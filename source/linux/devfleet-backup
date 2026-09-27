@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+[[ -r /etc/devfleet/restic.env ]] || exit 0
+set -a; source /etc/devfleet/restic.env; set +a
+[[ -d /var/lib/devfleet/backup-status && -w /var/lib/devfleet/backup-status ]] || { echo 'Backup status directory is missing or not writable.' >&2; exit 3; }
+[[ -d "${RESTIC_CACHE_DIR:-}" && -w "${RESTIC_CACHE_DIR:-}" ]] || { echo 'Restic cache directory is missing or not writable.' >&2; exit 3; }
+exec 9>/run/lock/devfleet-vault-operation.lock
+flock -n 9 || { echo 'Another Vault operation is already in progress.' >&2; exit 75; }
+exclude=$(mktemp)
+trap 'rm -f -- "$exclude"' EXIT
+cat >"$exclude" <<'EOF'
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.next
+**/dist
+**/build
+**/.cache
+# The transaction journal is control-owned (0700) and is not workspace data.
+# Keep the backup account from traversing this protected internal subtree.
+/home/devrunner/workspaces/.devfleet-transactions
+EOF
+if restic backup /home/devrunner/workspaces /home/devrunner/.devfleet-quarantine --host "$(hostname)" --tag devfleet --exclude-file "$exclude" --exclude-caches; then
+  printf '{"local_backup_status":"verified","vault_upload_status":"verified","durability_level":"vault"}\n' > /var/lib/devfleet/backup-status/latest.json
+else
+  backup_exit=$?
+  # Preserve the fixed child cause (for example unreadable source data), never
+  # accept a partial snapshot or expose private restic output through the broker.
+  printf '{"local_backup_status":"failed","vault_upload_status":"failed","durability_level":"none"}\n' > /var/lib/devfleet/backup-status/latest.json
+  exit "$backup_exit"
+fi

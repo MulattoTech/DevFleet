@@ -1,0 +1,5810 @@
+[
+  {
+    "path": ".agents/skills/devfleet-audit-convergence/SKILL.md",
+    "sha256": "0e66529f15784786a4debea8f1426e02885c60515d9192fc11b95ef87bfaa13a",
+    "bytes": 3976,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-audit-convergence/agents/openai.yaml",
+    "sha256": "56fb0c9c4b4e2c758e4225bb66f0f3b9881e706f11e72bfa7f2ced8ef0a94466",
+    "bytes": 325,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-audit-convergence/references/completion-contract.md",
+    "sha256": "3920df1a90d436a7429010fd20a02294999d604c1a952a28b8f56fced15bcad9",
+    "bytes": 7764,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-audit-convergence/scripts/audit_convergence.py",
+    "sha256": "1578966e2144b59aa6a1b62802cd69312e8f18a5d9ee692eefedf549684fa19f",
+    "bytes": 19823,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-audit-convergence/scripts/audit_io.py",
+    "sha256": "4997b6eb16d4748c95f39dbc84674265b6cd6d55f092ebab4869beed6ca64582",
+    "bytes": 8766,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-audit-convergence/scripts/native_runner.py",
+    "sha256": "bc891b27dcf38f3c0348fa0fca4f81ea83687040340aca1f171e88b5caae8262",
+    "bytes": 11370,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-audit-convergence/tests/Test-AuditSkillPackaging.ps1",
+    "sha256": "24e27db8b946891e025d736bc7820cee19de3591a6de85aa8c8faac90624522a",
+    "bytes": 9144,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-audit-convergence/tests/test_audit_convergence.py",
+    "sha256": "c5710d8a1decea587d288aff68e44fe7550efcb416b64cbb131d2570a122342c",
+    "bytes": 22815,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/FRESH-CAMPAIGN.md",
+    "sha256": "b17a1390b6b2aa5f949a85012763f9f5c20add30a22421a2d7f6c19fa771ca2c",
+    "bytes": 6339,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/SKILL.md",
+    "sha256": "ac4722243f4de7a5e0d6d6e513a37e7b91a55c5fc875c113a5274ef5bb2a252f",
+    "bytes": 11215,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/FreshAttemptAdmission.ps1",
+    "sha256": "c2dd86022a32c389e871d0c65de63b61a899f2b1cb6c3e1ada0dfe84935c2a11",
+    "bytes": 2252,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/Invoke-DevFleetBaselineAdoption.ps1",
+    "sha256": "7b15fc84e8943e1f93afda0f04b20f03ee2240aae52f2935338c5ccb7e0964b8",
+    "bytes": 4183,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/Invoke-DevFleetCertificationPreflight.ps1",
+    "sha256": "390bbe212124a6cd92a752c1d7eae27b1906ac6f64a09b12a7443ff039d307dc",
+    "bytes": 7039,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/Invoke-SecureE2ECredentialRefresh.ps1",
+    "sha256": "6fe506990a4e3673eed453ebb3b34c4d302ed61bc8694d45f61fce0299de2a9f",
+    "bytes": 3272,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/Test-CurrentGuestAccess.ps1",
+    "sha256": "b765b5b71a014866783f4e33b983942b0a8ed4e31ab3778c1cdfdd717199838b",
+    "bytes": 6266,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/Test-DevFleetCertificationReadiness.ps1",
+    "sha256": "2bf2b29e2cdfb72bb58abc258f014f81c05832aa825a48bc9ee16f4c1ab12d0b",
+    "bytes": 15075,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py",
+    "sha256": "390aaf940dbce71efe84c37a4100214ee0d86e2d5f3389127f153db18f7e45a4",
+    "bytes": 14012,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/guest_auth_diagnosis.py",
+    "sha256": "8c29e1c005de5cb76f3834b6b7f257697fcc4b8171b324e414fe42a16405839a",
+    "bytes": 8386,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_campaign_successor.py",
+    "sha256": "ebd01d69eaaafc709e8a1d5351dcd541a0db0f6f7a8bdb98a1731082bae39c3f",
+    "bytes": 1854,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_fresh_attempts.py",
+    "sha256": "ddd5e4619228c6f0cf99a54faab744b81725c53f7b95ee14b6bdbdda29a4f10e",
+    "bytes": 7148,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_guest_auth_diagnosis.py",
+    "sha256": "22465e9161d47219513c96fd5647cacb2010c85fb19ec2fa14a2fde4057cf190",
+    "bytes": 6653,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_one_diagnostic_successor.py",
+    "sha256": "6f4bc5f5dcbf14324c13889e4066b3b5560f9a7e86df086a7e28ec6f7bd2a777",
+    "bytes": 4055,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/tests/Test-CertificationOrchestratorVmFree.ps1",
+    "sha256": "dcde4386c6f0aaf2ea81d7c883cb4ca3f6a4fa12ea288a1a392e1d6ca2f686e1",
+    "bytes": 7598,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/tests/Test-CurrentGuestCredentialImport.ps1",
+    "sha256": "71710dbc9ae1aa8ce265687817253c904e9c431a9779a5ebd16fb0b6d18a5963",
+    "bytes": 1047,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/tests/Test-FreshAttemptAdmission.ps1",
+    "sha256": "73cf867cac54dee8f18bfa15567aeb304c8a664444d0f575077799b06a176347",
+    "bytes": 1390,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/tests/Test-FreshDateRoundTrip.ps1",
+    "sha256": "ba857c4eccf9df0cc8d80f9ab5f85aa2728980d6613b3e05fe69a76fd506675b",
+    "bytes": 1706,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-e2e-fastlane/SKILL.md",
+    "sha256": "9d8a7a8abdca00013101e565c3e9f37b530b5b7db292992935f5019a6fa64318",
+    "bytes": 3417,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-e2e-fastlane/agents/openai.yaml",
+    "sha256": "f64b07d22a64a949556a38478c33efc3cff638af072f3138e78da7d7fc21e9ad",
+    "bytes": 322,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-e2e-fastlane/references/acceleration.md",
+    "sha256": "ca083695b17e83eb41dc6d7db0fac3c1be5c28c2c1da6bc19ad3bee453f0d177",
+    "bytes": 6634,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-e2e-fastlane/scripts/Test-VirtualClock.ps1",
+    "sha256": "869d25b8891e4da21f57d86c0b2a95452e873e0ee710fc9316b0012a444db288",
+    "bytes": 5315,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-e2e-fastlane/scripts/fastlane.py",
+    "sha256": "403c21899b19c79e0e8c3fe59d61c30e991927f2760b0193926f6a5494e409f4",
+    "bytes": 16420,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-e2e-fastlane/tests/test_fastlane.py",
+    "sha256": "3205f4695cf362414c5d97bada87326261c72e2315b628164367d5245c2e56c8",
+    "bytes": 8050,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-evidence-triage/SKILL.md",
+    "sha256": "2fb2928548a51f5bcdf43a3059a097db21d8ea2be7ad82e21e50a6874369a7bb",
+    "bytes": 2091,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-evidence-triage/agents/openai.yaml",
+    "sha256": "d68a754dd28794d3db78fea95785206b0312515c8874d1fa3a7d2b34e8e9548d",
+    "bytes": 306,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-evidence-triage/references/evidence-precedence.md",
+    "sha256": "e2cb5d92a183d3398b69ffde70f4a01d48a72b2908bad7a593a892b50a0c2e27",
+    "bytes": 975,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-release-control/SKILL.md",
+    "sha256": "29f649e50449bd3b631b3da41c4d9ae18e79d4d67b73afa994af28e45708ebc1",
+    "bytes": 3687,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-release-control/agents/openai.yaml",
+    "sha256": "49b526441ecd2a98daf42d28982fef0a193f25324757bf446d67f870807ef266",
+    "bytes": 315,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-release-control/references/authority-and-safety.md",
+    "sha256": "3c01ba6afa7fc2734a3157c3e90363b0e24dcaf79e5d60c164e66cde0b67c5ee",
+    "bytes": 1487,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-release-control/references/closeout-and-memory.md",
+    "sha256": "6fb9795be3ae6bb824660b21e3f7a6472967e367b6f19d3a29c8b32fe3b7074b",
+    "bytes": 1293,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-release-control/references/correction-and-attempts.md",
+    "sha256": "8b37e510ef396a1f1b2be542ca2f042fffd3c6d138b9981f09782f746bacbfc5",
+    "bytes": 2007,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-release-control/references/release-monitor.json",
+    "sha256": "1e53026f4c1a8da5a698e434cc257ca464094ed8dab31080aa1b55c111f043db",
+    "bytes": 2814,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-release-control/scripts/Watch-ReleaseStatus.ps1",
+    "sha256": "d4a7b077c95c5ad3c35e68a5a174070b24f6c4eeb9f7276b7f9d1a55a9d94ed5",
+    "bytes": 652,
+    "kind": "text"
+  },
+  {
+    "path": ".gitattributes",
+    "sha256": "54a39a8a0708df4e5f424b067a10d51476f2b53186463f8122adcabeda0fe221",
+    "bytes": 149,
+    "kind": "text"
+  },
+  {
+    "path": ".gitignore",
+    "sha256": "1c0408e6b1dcbdc87c096f2d3c5cd9b5beb7dab136aa41522660491738ab3b89",
+    "bytes": 509,
+    "kind": "text"
+  },
+  {
+    "path": "AGENTS.md",
+    "sha256": "c400e6d8bb435195c2004a12c8b13cd8027b5f74f07160afe114cfdd1cbeb447",
+    "bytes": 3840,
+    "kind": "text"
+  },
+  {
+    "path": "audit/run-exact-candidate-proof.ps1",
+    "sha256": "3f5c7b46d65017527bf6406a3a91d11e2af83fa8a362d6f7c3c642e17b0990ab",
+    "bytes": 17520,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/Initialize-DevFleetE2ESecrets.ps1",
+    "sha256": "34249b04ed46de9f5fa091c8ad5e6ed554a2f55873f4fce2bcedd8c4c5ce3cf3",
+    "bytes": 949,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/Invoke-AutomatedInteractiveLoginSmoke.ps1",
+    "sha256": "7c926fb4b5069d77cfc12d34d699c4bb9972eaba0d613f41cefe1a3156a12e3d",
+    "bytes": 27979,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/Invoke-CampaignEMultipassM0.ps1",
+    "sha256": "7e275399a8e7032477a489fb965c51b5aa26316bd465e8c16b738ed7ea5cb32f",
+    "bytes": 9824,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/Invoke-CampaignEMultipassM0Worker.ps1",
+    "sha256": "f202b5b1e279812a02cac9d00f80ccf612f7fb8e886b7b0c0bb5f1005af70412",
+    "bytes": 1767,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/Invoke-CampaignEMultipassM1.ps1",
+    "sha256": "20572993f3b78106327d6189d520ee7d58b19f6dbe01c702e58952ad54502f8c",
+    "bytes": 22747,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/Invoke-CampaignEMultipassM1Worker.ps1",
+    "sha256": "9aa9008dbcd8c106f7c0bd43fe5770b7e88ea6675cdaccae327ef31ecd40dd94",
+    "bytes": 16873,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/Invoke-CampaignEPrerequisiteCheckpoint.ps1",
+    "sha256": "2015812621faeada41d077fbd7cc67390b6c62aef05aaf46f274c9c0ec56add5",
+    "bytes": 24650,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/Invoke-CampaignEPrerequisitePwshWorker.ps1",
+    "sha256": "dcd16eb713aef8bdd6b428bc8cac82081ec1b976e6aa8a286f546a51fd2e9b6c",
+    "bytes": 11582,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/Invoke-CampaignEPrerequisiteWorker.ps1",
+    "sha256": "e2c7f91a9a95821c85821bd81e81e4abce1c1ef71f3b54d51a671cf79bace1f7",
+    "bytes": 16847,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/Invoke-CampaignEProductM4.ps1",
+    "sha256": "ebbb7e1ba24c19b6c61e07433f744ba6381c01b6193c6e451a9f8ef058929d30",
+    "bytes": 16973,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/Invoke-CampaignEProductProfile.ps1",
+    "sha256": "c847254fa8dee61846823091bc7944f4ee0ae95e832fa47cab2b02bacf4ff2cb",
+    "bytes": 8275,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/Invoke-DevFleetReleaseE2E.ps1",
+    "sha256": "2e8aa82516205b5470d433f428f7548ea72b1527e3738fc838dc2e0c424910f2",
+    "bytes": 19523,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/Invoke-FocusedMaintenanceSentinels.ps1",
+    "sha256": "3ddd160b47a2c2e25b86f42f6b280fed370ab78261730e113b5194f5bdff2227",
+    "bytes": 4953,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/README.md",
+    "sha256": "7a8b6b433154a7fe0cc8c1bdac810d887e4a786c35c6bbda0398d9e84aa1b232",
+    "bytes": 5414,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/Set-DevFleetTailscaleOAuthCredential.ps1",
+    "sha256": "ae362cec16bf67643eb8f0f081f8e300f17fcce14d68206ddd99bef018a3eeb2",
+    "bytes": 645,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/config/devfleet-e2e.defaults.json",
+    "sha256": "8c6950ea31bc4e517f4c0ffc31f17ae6244fe9fe94df5646046fb1c6d07095b7",
+    "bytes": 5246,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/BaselineLineage.psm1",
+    "sha256": "a3b3c2d0ae7ca17a38ee7a1554a3e00bd2b0e900ab82b2971077d9a22f879a0b",
+    "bytes": 9063,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/Candidate.psm1",
+    "sha256": "e7b13883df7716fae759c6240369cec274ab09b6e3413e2644c5e133c50a32b1",
+    "bytes": 17395,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/Cleanup.psm1",
+    "sha256": "c80888b620328f95bc63f55523c8a06ef10939106836dfe17a945d18729944e5",
+    "bytes": 19207,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/Evidence.psm1",
+    "sha256": "c2642b8bcb0018aae5f1c8136aa855daf68c85b71bc5d8a8b4d7c73f20f2ac41",
+    "bytes": 2377,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/FullRelease.psm1",
+    "sha256": "c23e6779204b4b3679ae9c1969c5123a4459018e203be34fcbc8d3928c5acd69",
+    "bytes": 87106,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/GuestSession.psm1",
+    "sha256": "c9235fabe43a9abc28a993db5e6d34e9f454458f6dbf0e419358c65ab0ce7b68",
+    "bytes": 21961,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/HarnessBudget.psm1",
+    "sha256": "72b1ec59ae9fceb180e00fa205fb830fdaaca5617baa5eb9301f72889fa22897",
+    "bytes": 14437,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/HostSafety.psm1",
+    "sha256": "9dcbac957f5aa060f0441eb8d372e39a190aab54cbf9af718a05368e567cb6c1",
+    "bytes": 8910,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/InteractiveLogon.psm1",
+    "sha256": "0d845ac096e13d8bd1f8c7020f6c5d6de17bc3a19d514ba6c1e89dbc30318591",
+    "bytes": 71931,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/MaintenanceVault.psm1",
+    "sha256": "681caa846c0ce047db23a8a6ec5b2caf6aa5ab316ebb24f20a2f83b76c188da1",
+    "bytes": 28353,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/MultipassDiagnostic.psm1",
+    "sha256": "ba84f05ee27d9c6eedeaf7de9e7563c938b9a2c21d8111b332a62f07ed588aa4",
+    "bytes": 111666,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/RealUseAcceptance.psm1",
+    "sha256": "eb55dfbc1bb0e05213361eb8083072e5b8f215905df5ba93562c0ebd0112da53",
+    "bytes": 142359,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/ResumeState.psm1",
+    "sha256": "b8ce4a186694603ff0e7eb246f39052e2ee335f002b10bd55ad9c8014eb2f661",
+    "bytes": 2459,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/Secrets.psm1",
+    "sha256": "52c0820d2047f6839ad319170045f06ec65726fc1b8bb0ec977d007792182f53",
+    "bytes": 7992,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/TailscaleE2E.psm1",
+    "sha256": "32a289807948843d8f965cdd4f3c3950dbdc37bfe51dffc9bcae0deaa86ee397",
+    "bytes": 37483,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/executors/Invoke-AuditPhase.ps1",
+    "sha256": "b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95",
+    "bytes": 234,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/executors/Invoke-DependencyMatrix.ps1",
+    "sha256": "b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95",
+    "bytes": 234,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/executors/Invoke-HostAgentPhase.ps1",
+    "sha256": "b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95",
+    "bytes": 234,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/executors/Invoke-HttpHostilePhase.ps1",
+    "sha256": "e2d8ba28381c7fc3c3872312d6b7f964ca8e7b48d5dc03ada9d6c6b9a6f17ee1",
+    "bytes": 3111,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/executors/Invoke-LinuxPhase.ps1",
+    "sha256": "37bf83af6eb4acf2d956473bed6e5629bd423d6309ad7d0067b5ab98d0a18858",
+    "bytes": 237,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/executors/Invoke-MaintenancePhase.ps1",
+    "sha256": "b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95",
+    "bytes": 234,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/executors/Invoke-PrimaryPhase.ps1",
+    "sha256": "69f0b4b0b9e7204235b768adc34df5cc265cd77ac632515a79c838b8f8acb541",
+    "bytes": 234,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/executors/Invoke-ProductLifecycleScenario.py",
+    "sha256": "301a7f1227b24a6315846bd41e495ae038b1d4aa21f5e4707641687ea5e00ad2",
+    "bytes": 24956,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/executors/Invoke-RealProductPhase.psm1",
+    "sha256": "75a9ae97cb6cedb6afd0f8286c08e4eb085f68b941e524f519a3f5620ef31d90",
+    "bytes": 344483,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/executors/Invoke-RealUseAcceptance.py",
+    "sha256": "80d79b63d6f5eb5f69d7ebb5cdf4d00c8c30f33084d3b7cbc480019bed45e31a",
+    "bytes": 63454,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/executors/Invoke-SecurityPoisonPhase.ps1",
+    "sha256": "38c5bd51d2b597f37d3cf5df55fe821c9d0064bcb6b601853b8e3fd4fae63821",
+    "bytes": 5408,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/executors/Invoke-TailscalePhase.ps1",
+    "sha256": "b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95",
+    "bytes": 234,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/executors/Invoke-WpfPhase.ps1",
+    "sha256": "b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95",
+    "bytes": 234,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/executors/Invoke-WpfUiAutomation.ps1",
+    "sha256": "bc6fe36716dc608d213d08abab8c61082f9f68b0dfe9e680e874222bcec2b44a",
+    "bytes": 35816,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/modules/executors/WpfLaunchContract.psm1",
+    "sha256": "613270ead8d20ae457b4a64569d0d9db985f317d2bc82fd34ad60a80f3a417e5",
+    "bytes": 43448,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/DependencyPolicyRunner/ArgumentAwareProcessRunner.cs",
+    "sha256": "f961705e4e4a12eceda370814e59b4fcdd6fab3871215ce8fed14232d702a25d",
+    "bytes": 4263,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/DependencyPolicyRunner/DependencyPolicyRunner.csproj",
+    "sha256": "66171a9c8d3bad0472e75ec38cfa7045fd42c8e234525e4c971162f7c83d4f36",
+    "bytes": 924,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/DependencyPolicyRunner/Program.cs",
+    "sha256": "a2a05ddc6b7f7546d10955366ae3aea016031f2139796d86388520be47e8f188",
+    "bytes": 17382,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Invoke-HarnessTests.ps1",
+    "sha256": "59d3982927f6d3637514917b0db42b974c38cec9e64c17fc7ee3fff1bdc496e8",
+    "bytes": 61808,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-AstraCausalPackaging.ps1",
+    "sha256": "10e49a7a2553ad36b8bb7fc3b4c00f91adf82c9fe322a8735083ea06f109a115",
+    "bytes": 3776,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-AuthorityTimestampRoundTrip.ps1",
+    "sha256": "45a57bfc53e1ac6d18d5a5cacdbc619fa7216a74afdea59b36d46e8a51f3d45d",
+    "bytes": 913,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-BaselineLineage.ps1",
+    "sha256": "e3aa70cfba3004c82f91b9a4d4de66bed23da6b8ab4340b6754bafba74259d8b",
+    "bytes": 8951,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-BoundedProcessOutput.ps1",
+    "sha256": "4860ddb3799b916ef9e48d3b3d5dcdb7ba09a785ec78d953115b4d517533244c",
+    "bytes": 7930,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-CampaignEBackendObserver.ps1",
+    "sha256": "34152ef5960feca200774e344d2c45effd557edff585edcb9639e706d6dc55eb",
+    "bytes": 8333,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-CampaignECandidateNativeLaunch.ps1",
+    "sha256": "f151b65c93277d6b15a206630141a57fb90f7fbd88ba03043a4e1ec2edfb8a31",
+    "bytes": 3614,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-CampaignEM1Ownership.ps1",
+    "sha256": "2f098c01706ba97fe249a69d1b4cd81571b325a9cb7017f9e39f11f18355bc18",
+    "bytes": 5564,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-CampaignEM1WorkerBoundary.ps1",
+    "sha256": "3e877d7af1f603449ca25b942300610e55cf078c45eac2d59dbcb974e01b9ef8",
+    "bytes": 19638,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-CampaignEM2Controller.ps1",
+    "sha256": "f70b5a3f75c8ae53e8188abf55859f009271e7d1818ab7bf9b75cdb8f2e23d33",
+    "bytes": 14938,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-CampaignEM4Controller.ps1",
+    "sha256": "562e1d41db54602f71f4320e1344bbe8effaef964daec918ce084e882c0e7a9e",
+    "bytes": 13375,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-CampaignEPrerequisiteCheckpoint.ps1",
+    "sha256": "e7b6a7464791af8b7a6a7e445d78ac75d115df1c1d5cd1eadadd6122678b91d7",
+    "bytes": 49199,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-CampaignEProductProfile.ps1",
+    "sha256": "df72d5f35319333dff8ff684b1345f105e5ccb0aefb878cde1299753389cb9f0",
+    "bytes": 7566,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-CorrectionInventoryOrdering.ps1",
+    "sha256": "6e08106c7206116380d5d0250571542c07dca5bf7cd50ec001808273ecf65067",
+    "bytes": 985,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-CurrentGuestEvidenceChronology.ps1",
+    "sha256": "84413a82f99a4bb017e4e43e2a074845f5fe14f676e78bb02b0e0f806605a0f0",
+    "bytes": 4796,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-ExactProofBinding.ps1",
+    "sha256": "8b6a0d30dd1c1c81a7b50e47f9e731bb82e3505c796e4e2c89e7facbe9944aa4",
+    "bytes": 6294,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-FinalConvergenceContracts.ps1",
+    "sha256": "557e3f91c90bec1382730eeb603afccb0b77bbaf97478fa9d5afa44bf24801a5",
+    "bytes": 2859,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-FinalizerNestedTerminalEvidence.ps1",
+    "sha256": "a78208e93eef8365812a0e7979ab60eae65ad4fc23c44c871ddddc67af813f74",
+    "bytes": 14844,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-FinalizerProcessExitBoundary.ps1",
+    "sha256": "74f494d7d0b41f3bd657a9ac110302014229ca36b0119776f8f83a862d488207",
+    "bytes": 2539,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-FullReleaseFailureCleanup.ps1",
+    "sha256": "f37f4d49ab794c36eb7298442b7dacb3c53a4e8bef0ae5a0c7b0822bc4f3f7a5",
+    "bytes": 5999,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-FullReleasePromotionContract.ps1",
+    "sha256": "9fd4f72b6c481e77aa30e5406fddc41959cda99d6a32adaa92abcb981b0cc457",
+    "bytes": 3918,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-GuestSessionCredentialRetryBoundary.ps1",
+    "sha256": "46bfe5205671bf500bacdffb549ddc4553f601c57f3c445aa9b9a7a529fe5f1e",
+    "bytes": 7247,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-GuestSessionLifetime.ps1",
+    "sha256": "6174a017eb71991983d877da9b4101f5bb99e4d365a545f2e34f5065a6be8625",
+    "bytes": 4463,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-InstallerSelfTestStandardToken.ps1",
+    "sha256": "98203d79c9986c2f0b52f29513b3a027441d0355d605bb1ed18ad318dd9755ff",
+    "bytes": 5243,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-InteractiveLogonContracts.ps1",
+    "sha256": "0be399f64a28eaa682abe10da2ea592af918741c3015b0f6727b9bddac1f26bb",
+    "bytes": 17232,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-LifecycleObserverBehavior.ps1",
+    "sha256": "06eba1d0d13ede6fe3f63ff246d31b5bc725ef6901a430521e9641c2b4cb52f0",
+    "bytes": 99553,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-MaintenanceFallbackHealth.ps1",
+    "sha256": "26c4b4a811d3107f8e533fd8ed460cf825f77fc7aafd5155f1ad646abe516e8c",
+    "bytes": 4264,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-MaintenanceValidationRuntime.ps1",
+    "sha256": "ceb4b22547ca790f599c4c143f5a6a1720be6362959740815cb1d8a683f3a260",
+    "bytes": 10597,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-MaintenanceVaultCheckpoint.ps1",
+    "sha256": "e4d66a1b7b56cc203d6fd905494bd2d816af0bc0660cd0de398846d537bbc3db",
+    "bytes": 3323,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-MaintenanceVaultFixture.ps1",
+    "sha256": "29411799477e999eaaf191451f3e2ec4543167d9830702ce0be06b2dda838377",
+    "bytes": 4414,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-MaintenanceVaultImports.ps1",
+    "sha256": "a5a77a386d90166bbc51e489f734a3593b9b61c18de979bcf746ead31a4feac3",
+    "bytes": 2305,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-MaintenanceVaultNativeSteps.ps1",
+    "sha256": "74cc70ce0ed685a0e430fb09b8c7b25e7f59e785cf1017caf719f7ea9dd51e67",
+    "bytes": 8225,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-MaintenanceVaultPrivateFailurePreservation.ps1",
+    "sha256": "746ecef5996014ef9f032b2532db9a27ca901b42d80cf33a5e7aaa59303f4598",
+    "bytes": 3865,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-MaintenanceVaultScenarioBinding.ps1",
+    "sha256": "2a62ceead9e4bebf83027d592c57583f37b7075896ef54169b1969199db2409e",
+    "bytes": 2382,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-MaintenanceVaultWrapperStreams.ps1",
+    "sha256": "c1b941de50dbbe3388c1e0e8f8779e8144eb2c25c054b1152385f30c8bff94ee",
+    "bytes": 7778,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-MultipassDiagnosticCollector.ps1",
+    "sha256": "4f00c88ffe00ad82e36936c89f2cb08e702294bf4cbbdd77f5dd508dcf3809e8",
+    "bytes": 21888,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-NestedPrimaryReadiness.ps1",
+    "sha256": "0a68b7434923f44cd33db97fa17ff2ff6e624cebc58d64e115046138e1e2f79b",
+    "bytes": 7138,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-NestedProductScenarioArgumentBinding.ps1",
+    "sha256": "b356b9dd336a0eb408be0b54873c850da5da80ced35bdbc070258069ce4b8f07",
+    "bytes": 4200,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-NestedProductScenarioContract.ps1",
+    "sha256": "81149196fdcd62cf533f9bfa0e72d2fdc7bf6548eaabe677d542ecb417b33b09",
+    "bytes": 16399,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-ProductAuthenticatedHealth.ps1",
+    "sha256": "ef9b09d08092a078a3a94916dacf8e70ff3dbed481d42f435890c00d9f58e58c",
+    "bytes": 15024,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-ProductFailureLogCapture.ps1",
+    "sha256": "9406c6be99d4a9f0b2729580924d9aea26075b0d3b662eff4ff49915b3f8011e",
+    "bytes": 10139,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-ProductLaunchObserverDeferral.ps1",
+    "sha256": "8543a7358c2932c66808e4b95e285784a32e5e3f2f11351e19c6a5fd6cf20634",
+    "bytes": 7096,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-RealUseAcceptancePhase.ps1",
+    "sha256": "7d005da688720961d3a40d7182dee22ea146080d382043a726c6eab6cec04c7c",
+    "bytes": 29495,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-ReleaseIntegrityContracts.ps1",
+    "sha256": "b17cf60aad448fb292eea8bf11d71ecdf7e4de6c9b1edbaa018a03543693147c",
+    "bytes": 4854,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-SecurityPoisonFailureEvidence.ps1",
+    "sha256": "b4073442a9c880cc11bfc9da083c4215d770313127d95829cd3bd54b1b6da28b",
+    "bytes": 7129,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-SecurityPoisonHostAgent.ps1",
+    "sha256": "611abf463f61e0b1c29e11819eabe9772c54e2751075bd18cd89af69711d0224",
+    "bytes": 5702,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-StandardTokenCandidateEvidenceContract.ps1",
+    "sha256": "ed4e8167e2af5b31f3643141b4de172ce0e5a90bf3667825144d19d2bdc51cfa",
+    "bytes": 2621,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-TailscaleBrowserPairingObservability.ps1",
+    "sha256": "924883c14680e33733106aac103ad9e612cf159ab004e6635261d3626a612bb9",
+    "bytes": 7442,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-TailscaleModuleVisibility.ps1",
+    "sha256": "74d6de4ffae1b588cff231731ed5797d3aa50e715f2ff869d4d5d4d839e80ccb",
+    "bytes": 4845,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-TailscaleOAuthAutomation.ps1",
+    "sha256": "75c28c6c435b49db4f2d0703fac36f50d71af8766a7822d7a502db5d02dc3a29",
+    "bytes": 32684,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-TerminalCleanupBoundaries.ps1",
+    "sha256": "0e5ed34119cfc88373e2da6eaa9934ba0f32a3e940638a26239e7ff1339ac25a",
+    "bytes": 21398,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-ToolRuntimeResolution.ps1",
+    "sha256": "e5829ce5758969d6a5251f41f3c2005181b4955e438e18cef868229f0e9f0ed5",
+    "bytes": 902,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-WpfLaunchBoundaryBehavior.ps1",
+    "sha256": "77560263503899607a2157a4905704dcaf7713095af2887ca7358cecf5f44e9a",
+    "bytes": 41033,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-WpfProviderPowerShell51Compatibility.ps1",
+    "sha256": "d926276c5c06f209eaec7a4241a5252907c39daedd220f89cf4366466cd55237",
+    "bytes": 5664,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/fixtures/host-health-server.py",
+    "sha256": "2bc918964dc465cc6faf8cf7aa54d129c69cdc012758948b5b367734f6f83745",
+    "bytes": 2020,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/test_real_use_acceptance.py",
+    "sha256": "9352ea907b44f0526339cf47ad5821e0be177c2b8681b2992958170338425ee6",
+    "bytes": 32592,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/test_vault_scenario_contract.py",
+    "sha256": "9477fbc72d1b3190b8b00e5cd7463c50ba2b80d2028bf3b4a31bf71295bebb45",
+    "bytes": 8345,
+    "kind": "text"
+  },
+  {
+    "path": "automation/release-e2e/tests/test_vault_unconfigured_refusal.py",
+    "sha256": "7fb7ca14d6e4f12a02bcfc2816d6eacafe7b51ceeb72ee9d5dab5cab6358c4bb",
+    "bytes": 2746,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/CLOSEOUT.md",
+    "sha256": "fa4d653ea4ac7402aa1bb44c538c856dacf1705db83c96cb2a2f8ec62b3324ad",
+    "bytes": 3482,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/COMMAND-MAP.md",
+    "sha256": "a578696cb71ba9b2691d847502659d41426216fd5d32d1125f0da4f8b93a8edf",
+    "bytes": 5152,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/DONE.md",
+    "sha256": "6ac7bd826771941e6792d4efa16a135010b1f05ff9eb3a6337269330a3df2042",
+    "bytes": 4245,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/FEATURE-HANDOFF.md",
+    "sha256": "ef5747b1322ad80a5a1e69ae07d6d1eead0a496d282b572dc95fb99d3f078c66",
+    "bytes": 3163,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/MEMORY-PROTOCOL.md",
+    "sha256": "2d85fc7f367ea2702011623299830c3f8c6fce2b9acf76589619f95b4819695f",
+    "bytes": 5093,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/SAFETY-AND-AUTHORITY.md",
+    "sha256": "1c84b23f81d24c14a4590d182ceae85a55b39c774855396f89ac9d6a5bff42e9",
+    "bytes": 6519,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/SOURCES.md",
+    "sha256": "1487a17c669a0b3bdc92d123d59ba8b6fb650d5e27c33a8a38af6b41eb88c6a7",
+    "bytes": 2954,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/START-HERE.md",
+    "sha256": "1db4b3e90ff920c341fa74382d7c99579afe9ecd1705eecf5da078ea994455b8",
+    "bytes": 3485,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/TEST-PLAN.md",
+    "sha256": "63f145252da56aaa1a92c53fc19b804aab44d5cf56d6c2d6a1395fd84b3a35d5",
+    "bytes": 23598,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/WORKFLOW.md",
+    "sha256": "27f360ddc4f70be93ab23ab23808be08a456523453050347c624df0ce4e52c2e",
+    "bytes": 15344,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/campaigns/DF-STABLE-20260906-E/AUTHORIZATION.md",
+    "sha256": "f2b7119dd9724aaa251f560317903c3550535f8a7e7b4cbf2cf75f5263769756",
+    "bytes": 6427,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/campaigns/DF-STABLE-20260906-E/DIAGNOSTICS.md",
+    "sha256": "323a8c0b51355c4a9b3ef764c03e159013427483276dec3035c06214c417b621",
+    "bytes": 8689,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/campaigns/DF-STABLE-20260906-E/LOOP.md",
+    "sha256": "db08c6c3d8fed87cc3d6c807d494b52a5b09c956a3c17624473b329bb751652e",
+    "bytes": 6309,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/campaigns/DF-STABLE-20260906-E/MEMORY-TEMPLATES.md",
+    "sha256": "49bb79e111ca5d8ec0227e5c123aea59901fab64e0cfa323fca6bfd84fe54d35",
+    "bytes": 3864,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/campaigns/DF-STABLE-20260906-E/ORCHESTRATION.md",
+    "sha256": "5b12cdf940bc643cc751dfa60f606b7742569dc16b803bcc51b794efcc6221a7",
+    "bytes": 6153,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/campaigns/DF-STABLE-20260906-E/RELEASE-CLOSEOUT.md",
+    "sha256": "2080eef88b882d8f060d511315fd9c612702ce944289afc4ec5088a13d3115d0",
+    "bytes": 5587,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/campaigns/DF-STABLE-20260906-E/SOURCES.md",
+    "sha256": "61338ce0fdcbe93f7c752ec984897e2c1bd280f76f87a010037dab2dfc14a871",
+    "bytes": 2866,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/campaigns/DF-STABLE-20260906-E/START.md",
+    "sha256": "88abbcc0138819559b3c2712719ae737b0ed7317e781292d9d5e2ce68b80afd3",
+    "bytes": 3544,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/templates/ATTEMPT.md",
+    "sha256": "49cd4f7aab1fe95fa5444b5a191a80856e815519b5f3dfa2a0b8ded5386e5093",
+    "bytes": 1193,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/templates/INCIDENT.md",
+    "sha256": "8b1dfaa39db730d4a56b7a30794cd340a28ef9ae979f654cee061ee0c64b6fa2",
+    "bytes": 536,
+    "kind": "text"
+  },
+  {
+    "path": "docs/ai/devfleet-release/templates/SESSION.md",
+    "sha256": "12178ac191d569e826eb87f35355834e2476b8e1c22b49dce09d99f5fcbe4009",
+    "bytes": 501,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/Assets/README.md",
+    "sha256": "2078e9a68c7d64bc6d228479cc67bca8d96c453ba18029732515d034784f2821",
+    "bytes": 248,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/BUILD-INSTRUCTIONS.md",
+    "sha256": "2e12dc6c44bcaf136d8d67b812bd9610b4142073f4de32a71d0d2dad8f8a4e15",
+    "bytes": 1024,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/BUILDING.md",
+    "sha256": "94ee82f0cfc9a58725f0669ff8dcb4354945ba094ac92deef902b0649c2595bb",
+    "bytes": 824,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/Build-Release.ps1",
+    "sha256": "591d8b8a2684ab5f772d27c15db2637b0f19e702fbe73331d03d4444a4bb7647",
+    "bytes": 32505,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/CLEAN-REINSTALL.md",
+    "sha256": "2d564d5f20f75e8314e0dba9690fc8231484a0357e8ea3ec3809d302dda98522",
+    "bytes": 334,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/CLEAN-ROOM-INSTALL.md",
+    "sha256": "51442b27ee7597662af6ac6898437565945da71078dcb4b256ee199f939cab3c",
+    "bytes": 617,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/CODE-SIGNING.md",
+    "sha256": "ac28c26aace63647228cb0d0900fe8906a653d686950be63f6455a4044e0cf94",
+    "bytes": 1359,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/DEPENDENCY-RESOLUTION.md",
+    "sha256": "751d08beb7dc8bc6e9416791b8f488718959cbc6bd3b6e1c50818bba3b8e26b2",
+    "bytes": 580,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/DevFleet.Setup.Tests/DevFleet.Setup.Tests.csproj",
+    "sha256": "7d50c80ae886b551e3deeb53df04bcf0800402cfb5d87c3c56efb7fcac6febf7",
+    "bytes": 586,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/DevFleet.Setup.Tests/Program.cs",
+    "sha256": "f681ebed4f6fab1cd8a13584846834f15ad16739d4a753b193b34861d91cc841",
+    "bytes": 46971,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/DevFleet.Setup/App.xaml",
+    "sha256": "8bd96b935412a757a21e891815e4a153889803006b3d310d2291f4a7a54f2a66",
+    "bytes": 1712,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/DevFleet.Setup/App.xaml.cs",
+    "sha256": "2edf0f5fed9ccff111be6e4449c3fe584bbf09e497e4bcae9e21b49ab5df07d5",
+    "bytes": 4569,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/DevFleet.Setup/AssemblyInfo.cs",
+    "sha256": "b05cbfe29c306bf7a175342e0db5b0b62ea893fdd09853e66134839dec0a6c55",
+    "bytes": 730,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/DevFleet.Setup/DevFleet.Setup.csproj",
+    "sha256": "3a47f3c2e5e1d31df519a8ed382d74506b42b265e567404bdfa7a0991a0bffac",
+    "bytes": 1158,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/DevFleet.Setup/InstallerModels.cs",
+    "sha256": "dc43bc68e469ef1a31f2c01aaa4843144d443db935e7f15b4e0184e320b8d50f",
+    "bytes": 2489,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/DevFleet.Setup/MainWindow.xaml",
+    "sha256": "84048355976414e35186f6ff5cca89837f8fdba0bb79d2fd00dae928fade06e3",
+    "bytes": 10888,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/DevFleet.Setup/MainWindow.xaml.cs",
+    "sha256": "d0869b40c123a7082fbd3a7c4609503a35463c69366c8d0d4d84af94fc5a42dc",
+    "bytes": 15527,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/DevFleet.Setup/Payload/devfleet-v1.2.13.tar.gz",
+    "sha256": "48a41161394f5743808eec150631d87de6619ad2c3315f037a7bd23050adb29a",
+    "bytes": 529614,
+    "kind": "binary"
+  },
+  {
+    "path": "installer-source/DevFleet.Setup/PayloadManifest.cs",
+    "sha256": "8022cd17ccf21ac2827ac93ef21fa8922f38b61b2c9d078bfb802c031357335f",
+    "bytes": 345,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/DevFleet.Setup/Services/InstallerLifecycle.cs",
+    "sha256": "c6963a43398085968288e4b76fea4137e5790264c0fa827efd6afd9a0d2f556c",
+    "bytes": 141135,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/DevFleet.Setup/Services/InstallerServices.cs",
+    "sha256": "776f7362ad7aa5255cbcf6d8c44d2858193e2f00968bc342cffee45365e8a4f8",
+    "bytes": 44467,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/DevFleet.Setup/app.manifest",
+    "sha256": "78330ef35e9a02705b4d58730ee1483bda62e9998894873b2d4b497e9524c266",
+    "bytes": 427,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/DevFleet.Setup/dependencies.json",
+    "sha256": "b939c07de544806e87b8324c050a1a3aff6baac8b36fac57201d917ea8810b46",
+    "bytes": 19463,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/FACTORY-RESET.md",
+    "sha256": "e1c8f955b9b807a059d0c5545f0d308ffd56ca2055e090bbd82da2bd4d935392",
+    "bytes": 411,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/Fast-Rebuild-Installer.ps1",
+    "sha256": "7b5fd125f969ae691b2af65e11f5ecb222cad8cca7f92eb30d2f046bb36f0d4d",
+    "bytes": 1057,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/INSTALLER-ARCHITECTURE.md",
+    "sha256": "1ad6db013cc9910bf74852c5de3b365f89183d94df9c82efaf2ed2257ffd10b1",
+    "bytes": 483,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/INSTALLER-BUILD-MANIFEST.json",
+    "sha256": "cef183d146be489ce3b0c9f868b26c6125a5f7733b5a51271ffcadfaf0cf4dcd",
+    "bytes": 594,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/INSTALLER-OWNERSHIP-MODEL.md",
+    "sha256": "8a8ddc95b7204e0cfb2a934d57e0b66064361ba179d0ed699a6b32e99050cd70",
+    "bytes": 342,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/INSTALLER-RECOVERY-MODEL.md",
+    "sha256": "cfce34a874dc2598aca6fa6fc09481f219ea075edcd7c9d9abb9bd3f7925baca",
+    "bytes": 343,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/INSTALLER-REMOVAL-SAFETY.md",
+    "sha256": "36bd15741d36375c356ed67dc2a2e11fd3e79644d7ddd47ba2d5c1381d8c9f06",
+    "bytes": 401,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/INSTALLER-THREAT-MODEL.md",
+    "sha256": "4d567512f3cf645aa23661e5331bef819e3d30ccfc0d8c62e85ae6c70e4600a2",
+    "bytes": 792,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/INSTALLER_VERSION",
+    "sha256": "7d072b48526b023950e4c48db01e8c273554a6401119f5691e7589ba9bc65d9d",
+    "bytes": 6,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/MAINTENANCE.md",
+    "sha256": "cc39483c6b9f4a10009a752c3740b3cef7143ff644c65adc15f91bd6bd01524a",
+    "bytes": 329,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/MULTIPASS-E2E.md",
+    "sha256": "621ea3f6cd12b061299b84d8bfc253fbdc61a3df6ae219adf49a73388a975e26",
+    "bytes": 328,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/OFFLINE-DEPENDENCIES.json",
+    "sha256": "ebae2e37de6de3d13ca931db09e4e88b96cf3ea2da6adea1400ce4cfb6937afa",
+    "bytes": 811,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/OFFLINE-PAYLOAD-SHA256.txt",
+    "sha256": "5b09b852e593be0807c384c9375c76a3d5a9a858cb706b8fceae9d06459e4f56",
+    "bytes": 98,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/Prepare-ReleaseInputs.ps1",
+    "sha256": "abae53b5f93d9d403d089c9e8e99e2918d3a66e3d164072212fe660542b25b47",
+    "bytes": 15390,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/PrivateSelfSignedSigning.psm1",
+    "sha256": "7f60833369394740699c4fbc6ef410e1f302844c5b53bfe70dcd3b57b33afc11",
+    "bytes": 8933,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/RELEASING.md",
+    "sha256": "c06c804c4fdb8c8262ea4d6993b1e3785eb07df8799b00deb34ee4a18f32607f",
+    "bytes": 399,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/TAILSCALE-AUTH.md",
+    "sha256": "bb622751864f369df29b393cf085d839af3df2c3e9d7d4270d25d67cbbd8b754",
+    "bytes": 2219,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/TAILSCALE-SETUP.md",
+    "sha256": "d541e8e4771d5d59e1f33ecbecb9d0e76227979881690023aad74ba440487c74",
+    "bytes": 1637,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/TROUBLESHOOTING.md",
+    "sha256": "5b836b6d9771c53df03b0d2aed9b5b08acd053bfe3c2c938b4477494d01a1354",
+    "bytes": 396,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/Test-PrivateSelfSignedSigning.ps1",
+    "sha256": "39679218d9071d16b503321ab878e1862a9067595e574a4898891a0da45dc3c7",
+    "bytes": 3133,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/Test-ReleaseClosure.ps1",
+    "sha256": "813c9f586ed8d49213ee87dfd7cef43388534b6c24eb1e81ec701353f56dc902",
+    "bytes": 2436,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/UNINSTALL.md",
+    "sha256": "7d993247762902ce9b79c712e2ffdc899e913c98680f7bd22aaeadbf2f83d1d5",
+    "bytes": 386,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/WINGET-RECOVERY.md",
+    "sha256": "c1c5bae6e37edfde8026eccf9f09b8eb8397552427689a405c3fc931b80f199a",
+    "bytes": 482,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/third-party-license-inventory.json",
+    "sha256": "d74c0e92be53d174675bb68c2354e7f7f1751983a90ccb1e17860682e8bb8201",
+    "bytes": 198,
+    "kind": "text"
+  },
+  {
+    "path": "installer-source/third-party-signature-verification.json",
+    "sha256": "6ca692d68b18e596e9739f81d839238c9dcb98eee159bc983bed19ea2481dac2",
+    "bytes": 340,
+    "kind": "text"
+  },
+  {
+    "path": "source/.test-runtime/config.json",
+    "sha256": "8d52563b8a721ed66650dfa8a684751e481790e47a9690b00cd63db06e2f903c",
+    "bytes": 1292,
+    "kind": "text"
+  },
+  {
+    "path": "source/.test-runtime/peer.json",
+    "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "bytes": 2,
+    "kind": "text"
+  },
+  {
+    "path": "source/BASELINE-v1.0.0-FILES.txt",
+    "sha256": "7c52807b9916d34cb980d01c85049e1443be953d813106b7931fe8e8d02feb50",
+    "bytes": 2825,
+    "kind": "text"
+  },
+  {
+    "path": "source/Bootstrap-Install.ps1",
+    "sha256": "30f522b051e90266c8307537a661b458cfb8ddd092e30e0c0e6e2fc04f7e0554",
+    "bytes": 8139,
+    "kind": "text"
+  },
+  {
+    "path": "source/CHANGELOG.md",
+    "sha256": "349fbb021aae248702a626433c983e6b1aeadb42da92323f0f6df7c53383188d",
+    "bytes": 3950,
+    "kind": "text"
+  },
+  {
+    "path": "source/CHECKSUMS.sha256",
+    "sha256": "2d7eb896c3b391816e8d8cd892a99b54641d99918ce22cd1d393103a348abf23",
+    "bytes": 77861,
+    "kind": "text"
+  },
+  {
+    "path": "source/DevFleet-v1.1.0-FILE-CHANGES.md",
+    "sha256": "1bf9481ca5be5676e0070de024f05e66fa60a6e817c1999b71d3194ac79af892",
+    "bytes": 29390,
+    "kind": "text"
+  },
+  {
+    "path": "source/DevFleet-v1.1.0-MIGRATION.md",
+    "sha256": "28666495394ce7fa029bbf0c0d0949512333328d28181fb238bd901345af30f2",
+    "bytes": 1101,
+    "kind": "text"
+  },
+  {
+    "path": "source/DevFleet-v1.1.0-VALIDATION.md",
+    "sha256": "9b3a513c9e8dc3a351bcb721eaf6ab05044f1d0583c61f2eaff41e1c88abcd38",
+    "bytes": 3068,
+    "kind": "text"
+  },
+  {
+    "path": "source/INSTALL-CHECKLIST.txt",
+    "sha256": "1eaa7f8e5513960dce8b9ef1501f9d1f6a60383aa6f0529c906666a08b04a163",
+    "bytes": 2117,
+    "kind": "text"
+  },
+  {
+    "path": "source/Install-DevFleet.ps1",
+    "sha256": "a6eb7b82456f5de4c0d9446aa1901b70311e2dc8adf8bd8311affa25688d494e",
+    "bytes": 12735,
+    "kind": "text"
+  },
+  {
+    "path": "source/MIGRATION-ROLLBACK.md",
+    "sha256": "f777b8611323924d101515ff1d8a0401d1f2d4b0e5d4b1fe1e1afafdb8c91552",
+    "bytes": 179,
+    "kind": "text"
+  },
+  {
+    "path": "source/README-FIRST.md",
+    "sha256": "5ec4487ad07cec2145a6ade137e641047c19769957c03628978218a06dfb05a4",
+    "bytes": 3346,
+    "kind": "text"
+  },
+  {
+    "path": "source/SECURITY-NOTES.txt",
+    "sha256": "85ba7a2aa2c127e12f830f96aa1787f237598fae20e3ae7543828552b161f469",
+    "bytes": 607,
+    "kind": "text"
+  },
+  {
+    "path": "source/START-HERE-DESKTOP.cmd",
+    "sha256": "155b462f564dd1c2ae210029544d39194c14c0c85fb8062d31eb2a614e84d42f",
+    "bytes": 232,
+    "kind": "text"
+  },
+  {
+    "path": "source/START-HERE-LAPTOP.cmd",
+    "sha256": "97b7b3a91ffa320f1729e1662da3d615bf82bc6aa116e276c2bf373d0b6fd065",
+    "bytes": 231,
+    "kind": "text"
+  },
+  {
+    "path": "source/Upgrade-DevFleet.ps1",
+    "sha256": "3905ac18b10325246b765a33daac907f548c000372a1144ef736f44ef9136b2a",
+    "bytes": 3712,
+    "kind": "text"
+  },
+  {
+    "path": "source/VERSION",
+    "sha256": "c21698334b1e2308b8556ac1d10402342b8d3e837f65fa1c431eb23392824b1d",
+    "bytes": 7,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/__init__.py",
+    "sha256": "2736ff45f82f5c2ae6fd243801f786562d4ddfa6326f19cce66a72c6b9e28602",
+    "bytes": 33,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/analyzer.py",
+    "sha256": "0ebb618f06b728c84a5e8cfeeb04485536824f11bce37e752f5ed9c9a160e785",
+    "bytes": 28948,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/auth.py",
+    "sha256": "9810905e7e2ab9d1f1a426ffb9644e2c388de5d199aedf9848f953918ff7cb3d",
+    "bytes": 13026,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/caches.py",
+    "sha256": "9772d26aae5fa5d81142a9e1e29361886b9effbaa92f3eef8a99724bd985441d",
+    "bytes": 1733,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/codexpro.py",
+    "sha256": "30b25cb2a5e7479b08aeb3e1b161fe5b53d6eafe21f6b53ea6d2b827df5689a4",
+    "bytes": 867,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/configuration.py",
+    "sha256": "3ad7879d81b09b62d176c5483204281caf4d7f81a57d03d6fd77cf9a7f4c1ee1",
+    "bytes": 4081,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/containers.py",
+    "sha256": "56dc9aa80609796d45523c4d701e05afde736cccbc9a925fab4f8d50304dc600",
+    "bytes": 11180,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/core.py",
+    "sha256": "244499e96e005ac615042edbe10082a93110f186de8340cdc8a77c95341ac77c",
+    "bytes": 13760,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/failover.py",
+    "sha256": "cd69e5b29293e828ef6c7cfcbc4538e73456e3ac3041fffb3ce2059375f81e5d",
+    "bytes": 6853,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/host_control.py",
+    "sha256": "47b084d09edea59545bad7d16bf197892edfd2fd1905e06f8fb418e5a466ce53",
+    "bytes": 20952,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/language_policy.py",
+    "sha256": "d3c417f349ee93e1aefe323f09233c8e4e8d3f612914e97f0b9e32df5b81b289",
+    "bytes": 2079,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/leases.py",
+    "sha256": "968255eb2ab9f4121cb561dc474a382b3c47e7dcbe8c08936cda7022abfb7b31",
+    "bytes": 1668,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/main.py",
+    "sha256": "1da87d821f4910f3d0e86f39592593a351b55ab83a62174b90ffa62a80add618",
+    "bytes": 67806,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/metadata_io.py",
+    "sha256": "188ee5ed02c51d802e85cfa75a1017e9fc2c5a897a51083ba4a09bd564afd290",
+    "bytes": 22797,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/node_registry.py",
+    "sha256": "ffd562d4c2685dacea1e183e708530ea4ccf04c20f19e2969d827190b286600b",
+    "bytes": 5199,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/ollama.py",
+    "sha256": "5805e067353f237924b00fff0b0c595db779ccea061b7ad5e34186052dec0e6e",
+    "bytes": 943,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/operations.py",
+    "sha256": "d60334d923abed24439342e38ce4061e702b76a64813082718d29946e6832437",
+    "bytes": 12217,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/profiles.py",
+    "sha256": "1cd0b8e2b31ac2ff724837205ac8f83d2ee6cb0916a679512f543b8557f2dcc5",
+    "bytes": 646,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/projects.py",
+    "sha256": "6ff44e69f1eb4219d8ba2f0a4bc8416c11c7378ce3cdabfcb7f8e78ee33e272b",
+    "bytes": 196892,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/request_guards.py",
+    "sha256": "5162c54a20a1dfa99eea6eeed3773127a7f4714d067e7f5455b3adff1632f83a",
+    "bytes": 8224,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/resource_profiles.py",
+    "sha256": "9bec3c14f6019fe4439065f8419dd7f11cc2de01ed9e9bd15bbbc5bf94102eb1",
+    "bytes": 14021,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/runtime.py",
+    "sha256": "0fde1265ee3895e9dd1b0369256eca1e55fa51532ff1918982ad03ee4f5e4aad",
+    "bytes": 11280,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/status.py",
+    "sha256": "d5c260df7828b383aa6c7f1d6ff2735783430e5db5457bdd2d5989316164607c",
+    "bytes": 14255,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/version.py",
+    "sha256": "a0a9c477ebd09f6fa0713427174d3f86c685de2004badcd8f0c8dfc039dd4251",
+    "bytes": 744,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/devfleet/workspace_archives.py",
+    "sha256": "fcc44f267e3c4d0e8f9a674fa52a1675d46a5cb9877af27f8bc3868643605c0f",
+    "bytes": 52391,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/requirements-hashed.txt",
+    "sha256": "fe238c807b668a2f7e0f2b929e24859260e6a7f76bd6762ac7b6b10ad7daac33",
+    "bytes": 54467,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/requirements.txt",
+    "sha256": "f9a988a58e9e3b9df6e7e78963ec1a074a5642b77fb6541f4463592f6eee6346",
+    "bytes": 124,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/static/app.js",
+    "sha256": "8e100c7cc4c96993212aaabfc30e7ed1bbc1167b8f2eb5db840671aee6b0599a",
+    "bytes": 35603,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/static/style.css",
+    "sha256": "9e95e0103e58d5d59f47b099381beb3f0e9af60b34a9a30fe00c121c04833128",
+    "bytes": 20663,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/systemd/devfleet-backup.service",
+    "sha256": "4262827dc7134b7a52088898b25c35eba6359089ca24b4149acc5053c5c877c9",
+    "bytes": 390,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/systemd/devfleet-backup.timer",
+    "sha256": "52148ce1d51758771ea6aa53c5168ab750af865b40a4b084334359f800796a7e",
+    "bytes": 207,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/systemd/devfleet-vault-broker.socket",
+    "sha256": "9bfd790f5f2152ac43bdc78fb56efc3924c1f10975f31c0995a1cb690d64836f",
+    "bytes": 331,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/systemd/devfleet-vault-broker@.service",
+    "sha256": "4431ccb294f011419df43b9475954cfed6ff3f570d600074b4b5bda5037ef1da",
+    "bytes": 866,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/systemd/devfleet.service",
+    "sha256": "f33f84cc58fc18f2217a064cc40d9a55bbb14a008a664609b29d0518183a5cca",
+    "bytes": 897,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/systemd/mutable-paths.json",
+    "sha256": "00862e8161b5dbe817a5e4a4e2ce662c67b43fa45c160a9070b5b624db1f8069",
+    "bytes": 202,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/templates/index.html",
+    "sha256": "0fdd41703ebacd3f0231d7f18a74d908dbdc19f629f120d6af65c49b3707e559",
+    "bytes": 46645,
+    "kind": "text"
+  },
+  {
+    "path": "source/app/templates/login.html",
+    "sha256": "2545054327bb69d476b2fdb4b28ed75b12e1d30222a34cab8a46ebb82d2af4d1",
+    "bytes": 1660,
+    "kind": "text"
+  },
+  {
+    "path": "source/client/Configure-DockerContext.ps1",
+    "sha256": "d27ae17fba723ce41695a05d644d6ac5e4eb99557f6ff9296005e23e8e587058",
+    "bytes": 916,
+    "kind": "text"
+  },
+  {
+    "path": "source/client/Configure-SSH.ps1",
+    "sha256": "9376560ad72753307bf3ce174039807ad00e2bb13b12b9f6c2087ff630e141dc",
+    "bytes": 1699,
+    "kind": "text"
+  },
+  {
+    "path": "source/client/Configure-VSCode.ps1",
+    "sha256": "38e8948c6ae1e6f3c9b5d605d5650666939fbe477d23b9b2c9329fdc22b92ad1",
+    "bytes": 950,
+    "kind": "text"
+  },
+  {
+    "path": "source/client/ssh-config.example",
+    "sha256": "f299ee1509445c514d3faf5d91db10f071768f6f62b5cc90223856bf2afbdeff",
+    "bytes": 258,
+    "kind": "text"
+  },
+  {
+    "path": "source/client/vscode-extensions-core.txt",
+    "sha256": "4cd73e74d6ab46ccbe37cb08c46200aa203747f3b6ac79bb823a1c03226911c1",
+    "bytes": 79,
+    "kind": "text"
+  },
+  {
+    "path": "source/client/vscode-extensions-enterprise.txt",
+    "sha256": "56eee44c27cdc6b543a8f58f580629bc9197a7123a74d4f05f063aac54745eb9",
+    "bytes": 49,
+    "kind": "text"
+  },
+  {
+    "path": "source/client/vscode-extensions-python.txt",
+    "sha256": "aaa364399deda68c33ac158dbf32dad3dc4a4a522f66567df618d7bb3a48e131",
+    "bytes": 64,
+    "kind": "text"
+  },
+  {
+    "path": "source/client/vscode-extensions-systems.txt",
+    "sha256": "25b7b8985b0071eeaa9a69e1304dec94beb5919b14f1303a6353124d2c3455c8",
+    "bytes": 53,
+    "kind": "text"
+  },
+  {
+    "path": "source/client/vscode-extensions-web.txt",
+    "sha256": "8eefa88fd78c091f9ac23130aef1399a649929fc6a895a05be4f3742c0aa874d",
+    "bytes": 46,
+    "kind": "text"
+  },
+  {
+    "path": "source/client/vscode-settings.jsonc",
+    "sha256": "c5b88bbcff8c96b667cb46ea26eaabfb7336f2d7b5243f7a528553b825da0cf9",
+    "bytes": 882,
+    "kind": "text"
+  },
+  {
+    "path": "source/cloud-init/compute.yaml",
+    "sha256": "00316cd0d11900a961163b07a24f26e9ebfc71830100847ce2cc10ef650ea4cf",
+    "bytes": 1847,
+    "kind": "text"
+  },
+  {
+    "path": "source/cloud-init/vault.yaml",
+    "sha256": "02799e2f3cac7df71db945030cce0d122d3663564db761197ade7e34d09f18ca",
+    "bytes": 2314,
+    "kind": "text"
+  },
+  {
+    "path": "source/config/compose-security-policy.json",
+    "sha256": "e2db65056b5030e3547c8659563bdb0db197d71d6c6dfd50a609efddbd514279",
+    "bytes": 758,
+    "kind": "text"
+  },
+  {
+    "path": "source/config/devfleet.config.json",
+    "sha256": "e6d6d298e5437f994eeab4579253b1ef1bf49fe2ebeeffe01cd6e9ca30c65b5d",
+    "bytes": 3298,
+    "kind": "text"
+  },
+  {
+    "path": "source/config/ollama-profiles.json",
+    "sha256": "3e3b592adfe477dbc58c3995f8f34602f14d4145ef01b9b4cad117053c32b148",
+    "bytes": 961,
+    "kind": "text"
+  },
+  {
+    "path": "source/config/resource-policy.json",
+    "sha256": "8e93275c24263491338ac3939a808acdf07f15c3d0c45badda90edb51646de8d",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/dependencies.json",
+    "sha256": "b939c07de544806e87b8324c050a1a3aff6baac8b36fac57201d917ea8810b46",
+    "bytes": 19463,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/00-HARD-STOPS-AND-ASSUMPTIONS.md",
+    "sha256": "95f36460eee2e88d097ca0dc1f7cb4062292fc24e9702aaf2c28326127934c8f",
+    "bytes": 3228,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/01-ARCHITECTURE.md",
+    "sha256": "6b2d8c54bdef789c3fd80a6b6512a38d657c38bfb1a2e9a0b8bddd86809f3dc9",
+    "bytes": 2879,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/02-INSTALL-ORDER.md",
+    "sha256": "4ed32904f5194bf15804565bbd254bcb91479b7b87552780723c737f6b92d75e",
+    "bytes": 4071,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/03-DAILY-USE.md",
+    "sha256": "9c528be76c5285ec85c9eb2ae71fb68ac551dff06c54aef64d5b5c4f67013eb4",
+    "bytes": 2726,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/04-RECOVERY.md",
+    "sha256": "ab36d4634d1477f69ef0c4b910dcfa16b6eb157e7e72b081066ce643f36ce2e3",
+    "bytes": 2082,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/05-SECURITY-MODEL.md",
+    "sha256": "cc5a849cfe183f417cc6ee4600c0605e5258dddf9e3fc71f7de9451a7019bf2c",
+    "bytes": 3166,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/06-CODEXPRO-INTEGRATION.md",
+    "sha256": "04a3d4244d99396de9a9b17ed21567aa4a491e724a551b8b211cd556de88fe80",
+    "bytes": 3732,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/07-OFFICIAL-SOURCES.md",
+    "sha256": "24dc3b375dd5380ad3eef4d4a2b9ea3c90f02352136ceee936edde8865773429",
+    "bytes": 1748,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/08-DEVELOPMENT-PROFILES.md",
+    "sha256": "78cdead576d5def42520f8276f09d14ebacd60fc19edf3e29f79d98a9fc1a02d",
+    "bytes": 1940,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/09-LANGUAGE-SELECTION.md",
+    "sha256": "fc1505fce91fcbc2c07793e56e49d1b1595c8fe1d1c5d0a06d61ce99d61dc9a1",
+    "bytes": 1091,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/10-OLLAMA-AND-GPU.md",
+    "sha256": "1c62c6d556381f532b86eb7fe737d9e39a5726a4a457127e1adfe4a8404d9992",
+    "bytes": 1347,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/11-REMOTE-VSCODE.md",
+    "sha256": "adf463bf6333f1ff118433701d9bccb9038dc12c1c512a95f2932b46f5e3ad6b",
+    "bytes": 1184,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/12-UPGRADING-FROM-1.0.0.md",
+    "sha256": "28666495394ce7fa029bbf0c0d0949512333328d28181fb238bd901345af30f2",
+    "bytes": 1101,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/13-PERFORMANCE-TUNING.md",
+    "sha256": "04264853da9e3a2d5baa1002ccf43018df4af3c2d79bbf8236909e262a44501f",
+    "bytes": 2023,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/RELEASE-FINGERPRINT-SCHEMA.md",
+    "sha256": "0e83ab1f2f01961b14ddc261a76128fa8f27ad35c04c63e732ef5824620ec80f",
+    "bytes": 677,
+    "kind": "text"
+  },
+  {
+    "path": "source/docs/host-agent-portability.md",
+    "sha256": "b7c8271409e747cc03a5214b7d082b9673e3e69131edd6a534db613bf6bb8faf",
+    "bytes": 1504,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/bootstrap-compute.sh",
+    "sha256": "512bc920be2372e2211f897ba6b83dcfa72b4c5c8973f5f8f548363425880645",
+    "bytes": 26944,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/bootstrap-input.sh",
+    "sha256": "9f91b7f6d75029c4fbe47004e5ba85a11442eb92cbabc053fbb857b78be984ad",
+    "bytes": 1056,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/bootstrap-vault.sh",
+    "sha256": "08899264e01566206e13f36f04cffda80991c39bc54babfa75f593ae09e7102c",
+    "bytes": 13198,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/dependency-advisory-allowlist.json",
+    "sha256": "81a515050e5d312ac4a453fa1bdaa999cfc11ad6a652659776bf5747c6b69168",
+    "bytes": 46,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/dependency-policy.json",
+    "sha256": "9754d4c72b9a3c608f1ed1efda0d1ff7ae12f8d6be555ccd618466b8125c9269",
+    "bytes": 936,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-backup",
+    "sha256": "c1334694748167d8781713b3a74fe184b8a549dfde457a500233a97999e8f644",
+    "bytes": 1629,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-configure-backup",
+    "sha256": "f12c94fa0f12ba9482cbf8b10de3dfc5211d46f01863498af2a1a5d14849479e",
+    "bytes": 2389,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-docker-mode-report",
+    "sha256": "ad369c63d0363aa359ce1e34d37deeeb2947fc7d90f8a137cc4c14756b3e0017",
+    "bytes": 589,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-health",
+    "sha256": "11e17775c3f5a9dc5a59e79d70aeb2adcb0f25a0a1a6b4ecaafb1feefd1fd78a",
+    "bytes": 1352,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-join-deployment",
+    "sha256": "9a542f43851dfe31cc37928d650463e5724e6f0156fbe484b95a101645ec16cf",
+    "bytes": 5139,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-purge-quarantine",
+    "sha256": "cf80700961b1878e3de64867c67b293c44832cb0b70e59510081cbe7bfc487a1",
+    "bytes": 426,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-register-node",
+    "sha256": "2d46e7a6e2797b33eb61c8c7aa516cad8f735a65725ff4819ce6abd5516d9b13",
+    "bytes": 1251,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-repair",
+    "sha256": "0a3bc23dcf346c88d89fcc37bea30033b7d94b2f5649df6ab23e9721aefe32f5",
+    "bytes": 783,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-restore-project",
+    "sha256": "426640f394e023de9d6f9be723b58d1ac2a42c83c528e0221a7c1a7018f13c23",
+    "bytes": 5555,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-rotate-compute-secrets",
+    "sha256": "226ad81de29d261ac0cfb014556729cb97004305cf151c60261ca5ae1505d09e",
+    "bytes": 4865,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-rotate-vault-secrets",
+    "sha256": "31cffd4c26ea1fd3e50ca108f7dced492159e5504673a17b6b7c0a624f347724",
+    "bytes": 4429,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-safe-update",
+    "sha256": "4a64a44a1d8a921bdededc65b093541ebd7c613430b414e0ea0445af4c04a7a6",
+    "bytes": 573,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-set-peer",
+    "sha256": "502799d1a0beca07f2605b1b767aaf8babc938c8e55f6d8af0ff4827b08fa830",
+    "bytes": 462,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-switch-docker-mode",
+    "sha256": "6773950522775354abe07a698c24bdce8b7f73b458e5963e308e8b64f44cf056",
+    "bytes": 1849,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-user-repair",
+    "sha256": "eb6f98d1459e8fdae8b0bc3f7c8ba7d0164ce964a86d9d8c7277f936430c6e5a",
+    "bytes": 455,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-vault-broker",
+    "sha256": "fcdfdcd5762286fafa0b2ce8a14353f9bf404717472515a8d43efa4f3e3a54b9",
+    "bytes": 11277,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-vault-health",
+    "sha256": "aef4f5a6daa89f7a2e669a1e773e32e358801c242458b4a36da0e02769114763",
+    "bytes": 349,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-vault-maintenance",
+    "sha256": "bd9c01d8bf3ae54bbeba5f37b23d7dedc7e0a4a0778559d9c388f1b085e0c073",
+    "bytes": 408,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/devfleet-vault-request",
+    "sha256": "245458f58ef1a87ffd19abe2d6e3112e812d9b4ca6151158658be5f32b563fbb",
+    "bytes": 4720,
+    "kind": "text"
+  },
+  {
+    "path": "source/linux/upgrade-compute.sh",
+    "sha256": "f754f18cf80416026dea3f0a0b37772b419751aaec0198fd914c1ab87d8b5aec",
+    "bytes": 97,
+    "kind": "text"
+  },
+  {
+    "path": "source/pytest.ini",
+    "sha256": "6a96ba0e2d5a8296fb90f474da9d2f0173d3e41eba18965513f711104155f913",
+    "bytes": 41,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.devcontainer/devcontainer.json",
+    "sha256": "445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622",
+    "bytes": 209,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.devfleet/bootstrap.sh",
+    "sha256": "0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a",
+    "bytes": 116,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.devfleet/project-tools.json",
+    "sha256": "cd4d78db29dabe909a6929b0a1dfb066d98d2b80bd59e490c1bd10a4fd6a0cb5",
+    "bytes": 297,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.devfleet/template.json",
+    "sha256": "35339bcf595d1b776736804128076e41c74b343bdeb3241fda0da8921ee8c71d",
+    "bytes": 637,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/README.md",
+    "sha256": "228588bd8182b53ca0721b1342685e32c7afcb7f681cb513b87ab3e705cc8850",
+    "bytes": 358,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/compose.yaml",
+    "sha256": "0aa515e43796e07025f2cfdcb121e0d6edad4cfea877399c65fa066a4ced6231",
+    "bytes": 468,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/cpp-cmake/docs/architecture.md",
+    "sha256": "7f2df08e2676a8a97abf899c5b7c2caa96209ba308a6fde7c1fd527cb09fea23",
+    "bytes": 326,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.devcontainer/devcontainer.json",
+    "sha256": "31743d0b403e9a20eb3dffd87c5033c90bd0c28a0f522633bef1b18235b2c065",
+    "bytes": 207,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.devfleet/bootstrap.sh",
+    "sha256": "0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a",
+    "bytes": 116,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.devfleet/project-tools.json",
+    "sha256": "808c6a308c2e68d82e7f1c74e27f98b5dbf5903e1bfac70b9f777c890ca22ba2",
+    "bytes": 293,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.devfleet/template.json",
+    "sha256": "1f3b10b31593c3747515102994c7414598bcffe28e47ac08418aa9eff572b748",
+    "bytes": 633,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/README.md",
+    "sha256": "ec91ebe76515639ed04056aa7dfe14f3c47c5c3c776de81f647565c4d6acfacd",
+    "bytes": 357,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/compose.yaml",
+    "sha256": "1c84cd5554f19af11ea76022af21546d1e08f6bb4abb34bf8ad42ec3b6009581",
+    "bytes": 434,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/data-r/docs/architecture.md",
+    "sha256": "6cd72cb5a51cac627cba6256f617c70778cdb34113460b0fb596310a276240f8",
+    "bytes": 325,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.devcontainer/devcontainer.json",
+    "sha256": "445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622",
+    "bytes": 209,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.devfleet/bootstrap.sh",
+    "sha256": "ec1e677581abb22ca7a86b4ef7e3c86708659f0784584daf6afb44125415a074",
+    "bytes": 54,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.devfleet/project-tools.json",
+    "sha256": "26721a1313e9b66ca20366a2046829a6e9525653ad509d68f5349c5ccd7c5e4d",
+    "bytes": 350,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.devfleet/template.json",
+    "sha256": "d1aaee39b5fa228654d1e562218d09793f7b0b42f6b2cb684b5c20a8bdb19f09",
+    "bytes": 690,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/README.md",
+    "sha256": "ebbdb3332b9556c2f914c704d8a0a5505ca9ef9c39d79b2d77f06773e8d040d4",
+    "bytes": 367,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/compose.yaml",
+    "sha256": "27689cd9a2e39c77afbea11502beea583dbb5f7cb4f88038b7e6e3f88f9aee84",
+    "bytes": 512,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/docs/architecture.md",
+    "sha256": "f8838fa8b3ba83bd35d7e14664bdfe8cfea7adbd3292b689e2550908d388eb8b",
+    "bytes": 335,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/src/App/App.csproj",
+    "sha256": "cd8b60226e846d3819569814d937322bc3b4d055cb2cf2ef1a9fb9f345786f60",
+    "bytes": 186,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/src/App/Program.cs",
+    "sha256": "f899d19a0c23035a24153fa695bd5cf9043ff229ae0536dbb1ddceb2084da6dc",
+    "bytes": 134,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/tests/Smoke/Smoke.csproj",
+    "sha256": "66340917c9ec77aec68f1e42cbf5180ee73c216f16236a9053d2a4f6afc05da0",
+    "bytes": 359,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/dotnet-service/tests/Smoke/SmokeTest.cs",
+    "sha256": "051b9b53201d40216dc80ea93710787582710326e80459bd4d2eb5bf96bd1712",
+    "bytes": 88,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.devcontainer/devcontainer.json",
+    "sha256": "445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622",
+    "bytes": 209,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.devfleet/bootstrap.sh",
+    "sha256": "0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a",
+    "bytes": 116,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.devfleet/project-tools.json",
+    "sha256": "9aa617fd91e8ba76c0289c8eef2f41033531e497c1f7020aeebc779140215e32",
+    "bytes": 307,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.devfleet/template.json",
+    "sha256": "ada116c5fb800a6fa9db09b1c39944563feff9a26600d79ec81120e181ff799e",
+    "bytes": 647,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/README.md",
+    "sha256": "86ac907798e2475ece41e4da3add7768efcbd3d7b749ae764028af6d18556446",
+    "bytes": 363,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/compose.yaml",
+    "sha256": "c2d252c95c1ba4c3349ebed46c7e0cc154558a18b6daa7c3cbfa9623e9999dda",
+    "bytes": 510,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/elixir-phoenix/docs/architecture.md",
+    "sha256": "298034dab1c6a31f18a15c36c070df7f1e1abf1c9fcf3de0a366eed366d74f43",
+    "bytes": 331,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.devcontainer/devcontainer.json",
+    "sha256": "31743d0b403e9a20eb3dffd87c5033c90bd0c28a0f522633bef1b18235b2c065",
+    "bytes": 207,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.devfleet/bootstrap.sh",
+    "sha256": "0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a",
+    "bytes": 116,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.devfleet/project-tools.json",
+    "sha256": "ccde980799e84b21c3a72c6ed207f72392d9eb38f6754c780b54f722a9e42bb0",
+    "bytes": 298,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.devfleet/template.json",
+    "sha256": "7ca190e7e910fbd534f125b4633cef84bb032378ddd6781fab5acaa2b2493735",
+    "bytes": 638,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/README.md",
+    "sha256": "6329a8cb3a85a5cb800b93eb3c8c09d9ad410e3155a98628eccef2ec441e1aaf",
+    "bytes": 361,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/compose.yaml",
+    "sha256": "c9f668fb7fa80610306f70b0a9f35b5f608b968d1ffa5a4acf64d6535e7a3638",
+    "bytes": 449,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/flutter/docs/architecture.md",
+    "sha256": "32e45655fd2c249cf21c66683905451a443ae1c62e050fd6c911167637c6c53f",
+    "bytes": 329,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.devcontainer/devcontainer.json",
+    "sha256": "445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622",
+    "bytes": 209,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.devfleet/bootstrap.sh",
+    "sha256": "ac9d28d2b4a98047f18e7599b29d74879c512117c5b3b0dcb72cd57749e07bea",
+    "bytes": 44,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.devfleet/project-tools.json",
+    "sha256": "79c1452cf44643390a0b03acd16c886a858e50c0497395c237900306e45a95c9",
+    "bytes": 293,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.devfleet/template.json",
+    "sha256": "eae27ea299aea9ec489cc5e2164966f4e852cd89f6a64df98415cffc31c572c4",
+    "bytes": 633,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/README.md",
+    "sha256": "fd6d0e557e112cd9ec42c778cafe398101505d26f6691515ae820b9b1f156f2e",
+    "bytes": 359,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/compose.yaml",
+    "sha256": "e227e63586bddf735ae934ca51587e8f80bf861ab311ea8851486328b3fb84c2",
+    "bytes": 469,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/generic/docs/architecture.md",
+    "sha256": "7af620a56b88f9c91d90f48010d004349c27aae6fceaed2e658ae5732ccab3f8",
+    "bytes": 327,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.devcontainer/devcontainer.json",
+    "sha256": "445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622",
+    "bytes": 209,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.devfleet/bootstrap.sh",
+    "sha256": "d94e776ddcfbcaa57c952f05598c641ffc7385bcc831f0a89d5c5a41ef141ec4",
+    "bytes": 55,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.devfleet/project-tools.json",
+    "sha256": "67bd54a539448cef26e04643846f6bd8850a351decf9f5806c51c52d6bfcf538",
+    "bytes": 299,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.devfleet/template.json",
+    "sha256": "c345ee084647d1392c66b2743d86ad07050ffe6d7236b2eee8b27cf8b9ca894f",
+    "bytes": 639,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/README.md",
+    "sha256": "28cbc558c1274001d4bee124a2c8255efe62124b828b60042063267134622da4",
+    "bytes": 360,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/compose.yaml",
+    "sha256": "3fed20b7c7306cac4dd7f7334fe9678cd811219c12e494d2fcce673743f85341",
+    "bytes": 509,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/docs/architecture.md",
+    "sha256": "414fc1bfb8a2da46c37c08334184c939f9c4518a7c124b37c6d221798acbcf1b",
+    "bytes": 328,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/go.mod",
+    "sha256": "903b1ae73475c2e0b2ec2d939e9431db425872e17b9ba5349a09daa705b12f0a",
+    "bytes": 45,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/main.go",
+    "sha256": "0ca15faaa87a77554433ec0108ec287e3aa8c0de0ba75c5d3fa84ff669cc404d",
+    "bytes": 176,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/go-service/main_test.go",
+    "sha256": "66ab861ede33b409fa1996113224a5fa9f81d403948367be37ea488906798b5e",
+    "bytes": 87,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.devcontainer/devcontainer.json",
+    "sha256": "445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622",
+    "bytes": 209,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.devfleet/bootstrap.sh",
+    "sha256": "98839bba33a1300e24c7e3972e17264fb12f7c2f9c29934a694adf95fc03a484",
+    "bytes": 73,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.devfleet/project-tools.json",
+    "sha256": "a0c8a1832e788ccaea44c0c296f626c27d8d13883fb8c6de84a143b7fe79a11b",
+    "bytes": 342,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.devfleet/template.json",
+    "sha256": "37d151c720b0af43f536bbd95c8b7665b447c3ca6fe91a497988840e31d2c806",
+    "bytes": 682,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/README.md",
+    "sha256": "fd016ac49d43aa3e49afc9f9870b077cb3a3ef4de04b7237d2a96c1e27f68459",
+    "bytes": 365,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/compose.yaml",
+    "sha256": "6bcf5303791609900f2c4ef9ae6491856d09511d49293763fc6348b651f75acc",
+    "bytes": 509,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/docs/architecture.md",
+    "sha256": "86d557dbfaee567a7248bf5e5951297247b0e1c51a340835a51b5d58b2d3a06d",
+    "bytes": 333,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/pom.xml",
+    "sha256": "3247de893b1aeb4ae0a67988a896d86c7387e4cbaca99b73b9599ac641ee3fe9",
+    "bytes": 935,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/src/main/java/com/devfleet/Application.java",
+    "sha256": "ad69197be917ffdea77d7e907cb678318ec47f7d3e78b12d5f43d74d77399bc6",
+    "bytes": 356,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/java-spring/src/test/java/com/devfleet/ApplicationTest.java",
+    "sha256": "22f424b51758288b420bebd94b067b1d2252653a65cbf6b2eed7fbeebdc228a1",
+    "bytes": 168,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.devcontainer/devcontainer.json",
+    "sha256": "445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622",
+    "bytes": 209,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.devfleet/bootstrap.sh",
+    "sha256": "0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a",
+    "bytes": 116,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.devfleet/project-tools.json",
+    "sha256": "869e89aa0bc1d1bdec1c11427c4ac6a5d1321d450c0d0e6dbd7a12742c5c64b8",
+    "bytes": 304,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.devfleet/template.json",
+    "sha256": "597e482e24351687974c9633db75466b9820bfd8042a45f77f6ded32fd367391",
+    "bytes": 644,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/README.md",
+    "sha256": "222c507208a17c9605ddeb3eabb9b25d57db94387b588255234d5b6cf2fb4844",
+    "bytes": 360,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/compose.yaml",
+    "sha256": "6bcf5303791609900f2c4ef9ae6491856d09511d49293763fc6348b651f75acc",
+    "bytes": 509,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/kotlin-service/docs/architecture.md",
+    "sha256": "20faaf7d122cfbccb34018198302faf2582997e78f8ef07d14e82cd03dd5bc65",
+    "bytes": 328,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.devcontainer/devcontainer.json",
+    "sha256": "2e3f9099163de6f42887fb921741b6c9f0eabbf14c86fc7e4f3ae66123ab577f",
+    "bytes": 207,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.devfleet/bootstrap.sh",
+    "sha256": "ab4fc5d4fbbb3c4a680f0ddc19ecf073186cd8a1fbd3599b12abdcb2036b3327",
+    "bytes": 61,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.devfleet/project-tools.json",
+    "sha256": "37583adeb827d30c66de7316ee56774431578eeeec863ff8911001d8654cb663",
+    "bytes": 296,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.devfleet/template.json",
+    "sha256": "3cb664ae3211703f0eadf5f169d158a94c18720768744a493988e961f1238bf2",
+    "bytes": 636,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/README.md",
+    "sha256": "7be4300262e1bf4b940993b5c354ca51976ea2063f9866eed9267dcbc146334f",
+    "bytes": 364,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/compose.yaml",
+    "sha256": "bb7f04bb7ab2e6fc28d18ea16f6bfcade03f1904c3890569b059b52b4743ec0b",
+    "bytes": 477,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/docs/architecture.md",
+    "sha256": "dea7ef0c36a88ea7235ddb2f7f8f1956815d4029b801eadc3b20327cb01e6e96",
+    "bytes": 332,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/package.json",
+    "sha256": "2642292c5492fe051a2d40712be97bd1f53fae7af89ae8e496157e5faadfd532",
+    "bytes": 227,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/src/index.js",
+    "sha256": "a94468f11b9e176ff2b3cf31080d67c2a31efc3dc4c0757abf90585f4e765f6a",
+    "bytes": 29,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/node/test/index.test.js",
+    "sha256": "9c2cdf677c2a6a83b26572eab35a5092fbafd765934dc94997433659908735ec",
+    "bytes": 147,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.devcontainer/devcontainer.json",
+    "sha256": "445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622",
+    "bytes": 209,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.devfleet/bootstrap.sh",
+    "sha256": "0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a",
+    "bytes": 116,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.devfleet/project-tools.json",
+    "sha256": "f00db1d49a906ca361332bf159f90049ca017b129917b5a806bc47f92cdaa4ac",
+    "bytes": 301,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.devfleet/template.json",
+    "sha256": "0ed6d408d05c521541dda2791f2c6f9fbb8228b22d530774a382aa88fd2c4414",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/README.md",
+    "sha256": "1d062db755de6c3e975fdc27d449356946d405dd3aa5fc1a184536df018a895e",
+    "bytes": 360,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/compose.yaml",
+    "sha256": "c9762116782f8293f44ff351dd86bb96c97491bbdf9ce7b4ca0d43cd118ca2b7",
+    "bytes": 509,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/php-laravel/docs/architecture.md",
+    "sha256": "ce3bbb7cabe004c18d2e60a021adc61bc24b91586aa903e15927dafffa30f5d0",
+    "bytes": 328,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.devcontainer/devcontainer.json",
+    "sha256": "445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622",
+    "bytes": 209,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.devfleet/bootstrap.sh",
+    "sha256": "f5603278e0f48b576757073d9390ac0babcd1220014a063fa101cc4581113b42",
+    "bytes": 73,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.devfleet/project-tools.json",
+    "sha256": "7f63322ef37a3e86013da49f66c381cb95574f43087fcfd33c3eef3e5a90889f",
+    "bytes": 386,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.devfleet/template.json",
+    "sha256": "ddef3df299be0b9b8643e9fb22eb82fba9c8b45ae0ce593424b9ee2db0c38c9c",
+    "bytes": 726,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/README.md",
+    "sha256": "0a03c11125cda23b9441d7531965f99704bb059dfabb89db00310aed30f62892",
+    "bytes": 363,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/compose.yaml",
+    "sha256": "60913528a2d623d64179c622373241ff562b6ad9af778a020f66acb23c65aca4",
+    "bytes": 513,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/docs/architecture.md",
+    "sha256": "198ae8ef7460fc2c3e90bbd24102e084fa2b21343b9b18f86640199ad7331fea",
+    "bytes": 331,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/pyproject.toml",
+    "sha256": "0bdf89c37a4ae56fea7b0ac0bf3e03a0ca5a021f120342053ed0e8ec3e18c01c",
+    "bytes": 381,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/src/app/__init__.py",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/src/app/main.py",
+    "sha256": "530299cc59537a7cb558c8fdaa33a9987b56cc2d69f682390c30d718192f0439",
+    "bytes": 139,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python-fastapi/tests/test_smoke.py",
+    "sha256": "ad12033efd95564d4f6c4e634a3b6afe95d7018061f46b7700a014f595cab45b",
+    "bytes": 157,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.devcontainer/devcontainer.json",
+    "sha256": "445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622",
+    "bytes": 209,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.devfleet/bootstrap.sh",
+    "sha256": "f5603278e0f48b576757073d9390ac0babcd1220014a063fa101cc4581113b42",
+    "bytes": 73,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.devfleet/project-tools.json",
+    "sha256": "4ed08cf09ee8bf061f2b8aacba04d8f42c2daed6e83623b07814672a3d65ab4d",
+    "bytes": 358,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.devfleet/template.json",
+    "sha256": "5ee27b3dbc543e8a4a74f8405c8b279158fee8ba518ab85165198e5b94ab63ac",
+    "bytes": 698,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/README.md",
+    "sha256": "d70bd02f05a8d0dde76e0f9bc34b324744884c4433a5bcb669fc111767c0992e",
+    "bytes": 372,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/compose.yaml",
+    "sha256": "50c322aeab9d5906f20a47b9b5d3bf41d4971293c01aa5ec92f040902b50bcef",
+    "bytes": 472,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/docs/architecture.md",
+    "sha256": "7023d15f4bd95a317ecdc92da9eccd882219b0e93fbbb8d185896e4b7ef5e5ec",
+    "bytes": 340,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/pyproject.toml",
+    "sha256": "8e3ef0a71d882dc887690e0e5856fbbf0f001b17c54f11f646877fa3676d3d63",
+    "bytes": 310,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/src/app/__init__.py",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/src/app/main.py",
+    "sha256": "b414e3e8a1cc84d091471727544c353f60db59fc2bea10ee562ece77410915be",
+    "bytes": 49,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/python/tests/test_smoke.py",
+    "sha256": "dcd33cee39843ebea7d05b394c7a1fac4c01ff790945f4f53cfeac0f2a5ba5fb",
+    "bytes": 72,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.devcontainer/devcontainer.json",
+    "sha256": "445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622",
+    "bytes": 209,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.devfleet/bootstrap.sh",
+    "sha256": "0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a",
+    "bytes": 116,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.devfleet/project-tools.json",
+    "sha256": "abf406e690a6d916a5efbbcc466e0bcced77d81f5789688c6b0ff2c517c85818",
+    "bytes": 299,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.devfleet/template.json",
+    "sha256": "87a778685bfa881582952f0c21336a77ff5df07f0b622529ba8a914a7d2ba773",
+    "bytes": 639,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/README.md",
+    "sha256": "71185a66535be2fc0dc28a672c9627e7d65e574ed62c5cf6d5962e99e3e82082",
+    "bytes": 359,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/compose.yaml",
+    "sha256": "aed7057e988225bb21f13ae0d84555bbd241856c26c5538a34809d3f683da0c0",
+    "bytes": 510,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/ruby-rails/docs/architecture.md",
+    "sha256": "17a8c0b957fd805a4a5a06b9ebe8abc303d7e929243bc731aeef2b86b53b8b90",
+    "bytes": 327,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.devcontainer/devcontainer.json",
+    "sha256": "445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622",
+    "bytes": 209,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.devfleet/bootstrap.sh",
+    "sha256": "c21570b7786f136f526a1b8e28b12dc3dcddaba3f759210e189a6aa2bce82345",
+    "bytes": 51,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.devfleet/project-tools.json",
+    "sha256": "af43eb1c4ffb2e84df818b021bbe26ef37278726ff9629c3e7ecd1f5c73b3b06",
+    "bytes": 330,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.devfleet/template.json",
+    "sha256": "f9a553b0caae1d958e98ecb8a4559669b62e358a77825ce8476190b0df975972",
+    "bytes": 670,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/Cargo.toml",
+    "sha256": "3913040a9984df6c6832a8367fabbe9050fa0566bc3f83990ebcfddb6bb0e7d0",
+    "bytes": 129,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/README.md",
+    "sha256": "45933ed40e10522eb584d621c872d91c8d9948327408205bdec2c1cf0b33e659",
+    "bytes": 358,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/compose.yaml",
+    "sha256": "8b474a2b349beec60e452b08e9b591a4f6bbf25eeee9088009fdfae1f6686906",
+    "bytes": 508,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/docs/architecture.md",
+    "sha256": "c39677d76d0df844dc40cdd8a7b9b5c646bbc8da1dd76558397be7181d6e5e02",
+    "bytes": 326,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/rust-service/src/main.rs",
+    "sha256": "4480a18357cf852cd7e7454baa5a3cc73cc53e61c99d89a98cf1f3589d672874",
+    "bytes": 315,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.devcontainer/devcontainer.json",
+    "sha256": "31743d0b403e9a20eb3dffd87c5033c90bd0c28a0f522633bef1b18235b2c065",
+    "bytes": 207,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.devfleet/bootstrap.sh",
+    "sha256": "0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a",
+    "bytes": 116,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.devfleet/project-tools.json",
+    "sha256": "92c1c25136a67c50f0f24f32740b8667e02a1ec46f4672507a1ae3c306fd155d",
+    "bytes": 311,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.devfleet/template.json",
+    "sha256": "1a9163890cfa3ff94a6270a18999298b0e21f1c12518bb0bd6ebffcba9b64aba",
+    "bytes": 651,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/README.md",
+    "sha256": "b0c4f2f64c3038b37635c68ce5cc7998574a804bd40b509f3b1d16d3cdac78d8",
+    "bytes": 365,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/compose.yaml",
+    "sha256": "f133b4199d18c28b29df897a03d182d6b2dac206e24ad4e2a9bc7dd0dd3381a2",
+    "bytes": 435,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/scientific-julia/docs/architecture.md",
+    "sha256": "92f1c73fe87ddb0748414935c2eb1643093ec6bef1dadcb2e73e2a67f49fb37f",
+    "bytes": 333,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.devcontainer/devcontainer.json",
+    "sha256": "445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622",
+    "bytes": 209,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.devfleet/bootstrap.sh",
+    "sha256": "0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a",
+    "bytes": 116,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.devfleet/project-tools.json",
+    "sha256": "6d77fed1497db4e986303d1ee6eb936453acd4e76b1ae245a53a2207a5d6b3e2",
+    "bytes": 305,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.devfleet/template.json",
+    "sha256": "106197a4db00afb1aebc015fc88ee82f6eb0e9585492a06e32a69b13f3711be8",
+    "bytes": 645,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/README.md",
+    "sha256": "305cf1f564905ae68ef5f3d238a0a74f8be6c39f63b0c1707f4db6b0ec31f3cc",
+    "bytes": 359,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/compose.yaml",
+    "sha256": "e227e63586bddf735ae934ca51587e8f80bf861ab311ea8851486328b3fb84c2",
+    "bytes": 469,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/shell-automation/docs/architecture.md",
+    "sha256": "3de1095c5d566f3af270d9c22dd89b2e68ad7a7e92e682198e80c2363023f51a",
+    "bytes": 327,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.devcontainer/devcontainer.json",
+    "sha256": "445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622",
+    "bytes": 209,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.devfleet/bootstrap.sh",
+    "sha256": "0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a",
+    "bytes": 116,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.devfleet/project-tools.json",
+    "sha256": "1b28716482aa11226702b7e84fc8d5ef3a53288f06994e918ebe946f4107f395",
+    "bytes": 304,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.devfleet/template.json",
+    "sha256": "81bf6df419f1fd30533152a31e4177603314989e12c1a2b941777ed5173ee486",
+    "bytes": 644,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/README.md",
+    "sha256": "ae14d31a8c1157b3ab4a2648cce48b2425b24712603c95af613968e07f569e6d",
+    "bytes": 363,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/compose.yaml",
+    "sha256": "e227e63586bddf735ae934ca51587e8f80bf861ab311ea8851486328b3fb84c2",
+    "bytes": 469,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/sql-project/docs/architecture.md",
+    "sha256": "f6673cfe04b589f72f7c23400c275e08bbd4371bef3b4c12433901e99b6bbd1e",
+    "bytes": 331,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.devcontainer/devcontainer.json",
+    "sha256": "2e3f9099163de6f42887fb921741b6c9f0eabbf14c86fc7e4f3ae66123ab577f",
+    "bytes": 207,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.devfleet/bootstrap.sh",
+    "sha256": "ab4fc5d4fbbb3c4a680f0ddc19ecf073186cd8a1fbd3599b12abdcb2036b3327",
+    "bytes": 61,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.devfleet/project-tools.json",
+    "sha256": "c8b02582ba64ca5e2f2da5843f33f5617da6292c4383c3ffb53578df160a98d0",
+    "bytes": 330,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.devfleet/template.json",
+    "sha256": "124e137387a78052c19ada52a067c312b7eead9c9b19ec8f0baea53cd6a7c3ab",
+    "bytes": 670,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/README.md",
+    "sha256": "49723259d20bc66a9a10ed07a2c05cded4da74fc72745e592e6ca1cd20a9c14e",
+    "bytes": 366,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/app/layout.tsx",
+    "sha256": "d98ac855ef79a037c60b7d7cf93c8cc25fedefbb9372eb40fbab42d7503c9027",
+    "bytes": 115,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/app/page.tsx",
+    "sha256": "c088d85485b3cee9cd25f5ff1074f09a1fa51c1c173ae9059be58aca3269f117",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/compose.yaml",
+    "sha256": "d9658e7bc420d2dbd0221420035ca9237bddfd4b730560efc58cae0a4f919527",
+    "bytes": 518,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/docs/architecture.md",
+    "sha256": "c0dca68b485fe7ffcc73826ba017aae274acad4408251007c89f71fc4701c1b7",
+    "bytes": 334,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/package.json",
+    "sha256": "5b4a58f8bce9ff938e6a155e6d7250d6ca6df23d084cac2f3de15d57100101a2",
+    "bytes": 520,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/test/smoke.test.js",
+    "sha256": "774d4a0d76ba5f506257f653647a1b1d79c693af6b87da1a3b3386c874288d05",
+    "bytes": 108,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-next/tsconfig.json",
+    "sha256": "47702d97e54a4acdb910682fce9e9ed9d00c8d4572971a503bb492b8b107a1cb",
+    "bytes": 226,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.ai-bridge/chatgpt-memory.md",
+    "sha256": "ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f",
+    "bytes": 143,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.ai-bridge/codexpro-project-instructions.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.ai-bridge/current-plan.template.md",
+    "sha256": "7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb",
+    "bytes": 69,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.ai-bridge/prompts/broken-session-recovery.md",
+    "sha256": "d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135",
+    "bytes": 166,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.ai-bridge/prompts/handoff-template.md",
+    "sha256": "a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02",
+    "bytes": 78,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.ai-bridge/prompts/reconnect.md",
+    "sha256": "5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab",
+    "bytes": 105,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.ai-bridge/prompts/session-bootstrap.md",
+    "sha256": "95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd",
+    "bytes": 641,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.devcontainer/devcontainer.json",
+    "sha256": "2e3f9099163de6f42887fb921741b6c9f0eabbf14c86fc7e4f3ae66123ab577f",
+    "bytes": 207,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.devfleet/bootstrap.sh",
+    "sha256": "ab4fc5d4fbbb3c4a680f0ddc19ecf073186cd8a1fbd3599b12abdcb2036b3327",
+    "bytes": 61,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.devfleet/codexpro-bootstrap.sh",
+    "sha256": "18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b",
+    "bytes": 2254,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.devfleet/codexpro-profile.json",
+    "sha256": "c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44",
+    "bytes": 397,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.devfleet/codexpro.env.example",
+    "sha256": "86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30",
+    "bytes": 90,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.devfleet/health-check.sh",
+    "sha256": "04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311",
+    "bytes": 83,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.devfleet/project-tools.json",
+    "sha256": "7b12f17c24430177affaa376d274e8b3ede5ef8223aaa996e7400bb4dab50127",
+    "bytes": 328,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.devfleet/smoke-test.sh",
+    "sha256": "95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31",
+    "bytes": 214,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.devfleet/template.json",
+    "sha256": "83fd3f0f6091706cb92646df66e301bf0d13dad3ab9a8603e819c6695c8947f6",
+    "bytes": 668,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.editorconfig",
+    "sha256": "05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44",
+    "bytes": 137,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/.gitignore",
+    "sha256": "8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe",
+    "bytes": 133,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/README.md",
+    "sha256": "4b4b64b4e946e1eddd2cd6bba36396d82a4038da06c1df950dba31ca58b310ac",
+    "bytes": 364,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/compose.yaml",
+    "sha256": "d9658e7bc420d2dbd0221420035ca9237bddfd4b730560efc58cae0a4f919527",
+    "bytes": 518,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/docs/architecture.md",
+    "sha256": "504af113699383a8990df7a65a37e6a467c2d5880217c9c109f0555fd9e8f4a4",
+    "bytes": 332,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/package.json",
+    "sha256": "20d4fc59b923fa89378c9ad2e73e8480fb79fa1298e5c295728a21d1de81e853",
+    "bytes": 445,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/src/index.ts",
+    "sha256": "237153ab53bd8d45207a0eb7e33f84a15db9aee697c166de579873c82cbb5a84",
+    "bytes": 50,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/test/index.test.ts",
+    "sha256": "9c2cdf677c2a6a83b26572eab35a5092fbafd765934dc94997433659908735ec",
+    "bytes": 147,
+    "kind": "text"
+  },
+  {
+    "path": "source/templates/typescript-node/tsconfig.json",
+    "sha256": "c6489f4f0ed32be525819e1a567fbb936d8a1725edf98bf6853cb2c94214ecbd",
+    "bytes": 200,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-BootstrapInputBoundary.ps1",
+    "sha256": "a5eb67532f9c99ce38486b6eb5ecd2c03d158e7d882f304ae368c7f3470cd77c",
+    "bytes": 7069,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-BootstrapTerminalReporting.ps1",
+    "sha256": "8c7a792717408ec8048e7941b0d54698402d8832bc91e9e2cfbcc644997a13c9",
+    "bytes": 5546,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-ComputePendingRebootHandoff.ps1",
+    "sha256": "3f20ae26add6a6e9ac4e733debd795750d1ce3d9ecf73a2b880746c37ea2d50d",
+    "bytes": 7325,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-DependencyProbeBoundary.ps1",
+    "sha256": "5bc9343b93da6d7b99475b22475bd1dd9cbd9047052b5dae71f59b7dc6054a8e",
+    "bytes": 4911,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-DependencyTrustedRoot.ps1",
+    "sha256": "ee713cc06579ca475c5de829259f295c144484c88a39abf1504577828ceecd83",
+    "bytes": 1928,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-DevFleetHostAgentCurrent.ps1",
+    "sha256": "ec2aada5cb00d6e5d1e52e1eb125157ef86ceb0679fdca7ef69df689aeb2a7ca",
+    "bytes": 7807,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-EncryptedBundlePassphrase.ps1",
+    "sha256": "a25a97f7316a0c0d99bee1ecd3ca8da05cf74d20fce6dbf917f142a7240f1f27",
+    "bytes": 6875,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-ExternalStandardInputBoundary.ps1",
+    "sha256": "b4f3ddb532ed8d70ea694c63bdec8ded08bfc36747f5f79cbee54ba7bbc97a91",
+    "bytes": 7495,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-HostSecretRecovery.ps1",
+    "sha256": "8057414f92b8d1c4f9f68a64507737d4a1eac26b6a73051c774a86b0fa7f75ec",
+    "bytes": 2163,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-MultipassLaunchTimeoutEnvelope.ps1",
+    "sha256": "01bec115b8ef4905b78b5391341c5c62a6ebc1955795a756ba19d9fbc6bfda97",
+    "bytes": 12850,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-MultipassStandardInputTransport.ps1",
+    "sha256": "919655da1d747a27c7e965502ade0de80ac42feeb9592df7b84effa7b79c2ae0",
+    "bytes": 12157,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-PendingReboot.ps1",
+    "sha256": "0dae89d672d2e5250c009b50f69f4b248e9315bd169cbb82a8828f72d7fff966",
+    "bytes": 1582,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-ProcessOutputDrain.ps1",
+    "sha256": "a553a80e8fbe8c2863faeacf3ccccf4261e7b7e636e819443a1f7410b44bbf1c",
+    "bytes": 5755,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-TailscaleBrowserPairing.ps1",
+    "sha256": "4cae989aa96639e30e27d4a444b2bf1ae1c6f922d1cb5203f522b5db7e52408e",
+    "bytes": 5498,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-TailscaleGuestOAuthTransport.ps1",
+    "sha256": "3767e97aab7be361db254c680245813726b437c4baf2017511d4dbcffbec5dab",
+    "bytes": 7089,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-TailscalePostEnrollmentStatusRetry.ps1",
+    "sha256": "31de50a4f3beea14044a09fcf7ae763d4b495226d6ebd40d916b1d3be12bf2a2",
+    "bytes": 10166,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-TailscaleStageDeadlineComposition.ps1",
+    "sha256": "32076c12d01e5c0b9cbc72fb7824959e633e60aa098cadc71f76d8e41182fd23",
+    "bytes": 1201,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/Test-WindowsIntegrationOwnership.ps1",
+    "sha256": "b1ed85f8d67c5ab506ad550fac4d6a93af97ca8a2b9b6ab2ff530ad83aa14846",
+    "bytes": 5263,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/_bundle_layout.py",
+    "sha256": "bcd842e85f5b6c5f4a5365ffbdf032b9b1781b4e9a1a9f811e12652d171727c3",
+    "bytes": 1572,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/conftest.py",
+    "sha256": "03e3e1fab21c2523e89b74fb326aca7d38c1927a1aec528997f30558f714ee64",
+    "bytes": 1430,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_analyzer.py",
+    "sha256": "359450217b36e714dd5411b47230100fc0723991377d4ecab213d3ef11ed2a00",
+    "bytes": 3363,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_analyzer_v11.py",
+    "sha256": "11738fb7c631b7c0d2de4d70956ce3e458f5b0aed5d302702ff7bb60ee484ccb",
+    "bytes": 4024,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_audit5_destructive.py",
+    "sha256": "3ce81d650d6d41c7d18b76194d7eefe01feeb1231d80f772051ef845003f0ec1",
+    "bytes": 5863,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_audit_coherence.py",
+    "sha256": "58d8a589d22f1d4ff33419dbee2864b9a56fe5a9b4a6ffcf4fdc6d1079156e57",
+    "bytes": 36369,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_auth_multiprocess.py",
+    "sha256": "5b678aec7d5e3adc3205a598f950a73b3102166c0495c9e52bb8076bb031bcaa",
+    "bytes": 845,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_backup_exit_status.py",
+    "sha256": "3f7fa30cf012e8451beba327ca3fb255a4b30152c72d30aeb15ea844587b3ba7",
+    "bytes": 1900,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_backup_metadata_acl.py",
+    "sha256": "eff0c7cc0f43496e74c46f1be348b76a8bedd536389e5f30b6d2521069964e78",
+    "bytes": 7834,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_bootstrap_input_safety.py",
+    "sha256": "6416e46165662fcc0e31c37f78c79e89d89991b71fbe6dd8c53786d84dda7be2",
+    "bytes": 4713,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_client_generation.py",
+    "sha256": "493a64b3ce136bc267434b59f1afd5a134efec124cba7b736950b61bc56002f0",
+    "bytes": 547,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_codexpro_hook.py",
+    "sha256": "3c6790200f5f72039ea577a5398e1824a827686d394a6ef55882e05e789ad118",
+    "bytes": 1824,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_configuration.py",
+    "sha256": "8fe09b0249911ea8b01eca683e82f01fe488eaa0b01084e404c1962705fde75c",
+    "bytes": 1342,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_csharp_host_agent_response_auth.py",
+    "sha256": "d5a00280ded660b836947e6921aa804fcfca33b524853a57a3473848fac185fb",
+    "bytes": 1039,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_dashboard_v11.py",
+    "sha256": "ddf6ab6efb8d2ada422be5e1cb2fc897fe02d619baceec195d823e3d0045dbc0",
+    "bytes": 2659,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_dependency_advisories.py",
+    "sha256": "4cdaf6f35cb09709b2df65afa97dbf56fccb76f517065254ad6d2b99c4eada2b",
+    "bytes": 4652,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_destructive_ownership.py",
+    "sha256": "79fa7f5ef8d85982f8650ed0d58b6716fd0e5327199a7c42f3f002b2e2d2e79d",
+    "bytes": 2513,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_destructive_safety_transaction.py",
+    "sha256": "c64fb764b78450c811014b85c76fcfda076ef98cf3e22003b5767c7131109bd8",
+    "bytes": 3145,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_docker_modes.py",
+    "sha256": "5340bdf18fc9026bfca919acc59f908d4065dcfc756d1f5fe156d3b5cad85759",
+    "bytes": 1569,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_existing_runtime_assignment.py",
+    "sha256": "3a7ca4b6a92618c2f753dad9d0e86b72253b9550bd61379fbd2301c1edd986bd",
+    "bytes": 7902,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_failover.py",
+    "sha256": "b69044da502f5c37cc4cd12d91091606a314ba90f0ff1157002439abb7ca5e6c",
+    "bytes": 11565,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_hardening11_red_blue.py",
+    "sha256": "c0639e0edc66abb29fdac71605866a0f1a488de357df153d743f825a2898546e",
+    "bytes": 13557,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_hardening7_boundaries.py",
+    "sha256": "c76ba7108747796dc74b7ff6c4d026d5be2672dd2b4e99d14fc6f0f49bcbd8bb",
+    "bytes": 8255,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_hardening8_api_serialization.py",
+    "sha256": "6af8731cc3e3d84adf2d355de336e1adf60780f5072dee5ac7b998124532ec29",
+    "bytes": 7410,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_hardening8_container_ownership.py",
+    "sha256": "a69ff2930191b209eff2bc8d772d2bcc824fa314f8fb54b464b4b7de975a9af2",
+    "bytes": 8949,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_hardening8_manifest_version.py",
+    "sha256": "1573d8d8d6573200b2e6be1d2ae0532d37d5dfdc14fc28e830a4f3c9d1a744d8",
+    "bytes": 1545,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_hardening8_restore_journal.py",
+    "sha256": "91a4d0d581078bc37003de7e0002f40151be9b141155fd587b8dfd7991720917",
+    "bytes": 8866,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_hardening8_secret_recovery.py",
+    "sha256": "6eee62b71d85f1f9971a38c129cc7fe010f4499084ef6ca02dd87e4b4e70d4e5",
+    "bytes": 2501,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_hardening8_systemd_contract.py",
+    "sha256": "785ff9fe6ec7a77292fe410d5a25dc9eb500c1c19288f35449fd4118d3986fdc",
+    "bytes": 2282,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_hardening8_windows_integrations.py",
+    "sha256": "4d7f62f7b1950263e5a069faca8fdedb2fec42afc45e7125c13f49dc1e0fb522",
+    "bytes": 2763,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_hardening9_filesystem_identity.py",
+    "sha256": "9d3a2b7a6fb5c0172eff50e8b184e7a1c03cc55f084841d71652ef9d9f02e5b3",
+    "bytes": 6850,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_host_agent_idle_polling.py",
+    "sha256": "bb42499c40a9c1fb9567090f96312700047ce6c5208440df86557d349137205a",
+    "bytes": 338,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_host_agent_integration.py",
+    "sha256": "83eba1dc0ef71d3db5def5f1dd72969b96dbd6c763819fedb60e9432ac4eb9af",
+    "bytes": 3987,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_host_safe_architecture.py",
+    "sha256": "bed644c01d6b81ece6eaf76db5199df20b9e1892c026b7b6fee0e98b2f8c6a7f",
+    "bytes": 7239,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_host_transport.py",
+    "sha256": "1afeb36061b7f8dc92233be15f77b8f6269d00177aa0511665c1d6132b0d0f36",
+    "bytes": 3548,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_installed_dependency_authenticity.py",
+    "sha256": "a096005c7bb6023e7242ea56517338137f4e8a516ab901bd37786afeffee1bf5",
+    "bytes": 4606,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_installer_self_cleanup.py",
+    "sha256": "966731a830d6a62ca9fa6d366ae88252a4c8d60f28fbe645221e35dc6a10ce25",
+    "bytes": 648,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_language_templates.py",
+    "sha256": "bf6448bdd5f7ee48208912fee44e08c99614c72f7ec036c9e4301a91d6cc60d7",
+    "bytes": 2062,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_laptop_profile.py",
+    "sha256": "a255b83381a5753c49b6029fdd6308ba0ac14d6a2a3774d0aa0dd2eaef0bcd3a",
+    "bytes": 473,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_laptop_tailscale_bootstrap.py",
+    "sha256": "499afe9442a2d9944d4fe7fc1c363c3f28880c8702472d5c9d45c610aa1c509b",
+    "bytes": 6219,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_metadata_io.py",
+    "sha256": "f1bdba4aa4c2d6501bd193ed8d1a4f1ac9d3ea1988d57df5e7f55a0e69f626f9",
+    "bytes": 16739,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_migration_integration.py",
+    "sha256": "1d6a93dd189f54371d54ac9b3639a415b9b29995c95e1a3f2ae422f8a1fc12b7",
+    "bytes": 4241,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_network_policy.py",
+    "sha256": "ae80d2cdaa7f48f283367ab50a4f96c4939a540f098929bee2d69bd0cc4ff836",
+    "bytes": 1349,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_node_registry.py",
+    "sha256": "20b6f1d35bec5b55649482f1fdd28fba68f2a2a5a7a33b6cc4a68aabfd3f695f",
+    "bytes": 1980,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_ollama.py",
+    "sha256": "ca9a7739053062da4e2085d89055277aacce1b1763debf0efacc5926c01f531b",
+    "bytes": 1331,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_operations_leases.py",
+    "sha256": "e4d54f47f0354e6f314c5f7c0515249aba022b743192ba8e82ba0e378542a8d0",
+    "bytes": 1446,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_package_structure.py",
+    "sha256": "e1b5312e7c28c0c54ccdf1a7d4b23c700f65bb15c436ccf0f0ef82258fcf17a0",
+    "bytes": 663,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_packaging_hygiene.py",
+    "sha256": "69352da5f3ec0cfdf73a8a6deff2c6afc7a3068a01cdb1bd1aff0b8327e73af0",
+    "bytes": 903,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_pairing_passphrase_contract.py",
+    "sha256": "f7fda6b02b77ac84c8ad43838a34c13b75820b7130daa55411d7c2816cd24306",
+    "bytes": 3233,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_posix_zip_writer.py",
+    "sha256": "6462892dce04a296322461f1046aa5e87ed72923caff2fad024f04cbdb42fff2",
+    "bytes": 1182,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_profiles.py",
+    "sha256": "c2b6c38df7c926f5b7e7151be4f2089786a023849ffd9a0a5d5cc0de2e42156c",
+    "bytes": 195,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_project_safety.py",
+    "sha256": "eaa01b1294d8f5a0e4b4b4debc59a7cf540305716a90b71dbdfeb9e08fa41187",
+    "bytes": 673,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_release_fingerprint.py",
+    "sha256": "c828417c604b08df30002a8af2a26a1070fbdf112b1e7e80dfd8635c883c6dd3",
+    "bytes": 6392,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_release_reproducibility.py",
+    "sha256": "f4af5c9897f923c4579ad5b5ede734d64067968ff58622b1bd25be24dccef66c",
+    "bytes": 3256,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_remediation_contract.py",
+    "sha256": "de0445f35b1c084cd557e7edede914adf0282aa5931dc47fc6dcf86fc00bcdad",
+    "bytes": 6905,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_request_admission.py",
+    "sha256": "084475db61c654d14637f96eaec248355c9f4c7d1c7e9c160835f622d62a66fc",
+    "bytes": 6459,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_runtime_architecture.py",
+    "sha256": "7fb003753a830ba6f20ece02678ff9a96016cc5b35b6a4a84e04a275d7145b1c",
+    "bytes": 1916,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_security_config.py",
+    "sha256": "e372fd0f3ddc6f2c90c244295828ad648abbcca689465ca29f7125d8e86ef6d5",
+    "bytes": 1020,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_security_poison_harness.py",
+    "sha256": "3b38b5f668c5cf6e9868778a365f16a7b105f95b38e861a1165d8797d3e32744",
+    "bytes": 1636,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_transitive_hook_closure.py",
+    "sha256": "e1284a9228410bb613bd8f942caf99d554e69d34d90f5e85e06a38f156531590",
+    "bytes": 1660,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_upgrade_preservation.py",
+    "sha256": "bc0b93eb5559346b2781139dbcaf21b98e1d7628e677630402f78b40e1e67763",
+    "bytes": 1058,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v1211_release_contract.py",
+    "sha256": "b338d6aafbeededad000f91c837375a3886c8461daf71e9f59b52ec2be8d4514",
+    "bytes": 8674,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v1211_stopped_capabilities.py",
+    "sha256": "1ceffa011ec0d19a052a4d3551879ee1dfd089d9ee07f21be3b05cd7cb40ab84",
+    "bytes": 5347,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v121_auth_performance.py",
+    "sha256": "a88a21055e555d85b2ebfa0ba63a18372c49dbb16a2f0c517efd71b3485fff98",
+    "bytes": 5903,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v122_auth_snapshot_package.py",
+    "sha256": "e8537161bda817b8cd7539ce4c40a078b8cef1d0a88477c3e8cf33910056f285",
+    "bytes": 3617,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v122_lifecycle_archive.py",
+    "sha256": "acd775b9253d3b6cf0a22d984731107e49253d632b05d000a28129d41875eb30",
+    "bytes": 2925,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v122_main_endpoints.py",
+    "sha256": "2c5ca92e1e82ad5b08d479de308347045410861c60df9abafd86dc7f3303e420",
+    "bytes": 5260,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v122_ui.py",
+    "sha256": "2d3f276abc1105aa61a069eb5669c3775a0bf472929779b9722834f1ad0f366a",
+    "bytes": 1794,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v123_contracts.py",
+    "sha256": "0012c02123620453c6a2731dced0ea6ea1aa72603fa31fe79c9afb4ffd7f411c",
+    "bytes": 6810,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v123_durable_operations.py",
+    "sha256": "b2b93383246e28effa2efc2c2313b2406adf7603ca57fee9926a3090119a4263",
+    "bytes": 2250,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v123_vault_broker.py",
+    "sha256": "6f4d0f458c1569459e509821d2d0e7ea3927b7dd4361caa13e627e921761cc24",
+    "bytes": 78343,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v123_vault_restore_transaction.py",
+    "sha256": "d13055a62902cdfe9b0ff6ab24dc8e0e3dab1e3fd79b0a21cda26cc01ee84633",
+    "bytes": 5814,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v124_environment_wizard.py",
+    "sha256": "cc35cdd574c4a2e12f84169d3b821030eead1bced0d3f1edcc3d09da6d478e0e",
+    "bytes": 3060,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v124_migration_transaction.py",
+    "sha256": "74c240589060a7fe59d71b6a829689c2564bcaa3a5cba00039060d05546b2ae9",
+    "bytes": 10484,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v124_vm_backups.py",
+    "sha256": "635be7cf6db6bcc88cbae397e782da8c586aef63d6824ad0f3bc6bcf2959fb48",
+    "bytes": 3936,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v124_vm_creation_ssh.py",
+    "sha256": "705b439b834162d0890b8b4b4bb42ed66dc300e76b409de537520323dd8ebe6c",
+    "bytes": 6592,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v125_jobfinder_hotfix.py",
+    "sha256": "f8f3e5ce386a3ce3b8c85a0514a09bbb702e935f716e4cd5e8b3c98e44f3b0da",
+    "bytes": 12515,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v126_dynamic_vm_hotfix.py",
+    "sha256": "3c793e1ea5beffe6b9bc87abd2de1f9ebd06abe38cb6b496fb66237e0551afe2",
+    "bytes": 5765,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v127_project_ux.py",
+    "sha256": "20e0a996802df6a6af676e448ea497d6d032063de574581f705071330c2e2a62",
+    "bytes": 5661,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_v128_container_workspace.py",
+    "sha256": "f947532feee6305c049ffa245545e60dc389ae6507b44552914471ebabbf4ae9",
+    "bytes": 4527,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_vault_metadata_identity_integration.py",
+    "sha256": "f5340252c6b2410b726c4529c51ecef9ec9aab60b41c5ca3cef989573668b9d3",
+    "bytes": 3801,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_verify_package_watchdog.py",
+    "sha256": "51cb998ef256cd58f3c6f63c63d23aa330566f0f4030c7f7237eb962967c3d4c",
+    "bytes": 974,
+    "kind": "text"
+  },
+  {
+    "path": "source/tests/test_worktrees_and_v1_restore.py",
+    "sha256": "7cf54e4291b6c4df1063afb2ab5113bf35b78498c8f035ac1633d3c41d7c3b2f",
+    "bytes": 3037,
+    "kind": "text"
+  },
+  {
+    "path": "source/tools/Build-InstallerSourceZip.ps1",
+    "sha256": "8b654e01e2be6f4faa42628be4168e9c349348a8dac29fa8cbf5d24bf86badcf",
+    "bytes": 2625,
+    "kind": "text"
+  },
+  {
+    "path": "source/tools/Verify-Package.ps1",
+    "sha256": "823ed5d1f17bf4b46a0f8f306ff73833df46ab50221734ff5116a8cac7e84cec",
+    "bytes": 3453,
+    "kind": "text"
+  },
+  {
+    "path": "source/tools/build_release.py",
+    "sha256": "59e38747a1c410ea7710b522c5bb2dab73adb841e892503c87114aed97dc5712",
+    "bytes": 8017,
+    "kind": "text"
+  },
+  {
+    "path": "source/tools/check_dependency_advisories.py",
+    "sha256": "8901ed5ad3d19846030f2c6b8af5f03274277ef76b641b540a127d9994906185",
+    "bytes": 11275,
+    "kind": "text"
+  },
+  {
+    "path": "source/tools/hook_modes.py",
+    "sha256": "3010bf588f088c9e6d4e956c2127a06abfec78f4875eec3441475383b6e02e54",
+    "bytes": 5491,
+    "kind": "text"
+  },
+  {
+    "path": "source/tools/migrate_config.py",
+    "sha256": "38e5b6be41be5d9a22039b047a5489ab476dce3ea02d9217e3737d3f07e4bdaa",
+    "bytes": 763,
+    "kind": "text"
+  },
+  {
+    "path": "source/tools/release_fingerprint.py",
+    "sha256": "f5440bfaeafb54607fa71d284ec6d63e115fe15e2de6e72bc7f1de644363cf6b",
+    "bytes": 5826,
+    "kind": "text"
+  },
+  {
+    "path": "source/tools/validate_ai_audit_bundle.py",
+    "sha256": "d9f46d511192d552013ce289ffe7547bb3befd1d9c65d40b61038e979e93a70c",
+    "bytes": 26859,
+    "kind": "text"
+  },
+  {
+    "path": "source/tools/validate_audit_coherence.py",
+    "sha256": "9c5f6b489571f076a332da9128767ccc44d72882445b72029e5f2c07cafed651",
+    "bytes": 73537,
+    "kind": "text"
+  },
+  {
+    "path": "source/tools/verify_package.py",
+    "sha256": "24d74c58ed2d13099032cbc4a2ef46a03c819da82b7505762ff2068ed8a1ea9b",
+    "bytes": 21852,
+    "kind": "text"
+  },
+  {
+    "path": "source/tools/write_posix_zip.py",
+    "sha256": "10088dbe4b07289b6f3df8811a75a2c58a2ad65b0b44f728f448c7cbc2129cda",
+    "bytes": 1706,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/00-Preflight.ps1",
+    "sha256": "e9a3edb41802e9a01d76641f133430d683c84d37cf43604a492ebf106827c731",
+    "bytes": 4118,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/01-Install-Prerequisites.ps1",
+    "sha256": "bc4d60449c0633509984438a3a41a8d5077222e66ca57e79f20f621fe076f81b",
+    "bytes": 12943,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/02-Provision-ComputeNode.ps1",
+    "sha256": "e06b31924cb383c9d6383c70376b89b49213248f1f09e61aef5dc15d8afff7d1",
+    "bytes": 9264,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/03-Provision-Vault.ps1",
+    "sha256": "620c99ab23861ad44f74b5d79ceda9e79eba20feb89ff6694e0e548e2a5308c6",
+    "bytes": 7647,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/04-Connect-Tailscale.ps1",
+    "sha256": "a8c18e358eeeeb4c00058fc893f165c2d47f90015e06abde8265bd7ae98b077b",
+    "bytes": 1873,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/04a-Connect-WindowsTailscale.ps1",
+    "sha256": "361255d8773a9de440bac3007db55635a7940e49409d77f9245651df44c3585b",
+    "bytes": 1720,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/05-Configure-LocalVaultClient.ps1",
+    "sha256": "9687c9be4a3bf40a2e1481cd402c7d4118aaa0c4533e9037244b7bb3a25e0c62",
+    "bytes": 1235,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/06-Import-Laptop-Bootstrap.ps1",
+    "sha256": "e38b19b780ca0a6ef94aba9a71a225d4a6cc28d5c3fe6c80333f7fa0d00c8452",
+    "bytes": 2442,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/08-Install-Shortcuts.ps1",
+    "sha256": "e8295df36470ee12ca2ea696195bbee0e64333ddce1c45f80aae3a2f37844a5f",
+    "bytes": 2685,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/09-Export-Laptop-Bootstrap.ps1",
+    "sha256": "806d2edbce838681979ac40678aeb452e2f6e0be87b2baafc307adb3813073c4",
+    "bytes": 2000,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/10-Export-Desktop-Pairing.ps1",
+    "sha256": "a20531c8ca0e0e2a85a720a0089b97fc769410b2246a93443014074e17ea45ee",
+    "bytes": 1877,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Complete-Cluster.ps1",
+    "sha256": "0168e428da1749b5ece2d61eb2df324fab835424e3d1de4af9576aea6e4baf74",
+    "bytes": 4180,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Configure-DevFleet-HostControl.ps1",
+    "sha256": "0c386e55d8d961d12708551ea4e30b0b2c224c1d25fd48f6a1c84f16bafa6432",
+    "bytes": 3931,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Configure-GitHub.ps1",
+    "sha256": "39ad88bc44596bfcb497d0b69f92130d859e338b878b6ad27d8fa1376f62e9d4",
+    "bytes": 675,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Configure-Ollama.ps1",
+    "sha256": "fffd6eb381da44ab8239be426bccf4260b196b4d48cdb9606289df62d2b322bd",
+    "bytes": 2506,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/DevFleet-HostAgent.ps1",
+    "sha256": "bf68455620a50dab6d3d470f54b264899d4712f553632c5180d7dc420e130bf2",
+    "bytes": 96997,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/DevFleet-HostAgentProtocol.psm1",
+    "sha256": "6e1b0bcea1194b7a4b5443f80b8af01e8331ed6772578cac272867de3334034f",
+    "bytes": 4785,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/DevFleet-VSCode.ps1",
+    "sha256": "6e7ab0758d482f69112085ce84d153b9d5a7ab645d70da1a92963d24e38f7248",
+    "bytes": 5596,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/DevFleet-WindowsIntegrationOwnership.psm1",
+    "sha256": "a05f3e85b4033d59e61d4ccdaa06bc8051befb711ae2b6fb26880f1ae89f1b0e",
+    "bytes": 16444,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/DevFleet.Common.psm1",
+    "sha256": "29e4a7fae0fde808e7e295bf4c9371be7da0cd2a37979d4347f3fb207f0c59d7",
+    "bytes": 108153,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/DevFleet.Tailscale.psm1",
+    "sha256": "b64b38830684a097fa8e1e60440f37894ce4b25e765016172ffb6a899bcf6afd",
+    "bytes": 65434,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Export-Diagnostics.ps1",
+    "sha256": "fd1dbee84b4be48f94162c14e75ed847f6c15a6ed898c08e86ddb0a827437cf3",
+    "bytes": 1036,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Export-Vault-OfflineCopy.ps1",
+    "sha256": "2ec63a9fa38753b0f55ff752faa9f3511b47e2fca70cff9b432fac2823eb9dd7",
+    "bytes": 1727,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Install-DevFleet-HostAgent.ps1",
+    "sha256": "2f8aaeef509e22b14ee2f53b7cc64ef92851042e7487c0e5eefacd9c77c7396b",
+    "bytes": 18803,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Invoke-Quarantine-Maintenance.ps1",
+    "sha256": "6770649aab6111d099e0ef4652238910cbfc61a69b4815686fadf052068e6eb8",
+    "bytes": 865,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Invoke-Vault-Maintenance.ps1",
+    "sha256": "ebf2557670dfd98191f8918699b08ef6607f166429943034fb96f2d4473944dd",
+    "bytes": 611,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Migrate-Config.ps1",
+    "sha256": "05506c1475b1562de935be365873970bb297f6f5adff8d281d7b82db9e20ec7f",
+    "bytes": 2289,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Remove-DevFleet-OwnedIntegrations.ps1",
+    "sha256": "a3fa2f7e42741649e8c5098b24574a4d2dd49b0c6f1815f5df25e096e64e1d80",
+    "bytes": 4357,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Repair-DevFleet.ps1",
+    "sha256": "a0c494824681657502694ef8cdd9622a247a9401d549fefb17fdbf37632e9ad5",
+    "bytes": 728,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Repair-DevFleetHostSecrets.ps1",
+    "sha256": "6c3233e1643fa8a5e317ee04a98da27b40c297ad15f961a68c5d5ccfd0ceba4b",
+    "bytes": 14840,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Set-DevFleetDockerMode.ps1",
+    "sha256": "f76be7c8d6fc8364fba6b7a142efe687351355681473e56cc30b51e021377f95",
+    "bytes": 2185,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Set-DevFleetTailscaleOAuthCredential.ps1",
+    "sha256": "0105c2847c27380d28d1dc28f2866309f107ced8dd750589b42185bd39bc27f3",
+    "bytes": 917,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Show-DevFleet-Credentials.ps1",
+    "sha256": "71a2690913ce61e9a48b24bcf7bcf6a6933c41b46b432375a212ebc3a2b159aa",
+    "bytes": 647,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Start-DevFleet.ps1",
+    "sha256": "111e3e8828b164feae5ec9bc7a0000683bbb8bbb77c4921aab5b28713447f404",
+    "bytes": 1989,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Stop-DevFleet.ps1",
+    "sha256": "e74baad7cd8e7ba9f706710b17bcae7e736266d8dc41d6f326243609a140a8e5",
+    "bytes": 808,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Test-DevFleet.ps1",
+    "sha256": "900e430ea23f0f2980da8d9529389a5abc06c4fefc3e2195ba6e76f3bb70f245",
+    "bytes": 979,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Test-Ollama.ps1",
+    "sha256": "d64c2328cb6057dc0bccf78051fdb523da928df89ed9b6ae713f961dab30aaf1",
+    "bytes": 1124,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Update-DevFleet.ps1",
+    "sha256": "6eb437cd4cf6a5d29fcd25c202d50d9a7ed738e2c76d9c5763d2acc64d13ff23",
+    "bytes": 1712,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Update-Vault.ps1",
+    "sha256": "bbd371182a3002edfe1e3b8995ad1a437d706eac8ed4b9713a4f7252339d7069",
+    "bytes": 1006,
+    "kind": "text"
+  },
+  {
+    "path": "source/windows/Verify-DevFleet-Host.ps1",
+    "sha256": "1e1a37ba016238f122173ce7bd22c0909ce2b155d47c23f6430fd15440020705",
+    "bytes": 2174,
+    "kind": "text"
+  },
+  {
+    "path": "tools/AuthorityTime.psm1",
+    "sha256": "d4be2f022fc46fc75561135149a2c6c11e9106f1bde2a653691e325084619ec1",
+    "bytes": 770,
+    "kind": "text"
+  },
+  {
+    "path": "tools/Build-AI-CodebaseBundle.ps1",
+    "sha256": "5c8c3ebb294bb267995747ebbe96d17a03f433d3882b1d8573352fe497b9312d",
+    "bytes": 238,
+    "kind": "text"
+  },
+  {
+    "path": "tools/Build-AIAuditBundle.ps1",
+    "sha256": "4befd0c71379996d857fff6abb84ca07bd4bb021851d70a1e36c72926b3f8b58",
+    "bytes": 95333,
+    "kind": "text"
+  },
+  {
+    "path": "tools/Build-ChatGPT-AuditBundle.ps1",
+    "sha256": "6b122224f06cdf7baaba463372aea1ae686dbce43489d9c3f8647a4d8390a393",
+    "bytes": 350,
+    "kind": "text"
+  },
+  {
+    "path": "tools/Complete-DevFleetInternalAcceptance.ps1",
+    "sha256": "5310a03dd6251268e8bf6a76dabf074bc4ad91d1f47586b928bb15e620fdd849",
+    "bytes": 17249,
+    "kind": "text"
+  },
+  {
+    "path": "tools/Finalize-CandidateEvidence.ps1",
+    "sha256": "893ad4fee445cc8e7a82482c329015cb816317b68a86552d5a7302f69c731acd",
+    "bytes": 19508,
+    "kind": "text"
+  },
+  {
+    "path": "tools/Invoke-DevFleetFinalConvergence.ps1",
+    "sha256": "d571fb3bf3d137db417fb55e1a825f98414ea51561d8bd09a94a30eed8f12478",
+    "bytes": 31192,
+    "kind": "text"
+  },
+  {
+    "path": "tools/PythonRuntime.psm1",
+    "sha256": "7b549bdaa54e822dc1875dbb75cbda8b610aed67a3ba4ed85a75879d87aade1d",
+    "bytes": 1235,
+    "kind": "text"
+  },
+  {
+    "path": "tools/Test-FinalizerAuthorityExitBoundary.ps1",
+    "sha256": "79bbec96d0e6f0db06d446c83d009230502c5ef01f7ab1b6be10fc3d941fd574",
+    "bytes": 3090,
+    "kind": "text"
+  },
+  {
+    "path": "tools/Update-CurrentReleaseAuthority.ps1",
+    "sha256": "179bbdd0b389cc521cb59e156334bfaa9e0617a8416d1f8cde82267f99e07903",
+    "bytes": 37062,
+    "kind": "text"
+  },
+  {
+    "path": "tools/astra-causal-evidence.json",
+    "sha256": "1fc036786413175dd43c0fc5b79be90b884ea4f8c800179a78d1300ce571ede9",
+    "bytes": 137578,
+    "kind": "text"
+  },
+  {
+    "path": "tools/audit-test-manifest.json",
+    "sha256": "d4541110787db1c96ce03696393a5eb202d8c85ac6a076b2c855bf31ef594f5f",
+    "bytes": 1306,
+    "kind": "text"
+  },
+  {
+    "path": "tools/audit_bundle_paths.py",
+    "sha256": "c1c886fba4c84706dd0e624e08e71d398af92298e48398f1851f84179a0b77d8",
+    "bytes": 1179,
+    "kind": "text"
+  },
+  {
+    "path": "tools/baseline_lineage.py",
+    "sha256": "421e922e581def7c52827bb40e43b8e45a17669f43f8e7bba777bd924b38fe80",
+    "bytes": 32796,
+    "kind": "text"
+  },
+  {
+    "path": "tools/compute_shipping_input_identity.py",
+    "sha256": "124fb632ac98b18e48f3b163a1568b627381c1614e93f98effce4d13d254732b",
+    "bytes": 9809,
+    "kind": "text"
+  },
+  {
+    "path": "tools/reconcile_osv_scanner.py",
+    "sha256": "6cb2abed1ebcf7784767c22714f398bd68935bb74ede1b4239c0b512794ab82b",
+    "bytes": 5548,
+    "kind": "text"
+  },
+  {
+    "path": "tools/release-tooling-requirements.txt",
+    "sha256": "78a660089f62dde9ed045e27020e6fd7973a0addfd638e2235d8064dcd083f60",
+    "bytes": 340,
+    "kind": "text"
+  },
+  {
+    "path": "tools/run_portable_audit_tests.py",
+    "sha256": "e65e234f040d84909033ce93152a27ba0ee6948c58892cf6bcf9fe6ccb0e90d9",
+    "bytes": 5249,
+    "kind": "text"
+  },
+  {
+    "path": "tools/test_baseline_lineage.py",
+    "sha256": "eca3e391c660e57a494a770c0c3b46d438fa631ba299c12d697b7b271b7fa8f6",
+    "bytes": 19983,
+    "kind": "text"
+  },
+  {
+    "path": "tools/test_baseline_temporal_binding.py",
+    "sha256": "525c83dc2f0787a4c94a8d126f62c50ce383448c2c81e57be2c3e902923e8cab",
+    "bytes": 3083,
+    "kind": "text"
+  },
+  {
+    "path": "tools/test_compute_shipping_input_identity.py",
+    "sha256": "b9c3721b1ca80a5c911da31f18ae4493714c3b356798f9ecac0ac49573de4c50",
+    "bytes": 4626,
+    "kind": "text"
+  },
+  {
+    "path": "tools/test_failed_attempt_freeze.py",
+    "sha256": "e7e1e0c43435ce7ba04c67ba47d5e43aae7f767ac99b976388459a77731b722e",
+    "bytes": 13077,
+    "kind": "text"
+  },
+  {
+    "path": "tools/test_final_acceptance_tools.py",
+    "sha256": "caa0b34b7f7a797a2efbfacb5a191411923aecc6ba23849b6cb0c8724f9bc9a4",
+    "bytes": 3415,
+    "kind": "text"
+  },
+  {
+    "path": "tools/test_release_tooling_corrections.py",
+    "sha256": "9a823f6a74ca782ed6e7f2d3b8051bc9f79a0fa41557b61a494c4bf39c23f2f5",
+    "bytes": 7014,
+    "kind": "text"
+  },
+  {
+    "path": "tools/test_validate_native_proof.py",
+    "sha256": "a2b51951efa8b17a27486720e7ec25362b78b1dc4f2f6b1407073423ecda1b29",
+    "bytes": 10205,
+    "kind": "text"
+  },
+  {
+    "path": "tools/test_validate_release_bundle.py",
+    "sha256": "7b51a6dc41a6487f4174f38a71155db86c04790e6475cf97e2447608f9acfd23",
+    "bytes": 40192,
+    "kind": "text"
+  },
+  {
+    "path": "tools/validate_audit_coherence.py",
+    "sha256": "13f4bfa1db5cedd99da67b211c0d18e3330d19e1291e8e027aa4152aff812b90",
+    "bytes": 18596,
+    "kind": "text"
+  },
+  {
+    "path": "tools/validate_release_bundle.py",
+    "sha256": "3bef9437795a08669e9fc2584f1ad1bf3d353d35b6416bd46d4a659206f7e4f7",
+    "bytes": 110347,
+    "kind": "text"
+  }
+]

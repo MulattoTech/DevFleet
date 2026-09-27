@@ -1,0 +1,130 @@
+{
+  "title": "DEVFLEET v1.2.13 RELEASE MONITOR  [read-only]",
+  "sources": {
+    "status": "evidence/CURRENT-STATUS.json",
+    "full": "evidence/FULLRELEASE-SUMMARY.json",
+    "final": "finalization-state.json"
+  },
+  "headline": {
+    "label": "Overall",
+    "source": "status",
+    "path": "blockerClassification",
+    "kind": "status"
+  },
+  "rows": [
+    {
+      "label": "Candidate current",
+      "source": "status",
+      "path": "candidateIsCurrent",
+      "kind": "bool"
+    },
+    {
+      "label": "Source unchanged",
+      "source": "status",
+      "path": "sourceChangedSinceCandidate",
+      "kind": "bool",
+      "trueMeansPass": false
+    },
+    {
+      "label": "No rebuild required",
+      "source": "status",
+      "path": "rebuildRequired",
+      "kind": "bool",
+      "trueMeansPass": false
+    },
+    {
+      "label": "Current proof",
+      "source": "status",
+      "path": "currentProofOutcome",
+      "kind": "status"
+    },
+    {
+      "label": "Proofs passed",
+      "source": "status",
+      "path": "proofsPassed",
+      "kind": "text"
+    },
+    {
+      "label": "Proofs required",
+      "source": "status",
+      "path": "proofsRequired",
+      "kind": "text"
+    },
+    {
+      "label": "FullRelease",
+      "source": "full",
+      "path": "status",
+      "kind": "status"
+    },
+    {
+      "label": "Last completed phase",
+      "source": "full",
+      "path": "lastCompletedPhase",
+      "kind": "complete"
+    },
+    {
+      "label": "Current phase",
+      "source": "full",
+      "path": "currentPhase",
+      "kind": "phase"
+    },
+    {
+      "label": "Finalizer blocker",
+      "source": "final",
+      "path": "finalizer_primary_blocker",
+      "kind": "status"
+    },
+    {
+      "label": "FullRelease passed",
+      "source": "status",
+      "path": "fullReleasePassed",
+      "kind": "bool"
+    },
+    {
+      "label": "Internal promotion",
+      "source": "status",
+      "path": "internalPromotionAllowed",
+      "kind": "bool"
+    },
+    {
+      "label": "Production unchanged",
+      "source": "status",
+      "path": "productionUnchanged",
+      "kind": "bool"
+    },
+    {
+      "label": "Surface untouched",
+      "source": "status",
+      "path": "mulattoTechSurfaceTouched",
+      "kind": "bool",
+      "trueMeansPass": false
+    }
+  ],
+  "footerPaths": [
+    {
+      "label": "Proof RunId",
+      "source": "status",
+      "path": "currentProofRunId"
+    },
+    {
+      "label": "FullRelease RunId",
+      "source": "status",
+      "path": "fullReleaseRunId"
+    },
+    {
+      "label": "Next action",
+      "source": "status",
+      "path": "nextAction"
+    },
+    {
+      "label": "Authority",
+      "source": "status",
+      "path": "authorityId"
+    },
+    {
+      "label": "Updated UTC",
+      "source": "status",
+      "path": "generatedAtUtc"
+    }
+  ]
+}

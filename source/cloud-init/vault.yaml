@@ -1,0 +1,60 @@
+#cloud-config
+hostname: __NODE_NAME__
+manage_etc_hosts: true
+package_update: true
+package_upgrade: false
+packages:
+  - unzip
+  - curl
+  - ca-certificates
+  - gnupg
+  - jq
+  - openssh-server
+  - apache2-utils
+  - ufw
+  - fail2ban
+  - unattended-upgrades
+users:
+  - default
+  - name: resticvault
+    gecos: DevFleet backup vault service
+    system: true
+    shell: /usr/sbin/nologin
+    homedir: /srv/restic
+write_files:
+  - path: /usr/local/sbin/devfleet-install-vault-tailscale
+    permissions: !!str 0700
+    content: |
+      #!/usr/bin/env bash
+      set -Eeuo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      . /etc/os-release
+      [[ "$ID" == ubuntu && "$VERSION_CODENAME" =~ ^[a-z]+$ ]] || exit 4
+      key=$(mktemp)
+      trap 'rm -f -- "$key"' EXIT
+      curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 "https://pkgs.tailscale.com/stable/ubuntu/$VERSION_CODENAME.noarmor.gpg" -o "$key"
+      observed=$(gpg --show-keys --with-colons "$key" | awk -F: '$1=="pub"{count++;pending=1;next} pending && $1=="fpr"{fingerprint=toupper($10);pending=0} END{if(count!=1 || pending || length(fingerprint)!=40)exit 4;print fingerprint}')
+      [[ "$observed" == '__TAILSCALE_SIGNING_FINGERPRINT__' ]] || { echo 'Tailscale signing-key identity mismatch' >&2; exit 4; }
+      install -m 0644 "$key" /usr/share/keyrings/tailscale-archive-keyring.gpg
+      printf 'deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu %s main\n' "$VERSION_CODENAME" > /etc/apt/sources.list.d/tailscale.list
+      apt-get update
+      apt-get install -y tailscale
+      systemctl enable --now tailscaled
+  - path: /etc/ssh/sshd_config.d/60-devfleet-vault.conf
+    permissions: !!str 0644
+    content: |
+      PasswordAuthentication no
+      PermitRootLogin no
+      AllowUsers ubuntu
+      X11Forwarding no
+      AllowAgentForwarding no
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    permissions: !!str 0644
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+runcmd:
+  - [timeout, --signal=TERM, --kill-after=10s, 900s, /usr/local/sbin/devfleet-install-vault-tailscale]
+  - systemctl enable --now ssh
+  - systemctl enable --now fail2ban
+final_message: "DevFleet vault base cloud-init complete."

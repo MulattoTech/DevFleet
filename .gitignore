@@ -1,0 +1,38 @@
+# Generated release and audit state
+outputs/
+audit/
+windows-e2e/evidence/
+windows-e2e/run-state/
+*.run-state.json
+run-state.json
+
+# Local SDKs, environments, caches, and build output
+.dotnet/
+.venv-test/
+**/.venv-test-*/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.test-runtime/
+bin/
+obj/
+build/
+dist/
+node_modules/
+dependency-cache/
+test-downloads/
+
+# Local secrets and credentials
+credentials/
+secrets/
+*.dpapi
+*.secret
+*.token
+*.pem
+*.key
+
+# Temporary tooling artifacts
+dotnet-install.ps1
+*.tmp
+*.log

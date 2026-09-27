@@ -1,0 +1,4 @@
+interface:
+  display_name: "DevFleet Audit Convergence"
+  short_description: "Build audits and reconcile the remaining native release gates"
+  default_prompt: "Use $devfleet-audit-convergence to inspect current DevFleet evidence, build an audit when requested, and advance the earliest authorized certification requirement."

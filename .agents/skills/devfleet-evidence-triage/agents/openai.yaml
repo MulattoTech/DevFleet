@@ -1,0 +1,6 @@
+interface:
+  display_name: "DevFleet Evidence Triage"
+  short_description: "Read-only DevFleet authority reconciliation"
+  default_prompt: "Use $devfleet-evidence-triage to reconcile the current DevFleet release status and identify the earliest truthful blocker."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,6 @@
+interface:
+  display_name: "DevFleet Release Control"
+  short_description: "Run DevFleet certification from live authority"
+  default_prompt: "Use $devfleet-release-control to continue the current DevFleet release certification from the earliest truthful incomplete gate."
+policy:
+  allow_implicit_invocation: true

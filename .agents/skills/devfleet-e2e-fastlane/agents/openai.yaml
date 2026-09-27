@@ -1,0 +1,4 @@
+interface:
+  display_name: "DevFleet E2E Fastlane"
+  short_description: "Fast, VM-free certification prechecks and lifecycle regressions"
+  default_prompt: "Use $devfleet-e2e-fastlane to revalidate current evidence and select the smallest VM-free regression suite before the next authorized real certification operation."

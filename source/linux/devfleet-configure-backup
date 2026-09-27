@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+src=${1:?vault json required}
+cleanup(){ if [[ "$src" == /tmp/* ]]; then rm -f -- "$src"; fi; }
+trap cleanup EXIT
+jq -e '.Repository and .RestUser and .RestPassword and .ResticPassword' "$src" >/dev/null
+repo=$(jq -r .Repository "$src")
+pairing_mode=$(jq -r '.PairingMode // "tailscale"' "$src")
+[[ "$pairing_mode" == 'tailscale' ]] || { echo 'Authenticated Vault transport requires Tailscale; plaintext deferred-local transport is disabled.' >&2; exit 2; }
+[[ "$repo" =~ ^rest:http://100\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/ ]] || { echo 'Repository must use a Tailscale IPv4 address.' >&2; exit 2; }
+cat >/etc/devfleet/restic.env <<EOF
+RESTIC_REPOSITORY=$repo
+RESTIC_REST_USERNAME=$(jq -r .RestUser "$src")
+RESTIC_REST_PASSWORD=$(jq -r .RestPassword "$src")
+RESTIC_PASSWORD=$(jq -r .ResticPassword "$src")
+RESTIC_CACHE_DIR=/var/lib/devfleet/backup-status/restic-cache
+EOF
+chown root:devfleet-backup /etc/devfleet/restic.env
+chmod 0640 /etc/devfleet/restic.env
+# Keep /etc/devfleet private while allowing only the backup service account to
+# traverse it to the restic environment file whose group owns read access.
+setfacl -m u:devfleet-backup:--x /etc/devfleet
+# Keep the runtime state root private while allowing the backup service account
+# to reach its separately permissioned status directory.
+setfacl -m u:devfleet-backup:--x /var/lib/devfleet
+# The backup source directories are deliberately private to devrunner and are
+# granted only the traversal needed by the backup service account. Their child
+# ACLs remain the authority for the actual files and directories read.
+setfacl -m u:devfleet-backup:--x /home/devrunner
+install -d -o devfleet-control -g devfleet-control -m 0750 /var/lib/devfleet/backup-status
+setfacl -m u:devfleet-backup:rwx /var/lib/devfleet/backup-status
+install -d -o devfleet-backup -g devfleet-backup -m 0700 /var/lib/devfleet/backup-status/restic-cache
+jq -n --arg repository "$repo" '{repository:$repository}' >/var/lib/devfleet/backup-status/config.json
+chown devfleet-control:devfleet-control /var/lib/devfleet/backup-status/config.json
+chmod 0640 /var/lib/devfleet/backup-status/config.json
+sudo -u devfleet-backup bash -lc 'set -a; source /etc/devfleet/restic.env; set +a; restic snapshots >/dev/null 2>&1 || restic init'
+systemctl restart devfleet-backup.timer
+sudo -u devfleet-backup /usr/local/bin/devfleet-backup

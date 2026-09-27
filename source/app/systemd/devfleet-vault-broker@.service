@@ -1,0 +1,31 @@
+[Unit]
+Description=DevFleet bounded Vault operation broker
+After=network-online.target tailscaled.service
+
+[Service]
+Type=exec
+User=devfleet-backup
+Group=devfleet-backup
+ExecStart=/usr/local/bin/devfleet-vault-broker
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+# Backup configuration creates this directory. Before configuration the broker
+# must start to return its authenticated refusal; the absent path stays read-only.
+ReadWritePaths=/run/lock -/var/lib/devfleet/backup-status __WORKSPACES__ __QUARANTINE__
+UMask=0077
+TimeoutStartSec=30
+RuntimeMaxSec=3660
+TimeoutStopSec=10
+KillMode=control-group

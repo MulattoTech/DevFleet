@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+src=${1:?primary invitation required}; identity=/etc/devfleet/node-identity.json; config=/etc/devfleet/config.json; registry=/var/lib/devfleet/runtime/node-registry.json
+[[ -f "$src" && -f "$identity" && -f "$config" ]] || { echo 'Joined-surrogate inputs are incomplete.' >&2; exit 3; }
+uuid='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+jq -e --arg r "$uuid" '.node_role=="primary" and .protocol_version==1 and (.deployment_id|type=="string" and test($r)) and (.node_id|type=="string" and test($r))' "$src" >/dev/null || { echo 'Primary invitation identity or protocol is invalid.' >&2; exit 3; }
+jq -e --arg r "$uuid" '.node_role=="surrogate" and (.deployment_id=="" or .deployment_id==null) and .protocol_version==1 and (.node_id|type=="string" and test($r)) and (.node_name|type=="string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$"))' "$identity" >/dev/null || { echo 'Existing node is not a valid unjoined Surrogate.' >&2; exit 3; }
+node_id=$(jq -er '.node_id' "$identity"); node_name=$(jq -er '.node_name' "$identity")
+jq -e --arg id "$node_id" --arg name "$node_name" '.node_role=="surrogate" and .node_id==$id and .node_name==$name and (.deployment_id=="" or .deployment_id==null) and .protocol_version==1' "$config" >/dev/null || { echo 'Surrogate configuration identity is missing or already joined.' >&2; exit 3; }
+deployment=$(jq -er '.deployment_id' "$src"); primary=$(jq -er '.node_id' "$src"); protocol=$(jq -er '.protocol_version' "$src")
+install -d -o devfleet-control -g devfleet-control -m 0750 /var/lib/devfleet/runtime
+if [[ -f "$registry" ]]; then jq -e --arg d "$deployment" '.deployment_id==$d' "$registry" >/dev/null || { echo 'Local registry deployment mismatch.' >&2; exit 3; }; fi
+tmpdir=$(mktemp -d /etc/devfleet/.join-deployment.XXXXXX); backupdir=$(mktemp -d /etc/devfleet/.join-deployment-backup.XXXXXX); restarted=0
+cleanup(){ rm -rf -- "$tmpdir" "$backupdir"; }; trap cleanup EXIT
+backup(){ local p=$1 n=$2; if [[ -e "$p" || -L "$p" ]]; then [[ -f "$p" && ! -L "$p" ]] || return 1; cp -p -- "$p" "$backupdir/$n"; stat -c '%u:%g:%a' "$p" >"$backupdir/$n.stat"; else : >"$backupdir/$n.absent"; fi; }
+restore(){ local p=$1 n=$2; if [[ -f "$backupdir/$n.absent" ]]; then rm -f -- "$p"; return; fi; install -m 0600 "$backupdir/$n" "$p"; IFS=: read -r u g m <"$backupdir/$n.stat"; chown "$u:$g" "$p" && chmod "$m" "$p"; }
+rollback(){ local rc=0; restore "$identity" identity || rc=1; restore "$config" config || rc=1; restore "$registry" registry || rc=1; if [[ $rc -eq 0 && $restarted -eq 1 ]]; then systemctl restart devfleet.service || rc=1; fi; [[ $rc -eq 0 ]] || { echo 'ROLLBACK_FAILED: joined-surrogate state could not be restored.' >&2; return 1; }; }
+fail(){ echo "$1" >&2; rollback || exit 70; exit 1; }
+backup "$identity" identity || exit 3; backup "$config" config || exit 3; backup "$registry" registry || exit 3
+jq --arg d "$deployment" --arg c "$primary" --argjson p "$protocol" '.deployment_id=$d|.coordinator_node_id=$c|.registration_state="joined"|.protocol_version=$p' "$identity" >"$tmpdir/identity"
+jq --arg d "$deployment" --arg c "$primary" --argjson p "$protocol" '.deployment_id=$d|.coordinator_node_id=$c|.registration_state="joined"|.protocol_version=$p' "$config" >"$tmpdir/config"
+if [[ -f "$registry" ]]; then jq --arg d "$deployment" --arg id "$node_id" --arg n "$node_name" --arg c "$primary" --argjson p "$protocol" '.deployment_id=$d|.nodes=(.nodes//[])|if any(.nodes[];.node_id==$id) then .nodes |= map(if .node_id==$id then .deployment_id=$d|.node_name=$n|.node_role="surrogate"|.coordinator_node_id=$c|.protocol_version=$p|.registration_state="joined"|.connectivity="online" else . end) else .nodes += [{deployment_id:$d,node_id:$id,node_name:$n,node_role:"surrogate",capabilities:["compute"],coordinator_node_id:$c,protocol_version:$p,registration_state:"joined",connectivity:"online"}] end' "$registry" >"$tmpdir/registry"; else jq -n --arg d "$deployment" --arg id "$node_id" --arg n "$node_name" --arg c "$primary" --argjson p "$protocol" '{schema_version:1,deployment_id:$d,nodes:[{deployment_id:$d,node_id:$id,node_name:$n,node_role:"surrogate",capabilities:["compute"],coordinator_node_id:$c,protocol_version:$p,registration_state:"joined",connectivity:"online"}]}' >"$tmpdir/registry"; fi
+install -o root -g devrunner -m 0640 "$tmpdir/identity" "$tmpdir/identity.ready" || fail 'Failed to stage joined node identity.'
+install -o root -g devfleet-control -m 0640 "$tmpdir/config" "$tmpdir/config.ready" || fail 'Failed to stage joined config.'
+install -o devfleet-control -g devfleet-control -m 0640 "$tmpdir/registry" "$tmpdir/registry.ready" || fail 'Failed to stage joined node registry.'
+mv -f -- "$tmpdir/identity.ready" "$identity" || fail 'Failed to commit joined node identity.'; mv -f -- "$tmpdir/config.ready" "$config" || fail 'Failed to commit joined config.'; mv -f -- "$tmpdir/registry.ready" "$registry" || fail 'Failed to commit joined node registry.'
+restarted=1; systemctl restart devfleet.service || fail 'Joined identity committed but daemon restart failed.'; restarted=0

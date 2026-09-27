@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+project=${1:?project slug required}
+expected_project_id=${2:?project ID required}
+mode=${3:-copy}
+expected_deployment_id=${4:-}
+expected_source_host_id=${5:-}
+[[ "$project" =~ ^[a-z0-9][a-z0-9._-]{1,62}$ ]] || { echo 'invalid project' >&2; exit 2; }
+[[ "$expected_project_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] || { echo 'invalid project ID' >&2; exit 2; }
+[[ "$mode" == copy || "$mode" == --canonical || "$mode" == transfer-copy ]] || { echo 'mode must be copy, transfer-copy, or --canonical' >&2; exit 2; }
+if [[ "$mode" == transfer-copy ]]; then
+  [[ "$expected_deployment_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] || { echo 'invalid deployment ID' >&2; exit 2; }
+  [[ "$expected_source_host_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$ ]] || { echo 'invalid source host identity' >&2; exit 2; }
+fi
+[[ -r /etc/devfleet/restic.env ]] || { echo 'backup not configured' >&2; exit 3; }
+
+set -a
+source /etc/devfleet/restic.env
+set +a
+
+exec 9>/run/lock/devfleet-vault-operation.lock
+flock -n 9 || { echo 'Another Vault operation is already in progress.' >&2; exit 75; }
+
+read -r restore_uuid </proc/sys/kernel/random/uuid
+stamp="$(date +%Y%m%d-%H%M%S)-${restore_uuid%%-*}"
+if [[ "$mode" == --canonical ]]; then
+  target="/home/devrunner/workspaces/$project"
+else
+  # Project slugs are capped at 63 characters. Keep the stable source prefix
+  # recognizable while leaving room for the collision-resistant recovery suffix.
+  recovered_slug="${project:0:28}-recovered-$stamp"
+  target="/home/devrunner/workspaces/$recovered_slug"
+  [[ ! -e "$target" && ! -L "$target" ]] || { echo 'Recovered copy target already exists.' >&2; exit 5; }
+fi
+tmp="/home/devrunner/workspaces/.${project}.restore-$stamp.tmp"
+canonical_quarantine=""
+workspace_identity_matches() {
+  local workspace=$1
+  [[ -d "$workspace" && ! -L "$workspace" ]] || return 1
+  local -a command=(python3 -I /opt/devfleet/devfleet/metadata_io.py --identity "$workspace" "$project" "$expected_project_id")
+  if [[ "$mode" == transfer-copy ]]; then
+    command+=("$expected_deployment_id" "$expected_source_host_id")
+  fi
+  "${command[@]}" >/dev/null 2>&1
+}
+cleanup_restore() {
+  rc=$?
+  trap - EXIT
+  if [[ "$rc" -ne 0 && "$mode" == --canonical && -n "$canonical_quarantine" ]]; then
+    if [[ ! -e "$target" && ! -L "$target" && -d "$canonical_quarantine" && ! -L "$canonical_quarantine" ]]; then
+      if ! mv -T --no-clobber -- "$canonical_quarantine" "$target"; then
+        echo 'Canonical restore rollback failed; the prior workspace remains quarantined.' >&2
+        rc=6
+      elif [[ -e "$canonical_quarantine" || -L "$canonical_quarantine" ]] || ! workspace_identity_matches "$target"; then
+        echo 'Canonical restore rollback did not reach its identity-bound postcondition.' >&2
+        rc=6
+      fi
+    else
+      echo 'Canonical restore rollback was blocked; the prior workspace remains quarantined.' >&2
+      rc=6
+    fi
+  fi
+  rm -rf --one-file-system -- "$tmp"
+  exit "$rc"
+}
+trap cleanup_restore EXIT
+
+mapfile -t snapshots < <(restic snapshots --json | jq -r 'sort_by(.time)|reverse|.[].id')
+for snapshot in "${snapshots[@]}"; do
+  rm -rf --one-file-system -- "$tmp"
+  mkdir -p "$tmp"
+  if ! restic restore "$snapshot" --target "$tmp" --include "/home/devrunner/workspaces/$project/**" >/dev/null 2>&1; then
+    continue
+  fi
+  source_dir="$tmp/home/devrunner/workspaces/$project"
+  [[ -d "$source_dir" && ! -L "$source_dir" ]] || continue
+  workspace_identity_matches "$source_dir" || continue
+  if [[ "$mode" == --canonical ]]; then
+    if [[ -e "$target" || -L "$target" ]]; then
+      workspace_identity_matches "$target" || { echo 'Canonical restore target is not the expected owned workspace.' >&2; exit 5; }
+      quarantine="/home/devrunner/.devfleet-quarantine/transfer-replaced-$stamp-$project"
+      [[ ! -e "$quarantine" && ! -L "$quarantine" ]] || { echo 'Canonical restore quarantine target already exists.' >&2; exit 5; }
+      mkdir -p /home/devrunner/.devfleet-quarantine
+      canonical_quarantine="$quarantine"
+      mv -T --no-clobber -- "$target" "$quarantine"
+      [[ ! -e "$target" && ! -L "$target" && -d "$quarantine" && ! -L "$quarantine" ]] || { echo 'Canonical restore could not quarantine the existing workspace.' >&2; exit 5; }
+    fi
+  else
+    [[ ! -e "$target" && ! -L "$target" ]] || { echo 'Recovered copy target appeared during restore.' >&2; exit 5; }
+  fi
+  mv -T --no-clobber -- "$source_dir" "$target"
+  [[ ! -e "$source_dir" && -d "$target" && ! -L "$target" ]] || { echo 'Restored workspace promotion did not reach its safe postcondition.' >&2; exit 5; }
+  if [[ "$mode" != --canonical ]] && ! workspace_identity_matches "$target"; then
+    invalid_quarantine="/home/devrunner/.devfleet-quarantine/vault-recovery-invalid-$stamp-$project"
+    [[ ! -e "$invalid_quarantine" && ! -L "$invalid_quarantine" ]] || { echo 'Recovered workspace identity quarantine target already exists.' >&2; exit 5; }
+    mkdir -p /home/devrunner/.devfleet-quarantine
+    mv -T --no-clobber -- "$target" "$invalid_quarantine"
+    [[ ! -e "$target" && -d "$invalid_quarantine" && ! -L "$invalid_quarantine" ]] || { echo 'Recovered workspace identity failed and quarantine did not reach its safe postcondition.' >&2; exit 5; }
+    echo 'Recovered workspace identity failed; the unmarked copy was quarantined.' >&2
+    exit 5
+  fi
+  echo "$target"
+  exit 0
+done
+
+echo 'Project was not found in any available snapshot.' >&2
+exit 4

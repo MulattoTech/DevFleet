@@ -1,0 +1,17 @@
+[Unit]
+Description=DevFleet bounded Vault operation socket
+
+[Socket]
+ListenStream=/run/devfleet-vault-broker.sock
+SocketUser=root
+SocketGroup=devfleet-control
+SocketMode=0660
+Accept=yes
+MaxConnections=1
+MaxConnectionsPerSource=1
+TriggerLimitIntervalSec=60s
+TriggerLimitBurst=20
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

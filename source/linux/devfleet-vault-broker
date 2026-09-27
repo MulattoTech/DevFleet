@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""Socket-activated, least-privilege broker for fixed Vault operations."""
+
+from __future__ import annotations
+
+import json
+import os
+import pwd
+import re
+import signal
+import socket
+import struct
+import subprocess
+from pathlib import Path
+
+
+MAX_REQUEST_BYTES = 4096
+MAX_RESPONSE_BYTES = 16384
+REQUEST_TIMEOUT_SECONDS = 10
+PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,62}$")
+PROJECT_ID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+HOST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
+WORKSPACES = Path("/home/devrunner/workspaces")
+SAFE_ENV = {
+    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "LANG": "C.UTF-8",
+}
+
+
+class ProtocolError(ValueError):
+    pass
+
+
+def _receive_frame(connection: socket.socket) -> dict[str, object]:
+    connection.settimeout(REQUEST_TIMEOUT_SECONDS)
+    header = b""
+    while len(header) < 4:
+        chunk = connection.recv(4 - len(header))
+        if not chunk:
+            raise ProtocolError("Request frame is incomplete.")
+        header += chunk
+    (length,) = struct.unpack("!I", header)
+    if length < 2 or length > MAX_REQUEST_BYTES:
+        raise ProtocolError("Request frame length is invalid.")
+    body = b""
+    while len(body) < length:
+        chunk = connection.recv(length - len(body))
+        if not chunk:
+            raise ProtocolError("Request frame body is incomplete.")
+        body += chunk
+    if connection.recv(1):
+        raise ProtocolError("Only one request frame is accepted.")
+    try:
+        value = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ProtocolError("Request frame is not valid JSON.") from exc
+    if not isinstance(value, dict):
+        raise ProtocolError("Request must be a JSON object.")
+    return value
+
+
+def _send_frame(connection: socket.socket, value: dict[str, object]) -> None:
+    encoded = json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    if len(encoded) > MAX_RESPONSE_BYTES:
+        encoded = b'{"error":"Broker response exceeded its bound.","ok":false}'
+    connection.sendall(struct.pack("!I", len(encoded)) + encoded)
+
+
+def _assert_peer(connection: socket.socket) -> None:
+    size = struct.calcsize("3i")
+    _pid, uid, _gid = struct.unpack(
+        "3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, size)
+    )
+    expected_uid = pwd.getpwnam("devfleet-control").pw_uid
+    if uid != expected_uid:
+        raise ProtocolError("Peer identity is not authorized.")
+
+
+def _parse_request(value: dict[str, object]) -> tuple[str, str, str, str, str]:
+    action = value.get("action")
+    if action == "backup" and set(value) == {"action"}:
+        return "backup", "", "", "", ""
+    if action == "restore-copy" and set(value) == {
+        "action",
+        "project",
+        "project_id",
+    }:
+        project = value.get("project")
+        if not isinstance(project, str) or not PROJECT_RE.fullmatch(project):
+            raise ProtocolError("Project identity is invalid.")
+        project_id = value.get("project_id")
+        if not isinstance(project_id, str) or not PROJECT_ID_RE.fullmatch(project_id):
+            raise ProtocolError("Project ID is invalid.")
+        return str(action), project, project_id, "", ""
+    if action == "restore-transfer" and set(value) == {
+        "action",
+        "project",
+        "project_id",
+        "deployment_id",
+        "source_host_id",
+    }:
+        project = value.get("project")
+        project_id = value.get("project_id")
+        deployment_id = value.get("deployment_id")
+        source_host_id = value.get("source_host_id")
+        if not isinstance(project, str) or not PROJECT_RE.fullmatch(project):
+            raise ProtocolError("Project identity is invalid.")
+        if not isinstance(project_id, str) or not PROJECT_ID_RE.fullmatch(project_id):
+            raise ProtocolError("Project ID is invalid.")
+        if not isinstance(deployment_id, str) or not PROJECT_ID_RE.fullmatch(deployment_id):
+            raise ProtocolError("Deployment ID is invalid.")
+        if not isinstance(source_host_id, str) or not HOST_ID_RE.fullmatch(source_host_id):
+            raise ProtocolError("Source host identity is invalid.")
+        return str(action), project, project_id, deployment_id, source_host_id
+    raise ProtocolError("Requested Vault operation is not allowed.")
+
+
+def _recovered_prefix(project: str) -> str:
+    return f"{project[:28]}-recovered-"
+
+
+def _quarantine_invalid_copy(target: Path, project: str) -> bool:
+    """Move only an exact generated recovery target out of the workspace root."""
+    if target.parent != WORKSPACES or target.is_symlink() or not target.is_dir():
+        return False
+    if re.fullmatch(re.escape(_recovered_prefix(project)) + r"[0-9]{8}-[0-9]{6}-[0-9a-f]{8}", target.name) is None:
+        return False
+    quarantine = Path("/home/devrunner/.devfleet-quarantine")
+    destination = quarantine / f"vault-broker-invalid-{target.name}"
+    if destination.exists() or destination.is_symlink():
+        return False
+    try:
+        quarantine.mkdir(parents=True, exist_ok=True)
+        os.rename(target, destination)
+        return not target.exists() and destination.is_dir() and not destination.is_symlink()
+    except OSError:
+        return False
+
+
+def _run_child(command: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+    process = subprocess.Popen(
+        command,
+        env=SAFE_ENV,
+        start_new_session=True,
+        stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.communicate()
+        return subprocess.CompletedProcess(command, 124, "", "")
+    return subprocess.CompletedProcess(command, int(process.returncode), stdout, stderr)
+
+
+def _restored_identity_matches(
+    target: Path,
+    project: str,
+    project_id: str,
+    deployment_id: str = "",
+    source_host_id: str = "",
+) -> bool:
+    command = ["python3", "-I", "/opt/devfleet/devfleet/metadata_io.py", "--identity",
+               str(target), project, project_id]
+    if deployment_id or source_host_id:
+        if not deployment_id or not source_host_id:
+            return False
+        command.extend([deployment_id, source_host_id])
+    try:
+        result = subprocess.run(command, env=SAFE_ENV, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                timeout=REQUEST_TIMEOUT_SECONDS, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def _run_fixed_operation(
+    action: str,
+    project: str,
+    project_id: str,
+    deployment_id: str = "",
+    source_host_id: str = "",
+) -> dict[str, object]:
+    if action not in {"backup", "restore-copy", "restore-transfer"}:
+        return {"ok": False, "error": "Vault restore action is unsupported.", "exit_code": 2}
+    if not os.access("/etc/devfleet/restic.env", os.R_OK):
+        return {"ok": False, "error": "Vault backup is not configured.", "exit_code": 3}
+    if action == "backup":
+        command = ["/usr/local/bin/devfleet-backup"]
+        timeout = 1800
+    else:
+        command = ["/usr/local/bin/devfleet-restore-project", project, project_id]
+        if action == "restore-transfer":
+            command.extend(["transfer-copy", deployment_id, source_host_id])
+        timeout = 3600
+    completed = _run_child(command, timeout)
+    if completed.returncode:
+        if completed.returncode == 124:
+            error, error_code = "Vault operation timed out.", "vault-operation-timeout"
+        elif completed.returncode == 75:
+            error, error_code = "Another Vault operation is already in progress.", "vault-operation-busy"
+        elif completed.returncode == 5 and action.startswith("restore-"):
+            error, error_code = "Vault restore failed its safety checks.", "restore-safety-conflict"
+        else:
+            error, error_code = "Vault operation failed.", "vault-operation-failed"
+        return {
+            "ok": False,
+            "error": error,
+            "error_code": error_code,
+            "exit_code": int(completed.returncode),
+        }
+    if action == "backup":
+        # The root-owned fixed child is authoritative: it exits nonzero whenever
+        # restic fails.  latest.json remains dashboard telemetry and is deliberately
+        # not an authorization receipt because devfleet-control can write it.
+        return {
+            "ok": True,
+            "action": action,
+            "local_backup_status": "verified",
+            "vault_upload_status": "verified",
+            "durability_level": "vault",
+        }
+    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        return {"ok": False, "error": "Vault restore receipt is invalid.", "exit_code": 5}
+    target = Path(lines[0])
+    if action in {"restore-copy", "restore-transfer"}:
+        expected_name = re.fullmatch(
+            re.escape(_recovered_prefix(project)) + r"[0-9]{8}-[0-9]{6}-[0-9a-f]{8}",
+            target.name,
+        )
+        valid_target = target.parent == WORKSPACES and expected_name is not None
+    else:
+        return {"ok": False, "error": "Vault restore action is unsupported.", "exit_code": 2}
+    if (
+        not valid_target
+        or not target.is_dir()
+        or target.is_symlink()
+        or not _restored_identity_matches(target, project, project_id, deployment_id, source_host_id)
+    ):
+        if action in {"restore-copy", "restore-transfer"}:
+            _quarantine_invalid_copy(target, project)
+        return {"ok": False, "error": "Vault restore target is invalid.", "exit_code": 5}
+    receipt = {
+        "ok": True,
+        "action": action,
+        "project": project,
+        "project_id": project_id,
+        "target": str(target),
+    }
+    if action == "restore-transfer":
+        receipt["deployment_id"] = deployment_id
+        receipt["source_host_id"] = source_host_id
+    return receipt
+
+
+def main() -> int:
+    connection = socket.socket(fileno=os.dup(0))
+    try:
+        try:
+            _assert_peer(connection)
+            request = _receive_frame(connection)
+            action, project, project_id, deployment_id, source_host_id = _parse_request(request)
+            response = _run_fixed_operation(
+                action, project, project_id, deployment_id, source_host_id
+            )
+        except (ProtocolError, OSError, KeyError) as exc:
+            response = {"ok": False, "error": str(exc), "exit_code": 2}
+        _send_frame(connection, response)
+        return 0
+    finally:
+        connection.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
