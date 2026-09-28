@@ -1,1019 +1,1132 @@
 # DevFleet source part 073
 
 Full-source UTF-8 byte interval [3348000, 3394500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: c1937c165fc9092d5161864a20cdefc5acc65f59c04da142d3de1dd9c0499a8e
+Payload SHA-256: 7f992e7eeed13f8a786c11a53c5df476269f7d9b5a3681185d230a2aae13dc88
 
 <!-- BEGIN SOURCE SLICE -->
-.")
-    except Exception as exc:
-        rollback_errors = []
-        for path, raw in ((metadata_file, metadata_before), (lease_file, lease_before)):
-            try:
-                if path == metadata_file:
-                    _write_project_metadata_bytes(project, raw)
-                else:
-                    atomic_bytes(path, raw)
-            except Exception as rollback_exc:
-                rollback_errors.append(f"{path.name}: {rollback_exc}")
-        if rollback_errors:
-            raise RuntimeError(
-                "Source transfer finalization failed and rollback was incomplete: "
-                + "; ".join(rollback_errors)
-            ) from exc
-        raise
-    return {
-        "ok": True,
-        "project": slug,
-        "project_id": project_id,
-        "source_host_id": SETTINGS.host_id,
-        "destination_host_id": destination_host_id,
-        "state": "transferred",
-    }
-
-
-def receive_transferred_project(
-    slug: str,
-    project_id: str,
-    deployment_id: str,
-    source_host_id: str,
-    destination_host_id: str,
-) -> dict[str, Any]:
-    """Restore and adopt one authenticated peer transfer on the destination."""
-    slug = validate_slug(slug)
-    project_id = validate_project_id(project_id)
-    deployment_id = validate_project_id(deployment_id)
-    if deployment_id != str(SETTINGS.deployment_id or ""):
-        raise ValueError("Transfer deployment identity does not match this node.")
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", source_host_id):
-        raise ValueError("Transfer source host identity is invalid.")
-    if destination_host_id != SETTINGS.host_id:
-        raise ValueError("Transfer destination host identity does not match this node.")
-    project = safe_child(SETTINGS.workspaces, slug)
-    with _destructive_lock(slug):
-        destination_existed = project.exists() or project.is_symlink()
-        if destination_existed:
-            if not project.is_dir() or project.is_symlink():
-                raise ValueError("Transfer destination path is unsafe.")
-            existing = _assert_canonical_restore_quiesced(
-                slug, expected_project_id=project_id
-            )
-            if str(existing.get("deployment_id") or "") != deployment_id:
-                raise ValueError("Transfer destination deployment identity conflicts.")
+ Do not
+                # clone the repository first: an existing project may have uncommitted
+                # work, and a pre-cloned workspace would make the import correctly refuse
+                # the target as non-empty.
+                candidate = {
+                    **previous,
+                    **command_readiness["resolved_commands"],
+                    "git_url": "",
+                    "runtime_isolation": "vm",
+                    "runtime_type": "vm",
+                    "runtime_provider": "multipass-host-agent",
+                    "resource_profile": selected_profile,
+                    "resource_limits": limits,
+                    "runtime_status": "provisioning",
+                    "lifecycle_status": "provisioning",
+                    "provisioning_status": "pending",
+                    "health_status": "unknown",
+                    "runtime_id": "",
+                    "runtime_address": "",
+                    "host_id": SETTINGS.expected_host_name or SETTINGS.node_name,
+                    "gpu_enabled": False,
+                    "last_error": "",
+                    "updated_at": now_iso(),
+                }
+                # Stage self-contained, trusted command metadata before import so the
+                # destination can run fixed Host Agent operations. Rollback restores the
+                # exact legacy bytes captured above.
+                _write_project_metadata(project, candidate)
+                if operation_context:
+                    operation_context.update(
+                        42,
+                        "Checking host capacity and creating the dedicated VM",
+                        "provision",
+                    )
+                result = VmRuntimeOperations.ensure(slug, candidate)
+                new_runtime_id = str(
+                    result.get("runtime_id") or result.get("vm_name") or ""
+                )
+                if not new_runtime_id:
+                    raise RuntimeError("Host agent created no runtime identity.")
+                if operation_context:
+                    operation_context.set_runtime(new_runtime_id)
+                if operation_context:
+                    operation_context.update(
+                        72,
+                        "Importing the existing workspace into the dedicated VM",
+                        "workspace-import",
+                    )
+                imported = import_project_workspace(
+                    slug,
+                    new_runtime_id,
+                    source_vm=SETTINGS.node_name,
+                    project_id=str(candidate.get("project_id") or ""),
+                )
+                if (
+                    imported.get("ok") is False
+                    or imported.get("workspace_preserved") is not True
+                ):
+                    raise RuntimeError(
+                        "Host agent did not verify the imported workspace."
+                    )
+                if (
+                    imported.get("source_archive_sha256")
+                    and imported.get("target_archive_sha256")
+                    and imported["source_archive_sha256"]
+                    != imported["target_archive_sha256"]
+                ):
+                    raise RuntimeError(
+                        "Imported workspace archive hashes do not match."
+                    )
+                migration["import_verified"] = True
+                migration["import_result"] = imported
+                atomic_json(snapshot, migration)
+                result = {**result, **imported}
+                candidate.update(
+                    runtime_metadata(
+                        provider_for(candidate),
+                        status="ready" if previous_running else "stopped",
+                        runtime_id=str(
+                            result.get("runtime_id") or old_runtime_id or new_runtime_id
+                        ),
+                        runtime_address=str(
+                            result.get("address")
+                            or previous.get("runtime_address")
+                            or ""
+                        ),
+                        provisioning_status="ready",
+                        health_status="unknown",
+                        lifecycle_status="ready" if previous_running else "stopped",
+                    )
+                )
+                candidate["health_scope"] = (
+                    "workspace-ready-not-app-healthy"
+                    if previous_running
+                    else "not-checked-stopped"
+                )
+                candidate["resource_profile"] = selected_profile
+                candidate["resource_limits"] = limits
+                candidate["ssh_alias"] = (
+                    str(candidate.get("runtime_id") or "devfleet-primary")
+                    if selected == "vm"
+                    else "devfleet-primary"
+                )
+                candidate["previous_runtime"] = {
+                    "runtime_provider": previous_provider.name,
+                    "runtime_type": previous_provider.runtime_type,
+                    "runtime_id": old_runtime_id,
+                    "was_running": previous_running,
+                }
+                candidate["runtime_migration_snapshot"] = str(snapshot)
+                candidate["updated_at"] = now_iso()
+                candidate["last_error"] = ""
+                if selected == "vm":
+                    sync_project_vm_ssh_alias(
+                        slug,
+                        str(candidate.get("runtime_id") or ""),
+                        project_id=str(candidate.get("project_id") or ""),
+                    )
+                _write_project_metadata(project, candidate)
         else:
-            _assert_no_running_project_containers(project, slug, project_id)
-
-        receipt = _vault_request(
-            "restore-transfer",
-            slug,
-            project_id,
-            timeout=3720,
-            deployment_id=deployment_id,
-            source_host_id=source_host_id,
-        )
-        staging = Path(
-            _validate_recovered_vault_copy(
-                slug,
-                {
-                    "project_id": project_id,
-                },
-                str(receipt.get("target") or ""),
-            )
-        )
-        marker_path = _vault_recovery_marker_path(staging)
-        restored_record = read_project_metadata(staging)
-        restored = restored_record.value
-        if (
-            not isinstance(restored, dict)
-            or str(restored.get("slug") or "") != slug
-            or str(restored.get("identity") or restored.get("slug") or "") != slug
-            or str(restored.get("project_id") or "") != project_id
-            or str(restored.get("deployment_id") or "") != deployment_id
-            or str(restored.get("host_id") or "") != source_host_id
-            or provider_for(restored).is_vm
-        ):
-            raise ValueError("Restored transfer ownership identity does not match.")
-        lease = _read_strict_project_json(staging, "ownership-lease.json")
-        if (
-            lease.get("project_identity") != slug
-            or lease.get("project_id") != project_id
-            or type(lease.get("active")) is not bool
-            or lease.get("active") is not False
-            or not isinstance(lease.get("last_clean_shutdown"), str)
-        ):
-            raise ValueError("Transferred backup is not cleanly quiesced.")
-        try:
-            time.strptime(lease["last_clean_shutdown"], "%Y-%m-%dT%H:%M:%SZ")
-        except ValueError as exc:
-            raise ValueError("Transferred backup is not cleanly quiesced.") from exc
-
-        candidate = dict(restored)
-        candidate.update(
-            {
-                "schema_version": max(5, int(candidate.get("schema_version") or 0)),
-                "managed_by": "devfleet",
-                "slug": slug,
-                "identity": slug,
-                "project_id": project_id,
-                "deployment_id": deployment_id,
-                "host_id": SETTINGS.host_id,
+            if previous_provider.is_vm:
+                if operation_context:
+                    operation_context.update(
+                        42,
+                        "Exporting the verified VM workspace back to the source VM",
+                        "vm-export",
+                    )
+                if not previous_running:
+                    VmRuntimeOperations.start(slug, previous)
+                    source_vm_started_for_export = True
+                exported = VM_RUNTIME.export_to_source(
+                    slug, previous, source_vm=SETTINGS.node_name, replace_source=True
+                )
+                migration["vm_export"] = exported
+                source_promoted = bool(
+                    exported.get("state") == "verified"
+                    and exported.get("workspace_path")
+                )
+                previous_workspace_path = str(
+                    exported.get("previous_workspace_path") or ""
+                )
+                migration["source_promoted"] = source_promoted
+                migration["previous_workspace_path"] = previous_workspace_path
+                atomic_json(snapshot, migration)
+                if operation_context:
+                    operation_context.update(
+                        58,
+                        "Stopping the old dedicated VM after verified export",
+                        "source-runtime",
+                    )
+                stop_project(slug)
+                source_vm_stopped_for_transition = True
+                # The host agent has promoted the VM copy to the canonical source path.
+                project = safe_child(SETTINGS.workspaces, slug)
+                previous = load_meta(project)
+                compose = compose_file(project)
+                if compose is None:
+                    raise ValueError(
+                        "The exported VM workspace has no supported Compose configuration."
+                    )
+            if operation_context:
+                operation_context.update(
+                    68,
+                    "Applying the selected container resources to the existing Compose project",
+                    "container-runtime",
+                )
+            override = write_resource_override(project, compose, limits)
+            if override is None:
+                raise ValueError(
+                    "Compose services could not be read; no container resource override was written."
+                )
+            fallback = {
+                "runtime_provider": previous_provider.name,
+                "runtime_type": previous_provider.runtime_type,
+                "runtime_id": old_runtime_id,
+                "runtime_address": str(previous.get("runtime_address") or ""),
+                "was_running": previous_running,
+                "lifecycle_status": previous_lifecycle,
+                "workspace_path": (
+                    str(exported.get("workspace_path") or "")
+                    if previous_provider.is_vm
+                    else str(project)
+                ),
+                "previous_workspace_path": previous_workspace_path,
+            }
+            candidate = {
+                **previous,
+                "schema_version": 5,
                 "runtime_isolation": "container",
                 "runtime_type": "container",
                 "runtime_provider": "docker-compose",
-                "runtime_id": compose_name(slug),
-                "runtime_address": "",
-                "workspace_location": str(project),
-                "workspace_host": SETTINGS.node_name,
-                "workspace_path": f"/home/devrunner/workspaces/{slug}",
-                "lifecycle_status": "ownership-transfer-pending",
-                "runtime_status": "stopped",
+                "runtime_status": "container-ready" if previous_running else "stopped",
+                "lifecycle_status": "ready" if previous_running else "stopped",
                 "provisioning_status": "ready",
                 "health_status": "unknown",
-                "health_scope": "not-checked-stopped",
-                "workspace_provisioned": False,
-                "ssh_host_key_pinned": False,
-                "ssh_authenticated": False,
-                "ssh_validation_passed": False,
+                "health_scope": (
+                    "not-checked" if previous_running else "not-checked-stopped"
+                ),
+                "resource_profile": selected_profile,
+                "resource_limits": limits,
+                "runtime_id": compose_name(slug),
+                "runtime_address": "",
+                "host_id": SETTINGS.node_name,
+                "gpu_enabled": False,
+                "runtime_migration_snapshot": str(snapshot),
+                "previous_environment": fallback,
                 "last_error": "",
-                "transfer_state": "pending-source-finalization",
-                "transfer_source_host_id": source_host_id,
-                "transfer_destination_host_id": SETTINGS.host_id,
-                "transferred_from_host_id": source_host_id,
-                "transferred_at": now_iso(),
+                "updated_at": now_iso(),
+            }
+            if (
+                previous_running
+                and str(previous.get("resource_profile") or previous_profile)
+                != selected_profile
+            ):
+                candidate["runtime_status"] = "restart-required"
+            _write_project_metadata(project, candidate)
+        if previous_running:
+            if operation_context:
+                operation_context.update(
+                    78,
+                    "Starting and checking the destination runtime",
+                    "destination-start",
+                )
+            start_project(slug)
+            destination_started = True
+            runtime_check = runtime_health(slug)
+            if not bool(runtime_check.get("ok", runtime_check.get("healthy", False))):
+                raise RuntimeError(
+                    f"Destination runtime health check failed: {runtime_check}"
+                )
+            app_output = health_project(slug)
+            candidate = load_meta(project)
+            if str(candidate.get("health_status") or "") != "healthy":
+                raise RuntimeError("Destination application health was not verified.")
+            destination_health = "healthy"
+        else:
+            if selected == "vm":
+                # The destination application was never started. Preserve a stopped
+                # source lifecycle by stopping only the VM, not by requiring an
+                # application stop command that had no services to stop.
+                VmRuntimeOperations.stop(slug, candidate)
+            candidate = load_meta(project)
+            candidate.update(
+                {
+                    "lifecycle_status": "stopped",
+                    "runtime_status": "stopped",
+                    "health_status": "unknown",
+                    "health_scope": "not-checked-stopped",
+                    "updated_at": now_iso(),
+                }
+            )
+            _write_project_metadata(project, candidate)
+            update_lease(project, active=False, clean_shutdown=True)
+            runtime_check = {
+                "ok": True,
+                "healthy": False,
+                "state": "stopped",
+                "preserved_previous_lifecycle": True,
+            }
+            app_output = "Destination intentionally left stopped to preserve the prior lifecycle state."
+            destination_health = "not-run-stopped"
+        migration["state"] = "verified"
+        migration["destination_runtime"] = runtime_check
+        migration["destination_application_health"] = destination_health
+        migration["destination_started"] = destination_started
+        migration["runtime_id"] = str(
+            new_runtime_id or old_runtime_id or candidate.get("runtime_id") or ""
+        )
+        atomic_json(snapshot, migration)
+        migration["state"] = "completed"
+        migration["completed_at"] = now_iso()
+        atomic_json(snapshot, migration)
+        if operation_context:
+            operation_context.update(94, "Environment assignment verified", "verify")
+        return {
+            "ok": True,
+            "project": candidate,
+            "migration_snapshot": str(snapshot),
+            "backup_status": "verified",
+            "workspace_preserved": True,
+            "runtime": (
+                result
+                if selected == "vm"
+                else {
+                    "provider": "docker-compose",
+                    "resource_override": str(resource_override_path(project)),
+                }
+            ),
+            "runtime_health": runtime_check,
+            "application_health": destination_health,
+            "application_health_output": (
+                app_output[-2000:]
+                if isinstance(app_output, str)
+                else str(app_output)[-2000:]
+            ),
+        }
+    except Exception as exc:
+        migration["state"] = "rollback-required"
+        migration["error"] = str(exc)
+        migration["failed_at"] = now_iso()
+        migration["runtime_id"] = str(new_runtime_id)
+        atomic_json(snapshot, migration)
+        # A VM retained after a failed migration is a first-class fallback.  It is
+        # never silently deleted when the previous environment was a VM.
+        if new_runtime_id and not previous_provider.is_vm:
+            try:
+                cleanup_hash = str(local_backup.get("sha256") or "")
+                destroy_project_vm(
+                    slug,
+                    slug,
+                    f"DESTROY {slug}",
+                    backup_verified=True,
+                    backup_id=str(backup_result.get("backup_id") or f"cleanup-{slug}"),
+                    backup_sha256=str(backup_result.get("backup_sha256") or ""),
+                    cleanup_only=True,
+                    cleanup_stage=(
+                        "post-import"
+                        if imported.get("workspace_preserved") is True
+                        else "pre-import"
+                    ),
+                    local_archive_sha256=cleanup_hash,
+                    import_archive_sha256=str(
+                        imported.get("archive_sha256")
+                        or imported.get("source_archive_sha256")
+                        or ""
+                    ),
+                    runtime_id=new_runtime_id,
+                    project_id=str(previous.get("project_id") or ""),
+                )
+                migration["cleanup"] = (
+                    "partially-created VM removed after import failure"
+                )
+            except Exception as cleanup_exc:
+                migration["cleanup_required"] = True
+                migration["cleanup_error"] = str(cleanup_exc)
+                migration["cleanup_note"] = (
+                    "Dedicated VM preserved for explicit host-agent reconciliation after migration failure."
+                )
+                rollback_errors.append(f"cleanup: {cleanup_exc}")
+        if source_promoted:
+            try:
+                if previous_workspace_path:
+                    restored = VM_RUNTIME.restore_previous_source(
+                        slug,
+                        previous,
+                        source_vm=SETTINGS.node_name,
+                        previous_workspace_path=previous_workspace_path,
+                    )
+                    if str(restored.get("state") or "") != "restored":
+                        raise RuntimeError(
+                            "Host agent did not confirm atomic previous-workspace restoration."
+                        )
+                    migration["workspace_restored"] = True
+                    migration["previous_workspace_consumed"] = True
+                    migration["previous_workspace_restore"] = restored
+                else:
+                    _restore_local_migration_backup(project, slug, local_backup)
+                    migration["workspace_restored"] = True
+                    migration["workspace_restore_fallback"] = (
+                        "local-archive-no-previous-path"
+                    )
+            except Exception as restore_workspace_exc:
+                rollback_errors.append(f"workspace: {restore_workspace_exc}")
+        if (
+            stopped_for_transition
+            or source_vm_stopped_for_transition
+            or source_vm_started_for_export
+        ):
+            try:
+                if previous_running:
+                    if previous_provider.is_vm:
+                        VmRuntimeOperations.start(slug, previous)
+                    else:
+                        start_project(slug)
+                elif previous_provider.is_vm and source_vm_started_for_export:
+                    VmRuntimeOperations.stop(slug, previous)
+            except Exception as restore_exc:
+                rollback_errors.append(f"runtime: {restore_exc}")
+        # Restore the exact legacy/control bytes only after the previous runtime
+        # state is recovered. Public lifecycle entrypoints intentionally reject
+        # legacy metadata and therefore cannot be used after this boundary.
+        try:
+            if metadata_present:
+                _write_project_metadata_bytes(project, previous_metadata_bytes)
+        except Exception as metadata_restore_exc:
+            rollback_errors.append(f"metadata: {metadata_restore_exc}")
+        try:
+            if override_present:
+                atomic_text(override_file, override_text)
+            elif override_file.exists():
+                override_file.unlink()
+        except Exception as override_restore_exc:
+            rollback_errors.append(f"override: {override_restore_exc}")
+        try:
+            if lease_present:
+                atomic_text(lease_file, lease_text)
+            elif lease_file.exists():
+                lease_file.unlink()
+        except Exception as lease_restore_exc:
+            rollback_errors.append(f"lease: {lease_restore_exc}")
+        if rollback_errors:
+            migration["state"] = "rollback-incomplete"
+            migration["rollback_errors"] = rollback_errors
+            migration["failure_state"] = {
+                "previous_lifecycle": previous_lifecycle,
+                "destination_started": destination_started,
+                "source_promoted": source_promoted,
+                "requires_reconciliation": True,
+            }
+        else:
+            migration["state"] = "rolled-back"
+            migration["rollback_completed_at"] = now_iso()
+        atomic_json(snapshot, migration)
+        raise
+
+
+def _verified_sha256(path: Path, expected: str) -> str:
+    if not path.is_file() or path.is_symlink():
+        raise FileNotFoundError(f"Recovery artifact is unavailable: {path}")
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if (
+        not re.fullmatch(r"[0-9a-f]{64}", str(expected or ""))
+        or actual != str(expected).lower()
+    ):
+        raise ValueError(f"Recovery artifact SHA-256 mismatch: {path}")
+    return actual
+
+
+def reconcile_failed_migration(
+    slug: str, migration_snapshot: str, confirm_phrase: str = ""
+) -> dict[str, Any]:
+    """Reconcile one known rollback-incomplete container-to-VM transaction."""
+    slug = validate_slug(slug)
+    if confirm_phrase != f"RECONCILE {slug}":
+        raise ValueError(
+            "Failed-migration reconciliation requires the exact project confirmation phrase."
+        )
+    root = (SETTINGS.runtime_root / "runtime-migrations").resolve()
+    snapshot = Path(str(migration_snapshot or "")).resolve()
+    if (
+        not snapshot.is_relative_to(root)
+        or snapshot.parent != root
+        or not re.fullmatch(
+            rf"{re.escape(slug)}-[0-9]{{8}}-[0-9]{{6}}-[0-9a-f]{{8}}\.json",
+            snapshot.name,
+        )
+    ):
+        raise ValueError(
+            "Migration snapshot path is outside the managed runtime-migrations directory."
+        )
+    data = _json_object(snapshot)
+    if data.get("state") != "rollback-incomplete" or not data.get("cleanup_required"):
+        raise ValueError(
+            "Only a cleanup-required rollback-incomplete migration may be reconciled."
+        )
+    if str(data.get("slug") or "") != slug:
+        raise ValueError(
+            "Migration snapshot slug does not match the requested project."
+        )
+    project = safe_child(SETTINGS.workspaces, slug)
+    meta = load_authoritative_project_identity_for_mutation(project)
+    if provider_for(meta).is_vm:
+        raise ValueError(
+            "Source project metadata was not restored to the container environment."
+        )
+    if running(project):
+        raise ValueError(
+            "Source container must remain stopped during failed-migration reconciliation."
+        )
+    runtime_id = str(data.get("runtime_id") or "")
+    expected_runtime = f"devfleet-project-{slug}"
+    if runtime_id != expected_runtime:
+        raise ValueError(
+            "Migration snapshot runtime identity is not the deterministic project VM name."
+        )
+    backup = (
+        data.get("backup_result") if isinstance(data.get("backup_result"), dict) else {}
+    )
+    local = (
+        data.get("backup_artifact")
+        if isinstance(data.get("backup_artifact"), dict)
+        else {}
+    )
+    if str(backup.get("backup_status") or "").lower() != "verified":
+        raise ValueError(
+            "Migration snapshot does not contain a verified provider-aware backup."
+        )
+    provider_sha = _verified_sha256(
+        Path(str(backup.get("backup_path") or "")),
+        str(backup.get("backup_sha256") or ""),
+    )
+    local_sha = _verified_sha256(
+        Path(str(local.get("path") or "")), str(local.get("sha256") or "")
+    )
+    result = destroy_project_vm(
+        slug,
+        slug,
+        f"DESTROY {slug}",
+        backup_verified=True,
+        backup_id=str(backup.get("backup_id") or ""),
+        backup_sha256=provider_sha,
+        cleanup_only=True,
+        cleanup_stage="post-import",
+        local_archive_sha256=local_sha,
+        import_archive_sha256=str(
+            (data.get("import_result") or {}).get("archive_sha256") or ""
+        ),
+        runtime_id=runtime_id,
+        project_id=str(data.get("project_id") or meta.get("project_id") or ""),
+    )
+    reconciliation = {
+        "schema_version": 1,
+        "slug": slug,
+        "project_id": str(data.get("project_id") or meta.get("project_id") or ""),
+        "runtime_id": runtime_id,
+        "original_snapshot": str(snapshot),
+        "original_snapshot_state": str(data.get("state")),
+        "state": "reconciled",
+        "reconciled_at": now_iso(),
+        "backup_id": str(backup.get("backup_id") or ""),
+        "provider_backup_sha256": provider_sha,
+        "local_archive_sha256": local_sha,
+        "host_cleanup": result,
+        "source_environment": detect_runtime(slug),
+    }
+    record = snapshot.with_suffix(".reconciliation.json")
+    atomic_json(record, reconciliation)
+    return {
+        "ok": True,
+        "state": "reconciled",
+        "reconciliation_record": str(record),
+        "original_snapshot_preserved": True,
+        "runtime_id": runtime_id,
+        "cleanup": result,
+        "source_environment": reconciliation["source_environment"],
+    }
+
+
+def _hook(project: Path, cf: Path | None) -> str:
+    hook = project / ".devfleet/codexpro-bootstrap.sh"
+    if not SETTINGS.auto_start_codexpro or not hook.exists():
+        return "CodexPro auto-bootstrap disabled or hook absent."
+    command = (
+        "test -f ./.devfleet/codexpro-bootstrap.sh && ./.devfleet/codexpro-bootstrap.sh"
+    )
+    if cf:
+        services = run(
+            [*compose_args(project, cf), "config", "--services"],
+            cwd=project,
+            check=False,
+        ).stdout.split()
+        if services:
+            return (
+                run(
+                    [
+                        *compose_args(project, cf),
+                        "exec",
+                        "-T",
+                        services[0],
+                        "sh",
+                        "-lc",
+                        command,
+                    ],
+                    cwd=project,
+                    check=False,
+                    timeout=900,
+                ).stdout
+                or ""
+            )[-4000:]
+    ids = run(
+        [
+            "docker",
+            "ps",
+            "-q",
+            "--filter",
+            f"label=devcontainer.local_folder={project}",
+        ],
+        check=False,
+    ).stdout.split()
+    return (
+        (
+            run(
+                ["docker", "exec", ids[0], "sh", "-lc", command],
+                check=False,
+                timeout=900,
+            ).stdout
+            or ""
+        )[-4000:]
+        if ids
+        else "No running container."
+    )
+
+
+def start_project(slug: str, override_failover: bool = False) -> str:
+    project = safe_child(SETTINGS.workspaces, slug)
+    meta = load_authoritative_project_identity_for_mutation(project)
+    _assert_current_compose_safety(project, meta)
+    if provider_for(meta).is_vm:
+        meta.update(
+            {
+                "lifecycle_status": "starting",
+                "runtime_status": "starting",
+                "health_scope": "transition",
+                "last_error": "",
+                "workspace_provisioned": False,
                 "updated_at": now_iso(),
             }
         )
-        lease.update(
-            {
-                "project_identity": slug,
-                "project_id": project_id,
-                "active": False,
-                "active_node": SETTINGS.node_name,
-                "last_clean_shutdown": now_iso(),
-                "heartbeat_time": now_iso(),
-            }
-        )
-        staging_metadata = metadata_path(staging)
-        staging_lease = staging / ".devfleet/ownership-lease.json"
-        staging_ownership = ownership_override_path(staging)
-        staging_metadata_before = restored_record.raw
-        staging_lease_before = staging_lease.read_bytes()
-        staging_ownership_present = staging_ownership.is_file()
-        staging_ownership_before = (
-            staging_ownership.read_bytes() if staging_ownership_present else b""
-        )
-        compose = compose_file(staging)
-        if compose is None:
-            raise ValueError("Transferred project has no supported Compose configuration.")
+        _write_project_metadata(project, meta)
         try:
-            _write_project_metadata(
-                staging, candidate, expected=restored_record.binding
-            )
-            labels = container_ownership_labels(candidate)
-            if write_ownership_override(staging, compose, labels) is None:
-                raise ValueError(
-                    "Transferred project services could not be ownership-bound."
+            result = VmRuntimeOperations.start(slug, meta)
+            meta.update(
+                runtime_metadata(
+                    provider_for(meta),
+                    status="starting",
+                    runtime_id=result.get("runtime_id")
+                    or result.get("vm_name", meta.get("runtime_id", "")),
+                    runtime_address=result.get(
+                        "address", meta.get("runtime_address", "")
+                    ),
+                    provisioning_status="ready",
+                    health_status="unknown",
+                    health_scope="runtime-ready-not-app-healthy",
+                    lifecycle_status="starting",
                 )
-            atomic_json(staging_lease, lease)
-        except Exception as exc:
-            rollback_errors: list[str] = []
-            for path, raw in (
-                (staging_metadata, staging_metadata_before),
-                (staging_lease, staging_lease_before),
-            ):
-                try:
-                    if path == staging_metadata:
-                        _write_project_metadata_bytes(staging, raw)
-                    else:
-                        atomic_bytes(path, raw)
-                except Exception as rollback_exc:
-                    rollback_errors.append(f"{path.name}: {rollback_exc}")
-            try:
-                if staging_ownership_present:
-                    atomic_bytes(staging_ownership, staging_ownership_before)
-                elif staging_ownership.exists() and not staging_ownership.is_symlink():
-                    staging_ownership.unlink()
-            except Exception as rollback_exc:
-                rollback_errors.append(
-                    f"{staging_ownership.name}: {rollback_exc}"
-                )
-            if rollback_errors:
-                raise RuntimeError(
-                    "Transfer staging preparation failed and rollback was incomplete: "
-                    + "; ".join(rollback_errors)
-                ) from exc
-            raise
-
-        quarantine_root = SETTINGS.quarantine
-        quarantine_root.mkdir(parents=True, exist_ok=True)
-        if quarantine_root.is_symlink() or not quarantine_root.is_dir():
-            raise ValueError("Transfer quarantine root is unsafe.")
-        stamp = f'{time.strftime("%Y%m%d-%H%M%S")}-{uuid.uuid4().hex[:8]}'
-        prior_quarantine = quarantine_root / f"transfer-replaced-{stamp}-{slug}"
-        failed_quarantine = quarantine_root / f"transfer-failed-{stamp}-{slug}"
-        if any(path.exists() or path.is_symlink() for path in (prior_quarantine, failed_quarantine)):
-            raise RuntimeError("Transfer quarantine reservation collided.")
-        transfer_marker = _record_transfer_pending(
-            project,
-            project_id=project_id,
-            deployment_id=deployment_id,
-            source_host_id=source_host_id,
-            destination_host_id=destination_host_id,
-        )
-        prior_moved = False
-        promoted = False
-        try:
-            if destination_existed:
-                # Revalidate immediately before the namespace transaction.
-                current = _assert_canonical_restore_quiesced(
-                    slug,
-                    expected_project_id=project_id,
-                    allow_pending_transfer=True,
-                )
-                if str(current.get("deployment_id") or "") != deployment_id:
-                    raise ValueError(
-                        "Transfer destination deployment identity changed."
-                    )
-                project.rename(prior_quarantine)
-                prior_moved = True
-            elif project.exists() or project.is_symlink():
-                raise RuntimeError("Transfer destination appeared before promotion.")
-            staging.rename(project)
-            promoted = True
-            verified = load_authoritative_project_identity_for_mutation(
-                project, allow_pending_transfer=True
             )
-            if (
-                str(verified.get("project_id") or "") != project_id
-                or str(verified.get("host_id") or "") != SETTINGS.host_id
-                or str(verified.get("runtime_id") or "") != compose_name(slug)
-            ):
-                raise RuntimeError("Transferred project ownership rebind was not durable.")
-            _assert_canonical_restore_quiesced(
-                slug,
-                expected_project_id=project_id,
-                allow_pending_transfer=True,
-            )
-        except Exception as exc:
-            rollback_errors: list[str] = []
-            if promoted and project.is_dir() and not project.is_symlink():
-                try:
-                    project.rename(failed_quarantine)
-                except Exception as rollback_exc:
-                    rollback_errors.append(f"failed-copy: {rollback_exc}")
-            if prior_moved and not project.exists() and not project.is_symlink():
-                try:
-                    prior_quarantine.rename(project)
-                except Exception as rollback_exc:
-                    rollback_errors.append(f"prior-destination: {rollback_exc}")
-            if not rollback_errors and (
-                (not destination_existed and not project.exists())
-                or (destination_existed and project.is_dir() and not project.is_symlink())
-            ):
-                try:
-                    _remove_transfer_pending(project, transfer_marker)
-                except Exception as rollback_exc:
-                    rollback_errors.append(f"transfer-authority: {rollback_exc}")
-            if rollback_errors or (prior_moved and not project.is_dir()):
-                raise RuntimeError(
-                    "Transfer promotion failed and destination rollback was incomplete: "
-                    + "; ".join(rollback_errors)
-                ) from exc
-            raise
-        try:
-            if marker_path.is_file() and not marker_path.is_symlink():
-                marker_path.unlink()
-        except OSError:
-            # A stale control-owned marker for the old staging pathname cannot
-            # authorize or block the promoted canonical path.
-            pass
-        return {
-            "ok": True,
-            "project": slug,
-            "project_id": project_id,
-            "deployment_id": deployment_id,
-            "source_host_id": source_host_id,
-            "destination_host_id": SETTINGS.host_id,
-            "state": "handoff-pending",
-            "prior_destination_quarantine": (
-                str(prior_quarantine) if prior_moved else ""
-            ),
-        }
-
-
-def activate_transferred_project(
-    slug: str,
-    project_id: str,
-    deployment_id: str,
-    source_host_id: str,
-    destination_host_id: str,
-) -> dict[str, Any]:
-    """Activate and start a pending destination after source retirement succeeds."""
-    slug = validate_slug(slug)
-    project_id = validate_project_id(project_id)
-    deployment_id = validate_project_id(deployment_id)
-    if deployment_id != str(SETTINGS.deployment_id or ""):
-        raise ValueError("Transfer deployment identity does not match this node.")
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", source_host_id):
-        raise ValueError("Transfer source host identity is invalid.")
-    if destination_host_id != SETTINGS.host_id or source_host_id == destination_host_id:
-        raise ValueError("Transfer destination host identity does not match this node.")
-    project = safe_child(SETTINGS.workspaces, slug)
-    with _destructive_lock(slug):
-        transfer_marker = _transfer_pending_marker(project, project_id=project_id)
-        if transfer_marker is None or any(
-            transfer_marker.get(key) != expected
-            for key, expected in (
-                ("project_id", project_id),
-                ("deployment_id", deployment_id),
-                ("source_host_id", source_host_id),
-                ("destination_host_id", destination_host_id),
-                ("state", "pending-source-finalization"),
-            )
-        ):
-            raise ValueError("Pending transfer authority does not match.")
-        identity = _assert_canonical_restore_quiesced(
-            slug,
-            expected_project_id=project_id,
-            allow_pending_transfer=True,
-        )
-        if (
-            str(identity.get("deployment_id") or "") != deployment_id
-            or str(identity.get("host_id") or "") != destination_host_id
-            or str(identity.get("transfer_state") or "")
-            != "pending-source-finalization"
-            or str(identity.get("transfer_source_host_id") or "") != source_host_id
-            or str(identity.get("transfer_destination_host_id") or "")
-            != destination_host_id
-            or provider_for(identity).is_vm
-        ):
-            raise ValueError("Pending transfer ownership identity does not match.")
-        metadata_file = metadata_path(project)
-        lease_file = project / ".devfleet/ownership-lease.json"
-        metadata_before = bytes(getattr(identity, "_metadata_raw", b""))
-        metadata_binding = getattr(identity, "_metadata_binding", None)
-        if not metadata_before or metadata_binding is None:
-            raise RuntimeError("Pending transfer metadata binding is unavailable.")
-        lease_before = lease_file.read_bytes()
-        compose_command: list[str] = []
-        start_attempted = False
-        commit_started = False
-        try:
-            compose = compose_file(project)
-            if compose is None:
-                raise ValueError(
-                    "Transferred project has no supported Compose configuration."
-                )
-            _assert_current_compose_safety(project, identity)
-            _write_current_compose_ownership(project, compose, identity)
-            compose_command = compose_args(project, compose)
-            start_attempted = True
-            result = run(
-                [*compose_command, "up", "-d", "--build"],
-                cwd=project,
-                timeout=1800,
-            )
-            hook_output = _hook(project, compose)
-            activated_at = now_iso()
-            candidate = dict(identity)
-            candidate.update(
-                {
-                    "lifecycle_status": "running",
-                    "runtime_status": "running",
-                    "transfer_state": "completed",
-                    "transfer_activated_at": activated_at,
-                    "updated_at": activated_at,
-                }
-            )
-            lease = _read_strict_project_json(project, "ownership-lease.json")
-            lease.update(
-                {
-                    "project_identity": slug,
-                    "project_id": project_id,
-                    "active": True,
-                    "active_node": destination_host_id,
-                    "start_time": activated_at,
-                    "last_clean_shutdown": None,
-                    "heartbeat_time": activated_at,
-                }
-            )
-            commit_started = True
-            _write_project_metadata(project, candidate, expected=metadata_binding)
-            atomic_json(lease_file, lease)
-            verified = load_authoritative_project_identity_for_mutation(
-                project, allow_pending_transfer=True
-            )
-            verified_lease = _read_strict_project_json(
-                project, "ownership-lease.json"
-            )
-            if (
-                str(verified.get("transfer_state") or "") != "completed"
-                or str(verified.get("lifecycle_status") or "") != "running"
-                or str(verified.get("runtime_status") or "") != "running"
-                or str(verified.get("host_id") or "") != destination_host_id
-                or verified_lease.get("project_id") != project_id
-                or verified_lease.get("active") is not True
-                or verified_lease.get("active_node") != destination_host_id
-            ):
-                raise RuntimeError("Transfer destination activation was not durable.")
-            # The control-owned marker is removed last. Until this exact commit,
-            # every ordinary mutation entry point continues to fail closed.
-            _remove_transfer_pending(project, transfer_marker)
-            activated = load_authoritative_project_identity_for_mutation(project)
-            if any(
-                str(activated.get(key) or "") != expected
-                for key, expected in (
-                    ("project_id", project_id),
-                    ("deployment_id", deployment_id),
-                    ("host_id", destination_host_id),
-                    ("transfer_source_host_id", source_host_id),
-                    ("transfer_destination_host_id", destination_host_id),
-                    ("transfer_state", "completed"),
-                    ("lifecycle_status", "running"),
-                    ("runtime_status", "running"),
-                )
-            ):
-                raise RuntimeError("Activated transfer identity changed after commit.")
-            started_lease = _read_strict_project_json(
-                project, "ownership-lease.json"
-            )
-            if (
-                started_lease.get("active") is not True
-                or started_lease.get("active_node") != destination_host_id
-                or started_lease.get("project_id") != project_id
-            ):
-                raise RuntimeError("Activated transfer lease did not bind to this node.")
-        except Exception as exc:
-            rollback_errors: list[str] = []
-            if start_attempted and compose_command:
-                try:
-                    stopped = run(
-                        [*compose_command, "down", "--remove-orphans"],
-                        cwd=project,
-                        check=False,
-                        timeout=600,
-                    )
-                    if stopped.returncode != 0:
-                        raise RuntimeError(
-                            (stopped.stderr or stopped.stdout or "Docker stop failed.")[
-                                -2000:
-                            ]
-                        )
-                except Exception as rollback_exc:
-                    rollback_errors.append(f"destination-runtime: {rollback_exc}")
-            if commit_started:
-                for path, raw in (
-                    (metadata_file, metadata_before),
-                    (lease_file, lease_before),
-                ):
-                    try:
-                        if path == metadata_file:
-                            _write_project_metadata_bytes(project, raw)
-                        else:
-                            atomic_bytes(path, raw)
-                    except Exception as rollback_exc:
-                        rollback_errors.append(f"{path.name}: {rollback_exc}")
-            try:
-                current_marker = _transfer_pending_marker(
-                    project, project_id=project_id
-                )
-                if current_marker is None:
-                    _record_transfer_pending(
-                        project,
-                        project_id=project_id,
-                        deployment_id=deployment_id,
-                        source_host_id=source_host_id,
-                        destination_host_id=destination_host_id,
-                    )
-                elif any(
-                    current_marker.get(key) != expected
-                    for key, expected in (
-                        ("project_id", project_id),
-                        ("deployment_id", deployment_id),
-                        ("source_host_id", source_host_id),
-                        ("destination_host_id", destination_host_id),
-                        ("state", "pending-source-finalization"),
-                    )
-                ):
-                    raise RuntimeError("Pending transfer authority changed during activation.")
-            except Exception as rollback_exc:
-                rollback_errors.append(f"transfer-authority: {rollback_exc}")
-            try:
-                pending = load_authoritative_project_identity_for_mutation(
-                    project, allow_pending_transfer=True
-                )
-                pending_lease = _read_strict_project_json(
-                    project, "ownership-lease.json"
-                )
-                if (
-                    str(pending.get("project_id") or "") != project_id
-                    or str(pending.get("deployment_id") or "") != deployment_id
-                    or str(pending.get("host_id") or "") != destination_host_id
-                    or str(pending.get("transfer_state") or "")
-                    != "pending-source-finalization"
-                    or str(pending.get("lifecycle_status") or "")
-                    != "ownership-transfer-pending"
-                    or pending_lease.get("project_id") != project_id
-                    or pending_lease.get("active") is not False
-                    or pending_lease.get("active_node") != destination_host_id
-                ):
-                    raise RuntimeError(
-                        "Pending transfer rollback identity is inconsistent."
-                    )
-            except Exception as rollback_exc:
-                rollback_errors.append(f"pending-state: {rollback_exc}")
-            if rollback_errors:
-                raise RuntimeError(
-                    "Transfer activation failed and rollback was incomplete: "
-                    + "; ".join(rollback_errors)
-                ) from exc
-            raise
-        return {
-            "ok": True,
-            "project": slug,
-            "project_id": project_id,
-            "deployment_id": deployment_id,
-            "source_host_id": source_host_id,
-            "destination_host_id": destination_host_id,
-            "state": "activated-running",
-            "output": ((result.stdout + result.stderr) + "\n" + hook_output)[-12000:],
-        }
-
-
-def backup_project(
-    slug: str,
-    *,
-    consistency_level: str = "live-best-effort",
-    destructive: bool = False,
-) -> str:
-    project = safe_child(SETTINGS.workspaces, slug)
-    if not project.is_dir():
-        raise FileNotFoundError(slug)
-    meta = load_authoritative_project_identity_for_mutation(project)
-    if provider_for(meta).is_vm:
-        if not str(meta.get("runtime_id") or ""):
-            if str(meta.get("lifecycle_status") or "") != "failed":
-                raise RuntimeError(
-                    "A VM project without a runtime id is not in a verified failed-provisioning state."
-                )
-            root = SETTINGS.runtime_root / "workspace-backups"
-            backup_id = f'{validate_slug(slug)}-{time.strftime("%Y%m%d-%H%M%S")}-{uuid.uuid4().hex[:8]}'
-            directory = root / backup_id
-            archive = directory / f"{validate_slug(slug)}.tar.gz"
-            result = create_workspace_archive(project, slug, archive, include_generated=destructive, consistency_level=consistency_level)
-            manifest = write_backup_manifest(
-                directory,
-                slug=slug,
-                project_id=str(meta.get("project_id") or ""),
-                runtime={"provider": "local-workspace-archive", "runtime_id": ""},
-                archive=result,
-                consistency_level=consistency_level,
+            _record_vm_readiness(meta, result, workspace_provisioned=False)
+            project_result = VM_RUNTIME.command(
+                slug, meta, "project-start", command_key="start"
             )
             meta.update(
                 {
-                    "backup_status": "verified",
-                    "backup_id": backup_id,
-                    "backup_path": str(archive),
-                    "backup_sha256": result["archive_sha256"],
-                    "backup_manifest": str(directory / "manifest.json"),
+                    "lifecycle_status": "running",
+                    "runtime_status": "running",
+                    "health_status": "unknown",
+                    "health_scope": "runtime-ready-not-app-healthy",
+                    "updated_at": now_iso(),
+                }
+            )
+            _record_vm_readiness(meta, result, workspace_provisioned=True)
+            _write_project_metadata(project, meta)
+            update_lease(project, active=True)
+            return str(
+                project_result.get("output")
+                or result.get(
+                    "message", "Dedicated project VM and project services started."
+                )
+            )
+        except Exception as exc:
+            meta.update(
+                {
+                    "lifecycle_status": "failed",
+                    "runtime_status": "failed",
+                    "health_status": "unknown",
+                    "health_scope": "not-ready",
+                    "last_error": str(exc)[-1000:],
                     "updated_at": now_iso(),
                 }
             )
             _write_project_metadata(project, meta)
-            return json.dumps(
-                {
-                    "ok": True,
-                    "provider": "local-workspace-archive",
-                    "backup_status": "verified",
-                    "backup_id": backup_id,
-                    "backup_path": str(archive),
-                    "backup_sha256": result["archive_sha256"],
-                    "manifest": manifest,
-                }
-            )
-        result = VmRuntimeOperations.backup(slug, meta, consistency_level=consistency_level, destructive=destructive)
-        if str(result.get("backup_status", "")).lower() != "verified":
-            raise RuntimeError(
-                "Host provider did not return a verified workspace backup artifact."
-            )
-        meta.update(
-            {
-                "backup_status": "verified",
-                "backup_id": result.get("backup_id", ""),
-                "backup_sha256": result.get("backup_sha256", ""),
-                "backup_manifest_sha256": result.get("manifest_sha256", ""),
-                "backup_reference": result.get("backup_reference"),
-                "updated_at": now_iso(),
-            }
+            raise
+    cf = compose_file(project)
+    if cf:
+        _assert_current_compose_safety(project, meta)
+        _write_current_compose_ownership(project, cf, meta)
+        r = run(
+            [*compose_args(project, cf), "up", "-d", "--build"],
+            cwd=project,
+            timeout=1800,
         )
-        _write_project_metadata(project, meta)
-        update_lease(project, backup_time=now_iso())
-        return json.dumps(
-            {
-                "ok": True,
-                "provider": "multipass-host-agent",
-                "backup_status": meta["backup_status"],
-                "runtime": result,
-            },
-            default=str,
+    elif (project / ".devcontainer/devcontainer.json").exists():
+        r = run(
+            ["devcontainer", "up", "--workspace-folder", str(project)],
+            cwd=project,
+            timeout=1800,
         )
-    root = SETTINGS.runtime_root / "workspace-backups"
-    backup_id = (
-        f'{validate_slug(slug)}-{time.strftime("%Y%m%d-%H%M%S")}-{uuid.uuid4().hex[:8]}'
-    )
-    directory = root / backup_id
-    archive = directory / f"{validate_slug(slug)}.tar.gz"
-    result = create_workspace_archive(project, slug, archive, include_generated=destructive, consistency_level=consistency_level)
-    manifest = write_backup_manifest(
-        directory,
-        slug=slug,
-        project_id=str(meta.get("project_id") or ""),
-        runtime={"provider": "docker-compose", "runtime_id": ""},
-        archive=result,
-        consistency_level=consistency_level,
-    )
-    vault = _vault_request("backup", timeout=1860)
-    if (
-        vault.get("local_backup_status") != "verified"
-        or vault.get("vault_upload_status") != "verified"
-        or vault.get("durability_level") != "vault"
-    ):
-        raise RuntimeError("Vault broker did not verify the encrypted backup upload.")
-    meta.update(
-        {
-            "backup_status": "verified",
-            "backup_id": backup_id,
-            "backup_path": str(archive),
-            "backup_sha256": result["archive_sha256"],
-            "backup_manifest": str(directory / "manifest.json"),
-            "updated_at": now_iso(),
-        }
-    )
+    else:
+        raise ValueError("No supported container configuration.")
+    meta["lifecycle_status"] = "running"
+    meta["runtime_status"] = "running"
+    meta["updated_at"] = now_iso()
     _write_project_metadata(project, meta)
-    update_lease(project, backup_time=now_iso())
-    return json.dumps(
-        {
-            "ok": True,
-            "provider": "docker-compose",
-            "backup_status": "verified",
-            "backup_id": backup_id,
-            "backup_path": str(archive),
-            "backup_sha256": result["archive_sha256"],
-            "vault_exit_code": 0,
-            "vault_upload_status": "verified",
-            "durability_level": "vault",
-            "manifest": manifest,
-        },
-        default=str,
-    )
+    update_lease(project, active=True)
+    return ((r.stdout + r.stderr) + "\n" + _hook(project, cf))[-12000:]
 
 
-def safety_backup_project(slug: str, _lock_held: bool = False) -> dict[str, Any]:
-    """Stop managed writers, create a fresh stable backup, and bind its identity."""
-    project = safe_child(SETTINGS.workspaces, slug)
-    if not project.is_dir() or project.is_symlink():
-        raise ValueError("Project workspace is not a safe directory.")
-    with contextlib.nullcontext() if _lock_held else _destructive_lock(slug):
-        meta = load_authoritative_project_identity_for_mutation(project)
-        transaction_id = f"destroy-{uuid.uuid4().hex}"
-        meta.update(
-            {
-                "lifecycle_status": "destructive-quiesce-pending",
-                "destructive_transaction_id": transaction_id,
-                "updated_at": now_iso(),
-            }
-        )
-        _write_project_metadata(project, meta)
-        stop_project(slug)
-        refreshed = load_authoritative_project_identity_for_mutation(project)
-        if provider_for(refreshed).is_vm:
-            if str(refreshed.get("lifecycle_status") or "").lower() == "running":
-                raise RuntimeError(
-                    "Destructive deletion blocked: owned VM is still running after quiesce."
-                )
-        elif running(project):
-            raise RuntimeError(
-                "Destructive deletion blocked: DevFleet-owned containers remain running after compose down."
-            )
-        meta = load_authoritative_project_identity_for_mutation(project)
-        meta.update(
-            {
-                "lifecycle_status": "destructive-quiesced",
-                "destructive_transaction_id": transaction_id,
-                "updated_at": now_iso(),
-            }
-        )
-        _write_project_metadata(project, meta)
-        before = _source_state_fingerprint(project, include_generated=True)
-        # Consistency is transaction-local and explicit.  The signature check
-        # keeps older focused test doubles compatible without reintroducing
-        # mutable module state.
-        import inspect
-        backup_signature = inspect.signature(backup_project)
-        if "consistency_level" in backup_signature.parameters:
-            result = json.loads(backup_project(slug, consistency_level="quiesced", destructive=True))
-        else:
-            result = json.loads(backup_project(slug))
-        result.setdefault("consistency_level", "quiesced")
-        meta = load_authoritative_project_identity_for_mutation(project)
-        after = _source_state_fingerprint(project, include_generated=True)
-        if before != after:
-            raise RuntimeError(
-                "Destructive deletion blocked: workspace changed during the safety backup; no deletion was performed."
-            )
-        backup_id, backup_sha, status = _safety_backup_fields(result, meta)
-        if (
-            status != "verified"
-            or not backup_id
-            or not re.fullmatch(r"[0-9a-f]{64}", backup_sha.lower())
-        ):
-            raise RuntimeError(
-                "Destructive deletion blocked: fresh safety backup was not cryptographically verified."
-            )
-        provider = provider_for(meta)
-        if provider.is_vm:
-            reference = result.get("backup_reference") or (result.get("runtime") or {}).get("backup_reference") or meta.get("backup_reference")
-            from .host_control import validate_backup_reference
-            checked_reference = validate_backup_reference(reference, project_id=str(meta.get("project_id") or ""), slug=slug, runtime_id=str(meta.get("runtime_id") or ""))
-            if checked_reference["archive_sha256"].lower() != backup_sha.lower():
-                raise RuntimeError("Destructive deletion blocked: provider backup reference hash changed after verification.")
-            meta["backup_reference"] = checked_reference
-        else:
-            archive = Path(str(result.get("backup_path") or meta.get("backup_path") or ""))
-            if not archive.is_file():
-                raise RuntimeError("Destructive deletion blocked: fresh safety backup archive is unavailable.")
-            verified = validate_archive(archive, slug)
-            if verified.get("archive_sha256", "").lower() != backup_sha.lower():
-                raise RuntimeError("Destructive deletion blocked: fresh safety backup hash changed after verification.")
-        binding = {
-            "transaction_id": transaction_id,
-            "project_id": str(meta.get("project_id") or ""),
-            "runtime_id": str(meta.get("runtime_id") or ""),
-            "backup_id": backup_id,
-            "backup_sha256": backup_sha.lower(),
-            "source_state_fingerprint": after,
-            "fingerprint_policy": {
-                "schema_version": FINGERPRINT_POLICY_VERSION,
-                "algorithm": FINGERPRINT_ALGORITHM,
-                "include_generated": True,
-                "ignored_directories": [],
-                "result": "verified",
-            },
-            "created_at": now_iso(),
-        }
-        meta.update(
-            {
-                "lifecycle_status": "destructive-backup-verified",
-                "destructive_backup_binding": binding,
-                "updated_at": now_iso(),
-            }
-        )
-        _write_project_metadata(project, meta)
-        return {"result": result, "binding": binding, "meta": meta}
-
-
-def list_backups(slug: str) -> list[dict[str, Any]]:
-    slug = validate_slug(slug)
+def stop_project(slug: str) -> str:
     project = safe_child(SETTINGS.workspaces, slug)
     meta = load_authoritative_project_identity_for_mutation(project)
-    project_id = str(meta.get("project_id") or "")
-    if provider_for(meta).is_vm and str(meta.get("runtime_id") or ""):
-        return VM_RUNTIME.list_backups(slug, meta)
-    root = SETTINGS.runtime_root / "workspace-backups"
-    items = []
-    if root.is_dir():
-        for directory in sorted(
-            (p for p in root.iterdir() if p.is_dir()), reverse=True
-        ):
-            manifest_file = directory / "manifest.json"
-            try:
-                manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            if manifest.get("slug") != slug or (
-                project_id and str(manifest.get("project_id") or "") != project_id
-            ):
-                continue
-            workspace = (
-                manifest.get("workspace")
-                if isinstance(manifest.get("workspace"), dict)
-                else {}
+    if provider_for(meta).is_vm:
+        meta.update(
+            {
+                "lifecycle_status": "stopping",
+                "runtime_status": "stopping",
+                "health_scope": "transition",
+                "updated_at": now_iso(),
+            }
+        )
+        _write_project_metadata(project, meta)
+        try:
+            project_result = VM_RUNTIME.command(
+                slug, meta, "project-stop", command_key="stop"
             )
-            archive = Path(str(workspace.get("archive_path") or ""))
-            digest = str(workspace.get("archive_sha256") or "")
-            eligible = archive.is_file()
-            if eligible:
-                try:
-                    eligible = (
-                        validate_archive(archive, slug).get("archive_sha256") == digest
-                    )
-                except (OSError, ValueError, tarfile.TarError):
-                    eligible = False
-            items.append(
+            result = VmRuntimeOperations.stop(slug, meta)
+            if meta.get("runtime_address"):
+                meta["last_known_runtime_address"] = meta.get("runtime_address")
+            meta.update(
                 {
-                    "backup_id": directory.name,
-                    "created_at": manifest.get("created_at", ""),
-                    "project_id": manifest.get("project_id", ""),
-                    "provider": str(
-                        (manifest.get("runtime") or {}).get("provider")
-                        or "docker-compose"
-                    ),
-                    "runtime_id": str(
-                        (manifest.get("runtime") or {}).get("runtime_id") or ""
-                    ),
-                    "archive_path": str(archive),
-                    "archive_bytes": archive.stat().st_size if archive.is_file() else 0,
-                    "archive_sha256": digest,
-                    "sha_verified": eligible,
-                    "restore_eligible": eligible,
-                    "reason": (
-                        ""
-                        if eligible
-                        else "Archive is missing or failed SHA/path verification."
-                    ),
-                    "status": "eligible" if eligible else "invalid",
-                    "manifest_path": str(manifest_file),
+                    "runtime_address": "",
+                    "workspace_host": "",
+                    "lifecycle_status": "stopped",
+                    "runtime_status": "stopped",
+                    "health_status": "unknown",
+                    "health_scope": "not-checked-stopped",
+                    "workspace_provisioned": False,
+                    "ssh_host_key_pinned": False,
+                    "ssh_authenticated": False,
+                    "ssh_validation_passed": False,
+                    "updated_at": now_iso(),
                 }
             )
-    return items
+            _record_vm_readiness(
+                meta,
+                {
+                    "address": "",
+                    "ssh_alias": meta.get("ssh_alias", ""),
+                    "host_key_pinned": False,
+                    "authenticated_connection": False,
+                    "validated": False,
+                },
+                workspace_provisioned=False,
+            )
+            _write_project_metadata(project, meta)
+            update_lease(project, active=False, clean_shutdown=True)
+            return str(
+                project_result.get("output")
+                or result.get("message", "Dedicated project VM stopped.")
+            )
+        except Exception as exc:
+            meta.update(
+                {
+                    "lifecycle_status": "failed",
+                    "runtime_status": "failed",
+                    "last_error": str(exc)[-1000:],
+                    "updated_at": now_iso(),
+                }
+            )
+            _write_project_metadata(project, meta)
+            raise
+    cf = compose_file(project)
+    if cf:
+        r = run(
+            [*compose_args(project, cf), "down", "--remove-orphans"],
+            cwd=project,
+            timeout=600,
+        )
+        out = (r.stdout + r.stderr)[-4000:]
+    else:
+        ids = run(
+            [
+                "docker",
+                "ps",
+                "-aq",
+                "--filter",
+                f"label=devcontainer.local_folder={project}",
+            ],
+            check=False,
+        ).stdout.split()
+        if ids:
+            run(["docker", "stop", *ids], timeout=300)
+        out = "Stopped."
+    meta["lifecycle_status"] = "stopped"
+    meta["runtime_status"] = "stopped"
+    meta["updated_at"] = now_iso()
+    _write_project_metadata(project, meta)
+    update_lease(project, active=False, clean_shutdown=True)
+    return out
 
 
-def restore_backup(
-    slug: str,
-    backup_id: str,
-    confirm_restore: bool = False,
-    allow_overwrite: bool = False,
-) -> dict[str, Any]:
-    slug = validate_slug(slug)
-    if "/" in backup_id or "\\" in backup_id or backup_id in {".", ".."}:
-        raise ValueError("Invalid backup identifier.")
+def restart_project(slug: str) -> str:
     project = safe_child(SETTINGS.workspaces, slug)
     meta = load_authoritative_project_identity_for_mutation(project)
-    project_id = str(meta.get("project_id") or "")
-    if provider_for(meta).is_vm and str(meta.get("runtime_id") or ""):
-        if not confirm_restore:
-            raise ValueError("Backup restore requires explicit confirmation.")
-        if not allow_overwrite:
-            raise ValueError(
-                "VM backup restore replaces the current workspace and requires explicit overwrite confirmation."
+    if provider_for(meta).is_vm:
+        meta.update(
+            {
+                "lifecycle_status": "restarting",
+                "runtime_status": "restarting",
+                "health_scope": "transition",
+                "workspace_provisioned": False,
+                "updated_at": now_iso(),
+            }
+        )
+        _write_project_metadata(project, meta)
+        try:
+            result = VmRuntimeOperations.restart(slug, meta)
+            meta.update(
+                runtime_metadata(
+                    provider_for(meta),
+                    status="restarting",
+                    runtime_id=result.get("runtime_id", meta.get("runtime_id", "")),
+                    runtime_address=result.get(
+                        "address", meta.get("runtime_address", "")
+                    ),
+                    health_status="unknown",
+                    health_scope="runtime-ready-not-app-healthy",
+                    lifecycle_status="restarting",
+                )
             )
-        result = VM_RUNTIME.restore_backup(slug, meta, backup_id, confirm_restore=True)
-        restored = {
-            **meta,
-            "backup_status": "verified",
-            "backup_id": backup_id,
-            "backup_sha256": str(result.get("backup_sha256") or ""),
-            "updated_at": now_iso(),
-            "last_restore_at": now_iso(),
-        }
-        _write_project_metadata(project, restored)
-        return {
-            "ok": True,
-            "provider": "multipass-host-agent",
-            "backup_id": backup_id,
-            "backup_sha256": restored["backup_sha256"],
-            "project": restored,
-            "restore": result,
-        }
-    directory = (SETTINGS.runtime_root / "workspace-backups" / backup_id).resolve()
-    root = (SETTINGS.runtime_root / "workspace-backups").resolve()
-    if directory.parent != root or not directory.is_dir():
-        raise FileNotFoundError(backup_id)
-    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
-    workspace = (
-        manifest.get("workspace") if isinstance(manifest.get("workspace"), dict) else {}
-    )
-    archive = Path(str(workspace.get("archive_path") or ""))
-    if (
-        manifest.get("slug") != slug
-        or str(manifest.get("project_id") or "") != project_id
-    ):
-        raise ValueError("Backup identity does not match this project.")
-    if not confirm_restore:
-        raise ValueError("Backup restore requires explicit confirmation.")
-    verified = validate_archive(archive, slug)
-    if verified.get("archive_sha256") != str(workspace.get("archive_sha256") or ""):
-        raise ValueError("Backup archive hash does not match its manifest.")
-    if project.exists() and any(project.iterdir()):
-        if not allow_overwrite:
-            raise ValueError(
-                "Restore refuses to overwrite a non-empty workspace without explicit overwrite confirmation."
+            _record_vm_readiness(meta, result, workspace_provisioned=False)
+            project_result = VM_RUNTIME.command(
+                slug, meta, "project-start", command_key="start"
             )
-        backup_project(slug)
-    result = restore_workspace_archive(archive, project, slug)
-    restored = load_meta(project)
-    restored.update(
-        {
-            "backup_status": "verified",
-            "backup_id": backup_id,
-            "backup_path": str(archive),
-            "backup_sha256": verified["archive_sha256"],
-            "backup_manifest": str(directory / "manifest.json"),
-            "updated_at": now_iso(),
-            "last_restore_at": now_iso(),
-        }
-    )
-    _write_project_metadata(project, restored)
+            meta.update(
+                {
+                    "lifecycle_status": "running",
+                    "runtime_status": "running",
+                    "updated_at": now_iso(),
+                }
+            )
+            _record_vm_readiness(meta, result, workspace_provisioned=True)
+            _write_project_metadata(project, meta)
+            return str(
+                project_result.get("output")
+                or result.get(
+                    "message",
+                    "Dedicated project VM restarted and project services started.",
+                )
+            )
+        except Exception as exc:
+            meta.update(
+                {
+                    "lifecycle_status": "failed",
+                    "runtime_status": "failed",
+                    "last_error": str(exc)[-1000:],
+                    "updated_at": now_iso(),
+                }
+            )
+            _write_project_metadata(project, meta)
+            raise
+    stop_project(slug)
+    return start_project(slug)
+
+
+def inspect_runtime(slug: str) -> dict[str, Any]:
+    project = safe_child(SETTINGS.workspaces, slug)
+    meta = load_authoritative_project_identity_for_mutation(project)
+    if provider_for(meta).is_vm:
+        return VmRuntimeOperations.inspect(slug, meta)
     return {
         "ok": True,
-        "backup_id": backup_id,
-        "backup_sha256": verified["archive_sha256"],
-        "project": restored,
-        "restore": result,
+        "provider": provider_for(meta).name,
+        "runtime_type": "container",
+        "running": running(project),
+        "project_id": meta.get("project_id"),
+        "resource_limits": meta.get("resource_limits"),
     }
 
 
-def _recovery_tombstone_path(slug: str, project_id: str) -> Path:
-    safe_id = re.sub(r"[^0-9a-fA-F-]", "", str(project_id)) or "unknown"
-    return SETTINGS.runtime_root / "recovery-tombstones" / f"{validate_slug(slug)}-{safe_id}.json"
-
-
-def _write_recovery_tombstone(meta: dict[str, Any], binding: dict[str, Any]) -> Path:
-    tombstone = {
-        "schema_version": 1,
-        "managed_by": "devfleet",
-        "project_id": str(meta.get("project_id") or ""),
-        "slug": validate_slug(str(meta.get("slug") or "")),
-        "runtime_provider": str(meta.get("runtime_provider") or "docker-compose"),
-        "host_id": str(meta.get("host_id") or SETTINGS.host_id),
-        "backup_id": str(binding.get("backup_id") or ""),
-        "backup_sha256": str(binding.get("backup_sha256") or ""),
-        "backup_reference": meta.get("backup_reference"),
-        "created_at": now_iso(),
-    }
-    path = _recovery_tombstone_path(tombstone["slug"], tombstone["project_id"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_json(path, tombstone)
-    return path
-
-
-def restore_deleted_project(
-    slug: str,
-    backup_id: str,
-    *,
-    project_id: str,
-    confirm_restore: bool = False,
-) -> dict[str, Any]:
-    """Recover a permanently deleted local project from a bound tombstone.
-
-    This path is intentionally separate from live-workspace restore: there is
-    no current workspace identity to trust, so the durable tombstone and
-    archive metadata must establish every identity before promotion.
-    """
-    slug = validate_slug(slug)
-    project_id = str(project_id or "")
-    if not confirm_restore:
-        raise ValueError("Deleted-project restore requires explicit confirmation.")
-    tombstone_path = _recovery_tombstone_path(slug, project_id)
-    if not tombstone_path.is_file():
-        raise FileNotFoundError("No durable recovery tombstone exists for this project identity.")
-    try:
-        tombstone = json.loads(tombstone_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError("Recovery tombstone is invalid.") from exc
-    if tombstone.get("slug") != slug or str(tombstone.get("project_id") or "") != project_id:
-        raise ValueError("Recovery tombstone identity does not match the requested project.")
-    if str(tombstone.get("backup_id") or "") != backup_id:
-        raise ValueError("Requested backup is not the tombstone-bound backup.")
-    if str(tombstone.get("runtime_provider") or "") != "docker-compose":
-        raise ValueError("Deleted VM workspace recovery requires the provider restore lifecycle and cannot use a local archive path.")
-    directory = (SETTINGS.runtime_root / "workspace-backups" / backup_id).resolve()
-    root = (SETTINGS.runtime_root / "workspace-backups").resolve()
-    if directory.parent != root or not directory.is_dir():
-        raise FileNotFoundError(backup_id)
-    manifest_path = directory / "manifest.json"
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError("Recovery backup manifest is invalid.") from exc
-    if manifest.get("slug") != slug or str(manifest.get("project_id") or "") != project_id:
-        raise ValueError("Recovery backup identity does not match the tombstone.")
-    workspace = manifest.get("workspace") if isinstance(manifest.get("workspace"), dict) else {}
-    archive = Path(str(workspace.get("archive_path") or ""))
-    verified = validate_archive(archive, slug)
-    expected_sha = str(tombstone.get("backup_sha256") or workspace.get("archive_sha256") or "")
-    if verified.get("archive_sha256") != expected_sha or str(workspace.get("archive_sha256") or "") != expected_sha:
-        raise ValueError("Recovery archive hash does not match the tombstone and manifest.")
-    project = safe_child(SETTINGS.workspaces, slug)
-    if project.exists():
-        raise ValueError("Deleted-project restore requires an absent destination; no overwrite was performed.")
-    restored = restore_workspace_archive(archive, project, slug)
-    recovered_meta = load_authoritative_project_identity_for_mutation(project)
-    if str(recovered_meta.get("project_id") or "") != project_id or str(recovered_meta.get("slug") or "") != slug or str(recovered_meta.get("managed_by") or "") != "devfleet":
-        raise ValueError("Recovered workspace metadata does not prove exact DevFleet ownership.")
-    return {"ok": True, "project": recovered_meta, "backup_id": backup_id, "backup_sha256": expected_sha, "restore": restored, "tombstone": str(tombstone_path)}
-
-
-def rebuild_project(slug: str) -> str:
+def runtime_health(slug: str) -> dict[str, Any]:
     project = safe_child(SETTINGS.workspaces, slug)
     meta = load_authoritative_project_identity_for_mutation(project)
-    cf = compose_file(project)
-    if SETTINGS.backup_before_rebuild:
-        backup_project(slug)
     if provider_for(meta).is_vm:
-        result = VmRuntimeOperations.command(
-            slug, meta, "project-rebuild", command_key="rebuild"
+        inspection = VmRuntimeOperations.inspect(slug, meta)
+        info = inspection.get("info") if isinstance(inspection, dict) else {}
+        state = str((info or {}).get("state") or "").lower()
+        if state != "running":
+            return {
+                "ok": True,
+                "provider": provider_for(meta).name,
+                "runtime_type": "vm",
+                "runtime_id": meta.get("runtime_id"),
+                "state": "stopped",
+                "healthy": False,
+                "runtime_health": "not-run-stopped",
+                "application_healthy": False,
+                "application_health": "not-run-stopped",
+                "health_scope": "runtime-only",
+                "guest_exec_performed": False,
+                "project_id": meta.get("project_id"),
+                "info": info or {},
+                "note": "The VM is stopped; health inspection did not execute a guest command.",
+            }
+        result = VmRuntimeOperations.health(slug, meta)
+        return {
+            **result,
+            "application_healthy": False,
+            "health_scope": "runtime-only",
+            "note": "Use the project health check for application health.",
+        }
+    is_running = running(project)
+    return {
+        "ok": True,
+        "provider": provider_for(meta).name,
+        "runtime_type": "container",
+        "healthy": is_running,
+        "application_healthy": is_running,
+        "health_scope": "container-runtime",
+        "project_id": meta.get("project_id"),
+    }
+
+
+def open_workspace(slug: str) -> dict[str, Any]:
+    project = safe_child(SETTINGS.workspaces, slug)
+    meta = load_authoritative_project_identity_for_mutation(project)
+    provider = provider_for(meta)
+    alias = str(meta.get("ssh_alias") or meta.get("runtime_id") or "devfleet-primary")
+    remote_path = str(
+        meta.get("workspace_path") or f"/home/devrunner/workspaces/{slug}"
+    )
+    if provider.is_vm:
+        inspection = VmRuntimeOperations.inspect(slug, meta)
+        info = inspection.get("info") if isinstance(inspection, dict) else {}
+        runtime_state = str((info or {}).get("state") or "").lower()
+        if runtime_state != "running":
+            readiness = workspace_readiness(
+                slug, {**meta, "lifecycle_status": runtime_state or "unknown"}
+            )
+            if runtime_state == "stopped":
+                error = "Project VM is stopped. Start it explicitly before opening the workspace."
+            else:
+                error = (
+                    readiness["reason"]
+                    or f'Project VM is {runtime_state or "not ready"}. Wait until it is running before opening the workspace.'
+                )
+            return {
+                "ok": False,
+                "provider": provider.name,
+                "state": runtime_state or readiness["state"],
+                "runtime_health": f'not-run-{runtime_state or "unknown"}',
+                "ssh_alias": alias,
+                "workspace_path": remote_path,
+                "launcher_uri": "",
+                "readiness": readiness,
+                "error": error,
+            }
+        meta.update({"lifecycle_status": "running", "runtime_status": "running"})
+        readiness = workspace_readiness(slug, meta)
+        if not readiness["ready"]:
+            refreshed = VmRuntimeOperations.refresh(slug, meta)
+            _record_vm_readiness(meta, refreshed, workspace_provisioned=True)
+            # A legacy agent that returns only an address supplies no trust
+            # proof. Preserve the address as diagnostic state, but leave the
+            # workspace blocked until a current agent or a real trusted SSH
+            # validation supplies all three proofs.
+            meta.update({"last_connection_refresh": now_iso(), "updated_at": now_iso()})
+            _write_project_metadata(project, meta)
+            readiness = workspace_readiness(slug, meta)
+            alias = str(meta.get("ssh_alias") or alias)
+        if not readiness["ready"]:
+            return {
+                "ok": False,
+                "provider": provider.name,
+                "state": readiness["state"],
+                "ssh_alias": alias,
+                "workspace_path": remote_path,
+                "launcher_uri": "",
+                "readiness": readiness,
+                "error": readiness["reason"] or "Workspace is not ready to open.",
+            }
+    else:
+        readiness = workspace_readiness(slug, meta)
+        alias = str(readiness.get("ssh_alias") or alias)
+        remote_path = str(readiness.get("workspace_path") or remote_path)
+        if not readiness["ready"]:
+            return {
+                "ok": False,
+                "provider": provider.name,
+                "state": readiness["state"],
+                "ssh_alias": alias,
+                "workspace_path": remote_path,
+                "launcher_uri": "",
+                "readiness": readiness,
+                "error": readiness["reason"] or "Workspace is not ready to open.",
+            }
+    return {
+        "ok": True,
+        "provider": provider.name,
+        "state": (
+            "running"
+            if provider.is_vm
+            else ("running" if running(project) else "stopped")
+        ),
+        "runtime_address": str(meta.get("runtime_address") or ""),
+        "ssh_alias": str(meta.get("ssh_alias") or alias),
+        "workspace_path": remote_path,
+        "readiness": readiness,
+        "launcher_uri": f'vscode://vscode-remote/ssh-remote+{quote(str(meta.get("ssh_alias") or alias),safe="")}/{quote(remote_path.lstrip("/"),safe="/")}',
+    }
+
+
+def _vault_request(
+    action: str,
+    slug: str = "",
+    project_id: str = "",
+    *,
+    timeout: int,
+    deployment_id: str = "",
+    source_host_id: str = "",
+) -> dict[str, Any]:
+    cmd = ["/usr/local/bin/devfleet-vault-request", action]
+    if slug:
+        cmd.extend([validate_slug(slug), validate_project_id(project_id)])
+    if action == "restore-transfer":
+        cmd.extend(
+            [
+                validate_project_id(deployment_id),
+                source_host_id,
+            ]
         )
-        return str(result.get("output") or result.get("message") or result)[-12000:]
-    if cf:
-        _write_current_compose_ownership(project, cf, meta)
-        _assert_cu
+    completed = run(cmd, timeout=timeout)
+    try:
+        receipt = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Vault broker returned an invalid receipt.") from exc
+    if not isinstance(receipt, dict) or receipt.get("ok") is not True:
+        raise RuntimeError("Vault broker did not return a verified receipt.")
+    if receipt.get("action") != action:
+        raise RuntimeError("Vault broker receipt action does not match the request.")
+    if slug and (
+        receipt.get("project") != slug or receipt.get("project_id") != project_id
+    ):
+        raise RuntimeError("Vault broker receipt project identity does not match the request.")
+    if action == "restore-transfer" and (
+        receipt.get("deployment_id") != deployment_id
+        or receipt.get("source_host_id") != source_host_id
+    ):
+        raise RuntimeError("Vault broker receipt transfer identity does not match the request.")
+    return receipt
+
+
+def _read_strict_project_json(project: Path, name: str) -> dict[str, Any]:
+    """Read one control record without accepting symlinks or special files."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name):
+        raise ValueError("Project control record name is invalid.")
+    project = Path(project)
+    metadata_dir = project / ".devfleet"
+    path = metadata_dir / name
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+    if os.name != "nt" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"):
+        project_fd = metadata_fd = record_fd = -1
+        try:
+            project_fd = os.open(
+                project,
+                flags | os.O_DIRECTORY | os.O_NOFOLLOW,
+            )
+            metadata_fd = os.open(
+                ".devfleet",
+                flags | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=project_fd,
+            )
+            record_fd = os.open(
+                name,
+                flags | os.O_NOFOLLOW,
+                dir_fd=metadata_fd,
+            )
+            record_stat = os.fstat(record_fd)
+            if not stat.S_ISREG(record_stat.st_mode) or record_stat.st_size > 1024 * 1024:
+                raise ValueError("Project control record is not a bounded regular file.")
+            chunks: list[bytes] = []
+            remaining = 1024 * 1024 + 1
+            while remaining:
+                chunk = os.read(record_fd, min(65536, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            if remaining == 0:
+                raise ValueError("Project control record is too large.")
+            raw = b"".join(chunks).decode("utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ValueError("Project control record is unreadable.") from exc
+        finally:
+            for fd in (record_fd, metadata_fd, project_fd):
+                if fd >= 0:
+                    os.close(fd)
+    else:
+        if (
+            not project.is_dir()
+            or project.is_symlink()
+            or not metadata_dir.is_dir()
+            or metadata_dir.is_symlink()
+            or not path.is_file()
+            or path.is_symlink()
+        ):
+            raise ValueError("Project control record is unavailable or unsafe.")
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ValueError("Project control record is unreadable.") from exc
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Project control record is malformed.") from exc
+    if not isinstance(value, dict):
+        raise ValueError("Project control record must be a JSON object.")
+    return value
+
+
+def _assert_no_running_project_containers(
+    project: Path, slug: str, project_id: str
+) -> None:
+    filters = (
+        f"io.devfleet.project-id={project_id}",
+        f"io.devfleet.project-slug={slug}",
+        f"io.devfleet.runtime-id={compose_name(slug)}",
+        f"com.docker.compose.project={compose_name(slug)}",
+        f"devcontainer.local_folder={project}",
+    )
+    running_ids: set[str] = set()
+    for label in filters:
+        result = run(
+            ["docker", "ps", "--quiet", "--filter", f"label={label}"],
+            check=False,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                "Canonical restore blocked: Docker quiescence probe failed."
+            )
+        running_ids.update(item for item in result.stdout.split() if item)
+    if running_ids:
+    

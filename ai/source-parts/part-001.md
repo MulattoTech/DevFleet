@@ -1,12 +1,12 @@
 # DevFleet source part 001
 
 Full-source UTF-8 byte interval [0, 46500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 3730d52a6bebef244fb730905bf7a78bcd2a8630ea89927ab149fc1c4b871619
+Payload SHA-256: b89555980546ebc32a22e0392046d895cfe51a6ca02740a74dc31709eb50890d
 
 <!-- BEGIN SOURCE SLICE -->
 # DevFleet complete tracked source text
 
-Provenance HEAD 110fc2ee4fe611518e302b0185e9499a8e8a7e40.
+Provenance original certification source HEAD 78e92440a51717f09f92676cba9c0b2e67d7b06c.
 Original byte hashes/modes are in ORIGINAL-SOURCE-INVENTORY.json.
 Binary files are indexed and included as real files in the repository.
 
@@ -718,4 +718,4 @@ def _execute(command,repo,out,timeout=900):
 
 
 def check_archive_code_trust(repo, archive):
-    """Native validators execute extracted 
+    """Native

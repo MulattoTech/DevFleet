@@ -1,147 +1,236 @@
 # DevFleet source part 049
 
 Full-source UTF-8 byte interval [2232000, 2278500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 5fc5173bd4b5bfe2ab7c482a3dce80d3d6e239615dc86b72afd37402f07720b1
+Payload SHA-256: 8fb4c0e3550db4e62a6f34edde1430add1525bc8e77a1948f3c9f58385de236f
 
 <!-- BEGIN SOURCE SLICE -->
-} }
-function Get-FileHash {
-    [CmdletBinding()]
-    param([string]$LiteralPath,[string]$Algorithm)
-    $hash=[Security.Cryptography.SHA256]::HashData([IO.File]::ReadAllBytes($LiteralPath))
-    [pscustomobject]@{Hash=([Convert]::ToHexString($hash))}
+'candidateBuildCommit' -and $standard -match 'shippingInputIdentity' -and $standard -match 'releaseFingerprintId' -and $standard -match 'toolingFingerprintId' -and $standard -match 'reportSha256' -and $standard -match 'runnerRelative'
+    standardAtomicCurrentPointer=$standard -match 'CURRENT-STANDARD-TOKEN\.json' -and $standard -match 'Write-AtomicJson'
+    noBuildOrSign=$standard -notmatch 'dotnet publish|Build-Release|Set-AuthenticodeSignature'
 }
-
-$tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('DevFleet-terminal-boundary-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
-try {
-    $script:fixture = @{vm=[pscustomobject]@{Name='DevFleet-E2E-Win11-01';Id=[guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2';State='Running'};l2Name='DevFleet-E2E-Linux-01';hostL2Queries=0;hostQueryDenied=$false;hostNotFoundNative=$false;hostNotFoundTarget=$null;hostL2Present=$false;startCalls=0;stopCalls=0;remoteCalls=0;nestedCalls=0}
-    $script:fixture.hostNotFoundNative=$true
-    $script:fixture.hostL2Queries=0
-    $hostAbsent=Get-DevFleetHostNameExclusion -Name $script:fixture.l2Name
-    Check 'exact Hyper-V missing-name signature means host exclusion only' ([string]$hostAbsent.status -ceq 'ABSENT' -and $hostAbsent.present -eq $false -and [string]$hostAbsent.inventoryScope -ceq 'host Hyper-V exact-name exclusion only' -and $script:fixture.hostL2Queries -eq 1) ("status=$($hostAbsent.status) scope=$($hostAbsent.inventoryScope)")
-    $script:fixture.hostQueryDenied=$true
-    $deniedClassificationRejected=$false
-    try { Get-DevFleetHostNameExclusion -Name $script:fixture.l2Name | Out-Null } catch { $deniedClassificationRejected=$true }
-    Check 'denied host inventory is not classified as absent' $deniedClassificationRejected "rejected=$deniedClassificationRejected"
-    $script:fixture.hostQueryDenied=$false;$script:fixture.hostNotFoundTarget='DevFleet-E2E-Foreign'
-    $wrongTargetRejected=$false
-    try { Get-DevFleetHostNameExclusion -Name $script:fixture.l2Name | Out-Null } catch { $wrongTargetRejected=$true }
-    Check 'missing-name signature with a different target is rejected' $wrongTargetRejected "rejected=$wrongTargetRejected"
-    $script:fixture.hostNotFoundTarget=$null
-    $script:fixture.hostQueryDenied=$false;$script:fixture.hostNotFoundNative=$false;$script:fixture.hostL2Present=$true
-    $hostPresent=Get-DevFleetHostNameExclusion -Name $script:fixture.l2Name
-    Check 'same-name host resource remains a distinct present conflict' ([string]$hostPresent.status -ceq 'PRESENT' -and $hostPresent.present -eq $true -and @($hostPresent.resources).Count -eq 1) ("status=$($hostPresent.status) rows=$(@($hostPresent.resources).Count)")
-    $script:fixture.hostL2Present=$false;$script:fixture.hostNotFoundNative=$false
-    $writerRun = Join-Path $tempRoot 'writer-run'; New-Item -ItemType Directory -Path $writerRun | Out-Null
-    $script:fixture.hostL2Queries=0
-    $writerOutput = @(Write-TerminalVmEvidence -Vm $script:fixture.vm -RunDir $writerRun -L2Name $script:fixture.l2Name)
-    $written = $writerOutput[-1]
-    Check 'terminal evidence writer does not infer nested absence from host lookup' ($null -eq $written.l2.present -and [string]$written.l2.status -eq 'UNVERIFIED' -and $script:fixture.hostL2Queries -eq 0) ("l2="+($written.l2|ConvertTo-Json -Compress -Depth 5)+" hostQueries=$($script:fixture.hostL2Queries)")
-
-    $candidateTuple=[pscustomobject]@{repositoryHead=('a'*40);gitCommit=('b'*40);candidateCommit=('b'*40);shippingInputIdentity=('c'*64);releaseFingerprintId=('d'*64);toolingFingerprintId=('e'*64)}
-    $writerFingerprint=[pscustomobject]@{repositoryHead=$candidateTuple.repositoryHead;gitCommit=$candidateTuple.candidateCommit;shippingInputIdentity=$candidateTuple.shippingInputIdentity;releaseFingerprintId=$candidateTuple.releaseFingerprintId;toolingFingerprintId=$candidateTuple.toolingFingerprintId}
-    $script:fixture.vm.State='Off'
-    $nestedWriterObservation=[pscustomobject]@{status='ABSENT';expectedName=$script:fixture.l2Name;present=$false;observedUtc='2026-09-24T00:00:01Z';verification='Bounded Multipass JSON inventory inside exact L1';exactMatchCount=0;inventoryCount=0;backendInventories=@()}
-    $writerValidRun=Join-Path $tempRoot 'writer-valid-run';New-Item -ItemType Directory -Path $writerValidRun|Out-Null
-    $writerValid=Write-TerminalVmEvidence -Vm $script:fixture.vm -RunDir $writerValidRun -L2Name $script:fixture.l2Name -RunId 'writer-valid-run' -NestedL2Observation $nestedWriterObservation -Candidate $writerFingerprint -EvidenceClass 'FullRelease run-bound nested observation'
-    Check 'terminal writer preserves complete nested observation and source hash' ([string]$writerValid.l2.status -ceq 'ABSENT' -and $writerValid.l2.present -eq $false -and (Test-Path -LiteralPath (Join-Path $writerValidRun 'nested-l2-terminal-observation.json')) -and -not [string]::IsNullOrWhiteSpace([string]$writerValid.l2.sourceEvidenceSha256)) ("status=$($writerValid.l2.status) runId=$($writerValid.l2.runId) sourceHash=$($writerValid.l2.sourceEvidenceSha256)")
-    $hostOnlyObservation=[pscustomobject]@{status='ABSENT';expectedName=$script:fixture.l2Name;present=$false;observedUtc='2026-09-24T00:00:01Z';verification='Get-VM -Name exact returned no VM';exactMatchCount=0;inventoryCount=0;backendInventories=@()}
-    $hostOnlyWriterRejected=$false;try{Write-TerminalVmEvidence -Vm $script:fixture.vm -RunDir (Join-Path $tempRoot 'writer-host-only') -L2Name $script:fixture.l2Name -RunId 'writer-host-only' -NestedL2Observation $hostOnlyObservation -Candidate $writerFingerprint -EvidenceClass 'FullRelease run-bound nested observation'|Out-Null}catch{$hostOnlyWriterRejected=$true}
-    Check 'terminal writer rejects host-only absence even when passed as nested input' $hostOnlyWriterRejected "rejected=$hostOnlyWriterRejected"
-
-    $script:fixture.vm.State='Running';$script:fixture.startCalls=0;$script:fixture.stopCalls=0;$script:fixture.remoteCalls=0;$script:fixture.nestedCalls=0
-    $cleanupRun = Join-Path $tempRoot 'cleanup-running'; New-Item -ItemType Directory -Path $cleanupRun | Out-Null
-    $cleanupBlocked=$false
-    $cleanupArgs=@{Vm=$script:fixture.vm;Config=([pscustomobject]@{NestedLinux=[pscustomobject]@{Name=$script:fixture.l2Name}});RunId='cleanup-running';RunDir=$cleanupRun}
-    if((Get-Command Invoke-FullReleaseCleanup).Parameters.ContainsKey('Fingerprint')){$cleanupArgs.Fingerprint=$candidateTuple}
-    try { Invoke-FullReleaseCleanup @cleanupArgs | Out-Null }
-    catch { $cleanupBlocked=$true;$cleanupError=$_.Exception.Message }
-    Check 'FullRelease cleanup rejects an unverified nested inventory' ($cleanupBlocked -and $script:fixture.nestedCalls -gt 0) ("blocked=$cleanupBlocked nestedCalls=$($script:fixture.nestedCalls) error=$cleanupError")
-
-    $script:fixture.vm.State='Off';$script:fixture.startCalls=0;$script:fixture.stopCalls=0;$script:fixture.nestedCalls=0
-    $offRun = Join-Path $tempRoot 'cleanup-off'; New-Item -ItemType Directory -Path $offRun | Out-Null
-    $offBlocked=$false
-    $offArgs=@{Vm=$script:fixture.vm;Config=([pscustomobject]@{NestedLinux=[pscustomobject]@{Name=$script:fixture.l2Name}});RunId='cleanup-off';RunDir=$offRun}
-    if((Get-Command Invoke-FullReleaseCleanup).Parameters.ContainsKey('Fingerprint')){$offArgs.Fingerprint=$candidateTuple}
-    try { Invoke-FullReleaseCleanup @offArgs | Out-Null }
-    catch { $offBlocked=$true;$offError=$_.Exception.Message }
-    Check 'FullRelease cleanup does not restart an already-Off L1 to refresh metadata' ($offBlocked -and $script:fixture.startCalls -eq 0) ("blocked=$offBlocked starts=$($script:fixture.startCalls) error=$offError")
-
-    $postRun = Join-Path $tempRoot 'audit/automation-harness/runs/post-run'; New-Item -ItemType Directory -Path $postRun -Force | Out-Null
-    $cleanup = [ordered]@{status='PASS';runId='post-run';candidate=$candidateTuple;l1=[ordered]@{name='DevFleet-E2E-Win11-01';id='84b7d8b8-ee6c-4085-aa29-4b0adc316de2';state='Off';deleted=$false};guest=[ordered]@{runRootAbsent=$true;nestedAbsent=$true;foreignResourcesMutated=$false}}
-    $l1 = [ordered]@{name='DevFleet-E2E-Win11-01';id='84b7d8b8-ee6c-4085-aa29-4b0adc316de2';state='Off';timestampUtc='2026-09-24T00:00:02Z';runId='post-run';ownershipScope='exact disposable'}
-    $nested=[ordered]@{schemaVersion=1;runId='post-run';status='ABSENT';expectedName=$script:fixture.l2Name;present=$false;observedUtc='2026-09-24T00:00:01Z';verification='Bounded Multipass JSON inventory inside exact L1';exactMatchCount=0;inventoryCount=0;backendInventories=@();candidate=$candidateTuple;l1=[ordered]@{name='DevFleet-E2E-Win11-01';id='84b7d8b8-ee6c-4085-aa29-4b0adc316de2'};nestedScope='inside the exact L1 guest session';observer='Get-DevFleetNestedL2State';evidenceClass='FullRelease run-bound nested observation'}
-    $nestedPath=Join-Path $postRun 'nested-l2-terminal-observation.json';Write-EvidenceJson -Path $nestedPath -Value $nested;$nestedHash=(Get-FileHash -LiteralPath $nestedPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $l2=[ordered]@{schemaVersion=2;expectedName=$script:fixture.l2Name;status='ABSENT';present=$false;timestampUtc=$nested.observedUtc;verificationMethod=$nested.verification;nestedScope=$nested.nestedScope;backendInventories=@();runId='post-run';sourceRunId='post-run';sourceEvidence='nested-l2-terminal-observation.json';sourceEvidenceSha256=$nestedHash;l1Name='DevFleet-E2E-Win11-01';l1Id='84b7d8b8-ee6c-4085-aa29-4b0adc316de2';candidate=$candidateTuple;evidenceClass='FullRelease run-bound nested observation'}
-    Write-EvidenceJson -Path (Join-Path $postRun 'final-cleanup.json') -Value $cleanup
-    Write-EvidenceJson -Path (Join-Path $postRun 'l1-terminal-state.json') -Value $l1
-    $l2Path=Join-Path $postRun 'l2-terminal-state.json'
-    $hostOnlyNested=[ordered]@{schemaVersion=1;runId='post-run';status='ABSENT';expectedName=$script:fixture.l2Name;present=$false;observedUtc='2026-09-24T00:00:01Z';verification='Get-VM -Name exact returned no VM';exactMatchCount=0;inventoryCount=0;backendInventories=@();candidate=$candidateTuple;l1=[ordered]@{name='DevFleet-E2E-Win11-01';id='84b7d8b8-ee6c-4085-aa29-4b0adc316de2'};nestedScope='inside the exact L1 guest session';observer='Get-DevFleetNestedL2State';evidenceClass='FullRelease run-bound nested observation'}
-    Write-EvidenceJson -Path $nestedPath -Value $hostOnlyNested;$hostOnlyHash=(Get-FileHash -LiteralPath $nestedPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $hostOnlyL2=[ordered]@{};foreach($key in $l2.Keys){$hostOnlyL2[$key]=$l2[$key]};$hostOnlyL2.verificationMethod=$hostOnlyNested.verification;$hostOnlyL2.sourceEvidenceSha256=$hostOnlyHash
-    Write-EvidenceJson -Path $l2Path -Value $hostOnlyL2
-    $script:fixture.hostL2Queries=0;$script:fixture.hostL2Present=$false;$script:fixture.hostQueryDenied=$false
-    $postRejected=$false
-    $postState=[pscustomobject]@{runId='post-run';candidateHashes=$candidateTuple}
-    $postArgs=@{State=$postState;Vm=([pscustomobject]@{Name=$l1.name;Id=[guid]$l1.id;State='Off'});Config=([pscustomobject]@{NestedLinux=[pscustomobject]@{Name=$script:fixture.l2Name}});RunDir=$postRun;Records=@([pscustomobject]@{id='CLEANUP';status='PASS';evidence=@{status='PASS'}})}
-    if((Get-Command Write-PostCleanupFinalization).Parameters.ContainsKey('WorkspaceRoot')){$postArgs.WorkspaceRoot=$tempRoot}
-    try { Write-PostCleanupFinalization @postArgs | Out-Null }
-    catch { $postRejected=$true;$postError=$_.Exception.Message }
-    Check 'post-cleanup finalizer rejects host-only L2 absence evidence' ($postRejected -and $postError -match 'unsupported inventory method' -and $script:fixture.hostL2Queries -eq 0) ("rejected=$postRejected hostQueries=$($script:fixture.hostL2Queries) error=$postError")
-
-    Write-EvidenceJson -Path $nestedPath -Value $nested;$validNestedHash=(Get-FileHash -LiteralPath $nestedPath -Algorithm SHA256).Hash.ToLowerInvariant();$l2.sourceEvidenceSha256=$validNestedHash
-    Write-EvidenceJson -Path $l2Path -Value $l2
-    $script:fixture.hostL2Queries=0;$script:fixture.hostQueryDenied=$true
-    $hostDeniedRejected=$false
-    try { Write-PostCleanupFinalization @postArgs | Out-Null }
-    catch { $hostDeniedRejected=$true;$hostDeniedError=$_.Exception.Message }
-    Check 'post-cleanup host conflict check fails closed on access denial' ($hostDeniedRejected -and $script:fixture.hostL2Queries -eq 1) ("rejected=$hostDeniedRejected hostQueries=$($script:fixture.hostL2Queries) error=$hostDeniedError")
-
-    $script:fixture.hostL2Queries=0;$script:fixture.hostQueryDenied=$false;$script:fixture.hostNotFoundNative=$true
-    $hostAbsentPost=$null;$hostAbsentPostError=$null
-    try { $hostAbsentPost=Write-PostCleanupFinalization @postArgs } catch { $hostAbsentPostError=$_.Exception.Message }
-    Check 'post-cleanup accepts exact host absence while retaining nested proof requirement' ($hostAbsentPost -and [string]$hostAbsentPost.status -ceq 'PASS' -and $hostAbsentPost.liveChecks.hostSameNameL2Absent -eq $true -and $hostAbsentPost.liveChecks.l2ExactAbsent -eq $true -and $script:fixture.hostL2Queries -eq 1) ("status=$($hostAbsentPost.status) hostQueries=$($script:fixture.hostL2Queries) error=$hostAbsentPostError")
-
-    $script:fixture.hostL2Queries=0;$script:fixture.hostNotFoundNative=$false;$script:fixture.hostL2Present=$true
-    $hostConflictPostRejected=$false
-    try { Write-PostCleanupFinalization @postArgs | Out-Null } catch { $hostConflictPostRejected=$true }
-    Check 'post-cleanup preserves same-name host resource and blocks promotion' ($hostConflictPostRejected -and $script:fixture.hostL2Queries -eq 1) "rejected=$hostConflictPostRejected"
-
-    $script:fixture.hostL2Queries=0;$script:fixture.hostL2Present=$false;$script:fixture.hostNotFoundNative=$true;$script:fixture.hostQueryDenied=$false
-    $nested.verification='Multipass CLI absent; complete read-only inventories from every supported in-L1 virtualization backend'
-    $nested.inventoryCount=2
-    $nested.backendInventories=@([ordered]@{provider='Hyper-V';status='PASS';names=@('foreign-instance','foreign-instance');verification='bounded Hyper-V inventory'},[ordered]@{provider='VirtualBox';status='PASS';names=@();verification='bounded VirtualBox inventory'})
-    Write-EvidenceJson -Path $nestedPath -Value $nested;$nestedHash=(Get-FileHash -LiteralPath $nestedPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $l2.verificationMethod=$nested.verification;$l2.backendInventories=$nested.backendInventories;$l2.sourceEvidenceSha256=$nestedHash
-    Write-EvidenceJson -Path $l2Path -Value $l2
-    $malformedBackendPostRejected=$false
-    try { Write-PostCleanupFinalization @postArgs | Out-Null } catch { $malformedBackendPostRejected=$true;$malformedBackendPostError=$_.Exception.Message }
-    Check 'post-cleanup consumer rejects duplicate nested backend instance names' ($malformedBackendPostRejected -and $malformedBackendPostError -match 'duplicate instance name') "rejected=$malformedBackendPostRejected error=$malformedBackendPostError"
-
-    $nested.verification='Bounded Multipass JSON inventory inside exact L1';$nested.inventoryCount=0;$nested.backendInventories=@();$nested.candidate=[ordered]@{}
-    $l2.verificationMethod=$nested.verification;$l2.backendInventories=@();$l2.candidate=[ordered]@{}
-    $cleanup.candidate=[ordered]@{};$postArgs.State.candidateHashes=[ordered]@{}
-    Write-EvidenceJson -Path $nestedPath -Value $nested;$nestedHash=(Get-FileHash -LiteralPath $nestedPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $l2.sourceEvidenceSha256=$nestedHash;Write-EvidenceJson -Path $l2Path -Value $l2
-    Write-EvidenceJson -Path (Join-Path $postRun 'final-cleanup.json') -Value $cleanup
-    $emptyTuplePostRejected=$false
-    try { Write-PostCleanupFinalization @postArgs | Out-Null } catch { $emptyTuplePostRejected=$true;$emptyTuplePostError=$_.Exception.Message }
-    Check 'post-cleanup consumer rejects a missing candidate tuple' ($emptyTuplePostRejected -and $emptyTuplePostError -match 'candidate tuple is malformed or incomplete') "rejected=$emptyTuplePostRejected error=$emptyTuplePostError"
-} finally {
-    if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }
-}
-
-$failed = @($checks | Where-Object { -not $_.pass })
-[ordered]@{scope='VM_FREE_PRODUCTION_TERMINAL_BOUNDARY_REGRESSION';certificationCredit=$false;status=if($failed.Count){'FAIL'}else{'PASS'};passed=$checks.Count-$failed.Count;total=$checks.Count;checks=@($checks);productionSources=@('Cleanup.psm1::Write-TerminalVmEvidence','Cleanup.psm1::Get-DevFleetHostNameExclusion','FullRelease.psm1::Invoke-FullReleaseCleanup','FullRelease.psm1::Write-PostCleanupFinalization')} | ConvertTo-Json -Depth 8
-if ($failed.Count) { exit 1 }
+$failed=@($checks.GetEnumerator()|Where-Object{-not[bool]$_.Value});$result=[ordered]@{status=if($failed.Count){'FAIL'}else{'PASS'};passed=($checks.Count-$failed.Count);total=$checks.Count;checks=$checks}
+$result|ConvertTo-Json -Depth 8;if($failed.Count){throw "Standard-token candidate evidence contract failed: $(@($failed.Name)-join ',')"}
 
 ```
 
 
-## FILE: automation/release-e2e/tests/Test-ToolRuntimeResolution.ps1
+## FILE: automation/release-e2e/tests/Test-TailscaleBrowserPairingObservability.ps1
 
-SHA256: e5829ce5758969d6a5251f41f3c2005181b4955e438e18cef868229f0e9f0ed5 | Bytes: 902 | Git mode: 100644
+SHA256: 924883c14680e33733106aac103ad9e612cf159ab004e6635261d3626a612bb9 | Bytes: 7442 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param(
+    [string]$WorkspaceRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+)
+
+$ErrorActionPreference = 'Stop'
+$windowsRoot = Join-Path $WorkspaceRoot 'source/windows'
+Import-Module (Join-Path $windowsRoot 'DevFleet.Tailscale.psm1') -Force -DisableNameChecking
+$module = Get-Module DevFleet.Tailscale
+$checks = [Collections.Generic.List[object]]::new()
+
+function Check([string]$Name, [bool]$Pass) {
+    $checks.Add([pscustomobject]@{ name = $Name; pass = $Pass })
+}
+
+function Read-Events([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return @() }
+    return @(Get-Content -LiteralPath $Path | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+}
+
+function Invoke-FixtureCase([string]$Case) {
+    $root = Join-Path ([IO.Path]::GetTempPath()) ('DevFleet-Tailscale-Observability-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    $eventPath = Join-Path $root 'pairing-events.log'
+    try {
+        $record = & $module {
+            param($FixtureCase, $FixtureEventPath)
+            $script:PairingFixtureCase = $FixtureCase
+            $script:PairingFixtureOpened = 0
+            $script:PairingFixtureStatusCalls = 0
+
+            function script:Get-DevFleetDeadlineContext { return $null }
+            function script:Start-Sleep { param($Milliseconds) }
+            function script:Open-DevFleetTailscaleAuthenticationPage {
+                param($Uri)
+                $script:PairingFixtureOpened++
+                if ($script:PairingFixtureCase -eq 'launch-failure') { throw 'fixture browser launch failure' }
+                [pscustomobject]@{ apiAccepted = $true; processId = 4242; processSessionId = 1 }
+            }
+            function script:Invoke-External {
+                param($FilePath, $ArgumentList, [switch]$Capture, [switch]$IgnoreExitCode, $TimeoutSeconds, $DeadlineUtc)
+                if (-not $Capture -or -not $IgnoreExitCode -or $TimeoutSeconds -le 0) { throw 'fixture lost bounded capture contract' }
+                if ($ArgumentList -contains 'up') {
+                    if ($script:PairingFixtureCase -eq 'no-uri') { return 'https://evil.example/a/fake' }
+                    return 'To authenticate, visit: https://login.tailscale.com/a/fixture123'
+                }
+                if ($ArgumentList -notcontains '--json') { throw 'fixture lost status JSON contract' }
+                $script:PairingFixtureStatusCalls++
+                if ($script:PairingFixtureCase -eq 'poll-command-failure' -and $script:PairingFixtureOpened -gt 0) { throw 'fixture status command timeout' }
+                $connected = $script:PairingFixtureCase -eq 'already-connected' -or
+                    ($script:PairingFixtureCase -eq 'auth-after-launch' -and $script:PairingFixtureOpened -gt 0)
+                return (@{
+                        BackendState = if ($connected) { 'Running' } else { 'NeedsLogin' }
+                        TailscaleIPs = if ($connected) { @('100.64.1.2') } else { @() }
+                        Self = if ($connected) { @{ HostName = 'devfleet-fixture' } } else { $null }
+                    } | ConvertTo-Json -Compress)
+            }
+
+            $deadline = if ($FixtureCase -eq 'deadline-before-command') { [datetime]::UtcNow.AddSeconds(-1) } else { [datetime]::UtcNow.AddSeconds(60) }
+            $result = $null
+            $failed = $false
+            $errorText = ''
+            try {
+                $result = Invoke-DevFleetTailscaleBrowserPairing `
+                    -FilePath 'tailscale-fixture.exe' `
+                    -Hostname 'devfleet-fixture' `
+                    -DeadlineUtc $deadline `
+                    -EvidencePath $FixtureEventPath `
+                    -RunId 'fixture-run-observability' `
+                    -TransactionId ('a' * 32) `
+                    -PayloadSha256 ('b' * 64) `
+                    -StageName 'windows-tailscale' `
+                    -TargetRole 'Host'
+            } catch {
+                $failed = $true
+                $errorText = $_.Exception.Message
+            }
+            [pscustomobject]@{
+                result = $result
+                failed = $failed
+                error = $errorText
+                opened = $script:PairingFixtureOpened
+                statusCalls = $script:PairingFixtureStatusCalls
+            }
+        } $Case $eventPath
+        [pscustomobject]@{ case = $Case; record = $record; events = @(Read-Events $eventPath); raw = if (Test-Path -LiteralPath $eventPath) { Get-Content -Raw -LiteralPath $eventPath } else { '' } }
+    } finally {
+        if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
+    }
+}
+
+foreach ($case in @('already-connected', 'auth-after-launch', 'launch-failure', 'no-uri', 'poll-command-failure', 'deadline-before-command')) {
+    $value = Invoke-FixtureCase $case
+    $events = @($value.events)
+    Check "$case writes sanitized event evidence" ($events.Count -gt 0)
+    Check "$case event evidence has no URL or fixture token" ($value.raw -notmatch 'https?://|login\.tailscale\.com|fixture123')
+    Check "$case event evidence binds transaction and target" (@($events | Where-Object { $_.transactionId -eq ('a' * 32) -and $_.requestedHostname -eq 'devfleet-fixture' -and $_.stage -eq 'windows-tailscale' }).Count -gt 0)
+    switch ($case) {
+        'already-connected' {
+            Check "$case records authenticated state" (@($events | Where-Object eventClass -eq 'PAIRING_AUTHENTICATED').Count -gt 0 -and -not $value.record.failed)
+        }
+        'auth-after-launch' {
+            Check "$case records accepted browser launch and authentication" (@($events | Where-Object eventClass -eq 'BROWSER_LAUNCH_ACCEPTED').Count -gt 0 -and @($events | Where-Object eventClass -eq 'PAIRING_AUTHENTICATED').Count -gt 0 -and -not $value.record.failed)
+        }
+        'launch-failure' {
+            Check "$case records browser launch failure" (@($events | Where-Object { $_.eventClass -eq 'BROWSER_LAUNCH_FAILED' -and $_.failureClass -eq 'BROWSER_LAUNCH_API_FAILED' }).Count -gt 0 -and $value.record.failed)
+        }
+        'no-uri' {
+            Check "$case records missing official URI" (@($events | Where-Object { $_.eventClass -eq 'PAIRING_FAILED' -and $_.failureClass -eq 'NO_VALID_OFFICIAL_URI' }).Count -gt 0 -and $value.record.failed)
+        }
+        'poll-command-failure' {
+            Check "$case records wait and poll command failure" (@($events | Where-Object eventClass -eq 'PAIRING_WAIT_ENTERED').Count -gt 0 -and @($events | Where-Object eventClass -eq 'COMMAND_FAILED').Count -gt 0 -and $value.record.failed)
+        }
+        'deadline-before-command' {
+            Check "$case records owner deadline before command" (@($events | Where-Object eventClass -eq 'COMMAND_BLOCKED_DEADLINE').Count -gt 0 -and $value.record.failed)
+        }
+    }
+}
+
+$result = [ordered]@{
+    status = if (@($checks | Where-Object { -not $_.pass }).Count) { 'FAIL' } else { 'PASS' }
+    scope = 'LOCAL_PRODUCTION_TAILSCALE_PAIRING_BOUNDARY_WITH_SANITIZED_EVENT_FIXTURES'
+    passed = @($checks | Where-Object pass).Count
+    total = $checks.Count
+    checks = @($checks)
+}
+$result | ConvertTo-Json -Depth 8
+if ($result.status -ne 'PASS') { exit 1 }
+Write-Host "PASS $($result.passed)/$($result.total) Tailscale pairing observability checks; no browser, network, VM or auth-store operations performed."
+
+```
+
+
+## FILE: automation/release-e2e/tests/Test-TailscaleModuleVisibility.ps1
+
+SHA256: 74d6de4ffae1b588cff231731ed5797d3aa50e715f2ff869d4d5d4d839e80ccb | Bytes: 4845 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param(
+    [string]$WindowsRoot = (Join-Path $PSScriptRoot '../../../source/windows'),
+    [Parameter(Mandatory)][string]$ReportPath
+)
+$ErrorActionPreference = 'Stop'
+$WindowsRoot = (Resolve-Path -LiteralPath $WindowsRoot).Path
+if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'The installed caller requires PowerShell 7.' }
+$results = [Collections.Generic.List[object]]::new()
+function Check([string]$Name, [bool]$Pass) {
+    $results.Add([pscustomobject]@{name=$Name;pass=$Pass})
+}
+
+# This is the actual dependency import order used by both shipping pairing scripts.
+Import-Module (Join-Path $WindowsRoot 'DevFleet.Common.psm1') -Force -DisableNameChecking
+$adminBefore = Get-Command Assert-Administrator -ErrorAction Stop
+$commonExports = @((Get-Module DevFleet.Common).ExportedFunctions.Keys)
+Import-Module (Join-Path $WindowsRoot 'DevFleet.Tailscale.psm1') -Force -DisableNameChecking
+$adminAfter = Get-Command Assert-Administrator -ErrorAction SilentlyContinue
+$pairingModule = Get-Module DevFleet.Tailscale
+$nestedAdmin = & $pairingModule { Get-Command Assert-Administrator -ErrorAction SilentlyContinue }
+Check 'Common administrator guard is visible before dependency import' ($null -ne $adminBefore)
+Check 'Dependency import preserves caller administrator guard' ($null -ne $adminAfter)
+Check 'Dependency retains its own Common command visibility' ($null -ne $nestedAdmin)
+$expectedExports=@('Invoke-DevFleetTailscaleBrowserPairing','Invoke-DevFleetTailscaleOAuthPairing','Get-DevFleetTailscaleReadiness','Get-DevFleetTailscaleEnrollmentProfile','Get-DevFleetTailscaleOAuthSecretPath','Set-DevFleetTailscaleOAuthClientSecret')
+$actualExports=@($pairingModule.ExportedFunctions.Keys)
+Check 'Tailscale exports only the reviewed public pairing/readiness/credential entrypoints' ($actualExports.Count -eq $expectedExports.Count -and @($expectedExports|Where-Object{$actualExports -notcontains $_}).Count -eq 0 -and @($actualExports|Where-Object{$expectedExports -notcontains $_}).Count -eq 0)
+$missingExports = @($commonExports | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) })
+Check 'All normal caller Common exports remain visible' ($missingExports.Count -eq 0)
+
+# Invoke the actual shipping script. The real administrator check runs unchanged;
+# a caller-scope mock stops execution at the first external service boundary.
+# No service, Tailscale CLI, browser, credential store or VM operation may run.
+function Get-Service { throw 'LOCAL_FIXTURE_SERVICE_BOUNDARY_AFTER_REAL_ADMIN_GUARD' }
+$scriptError = ''
+try { & (Join-Path $WindowsRoot '04a-Connect-WindowsTailscale.ps1') }
+catch { $scriptError = $_.Exception.Message }
+Check 'Production Windows pairing script reaches external boundary after real guard' ($scriptError -eq 'LOCAL_FIXTURE_SERVICE_BOUNDARY_AFTER_REAL_ADMIN_GUARD')
+Check 'Nested pairing caller can still resolve its Common helpers' ([bool](Get-Command Get-MultipassExe -ErrorAction SilentlyContinue) -and [bool](Get-Command Get-DevFleetStageBudgetSeconds -ErrorAction SilentlyContinue))
+
+# Repeated stage imports are part of the same durable installer process.
+Import-Module (Join-Path $WindowsRoot 'DevFleet.Common.psm1') -Force -DisableNameChecking
+Import-Module (Join-Path $WindowsRoot 'DevFleet.Tailscale.psm1') -Force -DisableNameChecking
+Check 'Repeated production import order preserves caller guard' ([bool](Get-Command Assert-Administrator -ErrorAction SilentlyContinue))
+$privateHelpers = & (Get-Module DevFleet.Tailscale) {
+    [bool](Get-Command Get-DevFleetDeadlineContext -ErrorAction SilentlyContinue) -and
+    [bool](Get-Command Invoke-External -ErrorAction SilentlyContinue)
+}
+Check 'Repeated dependency load preserves internal deadline and process helpers' ([bool]$privateHelpers)
+
+$report = [ordered]@{
+    status = if (@($results | Where-Object { -not $_.pass }).Count) {'FAIL'} else {'PASS'}
+    runtime = $PSVersionTable.PSVersion.ToString()
+    scope = 'LOCAL_PRODUCTION_IMPORT_AND_SCRIPT_EXTERNAL_BOUNDARY_NO_RUNTIME_PROOF'
+    actualScriptError = $scriptError
+    callerCommonExportCount = $commonExports.Count
+    missingCallerExports = $missingExports
+    inputHashes = @(foreach ($name in @('DevFleet.Common.psm1','DevFleet.Tailscale.psm1','04a-Connect-WindowsTailscale.ps1')) {
+        [ordered]@{name=$name;sha256=(Get-FileHash -LiteralPath (Join-Path $WindowsRoot $name) -Algorithm SHA256).Hash.ToLowerInvariant()}
+    })
+    results = @($results)
+    passed = @($results | Where-Object pass).Count
+    total = $results.Count
+}
+$report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $ReportPath -Encoding utf8
+[pscustomobject]@{status=$report.status;passed=$report.passed;total=$report.total;actualScriptError=$scriptError;missingCallerExportCount=$missingExports.Count} | ConvertTo-Json -Compress
+if ($report.status -ne 'PASS') { exit 1 }
+
+```
+
+
+## FILE: automation/release-e2e/tests/Test-TailscaleOAuthAutomation.ps1
+
+SHA256: 75c28c6c435b49db4f2d0703fac36f50d71af8766a7822d7a502db5d02dc3a29 | Bytes: 32684 | Git mode: 100644
 
 ```
 [CmdletBinding()]
@@ -149,324 +238,447 @@ param([string]$WorkspaceRoot)
 
 $ErrorActionPreference = 'Stop'
 if (-not $WorkspaceRoot) { $WorkspaceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path }
-Import-Module (Join-Path $WorkspaceRoot 'tools\PythonRuntime.psm1') -Force
-$python = Resolve-DevFleetPython -Workspace $WorkspaceRoot
-$version = @(& $python --version 2>&1)
-$insideWorkspace = [IO.Path]::GetFullPath($python).StartsWith(([IO.Path]::GetFullPath($WorkspaceRoot) + [IO.Path]::DirectorySeparatorChar),[StringComparison]::OrdinalIgnoreCase)
-$status = if($LASTEXITCODE -eq 0 -and ($version -join ' ') -match '^Python 3\.' -and (Test-Path -LiteralPath $python -PathType Leaf) -and $insideWorkspace){'PASS'}else{'FAIL'}
-[pscustomobject]@{status=$status;runtime=[IO.Path]::GetFileName($python);version=($version -join ' ');repositoryLocal=$insideWorkspace}|ConvertTo-Json -Depth 4
-if($status -ne 'PASS'){exit 1}
 
-```
-
-
-## FILE: automation/release-e2e/tests/Test-WpfLaunchBoundaryBehavior.ps1
-
-SHA256: 77560263503899607a2157a4905704dcaf7713095af2887ca7358cecf5f44e9a | Bytes: 41033 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([string]$WorkspaceRoot)
-
-$ErrorActionPreference = 'Stop'
-if (-not $WorkspaceRoot) { $WorkspaceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path }
-
-$modulePath = Join-Path $WorkspaceRoot 'automation\release-e2e\modules\executors\WpfLaunchContract.psm1'
-$driverPath = Join-Path $WorkspaceRoot 'automation\release-e2e\modules\executors\Invoke-WpfUiAutomation.ps1'
+$sourceModule = Join-Path $WorkspaceRoot 'source\windows\DevFleet.Tailscale.psm1'
+$e2eModule = Join-Path $WorkspaceRoot 'automation\release-e2e\modules\TailscaleE2E.psm1'
 $passed = 0
 $failures = [System.Collections.Generic.List[string]]::new()
-$scratch = Join-Path ([IO.Path]::GetTempPath()) ("devfleet-wpf-boundary-test-{0}" -f [guid]::NewGuid().ToString('N'))
+$caseCount = 0
+$scratch = Join-Path ([IO.Path]::GetTempPath()) ('devfleet-tailscale-oauth-test-' + [guid]::NewGuid().ToString('N'))
 
 function Check([bool]$Condition, [string]$Name) {
     if ($Condition) { $script:passed++ } else { [void]$script:failures.Add($Name) }
 }
 
+function New-FixtureStatusJson {
+    param(
+        [string]$BackendState = 'Running',
+        [string]$HostName = 'fixture-node',
+        [bool]$Online = $true,
+        [string[]]$Ips = @('100.64.1.2'),
+        [string[]]$Health = @()
+    )
+    [ordered]@{
+        BackendState = $BackendState
+        Self = [ordered]@{ HostName = $HostName; Online = $Online }
+        TailscaleIPs = @($Ips)
+        Health = @($Health)
+    } | ConvertTo-Json -Depth 5 -Compress
+}
+
+function New-FixturePreferencesJson {
+    param([string[]]$Tags = @('tag:devfleet-e2e'))
+    [ordered]@{ AdvertiseTags = @($Tags) } | ConvertTo-Json -Depth 3 -Compress
+}
+
+function New-FixtureCommandInvoker {
+    param([Parameter(Mandatory)][hashtable]$State)
+    $statusJsonBuilder = ${function:New-FixtureStatusJson}.GetNewClosure()
+    $preferencesJsonBuilder = ${function:New-FixturePreferencesJson}.GetNewClosure()
+    $invoker = {
+        param([string[]]$Arguments)
+        $command = [string]$Arguments[0]
+        [void]$State.commandArguments.Add(($Arguments -join ' '))
+        switch ($command) {
+            'status' {
+                $State.statusCalls = [int]$State.statusCalls + 1
+                $afterAuth = [int]$State.authCalls -gt 0
+                $backend = if ($afterAuth) { [string]$State.finalBackend } else { [string]$State.initialBackend }
+                $hostName = if ($afterAuth) { [string]$State.finalHostName } else { [string]$State.initialHostName }
+                $online = if ($afterAuth) { [bool]$State.finalOnline } else { [bool]$State.initialOnline }
+                $ips = if ($afterAuth) { @($State.finalIps) } else { @($State.initialIps) }
+                $health = if ($afterAuth) { @($State.finalHealth) } else { @($State.initialHealth) }
+                return [pscustomobject]@{ exitCode = [int]$State.statusExitCode; output = & $statusJsonBuilder -BackendState $backend -HostName $hostName -Online:$online -Ips $ips -Health $health }
+            }
+            'debug' {
+                $afterAuth = [int]$State.authCalls -gt 0
+                $tags = if ($afterAuth) { @($State.finalTags) } else { @($State.initialTags) }
+                return [pscustomobject]@{ exitCode = [int]$State.preferencesExitCode; output = & $preferencesJsonBuilder -Tags $tags }
+            }
+            'up' {
+                $State.authCalls = [int]$State.authCalls + 1
+                if ($State.pendingRebootOnAuth) { $State.pendingReboot = $true }
+                return [pscustomobject]@{ exitCode = [int]$State.upExitCode; output = [string]$State.upOutput }
+            }
+            'ping' {
+                $State.peerCalls = [int]$State.peerCalls + 1
+                if ([int]$State.peerFailuresBeforeSuccess -ge 0 -and [int]$State.peerCalls -gt [int]$State.peerFailuresBeforeSuccess) {
+                    return [pscustomobject]@{ exitCode = 0; output = 'pong' }
+                }
+                return [pscustomobject]@{ exitCode = [int]$State.peerExitCode; output = [string]$State.peerOutput }
+            }
+            default {
+                return [pscustomobject]@{ exitCode = 0; output = '' }
+            }
+        }
+    }.GetNewClosure()
+    $invoker
+}
+
+function Invoke-ProductionFixture {
+    param(
+        [string]$InitialBackend = 'Running',
+        [string]$FinalBackend = 'Running',
+        [string]$InitialHostName = 'fixture-node',
+        [string]$FinalHostName = 'fixture-node',
+        [bool]$InitialOnline = $true,
+        [bool]$FinalOnline = $true,
+        [string[]]$InitialIps = @('100.64.1.2'),
+        [string[]]$FinalIps = @('100.64.1.2'),
+        [string[]]$InitialHealth = @(),
+        [string[]]$FinalHealth = @(),
+        [string[]]$InitialTags = @('tag:devfleet-e2e'),
+        [string[]]$FinalTags = @('tag:devfleet-e2e'),
+        [string]$EnrollmentGuestHostname = '',
+        [string]$ExpectedPeer = '',
+        [int]$ServicePort = 0,
+        [string]$OptionsError = '',
+        [string]$EvidencePath = '',
+        [string]$LockStatus = 'DISABLED',
+        [int]$UpExitCode = 0,
+        [string]$UpOutput = '',
+        [int]$PeerExitCode = 0,
+        [string]$PeerOutput = '',
+        [int]$PeerFailuresBeforeSuccess = -1,
+        [int]$EndpointExitCode = 0,
+        [int]$StatusExitCode = 0,
+        [int]$PreferencesExitCode = 0,
+        [bool]$Stopped = $false,
+        [switch]$PendingRebootOnAuth
+    )
+    $state = @{
+        initialBackend = $InitialBackend; finalBackend = $FinalBackend
+        initialHostName = $InitialHostName; finalHostName = $FinalHostName
+        initialOnline = $InitialOnline; finalOnline = $FinalOnline
+        initialIps = @($InitialIps); finalIps = @($FinalIps)
+        initialHealth = @($InitialHealth); finalHealth = @($FinalHealth)
+        initialTags = @($InitialTags); finalTags = @($FinalTags)
+        optionsError = $OptionsError; lockStatus = $LockStatus; stopped = $Stopped
+        upExitCode = $UpExitCode; upOutput = $UpOutput
+        peerExitCode = $PeerExitCode; peerOutput = $PeerOutput; peerFailuresBeforeSuccess = $PeerFailuresBeforeSuccess
+        endpointExitCode = $EndpointExitCode; statusExitCode = $StatusExitCode; preferencesExitCode = $PreferencesExitCode
+        pendingRebootOnAuth = [bool]$PendingRebootOnAuth; pendingReboot = $false; pendingRebootChecks = 0
+        statusCalls = 0; authCalls = 0; startCalls = 0; endpointCalls = 0; peerCalls = 0
+        commandArguments = [System.Collections.Generic.List[string]]::new()
+    }
+    $guestHostnames = @{}
+    if ($EnrollmentGuestHostname) { $guestHostnames['fixture-guest'] = $EnrollmentGuestHostname }
+    $profile = [pscustomobject]@{ mode = 'e2e'; tag = 'tag:devfleet-e2e'; ephemeral = $true; preauthorized = $true; guestHostnames = $guestHostnames }
+    $optionsProvider = {
+        param([string]$RequestedHostname, [string]$InstanceName, [string]$TargetRole)
+        if ([string]$State.optionsError) { throw [string]$State.optionsError }
+        [pscustomobject]@{
+            mode = 'e2e'; tag = 'tag:devfleet-e2e'; ephemeral = $true; preauthorized = $true
+            hostname = $RequestedHostname; targetRole = $TargetRole; instanceName = $InstanceName
+            secret = 'fixture-oauth-client-secret'; credentialSource = 'fixture-only'
+        }
+    }.GetNewClosure()
+    $lockProvider = {
+        [pscustomobject]@{ status = [string]$State.lockStatus; observed = $true; enabled = ([string]$State.lockStatus -ceq 'ENABLED') }
+    }.GetNewClosure()
+    $serviceProvider = {
+        if ([bool]$State.stopped) { 'Stopped' } else { 'Running' }
+    }.GetNewClosure()
+    $startProvider = {
+        $State.startCalls = [int]$State.startCalls + 1
+    }.GetNewClosure()
+    $pendingRebootProvider = {
+        $State.pendingRebootChecks = [int]$State.pendingRebootChecks + 1
+        [bool]$State.pendingReboot
+    }.GetNewClosure()
+    $endpointInvoker = {
+        param([string]$Target, [int]$Port, [string]$Path)
+        $State.endpointCalls = [int]$State.endpointCalls + 1
+        [pscustomobject]@{ exitCode = [int]$State.endpointExitCode; output = '' }
+    }.GetNewClosure()
+    $result = $null
+    $errorText = ''
+    try {
+        $pairingParameters = @{
+            FilePath = 'fixture-tailscale.exe'; InstanceName = 'fixture-guest'; Hostname = 'fixture-node'
+            DeadlineUtc = [datetime]::UtcNow.AddSeconds(30); EvidencePath = $EvidencePath; RunId = 'oauth-automation-fixture'
+            StageName = 'TAILSCALE-AUTH'; TargetRole = 'Fixture'; ExpectedPeer = $ExpectedPeer
+            ServicePort = $ServicePort; ServicePath = '/healthz'
+            CommandInvoker = (New-FixtureCommandInvoker -State $state)
+            EndpointInvoker = $endpointInvoker; EnrollmentProfileProvider = { $profile }
+            EnrollmentOptionsProvider = $optionsProvider; TailnetLockProvider = $lockProvider
+            ServiceStateProvider = $serviceProvider; ServiceStartProvider = $startProvider
+        }
+        if ($PendingRebootOnAuth) { $pairingParameters.PendingRebootProvider = $pendingRebootProvider }
+        $result = Invoke-DevFleetTailscaleOAuthPairing @pairingParameters
+    } catch { $errorText = [string]$_.Exception.Message }
+    [pscustomobject]@{ result = $result; error = $errorText; state = $state }
+}
+
 try {
     New-Item -ItemType Directory -Path $scratch -Force | Out-Null
-    Import-Module $modulePath -Force
+    Import-Module $sourceModule -Force
+    Import-Module $e2eModule -Force
 
-    $driverTokens = $null
-    $driverParseErrors = $null
-    $driverAst = [System.Management.Automation.Language.Parser]::ParseFile(
-        (Resolve-Path -LiteralPath $driverPath).Path,
-        [ref]$driverTokens,
-        [ref]$driverParseErrors
-    )
-    $readObservedAst = $driverAst.Find({
-        param($node)
-        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-            $node.Name -ceq 'Read-ObservedJsonFile'
-    }, $true)
-    Check (@($driverParseErrors).Count -eq 0 -and $null -ne $readObservedAst) 'WPF driver observation helper remains parseable and discoverable'
-    if ($null -ne $readObservedAst) {
-        $readObservedText = [string]$readObservedAst.Extent.Text
-        $inaccessibleObservation = & {
-            function Test-Path { throw [System.UnauthorizedAccessException]::new('Access is denied') }
-            Invoke-Expression $readObservedText
-            Read-ObservedJsonFile -Path 'C:\blocked-observation' -Kind TERMINAL
-        }
-        Check ($null -eq $inaccessibleObservation) 'inaccessible observation files are treated as absent so the bounded WPF watchdog can retry'
-        $observedJsonPath=Join-Path $scratch 'observed-terminal.json'
-        [IO.File]::WriteAllText($observedJsonPath,'{"status":"PASS"}'+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))
-        $observedWithoutContentProvider=& {
-            function Get-Content { throw [InvalidOperationException]::new('Get-Content must not own atomic WPF observation reads') }
-            Invoke-Expression $readObservedText
-            Read-ObservedJsonFile -Path $observedJsonPath -Kind TERMINAL
-        }
-        Check ([string]$observedWithoutContentProvider.value.status -ceq 'PASS') 'atomic WPF terminal/progress observation reads do not depend on the stalled PowerShell content provider'
+    # 1. Healthy authenticated state is a read-only PASS.
+    $caseCount++
+    $healthy = Invoke-ProductionFixture
+    $healthyStatusCommands = @($healthy.state.commandArguments | Where-Object { $_ -match '(^|\s)status\s' })
+    Check ($healthy.result -and [bool]$healthy.result.authenticated -and -not [bool]$healthy.result.authenticationAttempted -and [int]$healthy.state.authCalls -eq 0 -and [string]$healthy.result.readiness.statusClass -eq 'READY') 'healthy state skips OAuth mutation and passes readiness'
+    $caseCount++
+    Check ($healthyStatusCommands.Count -gt 0 -and @($healthyStatusCommands | Where-Object { $_ -notmatch '--peers=false' }).Count -eq 0) 'status readiness excludes peer enumeration while retaining self state'
+
+    # An E2E guest's Tailscale self hostname is generated from the run identity,
+    # not copied from the Multipass instance name. Pre-auth readiness must use
+    # that profile-resolved identity or it will reject an already-authenticated
+    # guest as TAILSCALE_WRONG_TAG before OAuth.
+    $guestProfileIdentity = Invoke-ProductionFixture -InitialHostName 'fixture-guest-e2e' -EnrollmentGuestHostname 'fixture-guest-e2e'
+    $caseCount++
+    Check ($guestProfileIdentity.result -and [bool]$guestProfileIdentity.result.authenticated -and -not [bool]$guestProfileIdentity.result.authenticationAttempted -and [int]$guestProfileIdentity.state.authCalls -eq 0) 'E2E guest readiness uses the profile-resolved hostname before OAuth'
+
+    # 2. A stopped service gets one bounded recovery and is rechecked.
+    $caseCount++
+    $stopped = Invoke-ProductionFixture -Stopped:$true
+    Check ($stopped.result -and [int]$stopped.state.startCalls -eq 1 -and [int]$stopped.result.serviceRecoveryCount -eq 1 -and [int]$stopped.state.authCalls -eq 0) 'stopped service has one recovery and one readiness recheck'
+
+    # 3. NeedsLogin invokes the OAuth enrollment exactly once.
+    $caseCount++
+    $needsLogin = Invoke-ProductionFixture -InitialBackend 'NeedsLogin' -InitialOnline:$false -InitialIps @() -FinalBackend 'Running'
+    Check ($needsLogin.result -and [bool]$needsLogin.result.authenticated -and [bool]$needsLogin.result.authenticationAttempted -and [int]$needsLogin.state.authCalls -eq 1 -and [int]$needsLogin.state.statusCalls -eq 2) 'NeedsLogin performs one OAuth enrollment and verifies the resulting state'
+
+    # 3a. A servicing transition during OAuth must leave the auth boundary and
+    # propagate a typed reboot requirement to the installer lifecycle.
+    $servicingEvidencePath = Join-Path $scratch 'servicing-transition-events.jsonl'
+    $servicingTransition = Invoke-ProductionFixture -InitialBackend 'NeedsLogin' -InitialOnline:$false -InitialIps @() -FinalBackend 'Running' -EvidencePath $servicingEvidencePath -PendingRebootOnAuth
+    $caseCount++
+    Check (-not $servicingTransition.result -and $servicingTransition.error -match '^DEVFLEET_REBOOT_REQUIRED:' -and [int]$servicingTransition.state.authCalls -eq 1 -and [int]$servicingTransition.state.statusCalls -eq 1 -and [int]$servicingTransition.state.pendingRebootChecks -gt 0) 'servicing transition during OAuth propagates a typed reboot requirement before readiness'
+    $servicingEvents = if (Test-Path -LiteralPath $servicingEvidencePath -PathType Leaf) { @(Get-Content -LiteralPath $servicingEvidencePath | ForEach-Object { $_ | ConvertFrom-Json }) } else { @() }
+    $servicingEvent = $servicingEvents | Where-Object { [string]$_.eventClass -ceq 'REBOOT_REQUIRED_DURING_TAILSCALE' } | Select-Object -First 1
+    $caseCount++
+    Check ($servicingEvent -and [bool]$servicingEvent.rebootRequired -and [string]$servicingEvent.boundary -ceq 'oauth-enrollment' -and ($servicingEvents | ConvertTo-Json -Compress) -notmatch 'fixture-oauth-client-secret') 'servicing transition emits a bounded redacted structured event'
+
+    $windowsTailscaleSource = Get-Content -LiteralPath (Join-Path $WorkspaceRoot 'source\windows\04a-Connect-WindowsTailscale.ps1') -Raw
+    $installSource = Get-Content -LiteralPath (Join-Path $WorkspaceRoot 'source\Install-DevFleet.ps1') -Raw
+    $caseCount++
+    Check ($windowsTailscaleSource -match 'DEVFLEET_REBOOT_REQUIRED' -and $windowsTailscaleSource -match 'exit 3010' -and $installSource -match 'windows\\04a-Connect-WindowsTailscale\.ps1' -and $installSource -match 'LASTEXITCODE' -and $installSource -match 'Write-StageMarker ''windows-tailscale''') 'Windows Tailscale reboot result is propagated before its stage marker is published'
+
+    $guestTailscaleSource = Get-Content -LiteralPath (Join-Path $WorkspaceRoot 'source\windows\04-Connect-Tailscale.ps1') -Raw
+    $tailscaleSource = Get-Content -LiteralPath (Join-Path $WorkspaceRoot 'source\windows\DevFleet.Tailscale.psm1') -Raw
+    $caseCount++
+    Check ($guestTailscaleSource -match 'DEVFLEET_REBOOT_REQUIRED' -and $guestTailscaleSource -match 'exit 3010' -and $guestTailscaleSource -match '(?s)-PendingRebootProvider\s+\{\s*Test-PendingReboot\s*\}') 'Guest Tailscale reboot result is propagated before Vault completion'
+    $caseCount++
+    Check ($tailscaleSource -match 'OAUTH_ENROLLMENT_STARTED' -and $tailscaleSource -match "oauth-enrollment-before" -and $tailscaleSource -match 'DEVFLEET_TAILSCALE_UP_EXIT' -and $tailscaleSource -match 'timeout\s+--signal=TERM\s+--kill-after=10s') 'Guest OAuth enrollment has a bounded servicing-aware result handoff'
+    $caseCount++
+    Check ($tailscaleSource -match "status','--json','--peers=false") 'Guest Tailscale readiness uses self-only structured status before peer ping'
+
+    # 3b. Guest service probes must target systemctl directly; only Tailscale
+    # subcommands receive the sudo tailscale wrapper used by multipass exec.
+    $tailscaleModule = Get-Module DevFleet.Tailscale | Select-Object -First 1
+    $guestServiceArgs = & $tailscaleModule {
+        ConvertTo-DevFleetTailscaleNativeArguments -InstanceName 'fixture-guest' -CommandKind 'System' -Arguments @('systemctl','is-active','tailscaled')
     }
-
-    $readBootstrapAst = $driverAst.Find({
-        param($node)
-        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-            $node.Name -ceq 'Read-BootstrapLaunchSpecification'
-    }, $true)
-    Check ($null -ne $readBootstrapAst) 'WPF bootstrap request reader remains parseable and discoverable'
-    if ($null -ne $readBootstrapAst) {
-        $readBootstrapText = [string]$readBootstrapAst.Extent.Text
-        $bootstrapRequestPath = Join-Path $scratch 'bootstrap-read-request.json'
-        [IO.File]::WriteAllText($bootstrapRequestPath, '{"candidateSha256":"' + ('a' * 64) + '"}' + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
-        $bootstrapRead = & {
-            function Get-Content { throw [InvalidOperationException]::new('Get-Content must not be used for task-context bootstrap reads') }
-            Invoke-Expression $readBootstrapText
-            Read-BootstrapLaunchSpecification -Path $bootstrapRequestPath -DeadlineUtc ([DateTime]::UtcNow.AddMinutes(1).ToString('o'))
-        }
-        Check ([string]$bootstrapRead.candidateSha256 -ceq ('a' * 64)) 'task-context bootstrap request reader uses bounded .NET file I/O rather than the hanging PowerShell content provider'
-        $absentRequestFailure='';try{& {Invoke-Expression $readBootstrapText;Read-BootstrapLaunchSpecification -Path (Join-Path $scratch 'absent-request.json') -DeadlineUtc ([DateTimeOffset]::UtcNow.AddMilliseconds(900).ToString('o'))}|Out-Null}catch{$absentRequestFailure=$_.Exception.Message}
-        Check ($absentRequestFailure -match 'did not become visible before the bounded bootstrap deadline') 'absent launch request fails within its inherited bootstrap deadline'
-        $corruptRequestPath=Join-Path $scratch 'corrupt-request.json';[IO.File]::WriteAllText($corruptRequestPath,'{"schemaVersion":',[Text.UTF8Encoding]::new($false))
-        $corruptRequestFailure='';try{& {Invoke-Expression $readBootstrapText;Read-BootstrapLaunchSpecification -Path $corruptRequestPath -DeadlineUtc ([DateTimeOffset]::UtcNow.AddSeconds(2).ToString('o'))}|Out-Null}catch{$corruptRequestFailure=$_.Exception.Message}
-        Check ($corruptRequestFailure -match 'was not readable before the bounded bootstrap deadline') 'corrupt launch request fails within its inherited bootstrap deadline'
+    $guestTailscaleArgs = & $tailscaleModule {
+        ConvertTo-DevFleetTailscaleNativeArguments -InstanceName 'fixture-guest' -CommandKind 'Tailscale' -Arguments @('status','--json','--peers=false')
     }
+    $caseCount++
+    Check (($guestServiceArgs -join ' ') -ceq 'exec fixture-guest -- sudo systemctl is-active tailscaled' -and ($guestTailscaleArgs -join ' ') -ceq 'exec fixture-guest -- sudo tailscale status --json --peers=false') 'guest service commands bypass the Tailscale subcommand wrapper and bound status excludes peer enumeration'
 
-    foreach($role in @('Primary / Desktop','Laptop / Surrogate')){
-        foreach($mode in @('initial','direct','resume')){
-            $arguments=Get-WpfCandidateArguments -LaunchMode $mode -Action FreshInstall -Role $role -ElevatedResume:($mode-eq'resume')
-            Check (($arguments-contains'--defer-network-pairing')-eq($role-eq'Primary / Desktop')) "$role $mode honors supported network-pairing choice"
-            Check ($arguments[$arguments.IndexOf('--role')+1]-ceq$role) "$role $mode preserves exact reviewed role"
-        }
+    # 4. Missing credential is deterministic and never opens a browser.
+    $caseCount++
+    $missing = Invoke-ProductionFixture -InitialBackend 'NeedsLogin' -InitialOnline:$false -InitialIps @() -OptionsError 'fixture credential is absent'
+    Check (-not $missing.result -and $missing.error -ceq 'fixture credential is absent' -and [int]$missing.state.authCalls -eq 0 -and (@($missing.state.commandArguments | Where-Object { $_ -match '(?i)browser|login.tailscale' }).Count -eq 0)) 'missing OAuth credential fails closed without browser fallback'
+
+    # 5. Invalid credential has its own failure class and no enrollment attempt.
+    $caseCount++
+    $invalid = Invoke-ProductionFixture -InitialBackend 'NeedsLogin' -InitialOnline:$false -InitialIps @() -OptionsError 'TAILSCALE_CREDENTIAL_INVALID: fixture credential cannot be decrypted'
+    Check (-not $invalid.result -and $invalid.error -match '^TAILSCALE_CREDENTIAL_INVALID' -and [int]$invalid.state.authCalls -eq 0) 'invalid OAuth credential fails deterministically without authentication'
+
+    # 6. An authenticated node with an unavailable peer is not an auth failure.
+    $peerFailure = Invoke-ProductionFixture -ExpectedPeer 'fixture-peer' -PeerExitCode 1 -PeerOutput 'peer unreachable'
+    $caseCount++
+    Check (-not $peerFailure.result -and $peerFailure.error -match '^TAILSCALE_PEER_UNREACHABLE' -and [int]$peerFailure.state.authCalls -eq 0) 'unavailable expected peer is classified separately from authentication'
+
+    # Peer convergence uses the shipping readiness gate, not a fixture-side retry.
+    $peerConverged = Invoke-ProductionFixture -ExpectedPeer 'fixture-peer' -PeerExitCode 1 -PeerOutput 'peer unreachable' -PeerFailuresBeforeSuccess 1 -ServicePort 7443
+    $caseCount++
+    Check ($peerConverged.result -and $peerConverged.result.readiness.ready -and $peerConverged.result.readiness.peerLayer -eq 'PASS' -and $peerConverged.result.readiness.endpointLayer -eq 'PASS' -and $peerConverged.state.peerCalls -eq 2 -and $peerConverged.state.authCalls -eq 0 -and $peerConverged.state.endpointCalls -eq 1) 'transient peer failure converges without reenrollment and still checks the endpoint'
+    $peerAfterAuth = Invoke-ProductionFixture -InitialBackend 'NeedsLogin' -InitialOnline:$false -InitialIps @() -ExpectedPeer 'fixture-peer' -PeerExitCode 1 -PeerOutput 'peer unreachable' -PeerFailuresBeforeSuccess 1
+    $caseCount++
+    Check ($peerAfterAuth.result -and $peerAfterAuth.result.readiness.ready -and $peerAfterAuth.state.peerCalls -eq 2 -and $peerAfterAuth.state.authCalls -eq 1) 'post-OAuth peer convergence preserves exactly one enrollment'
+    $caseCount++
+    Check (-not $peerFailure.result -and $peerFailure.error -match '^TAILSCALE_PEER_UNREACHABLE' -and $peerFailure.state.peerCalls -eq 3 -and $peerFailure.state.endpointCalls -eq 0) 'persistent peer failure stops after the finite retry allowance without endpoint credit'
+    $peerDenied = Invoke-ProductionFixture -ExpectedPeer 'fixture-peer' -PeerExitCode 1 -PeerOutput 'access denied by ACL' -PeerFailuresBeforeSuccess 1 -ServicePort 7443
+    $caseCount++
+    Check (-not $peerDenied.result -and $peerDenied.error -match '^TAILSCALE_ACL_BLOCKED' -and $peerDenied.state.peerCalls -eq 1 -and $peerDenied.state.endpointCalls -eq 0) 'explicit peer denial remains an immediate failure even if a later ping would pass'
+    $peerTimeout = Invoke-ProductionFixture -ExpectedPeer 'fixture-peer' -PeerExitCode 124 -PeerOutput 'native command timed out' -PeerFailuresBeforeSuccess 1
+    $caseCount++
+    Check (-not $peerTimeout.result -and $peerTimeout.error -match '^TAILSCALE_PEER_UNREACHABLE' -and $peerTimeout.state.peerCalls -eq 1) 'native peer timeout is terminal and is not retried'
+    $peerEndpointFailure = Invoke-ProductionFixture -ExpectedPeer 'fixture-peer' -PeerExitCode 1 -PeerOutput 'peer unreachable' -PeerFailuresBeforeSuccess 1 -ServicePort 7443 -EndpointExitCode 1
+    $caseCount++
+    Check (-not $peerEndpointFailure.result -and $peerEndpointFailure.error -match '^DEVFLEET_SERVICE_UNREACHABLE_OVER_TAILSCALE' -and $peerEndpointFailure.state.peerCalls -eq 2 -and $peerEndpointFailure.state.endpointCalls -eq 1) 'peer recovery cannot bypass a failed endpoint'
+
+    # Exercise the real helper's native timeout boundary: CommandInvoker above
+    # intentionally models CLI output and does not receive MaximumSeconds.
+    $peerBudgetState = @{ calls = 0; maximum = 0; arguments = @() }
+    $peerBudgetInvoker = {
+        param([string[]]$Arguments, [int]$MaximumSeconds)
+        $peerBudgetState.calls++; $peerBudgetState.maximum = $MaximumSeconds; $peerBudgetState.arguments = @($Arguments)
+        [pscustomobject]@{ exitCode = 0; output = 'pong' }
+    }.GetNewClosure()
+    $invokePeerBudget = {
+        param([scriptblock]$Invoker, [datetime]$Deadline)
+        $readiness = Get-DevFleetTailscaleReadiness -StatusJson '{"BackendState":"Running","Self":{"HostName":"fixture-node","Online":true},"TailscaleIPs":["100.64.1.2"],"Health":[]}' -ExpectedHostname 'fixture-node'
+        Invoke-DevFleetTailscalePeerAndEndpointReadiness -Readiness $readiness -ExpectedPeer 'fixture-peer' -TailscaleInvoker $Invoker -DeadlineUtc $Deadline
     }
-
-    $now = [datetime]'2026-09-05T20:00:00Z'
-    $ownerDeadline = $now.AddSeconds(480)
-    $common = @{
-        DriverPath = $driverPath
-        ExePath = (Get-Command powershell.exe).Source
-        Action = 'FreshInstall'
-        Role = 'Primary / Desktop'
-        OutputPath = (Join-Path $scratch 'final.json')
-        StartedPath = (Join-Path $scratch 'started.json')
-        CheckpointPath = (Join-Path $scratch 'checkpoint.json')
-        WorkerResultPath = (Join-Path $scratch 'worker.json')
-        LaunchRequestPath = (Join-Path $scratch 'request.json')
-        RunId = 'wpf-boundary-regression'
-        LaunchId = ('1' * 32)
-        TransactionId = ('2' * 32)
-        PayloadSha256 = ('3' * 64)
-        ExpectedInteractiveSessionId = 1
-        AllowMutation = $true
-        AllowRebootRequired = $true
-        OwnerDeadlineUtc = $ownerDeadline
-        ClockProvider = { $now }
+    $shortPeer = & $tailscaleModule $invokePeerBudget $peerBudgetInvoker ([datetime]::UtcNow.AddSeconds(7.5))
+    $caseCount++
+    Check ($shortPeer.ready -and $peerBudgetState.calls -eq 1 -and $peerBudgetState.maximum -ge 1 -and $peerBudgetState.maximum -le 2 -and @($peerBudgetState.arguments | Where-Object { $_ -match '^--timeout=[12]s$' }).Count -eq 1) 'peer native and TSMP timeouts clip to the existing owner reserve'
+    $peerBudgetState.calls = 0
+    $expiredPeer = & $tailscaleModule $invokePeerBudget $peerBudgetInvoker ([datetime]::UtcNow.AddSeconds(4))
+    $caseCount++
+    Check (-not $expiredPeer.ready -and $expiredPeer.failureClass -eq 'TAILSCALE_PEER_UNREACHABLE' -and $peerBudgetState.calls -eq 0) 'peer check cannot launch after the owner reserve is exhausted'
+    $latePeerInvoker = {
+        param([string[]]$Arguments, [int]$MaximumSeconds)
+        Start-Sleep -Milliseconds 1400
+        [pscustomobject]@{ exitCode = 0; output = 'late pong' }
     }
+    $latePeer = & $tailscaleModule $invokePeerBudget $latePeerInvoker ([datetime]::UtcNow.AddSeconds(6.2))
+    $caseCount++
+    Check (-not $latePeer.ready -and $latePeer.failureClass -eq 'TAILSCALE_PEER_UNREACHABLE') 'peer success returned beyond its immutable deadline is rejected'
+    $peerBudgetState.calls = 0
+    $immediatePeer = & $tailscaleModule $invokePeerBudget $peerBudgetInvoker ([datetime]::UtcNow.AddSeconds(60))
+    $caseCount++
+    Check ($immediatePeer.ready -and $peerBudgetState.calls -eq 1 -and $peerBudgetState.maximum -le 10 -and $peerBudgetState.arguments -contains '--timeout=5s') 'healthy peer uses one bounded TSMP call inside the original ten-second window'
+    $slowPeerState = @{ calls = 0; maximums = [Collections.Generic.List[int]]::new() }
+    $slowPeerInvoker = {
+        param([string[]]$Arguments, [int]$MaximumSeconds)
+        $slowPeerState.calls++; $slowPeerState.maximums.Add($MaximumSeconds)
+        if ($slowPeerState.calls -ge 3) { return [pscustomobject]@{ exitCode = 0; output = 'pong' } }
+        Start-Sleep -Milliseconds ([math]::Min(4000,($MaximumSeconds*1000)))
+        [pscustomobject]@{ exitCode = 1; output = 'peer unreachable' }
+    }.GetNewClosure()
+    $peerWatch = [Diagnostics.Stopwatch]::StartNew()
+    $slowPeer = & $tailscaleModule $invokePeerBudget $slowPeerInvoker ([datetime]::UtcNow.AddSeconds(60))
+    $peerWatch.Stop()
+    $caseCount++
+    Check (-not $slowPeer.ready -and $slowPeer.failureClass -eq 'TAILSCALE_PEER_UNREACHABLE' -and $slowPeerState.calls -eq 2 -and $slowPeerState.maximums[1] -lt $slowPeerState.maximums[0] -and $peerWatch.Elapsed.TotalSeconds -lt 10.5) 'peer retries share one ten-second window and cannot accept a later third pong'
 
-    $resume = New-WpfLaunchSpecification @common -LaunchMode resume -ElevatedResume
-    Check ($resume.taskArguments -match '(?:^| )-ElevatedResume(?: |$)' -and $resume.taskArguments -match '-LaunchMode (?:"resume"|resume)') 'resume mode reaches the actual driver task arguments'
-    Check (@($resume.candidateArguments)[0] -eq '--elevated-resume') 'resume mode reaches the actual candidate argument vector'
-    Check ([datetime]$resume.boundaryDeadlineUtc -eq $ownerDeadline -and [datetime]$resume.driverDeadlineUtc -lt $ownerDeadline) 'child and terminalization deadlines consume the finite remaining owner budget'
-    $actualBinding=@{ExePath=$resume.exePath;Action=$resume.action;Role=$resume.role;OutputPath=$resume.outputPath;StartedPath=$resume.startedPath;CheckpointPath=$resume.checkpointPath;WorkerResultPath=$resume.workerResultPath;LaunchRequestPath=$resume.launchRequestPath;RunId=$resume.runId;LaunchId=$resume.launchId;TransactionId=$resume.transactionId;PayloadSha256=$resume.payloadSha256;LaunchMode=$resume.launchMode;ObserverDeadlineUtc=$resume.driverDeadlineUtc;ExpectedInteractiveSessionId=$resume.expectedInteractiveSessionId;AllowMutation=$resume.allowMutation;AllowRebootRequired=$resume.allowRebootRequired;UseDurableCompletionFallback=$resume.useDurableCompletionFallback;ElevatedResume=$resume.elevatedResume;ContractProbe=$resume.contractProbe;ContractModulePath=''}
-    $wrongRunBinding=@{}+$actualBinding;$wrongRunBinding.RunId='wrong-run';$wrongRunRejected=$false;try{Assert-WpfDriverBinding -Specification $resume -Actual $wrongRunBinding|Out-Null}catch{$wrongRunRejected=$_.Exception.Message -match 'runId'}
-    Check $wrongRunRejected 'launch request with a wrong run identity is rejected before product start'
-    $wrongHashSpec=$resume|Select-Object *;$wrongHashSpec.candidateSha256='f'*64;$wrongHashRejected=$false;try{Assert-WpfDriverBinding -Specification $wrongHashSpec -Actual $actualBinding|Out-Null}catch{$wrongHashRejected=$_.Exception.Message -match 'candidate hash'}
-    Check $wrongHashRejected 'launch request with a wrong candidate hash is rejected before product start'
+    # 7. A reachable peer with a failed DevFleet endpoint is a service-layer failure.
+    $serviceFailure = Invoke-ProductionFixture -ExpectedPeer 'fixture-peer' -ServicePort 7443 -EndpointExitCode 1
+    $caseCount++
+    Check (-not $serviceFailure.result -and $serviceFailure.error -match '^DEVFLEET_SERVICE_UNREACHABLE_OVER_TAILSCALE' -and [int]$serviceFailure.state.endpointCalls -eq 1) 'reachable peer with unavailable service endpoint is classified at layer four'
 
-    $handoffCommon = @{} + $common
-    $handoffCommon.LaunchId = ('d' * 32)
-    $handoffCommon.OutputPath = Join-Path $scratch 'handoff-final.json'
-    $handoffCommon.StartedPath = Join-Path $scratch 'handoff-started.json'
-    $handoffCommon.CheckpointPath = Join-Path $scratch 'handoff-checkpoint.json'
-    $handoffCommon.WorkerResultPath = Join-Path $scratch 'handoff-worker.json'
-    $handoffCommon.LaunchRequestPath = Join-Path $scratch 'handoff-request.json'
-    $handoffSpec = New-WpfLaunchSpecification @handoffCommon -LaunchMode resume -ElevatedResume -UseDurableCompletionFallback -ContractProbe
-    Write-WpfAtomicJson -Path $handoffSpec.launchRequestPath -Value $handoffSpec
-    $handoffProbe = Start-Process -FilePath $handoffSpec.taskExecutable -ArgumentList ([string]$handoffSpec.taskArguments) -PassThru -Wait
-    $handoffProbeReport = Get-Content -LiteralPath $handoffSpec.outputPath -Raw | ConvertFrom-Json
-    Check ($handoffProbe.ExitCode -eq 0 -and [string]$handoffProbeReport.status -eq 'CONTRACT_PROBE_PASS') 'resume product-observer handoff survives actual task argument construction and driver parsing'
-    $pageSeparator=[char]0x00B7
-    Check ((Get-WpfNavigationDisposition -LaunchMode initial -ElevatedResume $false -WindowOwnerMatches $true -PageKicker "STEP 1 OF 8 $pageSeparator WELCOME" -OperationStatus '' -NextEnabled $true -ExecutePresent $false -ExecuteEnabled $false) -eq 'NAVIGATE') 'initial launch navigates only when the exact owned window exposes Next'
-    Check ((Get-WpfNavigationDisposition -LaunchMode resume -ElevatedResume $true -WindowOwnerMatches $true -PageKicker "STEP 1 OF 8 $pageSeparator WELCOME" -OperationStatus '' -NextEnabled $true -ExecutePresent $false -ExecuteEnabled $false) -eq 'WAIT') 'elevated resume ignores a transient pre-auto-execution Next control'
-    Check ((Get-WpfNavigationDisposition -LaunchMode resume -ElevatedResume $true -WindowOwnerMatches $true -PageKicker "STEP 7 OF 8 $pageSeparator EXECUTE" -OperationStatus 'Invoking actual installer lifecycle' -NextEnabled $false -ExecutePresent $true -ExecuteEnabled $false) -eq 'OBSERVE_EXISTING') 'elevated resume observes the exact owned in-flight auto-execution page'
-    Check ((Get-WpfNavigationDisposition -LaunchMode resume -ElevatedResume $true -WindowOwnerMatches $true -PageKicker "STEP 7 OF 8 $pageSeparator EXECUTE" -OperationStatus 'Reboot required; checkpoint preserved' -NextEnabled $false -ExecutePresent $true -ExecuteEnabled $true) -eq 'OBSERVE_EXISTING') 'elevated resume observes terminal reboot state even after Execute is re-enabled'
-    Check ((Get-WpfNavigationDisposition -LaunchMode resume -ElevatedResume $true -WindowOwnerMatches $true -PageKicker "STEP 8 OF 8 $pageSeparator FINISH" -OperationStatus 'Completed and verified' -NextEnabled $false -ExecutePresent $false -ExecuteEnabled $false) -eq 'OBSERVE_EXISTING') 'elevated resume observes an already-completed Finish page'
-    Check ((Get-WpfNavigationDisposition -LaunchMode resume -ElevatedResume $true -WindowOwnerMatches $false -PageKicker "STEP 7 OF 8 $pageSeparator EXECUTE" -OperationStatus 'Completed and verified' -NextEnabled $false -ExecutePresent $true -ExecuteEnabled $true) -eq 'REJECT_OWNER_MISMATCH') 'post-launch window ownership divergence is rejected immediately'
+    # 8. A wrong tag fails the identity gate before any auth mutation.
+    $wrongTag = Invoke-ProductionFixture -InitialTags @('tag:foreign')
+    $caseCount++
+    Check (-not $wrongTag.result -and $wrongTag.error -match '^TAILSCALE_WRONG_TAG' -and [int]$wrongTag.state.authCalls -eq 0) 'wrong expected tag fails ownership identity readiness'
 
-    $longOwnerCommon = @{} + $common
-    $longOwnerCommon.OwnerDeadlineUtc = $now.AddSeconds(2400)
-    $longOwnerCommon.LaunchId = ('c' * 32)
-    $longOwner = New-WpfLaunchSpecification @longOwnerCommon -LaunchMode resume -ElevatedResume -SemanticNoProgressSeconds 1800
-    Check ([datetime]$longOwner.driverDeadlineUtc -eq ([datetime]$longOwner.ownerDeadlineUtc).AddSeconds(-60) -and [int]$longOwner.semanticNoProgressSeconds -eq 1800) 'WPF launch inherits the owner deadline and configured semantic no-progress budget without a hidden clamp'
+    # 9. A blocking health entry is not treated as READY.
+    $healthFailure = Invoke-ProductionFixture -InitialHealth @('fixture blocking health')
+    $caseCount++
+    Check (-not $healthFailure.result -and $healthFailure.error -match '^TAILSCALE_HEALTH_ERROR' -and [int]$healthFailure.state.authCalls -eq 0) 'blocking Tailscale health is a distinct readiness failure'
 
-    $bootstrapRoot = Join-Path $scratch 'bootstrap-failure'
-    New-Item -ItemType Directory -Path $bootstrapRoot -Force | Out-Null
-    $bootstrapDriver = Join-Path $bootstrapRoot 'Invoke-WpfUiAutomation.ps1'
-    Copy-Item -LiteralPath $driverPath -Destination $bootstrapDriver -Force
-    $bootstrapCommon = @{} + $common
-    $bootstrapCommon.DriverPath = $bootstrapDriver
-    $bootstrapCommon.OutputPath = Join-Path $bootstrapRoot 'terminal.json'
-    $bootstrapCommon.StartedPath = Join-Path $bootstrapRoot 'started.json'
-    $bootstrapCommon.CheckpointPath = Join-Path $bootstrapRoot 'checkpoint.json'
-    $bootstrapCommon.WorkerResultPath = Join-Path $bootstrapRoot 'worker.json'
-    $bootstrapCommon.LaunchRequestPath = Join-Path $bootstrapRoot 'request.json'
-    $bootstrapCommon.LaunchId = ('b' * 32)
-    $bootstrapSpec = New-WpfLaunchSpecification @bootstrapCommon -LaunchMode initial -ContractProbe
-    Write-WpfAtomicJson -Path $bootstrapSpec.launchRequestPath -Value $bootstrapSpec
-    $bootstrapProcess = Start-Process -FilePath $bootstrapSpec.taskExecutable -ArgumentList ([string]$bootstrapSpec.taskArguments) -PassThru -Wait
-    $bootstrapReport = Get-Content -LiteralPath $bootstrapSpec.outputPath -Raw | ConvertFrom-Json
-    Check ($bootstrapProcess.ExitCode -eq 2 -and [string]$bootstrapReport.status -eq 'OBSERVER_FAILURE' -and [string]$bootstrapReport.failureClass -eq 'DRIVER_BOOTSTRAP_FAILURE' -and [bool]$bootstrapReport.terminal -and -not [bool]$bootstrapReport.completionVerified -and [string]$bootstrapReport.runId -ceq $bootstrapSpec.runId -and [string]$bootstrapReport.launchId -ceq $bootstrapSpec.launchId -and [string]$bootstrapReport.payloadSha256 -ceq $bootstrapSpec.payloadSha256 -and [string]$bootstrapReport.candidateSha256 -ceq $bootstrapSpec.candidateSha256 -and $bootstrapReport.productStarted -eq $false -and -not [bool]$bootstrapReport.mutationInvoked -and -not (Test-Path -LiteralPath $bootstrapSpec.startedPath)) 'actual driver publishes an identity-bound terminal with productStarted=false before candidate launch when contract bootstrap fails'
+    # A valid-looking payload without a positive self identity is never READY.
+    $missingIdentity = Invoke-ProductionFixture -InitialHostName ''
+    $caseCount++
+    Check (-not $missingIdentity.result -and $missingIdentity.error -match '^TAILSCALE_WRONG_TAG' -and [int]$missingIdentity.state.authCalls -eq 0) 'missing self identity fails the readiness ownership gate'
 
-    $delayedRoot = Join-Path $scratch 'delayed-launch-request'
-    New-Item -ItemType Directory -Path $delayedRoot -Force | Out-Null
-    $delayedDriver = Join-Path $delayedRoot 'Invoke-WpfUiAutomation.ps1'
-    Copy-Item -LiteralPath $driverPath -Destination $delayedDriver -Force
-    Copy-Item -LiteralPath $modulePath -Destination (Join-Path $delayedRoot 'WpfLaunchContract.psm1') -Force
-    $delayedCommon = @{} + $common
-    $delayedCommon.DriverPath = $delayedDriver
-    $delayedCommon.OutputPath = Join-Path $delayedRoot 'terminal.json'
-    $delayedCommon.StartedPath = Join-Path $delayedRoot 'started.json'
-    $delayedCommon.CheckpointPath = Join-Path $delayedRoot 'checkpoint.json'
-    $delayedCommon.WorkerResultPath = Join-Path $delayedRoot 'worker.json'
-    $delayedCommon.LaunchRequestPath = Join-Path $delayedRoot 'request.json'
-    $delayedCommon.LaunchId = ('8' * 32)
-    $delayedCommon.ClockProvider = { (Get-Date).ToUniversalTime() }
-    $delayedCommon.OwnerDeadlineUtc = (Get-Date).ToUniversalTime().AddMinutes(5)
-    $delayedSpec = New-WpfLaunchSpecification @delayedCommon -LaunchMode initial -ContractProbe
-    $delayedProbe = Start-Process -FilePath $delayedSpec.taskExecutable -ArgumentList ([string]$delayedSpec.taskArguments) -PassThru
-    Start-Sleep -Milliseconds 500
-    Write-WpfAtomicJson -Path $delayedSpec.launchRequestPath -Value $delayedSpec
-    $delayedProbe.WaitForExit()
-    $delayedReport = Get-Content -LiteralPath $delayedSpec.outputPath -Raw | ConvertFrom-Json
-    Check ($delayedProbe.ExitCode -eq 0 -and [string]$delayedReport.status -eq 'CONTRACT_PROBE_PASS' -and [string]$delayedReport.candidateSha256 -ceq $delayedSpec.candidateSha256) 'driver waits for the exact launch request when task startup races remote file visibility'
+    # Native status and preference command failures cannot be promoted by valid-looking JSON.
+    $statusCommandFailure = Invoke-ProductionFixture -StatusExitCode 7
+    $prefsCommandFailure = Invoke-ProductionFixture -PreferencesExitCode 7
+    $caseCount++
+    Check (-not $statusCommandFailure.result -and $statusCommandFailure.error -match '^TAILSCALE_CONTROL_PLANE_OFFLINE' -and [int]$statusCommandFailure.state.authCalls -eq 0) 'nonzero Tailscale status exit fails closed'
+    $caseCount++
+    Check (-not $prefsCommandFailure.result -and $prefsCommandFailure.error -match '^TAILSCALE_HEALTH_ERROR' -and [int]$prefsCommandFailure.state.authCalls -eq 0) 'nonzero Tailscale preference exit fails closed'
 
-    $sidResolver = { param($account) if ($account -in @('DEVFLEET-E2E-01\E2EAdmin','E2EAdmin')) { 'S-1-5-21-100-200-300-1001' } else { 'S-1-5-21-100-200-300-9999' } }
-    $requestedPrincipal = [pscustomobject]@{UserId='DEVFLEET-E2E-01\E2EAdmin';LogonType=3;RunLevel=1}
-    $registered = [pscustomobject]@{Actions=@([pscustomobject]@{Execute=$resume.taskExecutable.ToUpperInvariant();Arguments=$resume.taskArguments});Principal=[pscustomobject]@{UserId='E2EAdmin';LogonType=3;RunLevel=1}}
-    $taskReason='';$taskEvidence=$null
-    Check ((Test-WpfRegisteredTaskBinding -Specification $resume -RegisteredTask $registered -RequestedPrincipal $requestedPrincipal -Reason ([ref]$taskReason) -Evidence ([ref]$taskEvidence) -SidResolver $sidResolver) -and $taskEvidence.verifiedBeforeStart -and $taskEvidence.principalSidSha256 -match '^[0-9a-f]{64}$') 'registered task accepts normalized account text only when the principal SID, enums, executable, and arguments are exact'
-    $wrongPrincipal = [pscustomobject]@{Actions=$registered.Actions;Principal=[pscustomobject]@{UserId='OtherUser';LogonType=3;RunLevel=1}}
-    $taskReason='';$taskEvidence=$null
-    Check (-not (Test-WpfRegisteredTaskBinding -Specification $resume -RegisteredTask $wrongPrincipal -RequestedPrincipal $requestedPrincipal -Reason ([ref]$taskReason) -Evidence ([ref]$taskEvidence) -SidResolver $sidResolver) -and $taskReason -eq 'registered task principal SID diverged') 'registered task rejects a different principal identity before start'
-    $wrongArguments = [pscustomobject]@{Actions=@([pscustomobject]@{Execute=$resume.taskExecutable;Arguments=($resume.taskArguments+' -ElevatedResume')});Principal=$registered.Principal}
-    $taskReason='';$taskEvidence=$null
-    Check (-not (Test-WpfRegisteredTaskBinding -Specification $resume -RegisteredTask $wrongArguments -RequestedPrincipal $requestedPrincipal -Reason ([ref]$taskReason) -Evidence ([ref]$taskEvidence) -SidResolver $sidResolver) -and $taskReason -eq 'registered task arguments diverged') 'registered task rejects post-registration argument divergence before start'
-    $realPhaseSource = Get-Content -LiteralPath (Join-Path $WorkspaceRoot 'automation\release-e2e\modules\executors\Invoke-RealProductPhase.psm1') -Raw
-    Check ($realPhaseSource -notmatch 'Import-Module \(\[string\]\$spec\.contractModulePath\)' -and $realPhaseSource -match 'Resolve-TaskSid' -and $realPhaseSource -match 'REGISTERED_TASK_BINDING_MISMATCH') 'restricted PowerShell Direct pre-start validation does not import a staged script module'
+    # 10. Repeated healthy execution is mutation-free and idempotent.
+    $repeatOne = Invoke-ProductionFixture
+    $repeatTwo = Invoke-ProductionFixture
+    $caseCount++
+    Check ($repeatOne.result -and $repeatTwo.result -and [int]$repeatOne.state.authCalls -eq 0 -and [int]$repeatTwo.state.authCalls -eq 0 -and [int]$repeatOne.state.startCalls -eq 0 -and [int]$repeatTwo.state.startCalls -eq 0) 'repeated healthy execution does not force reauth or create a new identity'
 
-    $initialCommon = @{} + $common
-    $initialCommon.LaunchId = ('4' * 32)
-    $initialCommon.OutputPath = Join-Path $scratch 'initial-final.json'
-    $initialCommon.StartedPath = Join-Path $scratch 'initial-started.json'
-    $initialCommon.CheckpointPath = Join-Path $scratch 'initial-checkpoint.json'
-    $initialCommon.WorkerResultPath = Join-Path $scratch 'initial-worker.json'
-    $initialCommon.LaunchRequestPath = Join-Path $scratch 'initial-request.json'
-    $initial = New-WpfLaunchSpecification @initialCommon -LaunchMode initial
-    Check ($initial.taskArguments -notmatch '(?:^| )-ElevatedResume(?: |$)' -and @($initial.candidateArguments) -notcontains '--elevated-resume') 'initial mode cannot silently inherit resume arguments'
-
-    $initialProbeSpec = Copy-WpfLaunchSpecification -Specification $initial -ContractProbe
-    Write-WpfAtomicJson -Path $initialProbeSpec.launchRequestPath -Value $initialProbeSpec
-    $initialProbe = Start-Process -FilePath $initialProbeSpec.taskExecutable -ArgumentList ([string]$initialProbeSpec.taskArguments) -PassThru -Wait
-    $initialProbeReport = Get-Content -LiteralPath $initialProbeSpec.outputPath -Raw | ConvertFrom-Json
-    Check ($initialProbe.ExitCode -eq 0 -and [string]$initialProbeReport.status -eq 'CONTRACT_PROBE_PASS') 'Windows PowerShell parser binds the exact generated initial task action'
-    Check ([string]$initialProbeReport.launchMode -eq 'initial' -and -not [bool]$initialProbeReport.elevatedResume -and (@($initialProbeReport.candidateArguments) -join [char]0) -ceq (@($initial.candidateArguments) -join [char]0) -and @($initialProbeReport.candidateArguments) -notcontains '--elevated-resume') 'driver parser acknowledgement keeps initial mode free of resume candidate arguments'
-
-    Write-WpfAtomicJson -Path $resume.launchRequestPath -Value $resume
-    $probeSpec = Copy-WpfLaunchSpecification -Specification $resume -ContractProbe
-    Write-WpfAtomicJson -Path $probeSpec.launchRequestPath -Value $probeSpec
-    $probe = Start-Process -FilePath $probeSpec.taskExecutable -ArgumentList ([string]$probeSpec.taskArguments) -PassThru -Wait
-    $probeReport = Get-Content -LiteralPath $probeSpec.outputPath -Raw | ConvertFrom-Json
-    Check ($probe.ExitCode -eq 0 -and [string]$probeReport.status -eq 'CONTRACT_PROBE_PASS') 'Windows PowerShell parser binds the exact generated resume task action'
-    Check ([string]$probeReport.launchMode -eq 'resume' -and [bool]$probeReport.elevatedResume -and @($probeReport.candidateArguments)[0] -eq '--elevated-resume') 'driver parser acknowledgement matches requested mode and candidate arguments'
-
-    $expected = [pscustomobject]$resume
-    $complete = [pscustomobject]@{schemaVersion=2;contract='devfleet-wpf-terminal-v2';status='PASS';terminal=$true;completionVerified=$true;runId=$resume.runId;launchId=$resume.launchId;transactionId=$resume.transactionId;payloadSha256=$resume.payloadSha256;candidateSha256=$resume.candidateSha256;sequence=8;cleanupDisposition='CLEANUP_EXACT_CANDIDATE';deadlineUtc=$resume.driverDeadlineUtc}
-    $reason = ''
-    Check (Test-WpfTerminalReport -Report $complete -Specification $expected -Reason ([ref]$reason)) 'completed report with exact launch identity is accepted'
-    $incomplete = $complete | Select-Object *
-    $incomplete.completionVerified = $false
-    $reason = ''
-    Check (-not (Test-WpfTerminalReport -Report $incomplete -Specification $expected -Reason ([ref]$reason))) 'completed-lifecycle PASS with completionVerified false is rejected'
-    $stale = $complete | Select-Object *
-    $stale.launchId = ('9' * 32)
-    $reason = ''
-    Check (-not (Test-WpfTerminalReport -Report $stale -Specification $expected -Reason ([ref]$reason))) 'stale or wrong-launch report is rejected'
-    $wrongPayload = $complete | Select-Object *
-    $wrongPayload.payloadSha256 = ('a' * 64)
-    $reason = ''
-    Check (-not (Test-WpfTerminalReport -Report $wrongPayload -Specification $expected -Reason ([ref]$reason))) 'wrong-payload report is rejected'
-    foreach($mismatchName in @('runId','transactionId','candidateSha256')){
-        $mismatched=$complete|Select-Object *;$mismatched.$mismatchName=if($mismatchName-eq'candidateSha256'){('b'*64)}elseif($mismatchName-eq'transactionId'){('c'*32)}else{'another-run'};$reason=''
-        Check (-not(Test-WpfTerminalReport -Report $mismatched -Specification $expected -Reason ([ref]$reason))) "wrong-$mismatchName report is rejected"
+    # 11. E2E profiles are deterministic, tagged, preauthorized, and ephemeral.
+    $profileConfig = [pscustomobject]@{
+        Primary = [pscustomobject]@{ InstanceName = 'DevFleet-E2E-Primary' }
+        Failover = [pscustomobject]@{ InstanceName = 'DevFleet-E2E-Failover' }
+        Vault = [pscustomobject]@{ InstanceName = 'DevFleet-E2E-Vault' }
     }
-    $reason=''
-    Check (-not(Test-WpfTerminalReport -Report $complete -Specification $expected -Reason ([ref]$reason) -MinimumSequenceExclusive 8)) 'duplicate or regressed terminal sequence is rejected against prior accepted evidence'
-    $unverifiedPending = $complete | Select-Object *
-    $unverifiedPending.status = 'DURABLE_PENDING'
-    $unverifiedPending.completionVerified = $false
-    $reason = ''
-    Check (-not (Test-WpfTerminalReport -Report $unverifiedPending -Specification $expected -Reason ([ref]$reason))) 'pending without durable identity and ownership transfer is rejected'
-    $verifiedPending = $unverifiedPending | Select-Object *
-    $verifiedPending | Add-Member -NotePropertyName durableCompletionPending -NotePropertyValue $true -Force
-    $verifiedPending | Add-Member -NotePropertyName durableStateVerified -NotePropertyValue $true -Force
-    $verifiedPending | Add-Member -NotePropertyName ownershipTransferVerified -NotePropertyValue $true -Force
-    $verifiedPending | Add-Member -NotePropertyName productOutcomeClaimed -NotePropertyValue $false -Force
-    $verifiedPending | Add-Member -NotePropertyName pendingBasis -NotePropertyValue 'EXACT_TRANSACTION_DURABLE_STATE' -Force
-    $verifiedPending.cleanupDisposition = 'RELINQUISH_VERIFIED_PENDING'
-    $reason = ''
-    Check (Test-WpfTerminalReport -Report $verifiedPending -Specification $expected -Reason ([ref]$reason)) 'durable pending requires exact transaction-bound durable state and ownership transfer'
+    $e2eProfile = New-TailscaleE2EEnrollmentProfile -RunId 'oauth-profile-fixture' -Config $profileConfig
+    $caseCount++
+    Check ([string]$e2eProfile.mode -ceq 'e2e' -and [string]$e2eProfile.tag -ceq 'tag:devfleet-e2e' -and [bool]$e2eProfile.ephemeral -and [bool]$e2eProfile.preauthorized -and [string]$e2eProfile.hostName -match '^devfleet-e2e-[0-9a-f]{10}-windows$' -and @($e2eProfile.guestHostnames.Keys).Count -eq 3) 'E2E enrollment profile has deterministic disposable semantics'
 
-    $observerHandoff = $unverifiedPending | Select-Object *
-    $observerHandoff.status = 'OBSERVER_HANDOFF'
-    $observerHandoff.cleanupDisposition = 'RELINQUISH_LIFECYCLE_OWNER'
-    $observerHandoff | Add-Member -NotePropertyName durableCompletionPending -NotePropertyValue $false -Force
-    $observerHandoff | Add-Member -NotePropertyName ownershipTransferVerified -NotePropertyValue $true -Force
-    $observerHandoff | Add-Member -NotePropertyName productOutcomeClaimed -NotePropertyValue $false -Force
-    $observerHandoff | Add-Member -NotePropertyName handoffBasis -NotePropertyValue 'EXACT_TRANSACTION_PRODUCT_OBSERVER_HANDOFF' -Force
-    $observerHandoff | Add-Member -NotePropertyName observerContract -NotePropertyValue 'Wait-DevFleetProductLifecycleTransition' -Force
-    $reason = ''
-    Check (Test-WpfTerminalReport -Report $observerHandoff -Specification $expected -Reason ([ref]$reason)) 'observer handoff transfers exact launch ownership without fabricating durable pending or product completion'
+    # 12. Persistent fixture semantics remain explicit and non-ephemeral.
+    $persistentPath = Join-Path $scratch 'persistent-profile.json'
+    $persistentDocument = [ordered]@{
+        schemaVersion = 1; mode = 'persistent'; tag = 'tag:devfleet'; ephemeral = $false; preauthorized = $true
+        hostName = 'devfleet-persistent-windows'; guestHostnames = [ordered]@{ 'DevFleet-E2E-Primary' = 'devfleet-persistent-primary' }
+    } | ConvertTo-Json -Depth 5 -Compress
+    [IO.File]::WriteAllText($persistentPath, $persistentDocument, [Text.UTF8Encoding]::new($false))
+    $persistentProfile = Get-DevFleetTailscaleEnrollmentProfile -Path $persistentPath
+    $caseCount++
+    Check ([string]$persistentProfile.mode -ceq 'persistent' -and [string]$persistentProfile.tag -ceq 'tag:devfleet' -and -not [bool]$persistentProfile.ephemeral -and [bool]$persistentProfile.preauthorized -and [string]$persistentProfile.hostName -ceq 'devfleet-persistent-windows') 'persistent enrollment profile remains explicitly non-ephemeral and tagged'
 
-    $script:clock = $now
-    $script:stopped = $false
-    $script:terminalWrites = 0
-    $timeout = Wait-WpfBoundReport -Specification $expected -ReportProvider { $null } -WorkerStateProvider { 'Running' } -StopWorker { $script:stopped = $true } -ClockProvider { $value=$script:clock; $script:clock=$value.AddSeconds(90); $value } -SleepProvider { param($seconds) } -TerminalWriter { param($value) $script:terminalWrites++; $value }
-    Check ([string]$timeout.status -eq 'OBSERVER_FAILURE' -and [string]$timeout.failureClass -eq 'UIA_SEMANTIC_NO_PROGRESS' -and $script:stopped -and $script:terminalWrites -eq 1) 'stuck UIA worker is isolated, stopped, and terminalized by the semantic no-progress watchdog'
+    # 13. File-backed OAuth input keeps raw credentials out of argv/output and cleans up.
+    $redactionSecret = 'fixture-oauth-secret-' + [guid]::NewGuid().ToString('N')
+    $redactionExpectedKey = 'ts' + 'key-' + ('fixture' * 4)
+    $redactionState = @{ filePath = ''; filePresent = $false; rawInArguments = $false; fileContainsSecret = $false }
+    $redactionInvoker = {
+        param([string]$AuthFile, [string[]]$Arguments)
+        $redactionState.filePath = $AuthFile
+        $redactionState.filePresent = Test-Path -LiteralPath $AuthFile -PathType Leaf
+        $redactionState.rawInArguments = ($Arguments -join ' ').Contains($redactionSecret)
+        $redactionState.fileContainsSecret = ([IO.File]::ReadAllText($AuthFile)).Contains($redactionSecret)
+        $dummyKey = 'ts' + 'key-' + ('fixture' * 4)
+        $dummyBearer = 'Bearer fixture-token-' + [guid]::NewGuid().ToString('N')
+        [pscustomobject]@{ exitCode = 0; output = "$dummyKey oauth=$redactionSecret $dummyBearer" }
+    }.GetNewClosure()
+    $redactionResult = Invoke-TailscaleOAuthClientSecretFileCommand -ClientSecret $redactionSecret -Hostname 'fixture-node' -CommandInvoker $redactionInvoker -TimeoutSeconds 15
+    $caseCount++
+    Check ($redactionState.filePresent -and $redactionState.fileContainsSecret -and -not $redactionState.rawInArguments -and $redactionResult.output -notmatch [regex]::Escape($redactionSecret) -and $redactionResult.output -notmatch [regex]::Escape($redactionExpectedKey) -and $redactionResult.output -notmatch 'fixture-token-' -and -not (Test-Path -LiteralPath $redactionState.filePath)) 'OAuth file input redacts representative tokens and removes the temporary file'
 
-    # The provider itself is outside the supervisor's trust boundary. A
-    # provider that never returns must not strand the driver until the outer
-    # proof watchdog; the supervisor must cancel that exact provider call,
-    # stop the exact worker, and publish one terminal record.
-    $neverProviderJob = Start-ThreadJob -ScriptBlock {
-        param($ContractModulePath,$Specification)
-        Import-Module $ContractModulePath -Force
-        $script:neverProviderStopped=$false;$script:neverProviderTerminalWrites=0
-        $result=Wait-WpfBoundReport -Specification $Specification `
-            -ReportProvider { while($true){Start-Sleep -Milliseconds 100} } `
-            -WorkerStateProvider { 'Running' } `
-            -StopWorker { $script:neverProviderStopped=$true } `
-            -ProviderCallTimeoutSeconds 1 `
-            -ClockProvider { [datetime]'2026-09-05T20:00:00Z' } `
-            -SleepProvider { param($seconds) } `
-            -TerminalWriter { param($value) $script:neverProviderTerminalWrites++; $value }
-        [pscustomobject]@{result=$result;stopped=$script:neverProviderStopped;terminalWrites=$script:neverProviderTerminalWrites}
-    } -ArgumentList $modulePath,$expected
+    # 14. A never-ready post-enrollment state terminates within its owner deadline.
+    $neverReadyStart = [datetime]::UtcNow
+    $neverReady = Invoke-ProductionFixture -InitialBackend 'NeedsLogin' -InitialOnline:$false -InitialIps @() -FinalBackend 'NeedsLogin' -FinalOnline:$false -FinalIps @()
+    $neverReadyElapsed = ([datetime]::UtcNow - $neverReadyStart).TotalSeconds
+    $caseCount++
+    Check (-not $neverReady.result -and $neverReady.error -match '^TAILSCALE_NEEDS_LOGIN' -and [int]$neverReady.state.authCalls -eq 1 -and [int]$neverReady.state.statusCalls -eq 2 -and $neverReadyElapsed -lt 10) 'never-ready authentication ends after one bounded attempt within the owner deadline'
+
+    # 15. Tailnet Lock is observed, never bypassed, and requires trusted signing.
+    $locked = Invoke-ProductionFixture -LockStatus 'ENABLED' -InitialBackend 'NeedsLogin' -InitialOnline:$false -InitialIps @()
+    $caseCount++
+    Check (-not $locked.result -and $locked.error -match '^TAILNET_LOCK_SIGNING_REQUIRED' -and [int]$locked.state.authCalls -eq 0) 'Tailnet Lock blocks OAuth enrollment without a trusted signing path'
+
+    # Exercise the actual protected-store classification with an isolated fixture path.
+    $oauthConfig = [pscustomobject]@{ Authentication = [pscustomobject]@{ Provider = 'OAuthClientSecretStore' } }
+    $savedLocalAppData = $env:LOCALAPPDATA
     try {
-        $neverProviderCompleted=Wait-Job -Job $neverProviderJob -Timeout 5
-        $neverProviderOutcome=if($neverProviderCompleted){Receive-Job -Job $neverProviderJob -ErrorAction SilentlyContinue}else{$null}
-        Check ($neverProviderCompleted -and [string]$neverProviderOutcome.result.failureClass -eq 'REPORT_PROVIDER_TIMEOUT' -and $neverProviderOutcome.result.productStarted -eq $true -and [bool]$neverProviderOutcome.stopped -and [int]$neverProviderOutcome.terminalWrites -eq 1) 'a report provider that never returns after product start is cancelled, stops the exact worker, and terminalizes once'
+        [Environment]::SetEnvironmentVariable('LOCALAPPDATA', $scratch, 'Process')
+        $missingStore = Get-TailscaleAuthenticationSecret -Config $oauthConfig
+        Check (-not [bool]$missingStore.available -and -not [bool]$missingStore.invalid -and [string]$missingStore.provider -ceq 'OAuthClientSecretStore') 'protected-store absence is classified as missing credential'
+        $isolatedStorePath = Join-Path $scratch 'DevFleet\E2E\secrets.json'
+        New-Item -ItemType Directory -Path (Split-Path -Parent $isolatedStorePath) -Force | Out-Null
+        [IO.File]::WriteAllText($isolatedStorePath, 'not-json', [Text.UTF8Encoding]::new($false))
+        $invalidStore = Get-TailscaleAuthenticationSecret -Config $oauthConfig
+        Check (-not [bool]$invalidStore.available -and [bool]$invalidStore.invalid -and [string]$invalidStore.provider -ceq 'OAuthClientSecretStore') 'protected-store corruption is classified as invalid credential'
     } finally {
-        Stop-Job -Job $neverProviderJob -ErrorAction SilentlyContinue
-        Remove-Job -Job $neverProviderJob -Force -ErrorAction SilentlyContinue
+        [Environment]::SetEnvironmentVariable('LOCALAPPDATA', $savedLocalAppData, 'Process')
     }
+} catch {
+    [void]$failures.Add('unexpected OAuth automation test harness exception')
+} finally {
+    if ($scratch -and (Test-Path -LiteralPath $scratch)) {
+        Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
 
-    $script:throwingProviderStopped=$false;$script:throwingProviderTerminalWrites=0
-    $throwingProvider=Wait-WpfBoundReport -Specification $expected `
-        -ReportProvider { throw 'controlled original report-provider error'
+$status = if ($failures.Count -eq 0) { 'PASS' } else { 'FAIL' }
+[pscustomobject][ordered]@{
+    status = $status
+    cases = $caseCount
+    passed = $passed
+    failed = $failures.Count
+    failures = @($failures)
+} | ConvertTo-Json -Depth 5
+if ($status -ne 'PASS') { exit 1 }
+
+```
+
+
+## FILE: automation/release-e2e/tests/Test-TerminalCleanupBoundaries.ps1
+
+SHA256: 0e5ed34119cfc88373e2da6eaa9934ba0f32a3e940638a26239e7ff1

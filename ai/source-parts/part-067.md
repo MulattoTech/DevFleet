@@ -1,1092 +1,1098 @@
 # DevFleet source part 067
 
 Full-source UTF-8 byte interval [3069000, 3115500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: acaf8a7927d25090b810a44c05e9955257dd1c4119c15265e390e538123fd4e7
+Payload SHA-256: 4f7428aded9a1c7b5020b38d24510fee194efb28746063590483b8863aebfcd8
 
 <!-- BEGIN SOURCE SLICE -->
-e ValueError("Command arguments must be non-empty strings.")
-    env = os.environ.copy()
-    executable = Path(cmd[0]).name.lower()
-    if SETTINGS.docker_mode == "rootless" and executable in {"docker", "docker.exe"}:
-        env["DOCKER_HOST"] = _validate_rootless_docker_host(env.get("DOCKER_HOST") or SETTINGS.docker_host)
-    elif SETTINGS.docker_mode != "rootless":
-        env.pop("DOCKER_HOST", None)
+
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            i += 1
+            continue
+        if char == '"':
+            in_string = True
+            result.append(char)
+            i += 1
+        elif text.startswith("//", i):
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end
+        elif text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = len(text) if end < 0 else end + 2
+        else:
+            result.append(char)
+            i += 1
+    return re.sub(r",\s*([}\]])", r"\1", "".join(result))
+
+
+def _parse_jsonc(path: Path) -> dict[str, Any] | None:
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=str(cwd) if cwd else None,
-            env=env,
-            text=True,
-            capture_output=True,
-            timeout=max(1, int(timeout)),
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        if check:
-            raise RuntimeError(f"Command not found: {cmd[0]}") from exc
-        return subprocess.CompletedProcess(cmd, 127, "", str(exc))
-    except subprocess.TimeoutExpired as exc:
-        detail = ((exc.stdout or "") + "\n" + (exc.stderr or ""))[-2000:]
-        if check:
-            raise RuntimeError(f"Command timed out after {timeout}s: {cmd[0]}\n{detail}") from exc
-        return subprocess.CompletedProcess(cmd, 124, exc.stdout or "", exc.stderr or "timeout")
-    if check and result.returncode:
-        detail = (result.stderr or result.stdout or "")[-4000:]
-        raise RuntimeError(f"Command failed ({result.returncode}): {' '.join(cmd)}\n{detail}")
-    return result
+        value = json.loads(_strip_jsonc(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
-def _atomic_replace(temp_name: str, path: Path) -> None:
-    deadline = time.monotonic() + 0.5
-    while True:
+def _scan_devcontainer(project: Path, profile: str, out: list[dict[str, str]], references: set[Path]) -> None:
+    path = project / ".devcontainer/devcontainer.json"
+    if not path.exists():
+        return
+    rel = str(path.relative_to(project))
+    if path.is_symlink():
+        out.append(finding("critical", "project.symlink-config", "devcontainer.json may not be a symbolic link.", rel))
+        return
+    data = _parse_jsonc(path)
+    if data is None:
+        out.append(finding("error", "devcontainer.json.invalid", "devcontainer.json is not valid bounded JSONC.", rel))
+        return
+    for key in data:
+        if key not in DEVCONTAINER_KEYS and not key.startswith("x-"):
+            out.append(finding("critical", "devcontainer.unknown-field", f"Unreviewed Dev Container field is blocked: {key!r}.", rel))
+    compose_files = data.get("dockerComposeFile")
+    compose_files = compose_files if isinstance(compose_files, list) else ([compose_files] if compose_files else [])
+    for compose_file in compose_files:
+        lexical = path.parent / str(compose_file)
+        candidate = lexical.resolve(strict=False)
+        if not _inside_project(project, candidate) or _contains_symlink(project, lexical):
+            out.append(finding("critical", "devcontainer.compose-path", "dockerComposeFile escapes the project or crosses a symlink.", rel))
+        elif candidate.is_file():
+            references.add(candidate)
+    if data.get("initializeCommand") is not None:
+        out.append(finding("critical", "devcontainer.host-command", "initializeCommand executes on the host and is blocked.", rel))
+    if data.get("privileged") is True:
+        out.append(finding(_severity(profile, "privileged"), "devcontainer.privileged", "Privileged Dev Container mode is blocked without an explicit reviewed exception.", rel))
+    if data.get("capAdd"):
+        out.append(finding("critical", "devcontainer.capabilities", "Dev Container capabilities are blocked in the supported subset.", rel))
+    if data.get("securityOpt"):
+        out.append(finding("critical", "devcontainer.security-options", "Dev Container security options are blocked in the supported subset.", rel))
+    run_args = data.get("runArgs")
+    if run_args:
+        if not isinstance(run_args, list) or any(not isinstance(item, str) for item in run_args):
+            out.append(finding("critical", "devcontainer.run-args", "runArgs must be a list of strings and is blocked by default.", rel))
+        else:
+            dangerous = {"--privileged", "--network", "--pid", "--ipc", "--uts", "--userns", "--volume", "-v", "--mount", "--device", "--cap-add", "--security-opt", "--env-file"}
+            for arg in run_args:
+                if arg.split("=", 1)[0] in dangerous:
+                    out.append(finding("critical", "devcontainer.run-args-dangerous", f"Dangerous Dev Container runtime argument is blocked: {arg!r}.", rel))
+            out.append(finding("critical", "devcontainer.run-args", "runArgs are rejected by default until each runtime option has a reviewed allowlist entry.", rel))
+    if data.get("workspaceMount"):
+        out.append(finding("critical", "devcontainer.workspace-mount", "workspaceMount is blocked until its host-path contract is authorized.", rel))
+    if data.get("mounts"):
+        out.append(finding("critical", "devcontainer.mount", "Dev Container mounts are blocked until their complete host-path and socket semantics are authorized.", rel))
+    features = data.get("features")
+    if features:
+        out.append(finding("critical", "devcontainer.features-unsupported", "Dev Container Features are blocked until immutable resolution and derived runtime metadata are validated.", rel))
+        if isinstance(features, dict):
+            for feature in features:
+                if str(feature).startswith((".", "/", "~")):
+                    lexical = path.parent / str(feature)
+                    if not _inside_project(project, lexical) or _contains_symlink(project, lexical):
+                        out.append(finding("critical", "devcontainer.feature-path", "Local Feature path escapes the project or crosses a symlink.", rel))
+
+
+def _port_state(port: Any) -> tuple[str, str]:
+    if isinstance(port, dict):
+        host = str(port.get("host_ip", ""))
+        text = json.dumps(port, sort_keys=True)
+    else:
+        text = str(port)
+        parts = text.rsplit(":", 2)
+        host = parts[0] if len(parts) >= 3 else ""
+    if host in {"127.0.0.1", "::1", "[::1]"}:
+        return "loopback", text
+    if host.startswith("100."):
         try:
-            os.replace(temp_name, path)
-            return
-        except PermissionError as exc:
-            if getattr(exc, "winerror", None) not in {5, 32, 33} or time.monotonic() >= deadline:
-                raise
-            time.sleep(0.01)
+            n = int(host.split(".")[1])
+            return ("tailnet" if 64 <= n <= 127 else "public"), text
+        except Exception:
+            pass
+    return "public", text
 
 
-def atomic_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+def _scan(project: Path, profile: str) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    references: set[Path] = set()
+    found = False
+    for relative in COMPOSE_FILES:
+        path = project / relative
+        if not path.exists():
+            continue
+        found = True
+        if path.is_symlink():
+            out.append(finding("critical", "project.symlink-config", "Container configuration may not be a symbolic link.", relative))
+            continue
+        document = _preflight_compose(project, path, out, references, set(), {"bytes": 0}, 0)
+        if document:
+            services = document.get("services") or {}
+            if isinstance(services, dict):
+                for name, service in services.items():
+                    if isinstance(service, dict):
+                        _scan_compose_service(project, path, str(name), service, profile, out)
+    dc = project / ".devcontainer/devcontainer.json"
+    if dc.exists():
+        found = True
+        _scan_devcontainer(project, profile, out, references)
+    if not found:
+        out.append(finding("warning", "project.no-container-config", "No supported Compose or Dev Container configuration found."))
+    for pth in project.rglob("*"):
+        if pth.is_symlink():
+            try:
+                pth.resolve().relative_to(project.resolve())
+            except ValueError:
+                out.append(finding("critical", "project.symlink-escape", "Symbolic link resolves outside the project.", str(pth.relative_to(project))))
+    return sorted(out, key=lambda x: {"critical": 0, "error": 1, "warning": 2, "info": 3}.get(x["severity"], 9))
+
+
+def _fingerprint(project: Path, profile: str) -> str:
+    h = hashlib.sha256()
+    for value in (ANALYZER_POLICY_VERSION, COMPOSE_SUPPORTED_SCHEMA, DEVCONTAINER_SUPPORTED_SCHEMA, profile):
+        h.update(value.encode("utf-8"))
+        h.update(b"\0")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
-            handle.flush()
-            enable_inherited_backup_read(handle.fileno(), parent=path.parent)
-            os.fsync(handle.fileno())
-        _atomic_replace(temp_name, path)
+        files = sorted(project.rglob("*"), key=lambda item: str(item.relative_to(project)))
+    except OSError:
+        files = []
+    for path in files:
+        try:
+            relative = path.relative_to(project)
+            if relative.as_posix() == ".devfleet/runtime/analyzer-cache.json" or not path.is_file():
+                continue
+            h.update(str(relative).encode("utf-8"))
+            h.update(b"\0")
+            if path.is_symlink():
+                h.update(b"symlink:")
+                h.update(str(path.resolve(strict=False)).encode("utf-8"))
+            else:
+                h.update(b"file:")
+                h.update(hashlib.sha256(path.read_bytes()).digest())
+            h.update(b"\0")
+        except (OSError, ValueError):
+            h.update(f"unreadable:{path}".encode("utf-8"))
+    return h.hexdigest()
+
+
+def analyze_project(project: Path, profile: str | None = None, force: bool = False) -> list[dict[str, str]]:
+    profile = (profile or SETTINGS.development_profile).lower()
+    fp = _fingerprint(project, profile)
+    cache = project / ".devfleet/runtime/analyzer-cache.json"
+    if SETTINGS.enable_analyzer_cache and not force:
+        try:
+            data = json.loads(cache.read_text(encoding="utf-8"))
+            if data.get("fingerprint") == fp and data.get("policyVersion") == ANALYZER_POLICY_VERSION:
+                return data.get("findings", [])
+        except Exception:
+            pass
+    findings = _scan(project, profile)
+    if SETTINGS.enable_analyzer_cache:
+        atomic_json(cache, {"fingerprint": fp, "policyVersion": ANALYZER_POLICY_VERSION, "findings": findings})
+    return findings
+
+
+def has_blockers(findings: list[dict[str, str]]) -> bool:
+    return any(x["severity"] in {"critical", "error"} for x in findings)
+
+```
+
+
+## FILE: source/app/devfleet/auth.py
+
+SHA256: 9810905e7e2ab9d1f1a426ffb9644e2c388de5d199aedf9848f953918ff7cb3d | Bytes: 13026 | Git mode: 100644
+
+```
+from __future__ import annotations
+import hashlib, hmac, json, secrets, time, threading, math, os, tempfile
+from contextlib import contextmanager
+from pathlib import Path
+from fastapi import Header, HTTPException, Request, status
+from .core import SETTINGS, atomic_json
+
+SESSION_COOKIE = "devfleet_session"
+LOGIN_CSRF_COOKIE = "devfleet_login_csrf"
+SESSION_TTL = 12 * 60 * 60
+REMEMBERED_TTL = 7 * 24 * 60 * 60
+SESSION_SAMESITE = "strict"
+SESSION_SECURE_COOKIE = True
+_SESSION_LOCK = threading.RLock()
+_LOGIN_LOCK = threading.RLock()
+_LOGIN_FAILURES = {}
+_SOURCE_FAILURES = {}
+_CREDENTIAL_FAILURES = {}
+_GLOBAL_FAILURES = []
+_BACKOFF_BASE = 0.25
+_BACKOFF_MAX = 8.0
+_SOURCE_WINDOW = 15 * 60
+_GLOBAL_WINDOW = 60.0
+_GLOBAL_LIMIT = 40
+
+
+def _session_path() -> Path:
+    return SETTINGS.runtime_root / "sessions.json"
+
+
+@contextmanager
+def _session_file_lock():
+    """Serialize the complete sessions read/modify/write transaction across workers."""
+    path = _session_path().with_name("sessions.json.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a+b")
+    try:
+        if os.name != "nt":
+            os.chmod(path, 0o600)
+    except OSError:
+        pass
+    try:
+        if os.name != "nt":
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        else:
+            import msvcrt
+
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        yield
     finally:
         try:
-            os.unlink(temp_name)
-        except FileNotFoundError:
-            pass
+            if os.name != "nt":
+                import fcntl
 
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            else:
+                import msvcrt
 
-def atomic_bytes(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        finally:
+            handle.close()
     try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(data)
-            handle.flush()
-            enable_inherited_backup_read(handle.fileno(), parent=path.parent)
-            os.fsync(handle.fileno())
-        _atomic_replace(temp_name, path)
-    finally:
-        try:
-            os.unlink(temp_name)
-        except FileNotFoundError:
-            pass
+        if os.name != "nt":
+            path.chmod(0o600)
+    except OSError:
+        pass
 
 
-def atomic_json(path: Path, data: Any) -> None:
-    atomic_text(path, json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
-
-
-def load_peer() -> dict[str, Any]:
+def _load_sessions() -> dict[str, dict]:
     try:
-        data = json.loads(SETTINGS.peer_file.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
+        value = json.loads(_session_path().read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
     except (OSError, json.JSONDecodeError):
         return {}
 
 
-def now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+def _save_sessions(value: dict[str, dict]) -> None:
+    path = _session_path()
+    parent = path.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        try:
+            parent.chmod(0o700)
+        except OSError:
+            pass
+    payload = json.dumps(value, indent=2, sort_keys=True, default=str) + "\n"
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(parent)
+    )
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            fd = -1
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        replace_error = None
+        for attempt in range(6):
+            try:
+                os.replace(temp_name, path)
+                replace_error = None
+                break
+            except PermissionError as exc:
+                replace_error = exc
+                if os.name != "nt" or attempt == 5:
+                    raise
+                time.sleep(0.02 * (attempt + 1))
+        if replace_error is not None:
+            raise replace_error
+    finally:
+        if fd != -1:
+            os.close(fd)
+        try:
+            Path(temp_name).unlink(missing_ok=True)
+        except OSError:
+            pass
+    if os.name != "nt":
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+
+
+def _credential_generation() -> str:
+    return hashlib.sha256(
+        (str(SETTINGS.admin_user) + "\0" + str(SETTINGS.admin_password)).encode()
+    ).hexdigest()
+
+
+def _prune_sessions(
+    sessions: dict[str, dict], now: int | None = None
+) -> dict[str, dict]:
+    now = int(time.time() if now is None else now)
+    return {
+        k: v
+        for k, v in sessions.items()
+        if isinstance(v, dict) and int(v.get("expires_at", 0)) > now
+    }
+
+
+def login_csrf_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def session_cookie_options(request: Request | None = None) -> dict:
+    """Cookie settings for callers that emit the session cookie.
+
+    v1.2.1's route signatures remain unchanged; this centralizes the strict,
+    secure-compatible policy for future/compatible emitters.
+    """
+    return {
+        "httponly": True,
+        "samesite": SESSION_SAMESITE,
+        "secure": bool(request and request.url.scheme == "https"),
+        "path": "/",
+    }
+
+
+def safe_next(value: str | None) -> str:
+    value = str(value or "/").strip()
+    if (
+        not value.startswith("/")
+        or value.startswith("//")
+        or "\\" in value
+        or "://" in value
+    ):
+        return "/"
+    return value
+
+
+def _backoff_key(user: str, source: str | None = None) -> str:
+    return f'{source or "unknown"}:{user}'
+
+
+def _source_key(source: str | None) -> str:
+    return str(source or "unknown").strip().lower()[:200]
+
+
+def _credential_key(user: str) -> str:
+    return hashlib.sha256(str(user or "").strip().lower().encode()).hexdigest()
+
+
+def _backoff_seconds(entries: dict[str, dict], key: str, now: float) -> float:
+    entry = entries.get(key)
+    return max(0.0, float(entry["until"]) - now) if entry else 0.0
+
+
+def login_backoff_seconds(
+    user: str, source: str | None = None, now: float | None = None
+) -> float:
+    now = time.monotonic() if now is None else now
+    key = _backoff_key(user, source)
+    with _LOGIN_LOCK:
+        entry = _LOGIN_FAILURES.get(key)
+        return max(0.0, float(entry["until"]) - now) if entry else 0.0
+
+
+def _record_login_failure(
+    user: str, source: str | None = None, now: float | None = None
+) -> None:
+    now = time.monotonic() if now is None else now
+    key = _backoff_key(user, source)
+    with _LOGIN_LOCK:
+        cutoff = now - _SOURCE_WINDOW
+        _LOGIN_FAILURES.update(
+            {k: v for k, v in _LOGIN_FAILURES.items() if v["last"] >= cutoff}
+        )
+        entry = _LOGIN_FAILURES.get(key, {"count": 0, "last": now, "until": now})
+        count = min(int(entry["count"]) + 1, 8)
+        entry = {
+            "count": count,
+            "last": now,
+            "until": now + min(_BACKOFF_MAX, _BACKOFF_BASE * (2 ** (count - 1))),
+        }
+        _LOGIN_FAILURES[key] = entry
+        for entries, entry_key in (
+            (_SOURCE_FAILURES, _source_key(source)),
+            (_CREDENTIAL_FAILURES, _credential_key(user)),
+        ):
+            old = entries.get(entry_key, {"count": 0, "last": now, "until": now})
+            n = min(int(old["count"]) + 1, 8)
+            entries[entry_key] = {
+                "count": n,
+                "last": now,
+                "until": now + min(_BACKOFF_MAX, _BACKOFF_BASE * (2 ** (n - 1))),
+            }
+        _GLOBAL_FAILURES[:] = [t for t in _GLOBAL_FAILURES if t >= now - _GLOBAL_WINDOW]
+        if len(_GLOBAL_FAILURES) < _GLOBAL_LIMIT:
+            _GLOBAL_FAILURES.append(now)
+
+
+def login_retry_after(
+    user: str, source: str | None = None, now: float | None = None
+) -> int:
+    now = time.monotonic() if now is None else now
+    with _LOGIN_LOCK:
+        source_delay = _backoff_seconds(_SOURCE_FAILURES, _source_key(source), now)
+        credential_delay = _backoff_seconds(
+            _CREDENTIAL_FAILURES, _credential_key(user), now
+        )
+        global_delay = 0.0
+        if len(_GLOBAL_FAILURES) >= _GLOBAL_LIMIT:
+            global_delay = max(0.0, (_GLOBAL_FAILURES[0] + _GLOBAL_WINDOW) - now)
+    return max(0, math.ceil(max(source_delay, credential_delay, global_delay)))
+
+
+def valid_credentials(user: str, password: str, source: str | None = None) -> bool:
+    user = str(user or "")
+    password = str(password or "")
+    # Keep both comparisons on every credential attempt.  Input-shape
+    # rejection is applied only after the comparisons so an invalid username
+    # cannot skip the password comparison.
+    user_ok = hmac.compare_digest(user, SETTINGS.admin_user)
+    password_ok = hmac.compare_digest(password, SETTINGS.admin_password)
+    valid = bool(user.strip() and password and (user_ok & password_ok))
+    if not user.strip() or not password:
+        _record_login_failure(user, source)
+        return False
+    if not valid:
+        if login_retry_after(user, source):
+            return False
+        _record_login_failure(user, source)
+    else:
+        # A correct credential must not be permanently locked out by earlier
+        # failures for the same account; throttle invalid attempts while allowing
+        # the owner to recover without waiting for the backoff window.
+        with _LOGIN_LOCK:
+            _LOGIN_FAILURES.pop(_backoff_key(user, source), None)
+            _CREDENTIAL_FAILURES.pop(_credential_key(user), None)
+            _SOURCE_FAILURES.pop(_source_key(source), None)
+    return valid
+
+
+def issue_session(user: str, remember: bool = False) -> tuple[str, int, str]:
+    now = int(time.time())
+    ttl = REMEMBERED_TTL if remember else SESSION_TTL
+    session_id = secrets.token_urlsafe(32)
+    csrf = secrets.token_urlsafe(32)
+    with _SESSION_LOCK, _session_file_lock():
+        sessions = _prune_sessions(_load_sessions())
+        sessions[session_id] = {
+            "user": user,
+            "issued_at": now,
+            "expires_at": now + ttl,
+            "csrf": csrf,
+            "credential_generation": _credential_generation(),
+        }
+        _save_sessions(sessions)
+    return session_id, ttl, csrf
+
+
+def _session_file_generation() -> tuple[int, int]:
+    try:
+        stat = _session_path().stat()
+        return (int(stat.st_mtime_ns), int(stat.st_size))
+    except OSError:
+        return (0, 0)
+
+
+def _request_session_record(request: Request) -> dict | None:
+    token = request.cookies.get(SESSION_COOKIE)
+    signature = (token, _credential_generation(), _session_file_generation())
+    state = getattr(request, "state", None)
+    cached = (
+        getattr(state, "devfleet_session_cache", None) if state is not None else None
+    )
+    if isinstance(cached, dict) and cached.get("signature") == signature:
+        return cached.get("record")
+    with _SESSION_LOCK, _session_file_lock():
+        record = _prune_sessions(_load_sessions()).get(token or "")
+    if (
+        not isinstance(record, dict)
+        or record.get("user") != SETTINGS.admin_user
+        or record.get("credential_generation") != signature[1]
+        or int(record.get("expires_at", 0)) <= int(time.time())
+    ):
+        record = None
+    if state is not None:
+        state.devfleet_session_cache = {"signature": signature, "record": record}
+    return record
+
+
+def validate_session(token: str | None) -> str | None:
+    if not token:
+        return None
+    with _SESSION_LOCK, _session_file_lock():
+        record = _prune_sessions(_load_sessions()).get(token)
+    if (
+        not isinstance(record, dict)
+        or record.get("user") != SETTINGS.admin_user
+        or record.get("credential_generation") != _credential_generation()
+    ):
+        return None
+    if int(record.get("expires_at", 0)) <= int(time.time()):
+        revoke_session(token)
+        return None
+    return str(record["user"])
+
+
+def session_user(request: Request) -> str | None:
+    record = _request_session_record(request)
+    return str(record["user"]) if isinstance(record, dict) else None
+
+
+def check_session(request: Request) -> None:
+    if not session_user(request):
+        raise HTTPException(status_code=401, detail="Login required.")
+
+
+def session_csrf_token(request: Request) -> str:
+    record = _request_session_record(request)
+    return str(record.get("csrf", "")) if isinstance(record, dict) else ""
+
+
+def validate_login_csrf(cookie: str | None, form_value: str) -> bool:
+    return bool(cookie and form_value) and hmac.compare_digest(cookie, form_value)
+
+
+def validate_session_csrf(request: Request, form_value: str) -> bool:
+    return bool(form_value) and hmac.compare_digest(
+        session_csrf_token(request), form_value
+    )
+
+
+def revoke_session(token: str | None) -> None:
+    if not token:
+        return
+    with _SESSION_LOCK, _session_file_lock():
+        sessions = _load_sessions()
+        sessions.pop(token, None)
+        _save_sessions(sessions)
+
+
+def api_token_valid(token: str | None) -> bool:
+    """Validate the API token without short-circuiting the digest comparison."""
+    expected = str(SETTINGS.api_token or "")
+    supplied = str(token or "")
+    configured = bool(expected.strip())
+    provided = bool(supplied.strip())
+    matches = hmac.compare_digest(supplied, expected)
+    return configured and provided and matches
+
+
+def check_api(x_devfleet_token: str = Header(default="")) -> None:
+    if not api_token_valid(x_devfleet_token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API token"
+        )
 
 ```
 
 
-## FILE: source/app/devfleet/failover.py
+## FILE: source/app/devfleet/caches.py
 
-SHA256: cd69e5b29293e828ef6c7cfcbc4538e73456e3ac3041fffb3ce2059375f81e5d | Bytes: 6853 | Git mode: 100644
+SHA256: 9772d26aae5fa5d81142a9e1e29361886b9effbaa92f3eef8a99724bd985441d | Bytes: 1733 | Git mode: 100644
 
 ```
 from __future__ import annotations
-
-import re
-import time
-from typing import Any, Callable, Protocol
-
-
-PEER_OPERATION_TIMEOUT_SECONDS = 3700.0
-PEER_OPERATION_POLL_INTERVAL_SECONDS = 0.5
-PEER_REQUEST_TIMEOUT_SECONDS = 30.0
-_OPERATION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
-_PROJECT_ID_RE = re.compile(r"[0-9a-fA-F-]{16,128}\Z")
-_TRANSFER_IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
-
-
-class Progress(Protocol):
-    def update(self, progress: int, message: str) -> None: ...
-
-
-PeerCall = Callable[[str, str, dict[str, Any] | None, float], Any]
-
-
-def _operation_endpoint(receipt: Any, phase: str) -> tuple[str, str]:
-    """Accept only the native 202 receipt shape and its exact operation endpoint."""
-    if (
-        not isinstance(receipt, dict)
-        or receipt.get("ok") is not True
-        or receipt.get("accepted") is not True
-    ):
-        raise RuntimeError(f"Peer {phase} operation response was malformed.")
-    operation_id = receipt.get("operation_id")
-    if not isinstance(operation_id, str) or not _OPERATION_ID_RE.fullmatch(operation_id):
-        raise RuntimeError(f"Peer {phase} operation response was malformed.")
-    operation_url = receipt.get("operation_url")
-    if operation_url != f"/api/operations/{operation_id}":
-        raise RuntimeError(f"Peer {phase} operation response was malformed.")
-    return operation_id, operation_url
-
-
-def _remaining_request_timeout(deadline: float, phase: str) -> float:
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        raise RuntimeError(f"Peer {phase} operation timed out.")
-    return min(PEER_REQUEST_TIMEOUT_SECONDS, remaining)
-
-
-def _await_peer_operation(
-    receipt: Any,
-    phase: str,
-    peer_call: PeerCall,
-    deadline: float,
-) -> None:
-    operation_id, operation_url = _operation_endpoint(receipt, phase)
-    while True:
-        request_timeout = _remaining_request_timeout(deadline, phase)
-        record = peer_call("GET", operation_url, None, request_timeout)
-        if not isinstance(record, dict):
-            raise RuntimeError(f"Peer {phase} operation response was malformed.")
-        record_ids = [record.get("operation_id"), record.get("id")]
-        if operation_id not in record_ids or any(
-            value is not None and value != operation_id for value in record_ids
-        ):
-            raise RuntimeError(f"Peer {phase} operation response was malformed.")
-        state = record.get("state")
-        if not isinstance(state, str):
-            raise RuntimeError(f"Peer {phase} operation response was malformed.")
-        if (
-            state == "locked"
-            or record.get("current_step") == "locked"
-            or record.get("error") == "operation_locked"
-        ):
-            raise RuntimeError(f"Peer {phase} operation is locked.")
-        if state == "completed":
-            return
-        if state in {"failed", "interrupted", "cancelled"}:
-            raise RuntimeError(f"Peer {phase} operation {state}.")
-        if state not in {"queued", "running"}:
-            raise RuntimeError(f"Peer {phase} operation response was malformed.")
-        remaining = _remaining_request_timeout(deadline, phase)
-        time.sleep(min(PEER_OPERATION_POLL_INTERVAL_SECONDS, remaining))
-
-
-def _submit_and_await_peer_operation(
-    method: str,
-    path: str,
-    payload: dict[str, Any] | None,
-    phase: str,
-    peer_call: PeerCall,
-) -> None:
-    deadline = time.monotonic() + PEER_OPERATION_TIMEOUT_SECONDS
-    receipt = peer_call(
-        method, path, payload, _remaining_request_timeout(deadline, phase)
-    )
-    _await_peer_operation(receipt, phase, peer_call, deadline)
-
-
-def _validated_transfer_identity(
-    project_id: str,
-    deployment_id: str,
-    source_host_id: str,
-    destination_host_id: str,
-) -> tuple[str, str, str, str]:
-    if not isinstance(project_id, str) or not _PROJECT_ID_RE.fullmatch(project_id):
-        raise ValueError("Ownership transfer requires a valid persisted project ID.")
-    if not isinstance(deployment_id, str) or not _TRANSFER_IDENTIFIER_RE.fullmatch(
-        deployment_id
-    ):
-        raise ValueError("Ownership transfer requires a valid deployment ID.")
-    if not isinstance(source_host_id, str) or not _TRANSFER_IDENTIFIER_RE.fullmatch(
-        source_host_id
-    ):
-        raise ValueError("Ownership transfer requires a valid source host ID.")
-    if not isinstance(destination_host_id, str) or not _TRANSFER_IDENTIFIER_RE.fullmatch(
-        destination_host_id
-    ):
-        raise ValueError("Ownership transfer requires a valid destination host ID.")
-    if source_host_id.casefold() == destination_host_id.casefold():
-        raise ValueError("Ownership transfer requires a distinct destination host ID.")
-    return project_id, deployment_id, source_host_id, destination_host_id
-
-
-def guided_transfer(
-    slug: str,
-    ctx: Progress,
-    *,
-    stop: Callable[[str], Any],
-    backup: Callable[[str], Any],
-    assert_quiesced: Callable[[str, str], Any],
-    project_id: str,
-    deployment_id: str,
-    source_host_id: str,
-    destination_host_id: str,
-    finalize_source: Callable[[str, str, str], Any],
-    peer_call: PeerCall,
-) -> str:
-    (
-        project_id,
-        deployment_id,
-        source_host_id,
-        destination_host_id,
-    ) = _validated_transfer_identity(
-        project_id, deployment_id, source_host_id, destination_host_id
-    )
-
-    def transfer_payload(confirm_phrase: str) -> dict[str, Any]:
-        return {
-            "slug": slug,
-            "project_id": project_id,
-            "deployment_id": deployment_id,
-            "source_host_id": source_host_id,
-            "destination_host_id": destination_host_id,
-            "confirm_slug": slug,
-            "confirm_phrase": confirm_phrase,
-        }
-
-    ctx.update(5, "Stopping local project")
-    stop(slug)
-    assert_quiesced(slug, project_id)
-    ctx.update(20, "Creating and verifying append-only backup")
-    backup(slug)
-    assert_quiesced(slug, project_id)
-    ctx.update(45, "Receiving verified transfer on peer")
-    _submit_and_await_peer_operation(
-        "POST",
-        "/api/transfers/receive",
-        transfer_payload(f"RECEIVE TRANSFER {slug}"),
-        "receive transfer",
-        peer_call,
-    )
-    ctx.update(65, "Finalizing source ownership handoff")
-    try:
-        finalize_source(slug, project_id, destination_host_id)
-    except Exception:
-        raise RuntimeError("Source transfer finalization failed.") from None
-    ctx.update(75, "Activating verified transfer on peer")
-    _submit_and_await_peer_operation(
-        "POST",
-        "/api/transfers/activate",
-        transfer_payload(f"ACTIVATE TRANSFER {slug}"),
-        "activate transfer",
-        peer_call,
-    )
-    ctx.update(95, "Ownership handoff activated and started on peer")
-    return "Ownership transferred to peer."
+from pathlib import Path
+from typing import Any
+import yaml
+from .core import SETTINGS
+MOUNTS={'python':[('pip','/home/vscode/.cache/pip'),('uv','/home/vscode/.cache/uv')],'javascript':[('npm','/home/node/.npm'),('pnpm','/home/node/.local/share/pnpm/store')],'typescript':[('npm','/home/node/.npm'),('pnpm','/home/node/.local/share/pnpm/store')],'java':[('maven','/home/vscode/.m2/repository'),('gradle','/home/vscode/.gradle/caches')],'kotlin':[('maven','/home/vscode/.m2/repository'),('gradle','/home/vscode/.gradle/caches')],'csharp':[('nuget','/home/vscode/.nuget/packages')],'go':[('go-mod','/go/pkg/mod'),('go-build','/home/vscode/.cache/go-build')],'rust':[('cargo-registry','/usr/local/cargo/registry'),('cargo-git','/usr/local/cargo/git')],'php':[('composer','/home/vscode/.cache/composer')],'ruby':[('bundler','/usr/local/bundle/cache')]}
+def cache_override(project:Path,compose_file:Path,meta:dict[str,Any])->Path|None:
+ if not SETTINGS.enable_shared_caches or meta.get('profile',SETTINGS.development_profile)=='strict':return None
+ mounts=MOUNTS.get(str(meta.get('language','')).lower(),[])
+ if not mounts:return None
+ data=yaml.safe_load(compose_file.read_text()) or {};services=data.get('services') or {};override={'services':{}}
+ for service in services:
+  volumes=[]
+  for name,target in mounts:
+   source=SETTINGS.cache_root/name;source.mkdir(parents=True,exist_ok=True);volumes.append({'type':'bind','source':str(source),'target':target})
+  override['services'][service]={'volumes':volumes}
+ out=SETTINGS.runtime_root/'compose-overrides'/f'{project.name}.cache.yaml';out.parent.mkdir(parents=True,exist_ok=True);out.write_text(yaml.safe_dump(override,sort_keys=False));return out
 
 ```
 
 
-## FILE: source/app/devfleet/host_control.py
+## FILE: source/app/devfleet/codexpro.py
 
-SHA256: 47b084d09edea59545bad7d16bf197892edfd2fd1905e06f8fb418e5a466ce53 | Bytes: 20952 | Git mode: 100644
+SHA256: 30b25cb2a5e7479b08aeb3e1b161fe5b53d6eafe21f6b53ea6d2b827df5689a4 | Bytes: 867 | Git mode: 100644
 
 ```
-"""Narrow authenticated client for the Windows DevFleet host agent."""
+from __future__ import annotations
+import json,time
+from pathlib import Path
+from typing import Any
+from .core import SETTINGS
+def codexpro_status(project:Path)->dict[str,Any]:
+ runtime=project/'.ai-bridge/local-agent';status=project/'.devfleet/runtime/codexpro-status.json';log=project/'.devfleet/runtime/codexpro-bootstrap.log';handoff=project/'.ai-bridge/current-plan.md'
+ data={'healthy':False,'state':'not-bootstrapped','workspace':str(project),'runtime_log':str(log),'model_endpoint':SETTINGS.ollama_base_url,'handoff_age_seconds':None}
+ try:data.update(json.loads(status.read_text()))
+ except Exception:pass
+ if handoff.exists():data['handoff_age_seconds']=max(0,int(time.time()-handoff.stat().st_mtime))
+ data['runtime_directory']=str(runtime);return data
+def bootstrap_command(project:Path)->list[str]:return [str(project/'.devfleet/codexpro-bootstrap.sh')]
+
+```
+
+
+## FILE: source/app/devfleet/configuration.py
+
+SHA256: 3ad7879d81b09b62d176c5483204281caf4d7f81a57d03d6fd77cf9a7f4c1ee1 | Bytes: 4081 | Git mode: 100644
+
+```
+from __future__ import annotations
+from copy import deepcopy
+from typing import Any
+SCHEMA_VERSION=2
+PROFILE_NAMES={'strict','balanced','fast'}
+DOCKER_MODES={'rootless','rootful'}
+
+def _setdefault_path(data:dict[str,Any],path:tuple[str,...],value:Any)->None:
+    cur=data
+    for key in path[:-1]:cur=cur.setdefault(key,{})
+    cur.setdefault(path[-1],value)
+
+def migrate_cluster_config(source:dict[str,Any],*,clean_install:bool=False)->tuple[dict[str,Any],list[str]]:
+    data=deepcopy(source); version=int(data.get('SchemaVersion',1)); changes=[]
+    if version>2: raise ValueError(f'Configuration schema {version} is newer than this package supports.')
+    if version==1:
+        profile='balanced' if clean_install else 'strict'
+        _setdefault_path(data,('Hosts',),{'DesktopFriendlyName':'DevFleet Primary','LaptopFriendlyName':'DevFleet Surrogate'})
+        for key,friendly,alias in [('Primary','CodexDevVM','CodexDevVM'),('Failover','DevFleetFailover','DevFleetFailover'),('Vault','DevFleetVault','DevFleetVault')]:
+            node=data.setdefault(key,{}); node.setdefault('FriendlyName',friendly); node.setdefault('SshAlias',alias)
+        data.setdefault('Development',{'Profile':profile,'EnableSharedBuildCaches':profile!='strict','EnableAnalyzerCache':True,'EnableTrustedOrchestrator':True,'AllowLoopbackPortPublishing':True,'AllowTailnetPortPublishing':profile!='strict','AutoStartCodexPro':True,'AutoStartProjectServices':True,'RequireConfirmationForRoutineRebuild':False,'RequireConfirmationForRoutineRepair':False,'BackupBeforeRebuild':False,'BackupBeforeQuarantine':True})
+        data.setdefault('Docker',{'PrimaryMode':'rootless','FailoverMode':'rootless','EnableBuildKit':True,'EnableSharedBuildCache':profile!='strict','EnableRegistryCache':False,'RootfulModeAcknowledged':False})
+        data.setdefault('CodexPro',{'Mode':'project-scoped-adapter','AutoBootstrap':True,'ToolCards':True,'DefaultHost':'127.0.0.1','DefaultPort':8787,'SharedTransportStatus':'adapter-only-until-a-verified-multi-workspace-registration-interface-is-exposed'})
+        ollama=data.setdefault('Ollama',{}); ollama.setdefault('PreferredBaseUrl',''); ollama.setdefault('Profile','stable-interactive'); ollama.setdefault('ProfilesFile','config/ollama-profiles.json')
+        network=data.setdefault('Network',{}); network.setdefault('TailnetCidr','100.64.0.0/10'); network.setdefault('PublicBindingAllowed',False)
+        backup=data.setdefault('Backup',{}); backup.setdefault('RequireVerifiedBackupBeforeQuarantine',True); backup.setdefault('OfflineExportEnabled',True)
+        safety=data.setdefault('Safety',{}); safety.setdefault('BlockWindowsPaths',True); safety.setdefault('BlockUncPaths',True); safety.setdefault('BlockWorkspaceEscape',True); safety.setdefault('OrdinaryContainersMayMountDockerSocket',False)
+        data.setdefault('LanguagePolicy',{'DefaultAutomation':'python','DefaultWindowsAdministration':'powershell','DefaultLinuxAdministration':'bash-or-python','DefaultCrossPlatformCli':'go','DefaultWebFrontend':'typescript','DefaultRapidApi':'python-fastapi'})
+        data['SchemaVersion']=2
+        changes += ['SchemaVersion: 1 -> 2',f'Development.Profile: {profile}','Existing rootless Docker stores preserved; no implicit image/volume migration','Primary friendly name and SSH alias: CodexDevVM; instance remains devfleet-primary']
+    data['PackageVersion']=__import__('devfleet.version',fromlist=['__version__']).__version__
+    return data,changes
+
+def validate_cluster_config(data:dict[str,Any])->None:
+    if int(data.get('SchemaVersion',0))!=2: raise ValueError('SchemaVersion must be 2 after migration.')
+    if str(data.get('Development',{}).get('Profile','')).lower() not in PROFILE_NAMES: raise ValueError('Unknown development profile.')
+    for key in ('PrimaryMode','FailoverMode'):
+        if str(data.get('Docker',{}).get(key,'')).lower() not in DOCKER_MODES: raise ValueError(f'Docker.{key} must be rootless or rootful.')
+    if data.get('Safety',{}).get('AllowDockerTcp'): raise ValueError('Unauthenticated Docker TCP remains unsupported.')
+
+```
+
+
+## FILE: source/app/devfleet/containers.py
+
+SHA256: 56dc9aa80609796d45523c4d701e05afde736cccbc9a925fab4f8d50304dc600 | Bytes: 11180 | Git mode: 100644
+
+```
 from __future__ import annotations
 
 import json
 import re
-import hashlib
-import hmac
-import secrets
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from typing import Any
 
-from .core import SETTINGS, validate_project_id, validate_slug
-from .resource_profiles import validate_resource_limits
+from .core import SETTINGS, run, safe_child, validate_project_id, validate_slug
+from .metadata_io import read_project_metadata
 
 
-_ACTION_TIMEOUTS = {
-    "inspect": 10,
-    "health": 15,
-    "capacity": 10,
-    "provider": 10,
-    "start": 120,
-    "stop": 120,
-    "restart": 180,
-    "create": 1200,
-    "destroy": 600,
-    "backup": 600,
-    "list-backups": 30,
-    "inspect-backup": 60,
-    "restore-backup": 1200,
-    "quarantine": 600,
-    "restore": 600,
-    "import": 900,
-    "export": 1200,
-    "export-to-source": 1200,
-    "restore-previous-source": 300,
-    "sync-ssh-alias": 30,
-    "refresh-connection-state": 30,
-    "project-start": 900,
-    "project-stop": 900,
-    "project-restart": 1200,
-    "project-health": 120,
-    "project-test": 1800,
-    "project-bootstrap": 3600,
-    "project-rebuild": 3600,
-    "project-logs": 120,
+_CONTAINER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_ACTIONS = {
+    "start": "start",
+    "stop": "stop",
+    "restart": "restart",
+    "pause": "pause",
+    "unpause": "unpause",
+    "remove": "rm",
+}
+_IMMUTABLE_CONTAINER_ID = re.compile(r"^[0-9a-fA-F]{64}$")
+OWNERSHIP_LABELS = {
+    "managed_by": "io.devfleet.managed-by",
+    "project_id": "io.devfleet.project-id",
+    "slug": "io.devfleet.project-slug",
+    "runtime_id": "io.devfleet.runtime-id",
+    "deployment_id": "io.devfleet.deployment-id",
+    "host_id": "io.devfleet.host-id",
 }
 
 
-def validate_backup_reference(
-    reference: Any,
-    *,
-    provider: str = "multipass-host-agent",
-    project_id: str = "",
-    slug: str = "",
-    runtime_id: str = "",
-    host_id: str = "",
-) -> dict[str, Any]:
-    """Validate a provider-owned backup identity without accepting a path.
-
-    A provider-local archive path is deliberately not part of the returned
-    authority.  Only the provider can resolve and verify the opaque ID.
-    """
-    if not isinstance(reference, dict):
-        raise RuntimeError("Host agent returned no provider-owned backup reference.")
-    forbidden = {"backup_path", "archive_path", "manifest_path", "path"}
-    if forbidden.intersection(reference):
-        raise RuntimeError("Host agent exposed a provider-local backup path as authority.")
-    expected = {
-        "provider": provider,
-        "project_id": project_id,
-        "slug": slug,
-        "runtime_id": runtime_id,
-        "host_id": host_id,
+def container_ownership_labels(metadata: dict[str, Any]) -> dict[str, str]:
+    values = {
+        "managed_by": str(metadata.get("managed_by") or "").strip().lower(),
+        "project_id": str(metadata.get("project_id") or "").strip(),
+        "slug": str(metadata.get("slug") or "").strip(),
+        "runtime_id": str(metadata.get("runtime_id") or "").strip(),
+        "deployment_id": str(metadata.get("deployment_id") or "").strip(),
+        "host_id": str(metadata.get("host_id") or "").strip(),
     }
-    for key, value in expected.items():
-        if value and str(reference.get(key) or "") != str(value):
-            raise RuntimeError(f"Provider backup reference {key} does not match the requested identity.")
-    for key in ("backup_id", "archive_sha256", "manifest_sha256"):
-        if not str(reference.get(key) or ""):
-            raise RuntimeError(f"Provider backup reference is missing {key}.")
-    if not re.fullmatch(r"[0-9a-fA-F]{64}", str(reference["archive_sha256"])):
-        raise RuntimeError("Provider backup reference archive hash is malformed.")
-    if not re.fullmatch(r"[0-9a-fA-F]{64}", str(reference["manifest_sha256"])):
-        raise RuntimeError("Provider backup reference manifest hash is malformed.")
-    if int(reference.get("archive_bytes") or 0) < 0:
-        raise RuntimeError("Provider backup reference archive size is malformed.")
-    return {key: reference[key] for key in ("provider", "backup_id", "project_id", "slug", "runtime_id", "host_id", "archive_sha256", "archive_bytes", "manifest_sha256", "created_at", "consistency_level") if key in reference}
+    if values["managed_by"] != "devfleet":
+        raise ValueError("Container ownership binding is missing the DevFleet manager identity.")
+    validate_project_id(values["project_id"])
+    validate_slug(values["slug"])
+    if any(not values[key] for key in ("runtime_id", "deployment_id", "host_id")):
+        raise ValueError("Container ownership binding is incomplete.")
+    return {label: values[field] for field, label in OWNERSHIP_LABELS.items()}
 
 
-def build_request_auth(method: str, path: str, body: bytes, key: str, expected_host: str, *, timestamp: int | None = None, nonce: str | None = None) -> dict[str, str]:
-    """Build the non-bearer request-authentication headers.
-
-    The key never appears in a request.  The server binds the MAC to the
-    expected host, preventing a captured request from being redirected to a
-    different configured Host Agent.
-    """
-    timestamp_text = str(int(time.time()) if timestamp is None else int(timestamp))
-    nonce_text = nonce or secrets.token_urlsafe(24)
-    material = b"\n".join((method.upper().encode(), path.encode(), timestamp_text.encode(), nonce_text.encode(), body, expected_host.encode()))
-    signature = hmac.new(str(key).encode(), material, hashlib.sha256).hexdigest()
-    return {"X-DevFleet-Host-Timestamp": timestamp_text, "X-DevFleet-Host-Nonce": nonce_text, "X-DevFleet-Host-Expected": expected_host, "X-DevFleet-Host-Signature": signature}
-
-
-def _response_auth_material(
-    method: str,
-    path: str,
-    timestamp: str,
-    nonce: str,
-    status: int,
-    body: bytes,
-    expected_host: str,
-) -> bytes:
-    return b"\n".join(
-        (
-            method.upper().encode(),
-            path.encode(),
-            str(timestamp).encode(),
-            str(nonce).encode(),
-            str(int(status)).encode(),
-            body,
-            expected_host.encode(),
-        )
-    )
-
-
-def build_response_auth(
-    method: str,
-    path: str,
-    status: int,
-    body: bytes,
-    key: str,
-    expected_host: str,
-    *,
-    timestamp: str,
-    nonce: str,
-) -> str:
-    """Return the response MAC bound to the exact authenticated request."""
-    material = _response_auth_material(method, path, timestamp, nonce, status, body, expected_host)
-    return hmac.new(str(key).encode(), material, hashlib.sha256).hexdigest()
-
-
-def verify_response_auth(
-    method: str,
-    path: str,
-    status: int,
-    body: bytes,
-    key: str,
-    expected_host: str,
-    *,
-    timestamp: str,
-    nonce: str,
-    provided: str,
-) -> None:
-    expected = build_response_auth(
-        method, path, status, body, key, expected_host, timestamp=timestamp, nonce=nonce
-    )
-    if not provided or not hmac.compare_digest(expected, str(provided).lower()):
-        raise RuntimeError("Host agent response authentication failed.")
-
-
-def _configured() -> None:
-    if not SETTINGS.host_control_enabled or not SETTINGS.host_control_url or not SETTINGS.host_control_token:
-        raise RuntimeError("Host VM control is not configured on this DevFleet node.")
-
-
-def _url(path: str) -> str:
-    _configured()
-    base = SETTINGS.host_control_url.rstrip("/")
-    return base + "/" + path.lstrip("/")
-
-
-def _request(method: str, path: str, payload: dict[str, Any] | None = None, *, timeout: int = 30) -> dict[str, Any]:
-    body = None
-    headers = {"Accept": "application/json"}
-    if payload is not None:
-        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    raw_body = body or b""
-    expected_host = str(getattr(SETTINGS, "expected_host_name", "") or "")
-    request_auth = build_request_auth(method, path, raw_body, SETTINGS.host_control_token, expected_host)
-    headers.update(request_auth)
-    request = urllib.request.Request(_url(path), data=body, headers=headers, method=method)
+def _authoritative_container_binding(inspected: dict[str, Any]) -> tuple[str, dict[str, str]]:
+    immutable_id = str(inspected.get("Id") or "").strip()
+    if not _IMMUTABLE_CONTAINER_ID.fullmatch(immutable_id):
+        raise ValueError("Container ownership verification failed: Docker returned no canonical immutable ID.")
+    config = inspected.get("Config")
+    labels = config.get("Labels") if isinstance(config, dict) else None
+    if not isinstance(labels, dict):
+        raise ValueError("Container ownership verification failed: container labels are missing.")
+    slug = str(labels.get(OWNERSHIP_LABELS["slug"]) or "")
     try:
-        with urllib.request.urlopen(request, timeout=max(1, int(timeout))) as response:
-            response_body = response.read()
-            verify_response_auth(
-                method,
-                path,
-                int(getattr(response, "status", response.getcode())),
-                response_body,
-                SETTINGS.host_control_token,
-                expected_host,
-                timestamp=request_auth["X-DevFleet-Host-Timestamp"],
-                nonce=request_auth["X-DevFleet-Host-Nonce"],
-                provided=response.headers.get("X-DevFleet-Host-Response-Signature", ""),
-            )
-            result = json.loads(response_body.decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        response_body = exc.read()
+        slug = validate_slug(slug)
+        project = safe_child(SETTINGS.workspaces, slug)
+    except ValueError as exc:
+        raise ValueError("Container ownership verification failed: project slug binding is invalid.") from exc
+    try:
+        metadata = read_project_metadata(project).value
+    except (OSError, ValueError, UnicodeError, TypeError) as exc:
+        raise ValueError("Container ownership verification failed: authoritative project state is unreadable.") from exc
+    if not isinstance(metadata, dict) or str(metadata.get("runtime_provider") or "") != "docker-compose":
+        raise ValueError("Container ownership verification failed: project is not currently Compose-managed.")
+    expected = container_ownership_labels(metadata)
+    if expected[OWNERSHIP_LABELS["deployment_id"]] != SETTINGS.deployment_id or expected[OWNERSHIP_LABELS["host_id"]] != SETTINGS.host_id:
+        raise ValueError("Container ownership verification failed: project deployment or host binding is not current.")
+    mismatches = [key for key, value in expected.items() if str(labels.get(key) or "") != value]
+    compose_project = str(labels.get("com.docker.compose.project") or "")
+    compose_service = str(labels.get("com.docker.compose.service") or "")
+    if compose_project != expected[OWNERSHIP_LABELS["runtime_id"]] or not compose_service:
+        mismatches.append("com.docker.compose.project/service")
+    if mismatches:
+        raise ValueError("Container ownership verification failed: complete DevFleet/Compose binding does not match current project state (" + ", ".join(sorted(set(mismatches))) + ").")
+    return immutable_id, expected
+
+
+def validate_container_ref(value: str) -> str:
+    value = str(value or "").strip()
+    if not _CONTAINER_ID.fullmatch(value):
+        raise ValueError("Invalid container reference.")
+    return value
+
+
+def _json_lines(args: list[str], timeout: int = 8) -> list[dict[str, Any]]:
+    result = run(args, check=False, timeout=timeout)
+    rows: list[dict[str, Any]] = []
+    for line in (result.stdout or "").splitlines():
         try:
-            verify_response_auth(
-                method,
-                path,
-                int(exc.code),
-                response_body,
-                SETTINGS.host_control_token,
-                expected_host,
-                timestamp=request_auth["X-DevFleet-Host-Timestamp"],
-                nonce=request_auth["X-DevFleet-Host-Nonce"],
-                provided=exc.headers.get("X-DevFleet-Host-Response-Signature", ""),
-            )
-        except RuntimeError:
-            raise
-        detail = response_body.decode("utf-8", errors="replace")[-2000:]
-        raise RuntimeError(f"Host agent rejected request ({exc.code}): {detail}") from exc
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
-        raise RuntimeError(f"Host agent request failed: {exc}") from exc
-    if not isinstance(result, dict) or not result.get("ok", False):
-        raise RuntimeError(str(result.get("error") if isinstance(result, dict) else "Host agent returned an invalid response."))
-    remote_host = str(result.get("host_name") or result.get("host_id") or "")
-    if path != "/healthz" and SETTINGS.expected_host_name and remote_host.lower() != SETTINGS.expected_host_name.lower():
-        raise RuntimeError(f"Host identity mismatch: expected {SETTINGS.expected_host_name}, received {remote_host}.")
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            rows.append(value)
+    return rows
+
+
+def _docker_inspect(ref: str) -> dict[str, Any]:
+    result = run(["docker", "inspect", ref], check=False, timeout=10)
+    if result.returncode:
+        raise ValueError((result.stderr or "Container not found.").strip()[-1000:])
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Docker returned invalid inspect data.") from exc
+    if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], dict):
+        raise ValueError("Container not found.")
+    return data[0]
+
+
+def _authorized_read(ref: str) -> tuple[str, dict[str, str], dict[str, Any]]:
+    """Resolve, bind, and revalidate a read before data can leave the service."""
+    inspected = _docker_inspect(ref)
+    immutable_id, expected = _authoritative_container_binding(inspected)
+    try:
+        current = _docker_inspect(immutable_id)
+    except ValueError as exc:
+        raise ValueError("Container ownership verification failed: immutable container disappeared before the read.") from exc
+    current_id, current_expected = _authoritative_container_binding(current)
+    if current_id != immutable_id or current_expected != expected:
+        raise ValueError("Container ownership verification failed: immutable identity changed before the read.")
+    return immutable_id, expected, current
+
+
+def list_containers() -> list[dict[str, Any]]:
+    """Return a safe, Portainer-style summary without exposing the Docker socket."""
+    containers = _json_lines([
+        "docker", "ps", "-a", "--no-trunc", "--format",
+        "{{json .}}",
+    ])
+    stats = _json_lines([
+        "docker", "stats", "--no-stream", "--format", "{{json .}}",
+    ])
+    stats_by_id = {str(item.get("ID") or ""): item for item in stats}
+    result: list[dict[str, Any]] = []
+    for item in containers:
+        ref = str(item.get("ID") or "")
+        if not ref:
+            continue
+        try:
+            immutable_id, expected, inspected = _authorized_read(ref)
+        except ValueError:
+            # A Docker-engine container without a current authoritative DevFleet
+            # binding is deliberately absent, including from metrics.
+            continue
+        stat = stats_by_id.get(immutable_id) or {}
+        name = str(inspected.get("Name") or item.get("Names") or immutable_id[:12]).lstrip("/")
+        result.append({
+            "id": immutable_id,
+            "short_id": immutable_id[:12],
+            "name": name,
+            "image": item.get("Image") or "",
+            "state": item.get("State") or "unknown",
+            "status": item.get("Status") or "",
+            "created": item.get("CreatedAt") or "",
+            "ports": item.get("Ports") or "",
+            "labels": expected,
+            "cpu_percent": stat.get("CPUPerc") or "—",
+            "memory_usage": stat.get("MemUsage") or "—",
+            "memory_percent": stat.get("MemPerc") or "—",
+            "network_io": stat.get("NetIO") or "—",
+            "block_io": stat.get("BlockIO") or "—",
+            "pids": stat.get("PIDs") or "—",
+        })
     return result
 
 
-def host_control_request(operation: str, payload: dict[str, Any], *, runtime_id: str = "") -> dict[str, Any]:
-    """Compatibility entry point that maps intent to a fixed endpoint."""
-    operation = str(operation or "").lower()
-    if operation == "capacity":
-        return _request("GET", "/v1/host/capacity", timeout=_ACTION_TIMEOUTS["capacity"])
-    if operation == "provider":
-        return _request("GET", "/v1/provider", timeout=_ACTION_TIMEOUTS["provider"])
-    if operation == "ensure":
-        return _request("POST", "/v1/project-vms", payload, timeout=_ACTION_TIMEOUTS["create"])
-    runtime_id = runtime_id or str(payload.get("runtime_id") or "")
-    if not runtime_id:
-        raise ValueError("A runtime id is required for this host-agent operation.")
-    encoded = urllib.parse.quote(runtime_id, safe="")
-    if operation == "inspect":
-        return _request("GET", f"/v1/project-vms/{encoded}", timeout=_ACTION_TIMEOUTS["inspect"])
-    if operation == "destroy":
-        # Keep the destructive request on the fixed action route so the
-        # Windows host agent receives the JSON confirmation body reliably.
-        return _request("POST", f"/v1/project-vms/{encoded}/destroy", payload, timeout=_ACTION_TIMEOUTS["destroy"])
-    if operation in {"start", "stop", "restart", "health", "backup", "list-backups", "inspect-backup", "restore-backup", "quarantine", "restore", "export", "export-to-source", "restore-previous-source", "sync-ssh-alias", "refresh-connection-state", "project-start", "project-stop", "project-restart", "project-health", "project-test", "project-bootstrap", "project-rebuild", "project-logs"}:
-        return _request("POST", f"/v1/project-vms/{encoded}/{operation}", payload, timeout=_ACTION_TIMEOUTS[operation])
-    if operation == "import":
-        return _request("POST", f"/v1/project-vms/{encoded}/import", payload, timeout=_ACTION_TIMEOUTS[operation])
-    raise ValueError(f"Unsupported host-agent operation: {operation}")
+def inspect_container(ref: str) -> dict[str, Any]:
+    ref = validate_container_ref(ref)
+    _, _, inspected = _authorized_read(ref)
+    return inspected
 
 
-def host_control_status() -> dict[str, Any]:
-    if not SETTINGS.host_control_enabled or not SETTINGS.host_control_url or not SETTINGS.host_control_token:
-        return {"configured": False, "reachable": False, "status": "not-configured"}
-    try:
-        result = _request("GET", "/healthz", timeout=5)
-        return {"configured": True, "reachable": True, "status": "healthy", **result}
-    except Exception as exc:
-        return {"configured": True, "reachable": False, "status": "unreachable", "error": str(exc)[-500:]}
+def container_logs(ref: str, tail: int = 200) -> str:
+    ref = validate_container_ref(ref)
+    tail = max(1, min(int(tail), 1000))
+    immutable_id, _, _ = _authorized_read(ref)
+    result = run([
+        "docker", "logs", "--timestamps", "--tail", str(tail), immutable_id,
+    ], check=False, timeout=15)
+    output = ((result.stdout or "") + (result.stderr or "")).strip()
+    return output[-30000:] or "No container log output."
 
 
-def get_host_capacity() -> dict[str, Any]:
-    return host_control_request("capacity", {})
-
-
-def get_provider_status() -> dict[str, Any]:
-    return host_control_request("provider", {})
-
-
-def ensure_project_vm(slug: str, resource_limits: dict[str, Any], *, project_id: str = "", git_url: str = "") -> dict[str, Any]:
-    slug = validate_slug(slug)
-    project_id = validate_project_id(project_id)
-    limits = validate_resource_limits(resource_limits, runtime_type="vm")
-    payload = {
-        "project_id": project_id,
-        "slug": slug,
-        "resource_limits": limits,
-        "git_url": git_url,
-        "gpu": False,
-        "gpu_passthrough": False,
-    }
-    return host_control_request("ensure", payload)
-
-
-def runtime_project_vm(slug: str, operation: str, *, runtime_id: str = "", project_id: str = "") -> dict[str, Any]:
-    payload = {"slug": validate_slug(slug), "project_id": project_id}
-    return host_control_request(operation, payload, runtime_id=runtime_id)
-
-
-def list_project_vm_backups(slug: str, *, runtime_id: str = "", project_id: str = "") -> list[dict[str, Any]]:
-    result = host_control_request("list-backups", {"slug": validate_slug(slug), "project_id": validate_project_id(project_id)}, runtime_id=runtime_id)
-    backups = result.get("backups")
-    if not isinstance(backups, list):
-        raise RuntimeError("Host agent returned an invalid backup list.")
-    checked: list[dict[str, Any]] = []
-    for item in backups:
-        if not isinstance(item, dict):
-            continue
-        reference = item.get("backup_reference") or item
-        checked_reference = validate_backup_reference(reference, project_id=project_id, slug=slug, runtime_id=runtime_id)
-        checked.append({key: value for key, value in item.items() if key not in {"backup_path", "archive_path", "manifest_path"} and key != "backup_reference"} | {"backup_reference": checked_reference})
-    return checked
-
-
-def inspect_project_vm_backup(slug: str, backup_id: str, *, runtime_id: str = "", project_id: str = "") -> dict[str, Any]:
-    payload = {"slug": validate_slug(slug), "project_id": validate_project_id(project_id), "backup_id": str(backup_id or "")}
-    result = host_control_request("inspect-backup", payload, runtime_id=runtime_id)
-    reference = validate_backup_reference((result.get("backup") or {}).get("backup_reference") or result.get("backup"), project_id=project_id, slug=slug, runtime_id=runtime_id)
-    return {key: value for key, value in result.items() if key not in {"backup_path", "archive_path", "manifest_path"}} | {"backup_reference": reference}
-
-
-def restore_project_vm_backup(slug: str, backup_id: str, *, confirm_restore: bool = False, runtime_id: str = "", project_id: str = "") -> dict[str, Any]:
-    if not confirm_restore:
-        raise ValueError("Backup restore requires explicit confirmation.")
-    payload = {"slug": validate_slug(slug), "project_id": validate_project_id(project_id), "backup_id": str(backup_id or ""), "confirm_restore": True}
-    return host_control_request("restore-backup", payload, runtime_id=runtime_id)
-
-
-def import_project_workspace(slug: str, runtime_id: str, *, source_vm: str, project_id: str = "") -> dict[str, Any]:
-    """Copy an existing workspace from the current DevFleet VM into an owned project VM."""
-    slug = validate_slug(slug)
-    source_vm = validate_slug(source_vm)
-    project_id = validate_project_id(project_id)
-    if not source_vm.startswith("devfleet-"):
-        raise ValueError("Workspace imports are limited to a DevFleet source VM.")
-    if not runtime_id:
-        raise ValueError("A target project VM runtime id is required for workspace import.")
-    payload = {"slug": slug, "project_id": project_id, "source_vm": source_vm}
-    return host_control_request("import", payload, runtime_id=runtime_id)
-
-
-def sync_project_vm_ssh_alias(slug: str, runtime_id: str, *, project_id: str = "") -> dict[str, Any]:
-    """Create or refresh the host-owned alias for one dedicated project VM.
-
-    The host agent derives both alias and address from its ownership registry;
-    callers cannot submit SSH configuration text or an arbitrary host.
-    """
-    slug = validate_slug(slug)
-    project_id = validate_project_id(project_id)
-    if not runtime_id:
-        raise ValueError("A project VM runtime id is required for SSH alias synchronization.")
-    return host_control_request("sync-ssh-alias", {"slug": slug, "project_id": project_id}, runtime_id=runtime_id)
-
-
-def refresh_project_vm_connection_state(slug: str, runtime_id: str, *, project_id: str = "") -> dict[str, Any]:
-    """Reconcile the current owned VM address, registry, and pinned SSH alias."""
-    slug = validate_slug(slug)
-    project_id = validate_project_id(project_id)
-    if not runtime_id:
-        raise ValueError("A project VM runtime id is required for connection-state refresh.")
-    return host_control_request("refresh-connection-state", {"slug": slug, "project_id": project_id}, runtime_id=runtime_id)
-
-
-def export_project_workspace(slug: str, runtime_id: str, *, project_id: str = "") -> dict[str, Any]:
-    slug = validate_slug(slug)
-    project_id = validate_project_id(project_id)
-    if not runtime_id:
-        raise ValueError("A project VM runtime id is required for workspace export.")
-    return host_control_request("export", {"slug": slug, "project_id": project_id}, runtime_id=runtime_id)
-
-
-def export_project_workspace_to_source(slug: str, runtime_id: str, *, source_vm: str, project_id: str = "", replace_source: bool = False) -> dict[str, Any]:
-    slug = validate_slug(slug)
-    source_vm = validate_slug(source_vm)
-    project_id = validate_project_id(project_id)
-    if not source_vm.startswith("devfleet-") or not runtime_id:
-        raise ValueError("VM export requires a DevFleet source VM and target runtime id.")
-    return host_control_request("export-to-source", {"slug": slug, "project_id": project_id, "source_vm": source_vm, "replace_source": bool(replace_source)}, runtime_id=runtime_id)
-
-
-def restore_previous_source_workspace(slug: str, runtime_id: str, *, source_vm: str, project_id: str, previous_workspace_path: str) -> dict[str, Any]:
-    """Atomically reinstate the source workspace retained by a VM export."""
-    slug = validate_slug(slug)
-    source_vm = validate_slug(source_vm)
-    project_id = validate_project_id(project_id)
-    if not source_vm.startswith("devfleet-") or not runtime_id or not previous_workspace_path:
-        raise ValueError("Restoring a previous source workspace requires a DevFleet source VM, runtime id, and retained path.")
-    payload = {"slug": slug, "project_id": project_id, "source_vm": source_vm, "previous_workspace_path": previous_workspace_path}
-    return host_control_request("restore-previous-source", payload, runtime_id=runtime_id)
-
-
-def project_vm_operation(slug: str, operation: str, *, runtime_id: str = "", project_id: str = "", command_key: str = "", tail: int = 150) -> dict[str, Any]:
-    slug = validate_slug(slug)
-    project_id = validate_project_id(project_id)
-    if operation not in {"project-start", "project-stop", "project-restart", "project-health", "project-test", "project-bootstrap", "project-rebuild", "project-logs"}:
-        raise ValueError("Unsupported structured project VM operation.")
-    payload: dict[str, Any] = {"slug": slug, "project_id": project_id}
-    if command_key:
-        payload["command_key"] = command_key
-    if operation == "project-logs":
-        payload["tail"] = max(1, min(int(tail), 500))
-    return host_control_request(operation, payload, runtime_id=runtime_id)
-
-
-def stop_project_vm(slug: str, *, runtime_id: str = "", project_id: str = "") -> dict[str, Any]:
-    return runtime_project_vm(slug, "stop", runtime_id=runtime_id, project_id=project_id)
-
-
-def destroy_project_vm(slug: str, confirm_slug: str, confirm_phrase: str, *, backup_verified: bool = False, backup_id: str = "", backup_sha256: str = "", cleanup_only: bool = False, cleanup_stage: str = "", local_archive_sha256: str = "", import_archive_sha256: str = "", runtime_id: str = "", project_id: str = "") -> dict[str, Any]:
-    slug = validate_slug(slug)
-    if confirm_slug != slug or confirm_phrase != f"DESTROY {slug}":
-        raise ValueError("Permanent destruction requires the exact project slug and confirmation phrase.")
-    if not cleanup_only and (not backup_id or not backup_sha256):
-        raise ValueError("Permanent VM destruction requires an identified, hashed workspace backup artifact.")
-    if cleanup_only:
-        if not backup_verified or not backup_id:
-            raise ValueError("Failed-migration cleanup requires a verified provider-aware backup identity.")
-        if cleanup_stage not in {"pre-import", "post-import"}:
-            raise ValueError("Failed-migration cleanup requires an explicit pre-import or post-import stage.")
-        if not re.fullmatch(r"[0-9a-fA-F]{64}", str(backup_sha256 or "")) or not re.fullmatch(r"[0-9a-fA-F]{64}", str(local_archive_sha256 or "")):
-            raise ValueError("Failed-migration cleanup requires verified provider and local archive SHA-256 values.")
-        if cleanup_stage == "post-import" and import_archive_sha256 and not re.fullmatch(r"[0-9a-fA-F]{64}", str(import_archive_sha256)):
-            raise ValueError("Failed-migration cleanup import archive SHA-256 is malformed.")
-    payload = {"slug": slug, "project_id": project_id, "confirm_slug": confirm_slug, "confirm_phrase": confirm_phrase, "backup_verified": bool(backup_verified), "backup_id": backup_id, "backup_sha256": backup_sha256, "cleanup_only": bool(cleanup_only), "cleanup_stage": cleanup_stage, "local_archive_sha256": local_archive_sha256, "import_archive_sha256": import_archive_sha256}
-    return host_control_request("destroy", payload, runtime_id=runtime_id)
-
-```
-
-
-## FILE: source/app/devfleet/language_policy.py
-
-SHA256: d3c417f349ee93e1aefe323f09233c8e4e8d3f612914e97f0b9e32df5b81b289 | Bytes: 2079 | Git mode: 100644
-
-```
-from __future__ import annotations
-TEMPLATES={
-'generic':('other','none','core'),'python':('python','standard-library','core'),'python-fastapi':('python','fastapi','core'),'node':('javascript','node','core'),'typescript-node':('typescript','node','core'),'typescript-next':('typescript','nextjs','core'),'go-service':('go','net-http','core'),'dotnet-service':('csharp','aspnet-core','core'),'java-spring':('java','spring-boot','core'),'rust-service':('rust','axum','core'),
-'kotlin-service':('kotlin','ktor','preview'),'php-laravel':('php','laravel','preview'),'ruby-rails':('ruby','rails','preview'),'flutter':('dart','flutter','preview'),'elixir-phoenix':('elixir','phoenix','preview'),'cpp-cmake':('cpp','cmake','preview'),'shell-automation':('shell','bash','preview'),'data-r':('r','base-r','preview'),'scientific-julia':('julia','base-julia','preview'),'sql-project':('sql','migrations','preview')}
-def recommend_template(language:str='',framework:str='',scale:str='',intent:str='',project_kind:str='')->str:
- l=language.lower();f=framework.lower();k=project_kind.lower()
- if 'fastapi' in f or k=='rapid-api':return 'python-fastapi'
- if 'next' in f or k in {'web-frontend','full-stack-web','browser-extension','vscode-extension'}:return 'typescript-next' if 'next' in f or k=='full-stack-web' else 'typescript-node'
- return {'python':'python','javascript':'node','typescript':'typescript-node','go':'go-service','csharp':'dotnet-service','c#':'dotnet-service','java':'java-spring','rust':'rust-service','kotlin':'kotlin-service','php':'php-laravel','ruby':'ruby-rails','dart':'flutter','elixir':'elixir-phoenix','cpp':'cpp-cmake','c++':'cpp-cmake','shell':'shell-automation','bash':'shell-automation','r':'data-r','julia':'scientific-julia','sql':'sql-project'}.get(l,'generic')
-def template_metadata(name:str)->dict[str,str]:
- language,framework,maturity=TEMPLATES[name];return {'language':language,'framework':framework,'template_maturity':maturity,'language_rationale':"Selected using Dylan's DevFleet engineering preferences; this is not a scientific model benchmark."}
-
-```
-
-
-## FILE: source/app/devfleet/leases.py
-
-SHA256: 968255eb2ab9f4121cb561dc474a382b3c47e7dcbe8c08936cda7022abfb7b31 | Bytes: 1668 | Git mode: 100644
-
-```
-from __future__ import annotations
-from pathlib import Path
-from typing import Any
-from .core import SETTINGS,atomic_json,now_iso,run
-from .metadata_io import read_project_metadata
-def lease_path(project:Path)->Path:return project/'.devfleet'/'ownership-lease.json'
-def load_lease(project:Path)->dict[str,Any]:
- try:return __import__('json').loads(lease_path(project).read_text())
- except Exception:return {}
-def _git(project:Path)->tuple[str,bool]:
- commit=run(['git','rev-parse','HEAD'],cwd=project,check=False,timeout=15).stdout.strip();dirty=bool(run(['git','status','--porcelain'],cwd=project,check=False,timeout=15).stdout.strip());return commit,dirty
-def update_lease(project:Path,*,active:bool|None=None,clean_shutdown:bool|None=None,backup_time:str|None=None,active_node:str|None=None)->dict[str,Any]:
- data=load_lease(project);meta={}
- try:
-  value=read_project_metadata(project).value
-  meta=value if isinstance(value,dict) else {}
- except Exception:pass
- commit,dirty=_git(project);now=now_iso();data.update({'project_identity':meta.get('identity',project.name),'project_id':meta.get('project_id',''),'active_node':(active_node or SETTINGS.node_name) if active is not None else data.get('active_node'),'heartbeat_time':now,'git_commit':commit,'working_tree_dirty':dirty})
- if active is not None:
-  data['active']=active
-  if active:data['start_time']=now;data['last_clean_shutdown']=None
- if clean_shutdown is not None:data['last_clean_shutdown']=now if clean_shutdown else None
- if backup_time:data['last_backup']=backup_time
- atomic_json(lease_path(project),data);return data
-def heartbeat_lease(project:Path)->dict[str,Any]:return update_lease(project)
-
-```
-
-
-## FILE: source/app/devfleet/main.py
-
-SHA256: 1da87d821f4910f3d0e86f39592593a351b55ab83a62174b90ffa62a80add618 | Bytes: 67806 | Git mode: 100644
-
-```
-from __future__ import annotations
-from urllib.parse import quote, urlsplit
-import hashlib, html, hmac, json, logging, os, re
-from pathlib import Path
-from typing import Any
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
-import httpx
-from .auth import (
-    LOGIN_CSRF_COOKIE,
-    SESSION_COOKIE,
-    check_api,
-    check_session,
-    issue_session,
-    login_csrf_token,
-    login_retry_after,
-    revoke_session,
-    safe_next,
-    session_cookie_options,
-    session_csrf_token,
-    session_user,
-    validate_login_csrf,
-    valid_credentials,
-)
-from .core import (
-    SETTINGS,
-    load_peer,
-    safe_child,
-    validate_project_id,
-    validate_slug,
-    run,
-    client_allowed_by_network,
-)
-from .projects import (
-    create_project,
-    start_project,
-    stop_project,
-    restart_project,
-    inspect_runtime,
-    runtime_health,
-    open_workspace,
-    rebuild_project,
-    quarantine_project,
-    destroy_project,
-    list_backups,
-    restore_backup,
-    list_quarantine,
-    restore_quarantine,
-    restore_from_vault,
-    backup_project,
-    test_project,
-    load_authoritative_project_identity_for_mutation,
-    load_meta,
-    metadata_path,
-    commit_project_metadata,
-    project_logs,
-    bootstrap_codexpro,
-    bootstrap_project,
-    health_project,
-    assign_project_runtime,
-    detect_runtime,
-    project_command_readiness,
-    project_capabilities,
-    reconcile_failed_migration,
-    assert_project_quiesced_for_transfer,
-    finalize_source_transfer,
-    project_transfer_lock,
-    receive_transferred_project,
-    activate_transferred_project,
-)
-from .status import (
-    cluster_snapshot,
-    local_status,
-    peer_status,
-    peer_node_status,
-    runtime_status,
-    cluster_status,
-)
-from .containers import (
-    container_action,
-    container_logs,
-    inspect_container,
-    list_containers,
-    validate_container_ref,
-)
-from .operations import submit_operation, get_operation, list_operations
-from .analyzer import analyze_project
-from .language_policy import TEMPLATES, recommend_template
-from .resource_profiles import (
-    RESOURCE_PROFILES,
-    RUNTIME_ISOLATIONS,
-    capacity_allows,
-    custom_resource_metadata,
-    recommend_resource_profile,
-    recommend_runtime_isolation,
-)
-from .host_control import host_control_status, get_host_capacity, get_provider_status
-from .failover import guided_transfer
-from .workspace_archives import inspect_workspace
-from .request_guards import RequestAdmissionMiddleware
-from .version import __version__
-
-app = FastAPI(title="DevFleet", version=__version__, docs_url=None, redoc_url=None)
-LOGGER = logging.getLogger("devfleet")
-templates = Jinja2Templates(
-    directory=str(
-        Path(os.environ.get("DEVFLEET_TEMPLATE_DIR", "/opt/devfleet/templates"))
-    )
-)
-app.mount(
-    "/static",
-    StaticFiles(
-        directory=str(
-            Path(os.environ.get("DEVFLEET_STATIC_DIR", "/opt/devfleet/static"))
-        ),
-        check_dir=True,
-    ),
-    name="static",
-)
-app.add_middleware(RequestAdmissionMiddleware)
-
-
-def ui_csrf_token(request: Request | None = None) -> str:
-    if request is None:
-        raise ValueError("A request-bound session is required for UI CSRF generation.")
-    return session_csrf_token(request)
-
-
-def valid_ui_csrf(value: str, request: Request | None = None) -> bool:
-    expected = ui_csrf_token(request)
-    return bool(value and expected) and hmac.compare_digest(value, expected)
-
-
-@app.middleware("http")
-async def headers(request: Request, call_next):
-    started = __import__("time").perf_counter()
-    response = await call_next(request)
-    duration = (__import__("time").perf_counter() - started) * 1000
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
-    )
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Cache-Control"] = (
-        "public, max-age=31536000, immutable"
-        if request.url.path.startswith("/static/")
-        else "no-store"
-    )
-    response.headers["Server-Timing"] = f"app;dur={duration:.2f}"
-    response.headers["X-DevFleet-Render-Ms"] = f"{duration:.2f}"
-    return response
-
-
-@app.middleware("http")
-async def network_guard(request: Request, call_next):
-    if not client_allowed_by_network(request.client.host if request.client else None):
-        return JSONResponse(
-            {
-                "detail": "Portal access is restricted to loopback and the configured Tailscale network."
-            },
-            status_code=403,
-        )
-    return await call_next(request)
-
-
-def _human_ui_route(path: str) -> bool:
-    return path == "/" or path.startswith(
-        (
-            "/projects",
-            "/cluster",
-            "/containers",
-            "/peer",
-            "/operations",
-            "/ui",
-            "/quarantine",
-            "/repair",
-        )
+def container_action(ref: str, action: str) -> str:
+    ref = validate_container_ref(ref)
+    command = _ACTIONS.get(str(action or "").lower())
+    if not command:
+        raise ValueError("Unsupported container action.")
+    inspected = _docker_inspect(ref)
+    immutable_id, expected = _authoritative_container_binding(inspected)
+    slug = expected[OWNERSHIP_LABELS["slug"]]
+    project_id = expected[OWNERSHIP_LABELS["project_id"]]
+    # Lazy import avoids the projects -> containers module dependency cycle.
+    # Both paths use the same cross-process lock and control-owned marker.
+    from .projects import (
+        load_authoritative_project_identity_for_mutation,
+        project_transfer_lock,
     )
 
-
-@app.middleware("http")
-async def session_guard(request: Request, call_next):
-    if _human_ui_route(request.url.path) and not session_user(request):
-        target = request.url.path + (
-            (f"?{request.url.query}") if request.url.query else ""
-        )
-        return RedirectResponse(
-            "/login?next=" + quote(safe_next(target), safe="/?:=&%"), status_code=303
-        )
-    return await call_next(request)
-
-
-def ui(request: Request, csrf_token: str = ""):
-    check_session(request)
-    if request.method not in {"GET", "HEAD", "OPTIONS"}:
-        if not valid_ui_csrf(csrf_token, request):
-            raise HTTPException(403, "A valid session CSRF token is required.")
-        expected = f"{request.url.scheme}://{request.url.netloc}"
-        origin = request.headers.get("origin", "").strip()
-        referer = request.headers.get("referer", "").strip()
-        candidate = origin if origin.lower() not in {"", "null"} else referer
-        if candidate:
-            try:
-                p = urlsplit(candidate)
-                request_parts = urlsplit(expected)
-                same_scheme = p.scheme.lower() == request_parts.scheme.lower()
-                same_host = (p.hostname or "").lower() == (
-                    request_parts.hostname or ""
-                ).lower()
-
-                def effective_port(parts):
-                    if parts.port is not None:
-                        return parts.port
-                    return {"http": 80, "https": 443}.get(parts.scheme.lower())
-
-                same_port = effective_port(p) == effective_port(request_parts)
-            except ValueError:
-                same_scheme = same_host = same_port = False
-            if not (same_scheme and same_host and same_port):
-                LOGGER.warning(
-                    "Rejected form origin: origin=%r referer=%r fetch_site=%r fetch_mode=%r fetch_dest=%r scheme=%r host=%r path=%r user_agent=%r",
-                    origin,
-                    referer,
-                    request.headers.get("sec-fetch-site", ""),
-                    request.headers.get("sec-fetch-mode", ""),
-                    request.headers.get("sec-fetch-dest", ""),
-                    request.url.scheme,
-                    request.headers.get("host", ""),
-                    request.url.path,
-                    request.headers.get("user-agent", ""),
-                )
-                raise HTTPException(403, "Cross-origin form submission rejected.")
-        elif request.headers.get("sec-fetch-site", "").lower() != "same-origin":
-            LOGGER.warning(
-                "Rejected unverifiable form: origin=%r referer=%r fetch_site=%r fetch_mode=%r fetch_dest=%r scheme=%r host=%r path=%r user_agent=%r",
-                origin,
-                referer,
-                request.headers.get("sec-fetch-site", ""),
-                request.headers.get("sec-fetch-mode", ""),
-                request.headers.get("sec-fetch-dest", ""),
-                request.url.scheme,
-                request.headers.get("host", ""),
-                request.url.path,
-                request.headers.get("user-agent", ""),
+    with project_transfer_lock(slug):
+        try:
+            current = _docker_inspect(ref)
+        except ValueError as exc:
+            raise ValueError("Container ownership verification failed: immutable container disappeared before mutation; no same-name replacement was touched.") from exc
+        current_id, current_expected = _authoritative_container_binding(current)
+        if current_id != immutable_id or current_expected != expected:
+            raise ValueError("Container ownership verification failed: immutable identity changed before mutation.")
+        project = safe_child(SETTINGS.workspaces, slug)
+        authoritative = load_authoritative_project_identity_for_mutation(project)
+        if (
+            str(authoritative.get("runtime_provider") or "") != "docker-compose"
+            or container_ownership_labels(authoritative) != expected
+            or str(authoritative.get("project_id") or "") != project_id
+        ):
+            raise ValueError(
+                "Container ownership verification failed: authoritative project identity changed before mutation."
             )
-            raise HTTPException(403, "Cross-origin form submission rejected.")
+        # Reinspect the immutable ID after the authority decision. A receiver cannot
+        # create pending authority or promote a replacement while this lock is held.
+        try:
+            final = _docker_inspect(immutable_id)
+        except ValueError as exc:
+            raise ValueError(
+                "Container ownership verification failed: immutable container disappeared before mutation."
+            ) from exc
+        final_id, final_expected = _authoritative_container_binding(final)
+        if final_id != immutable_id or final_expected != expected:
+            raise ValueError(
+                "Container ownership verification failed: immutable identity changed before mutation."
+            )
+        result = run(["docker", command, immutable_id], check=False, timeout=60)
+        if result.returncode:
+            raise ValueError((result.stderr or result.stdout or "Docker action failed.").strip()[-2000:])
+        return (result.stdout or result.stderr or f"Container {action} completed.").strip()[-4000:]
+
+```
 
 
-def peer_call(
-    method: str, path: str, payload: dict | None = None, timeout: float = 1800
-):
-    peer = load_peer()
-    if not peer.get("Url") or not peer.get("Token"):
-        raise ValueError("Peer is not configured.")
-    with httpx.Client(timeout=timeout) as client:
-        r = client.request(
-            method,
-            peer["Url"].rstrip("/") + path,
-            headers={"X-DevFleet-Token": peer["Token"]},
-            json=payload or {},
-        )
-        if r.status_code >= 400:
-            raise ValueError(f"Peer error {r.status_code}: {r.text[-1000:]}")
-        return r.json()
+## FILE: source/app/devfleet/core.py
+
+SHA256: 244499e96e005ac615042edbe10082a93110f186de8340cdc8a77c95341ac77c | Bytes: 13760 | Git mode: 100644
+
+```
+"""Shared DevFleet settings, validation, and crash-safe filesystem helpers.
+
+This module deliberately contains no host-management logic.  Host changes are
+made only through the narrow authenticated host-agent client.
+"""
+from __future__ import annotations
+
+import json
+import ipaddress
+import os
+import re
+import secrets
+import stat
+import subprocess
+import tempfile
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from .metadata_io import enable_inherited_backup_read
+
+try:
+    import pwd
+except ImportError:  # pragma: no cover - Windows has no pwd module.
+    pwd = None
 
 
-def require_safe_start(slug: str, confirmed: bool) -> None:
-    project = safe_child(SETTINGS.workspaces, slug)
-    authoritative = load_authoritative_project_identity_for_mutation(project)
-    identity = validate_slug(
-        str(authoritative.get("identity") or authoritative.get("slug") or slug)
-    )
-    try:
-        lease = __import__("json").loads(
-            (project / ".devfleet/ownership-lease.json").read_text()
-        )
-    except Exception:
-        lease = {}
-    if (
-        lease.get("active")
-        and lease.get("active_node")
-        and lease.get("active_node") != SETTINGS.node_name
-        and not confirmed
-    ):
-        raise ValueError(
-            f"Ownership lease belongs to {lease.get('active_node')}. Use guided transfer or acknowledge failover risk."
-        )
-    meta = authoritative
-    # A project already owned by this node is not a failover operation.  The
-    # peer may be offline while the local VM/container still needs an ordinary
-    # start or rebuild.  Foreign ownership leases remain blocked above.
-    local_host_ids = {
-        str(SETTINGS.node_name or "").strip().lower(),
-        str(SETTINGS.expected_host_name or "").strip().lower(),
+CONFIG_PATH = Path(os.environ.get("DEVFLEET_CONFIG_PATH", "/etc/devfleet/config.json"))
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,62}$")
+PROJECT_ID_RE = re.compile(r"^[0-9a-fA-F-]{36}$")
+
+
+@dataclass(frozen=True)
+class Settings:
+    node_name: str
+    deployment_id: str
+    node_role: str
+    friendly_name: str
+    portal_port: int
+    workspaces: Path
+    quarantine: Path
+    peer_file: Path
+    runtime_root: Path
+    cache_root: Path
+    ollama_base_url: str
+    ollama_model: str
+    ollama_profile: str
+    development_profile: str
+    docker_mode: str
+    docker_host: str
+    docker_owner_uid: int | None
+    enable_shared_caches: bool
+    enable_analyzer_cache: bool
+    auto_start_codexpro: bool
+    allow_tailnet_ports: bool
+    backup_before_rebuild: bool
+    backup_before_quarantine: bool
+    allow_permanent_delete: bool
+    host_control_enabled: bool
+    host_control_url: str
+    host_control_token: str
+    expected_host_name: str
+    host_agent_timeout_seconds: int
+    host_resource_policy: dict[str, Any]
+    admin_user: str
+    admin_password: str
+    api_token: str
+    require_tailscale: bool
+    tailnet_cidr: str
+    public_binding_allowed: bool
+
+    @property
+    def operations(self) -> Path:
+        return self.runtime_root / "operations"
+
+    @property
+    def host_id(self) -> str:
+        return self.node_name
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _default_config() -> dict[str, Any]:
+    root = Path(os.environ.get("DEVFLEET_TEST_ROOT", "/tmp/devfleet"))
+    return {
+        "node_name": os.environ.get("DEVFLEET_NODE_NAME", "devfleet-primary"),
+        "deployment_id": os.environ.get("DEVFLEET_DEPLOYMENT_ID", ""),
+        "node_role": "primary",
+        "friendly_name": "DevFleet",
+        "portal_port": 8787,
+        "workspaces": str(root / "workspaces"),
+        "quarantine": str(root / "quarantine"),
+        "peer_file": str(root / "peer.json"),
+        "runtime_root": str(root / "runtime"),
+        "cache_root": str(root / "cache"),
+        "docker_mode": "rootless",
+        "docker_host": os.environ.get("DOCKER_HOST", ""),
+        "host_resource_policy": {},
+        "require_tailscale": True,
+        "tailnet_cidr": "100.64.0.0/10",
+        "public_binding_allowed": False,
     }
-    recorded_host = str(meta.get("host_id") or "").strip().lower()
-    if recorded_host in local_host_ids and str(meta.get("runtime_provider") or "") in {
-        "",
-        "docker-compose",
-        "multipass-host-agent",
-    }:
-        return
-    state = peer_status()
-    if not state.get("configured"):
-        return
-    if not state.get("ok") and not confirmed:
-        raise ValueError(
-            "Peer is unreachable. Confirm failover risk only after verifying the project
+
+
+def load_settings() -> Settings:
+    if CONFIG_PATH.exists():
+        try:
+            if os.name != "nt" and str(CONFIG_PATH).startswith("/etc/devfleet/"):
+                stat = CONFIG_PATH.stat()
+                if stat.st_uid != 0 or stat.st_mode & 0o022:
+                    raise ValueError("security configuration ownership or permissions are unsafe")
+            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            raise ValueError("security configuration is missing, malformed, or unreadable; refusing fail-open defaults") from exc
+        if not isinstance(cfg, dict):
+            raise ValueError("security configuration must be a JSON object")
+    else:
+        cfg = _default_config()
+    policy = dict(cfg.get("host_resource_policy") or {})
+    return Settings(
+        node_name=str(cfg.get("node_name", cfg.get("host_id", "devfleet-primary"))),
+        deployment_id=str(cfg.get("deployment_id", "")),
+        node_role=str(cfg.get("node_role", "primary")),
+        friendly_name=str(cfg.get("friendly_name", cfg.get("node_name", "DevFleet"))),
+        portal_port=int(cfg.get("portal_port", 8787)),
+        workspaces=Path(cfg.get("workspaces", "/var/lib/devfleet/workspaces")),
+        quarantine=Path(cfg.get("quarantine", "/var/lib/devfleet/quarantine")),
+        peer_file=Path(cfg.get("peer_file", "/etc/devfleet/peer.json")),
+        runtime_root=Path(cfg.get("runtime_root", "/var/lib/devfleet/runtime")),
+        cache_root=Path(cfg.get("cache_root", "/var/cache/devfleet")),
+        ollama_base_url=str(cfg.get("ollama_base_url", "")),
+        ollama_model=str(cfg.get("ollama_model", "")),
+        ollama_profile=str(cfg.get("ollama_profile", "stable-interactive")),
+        development_profile=str(cfg.get("development_profile", "strict")),
+        docker_mode=str(cfg.get("docker_mode", "rootless")),
+        docker_host=str(os.environ.get("DOCKER_HOST", cfg.get("docker_host", ""))),
+        docker_owner_uid=(int(os.environ["DEVFLEET_DOCKER_OWNER_UID"]) if os.environ.get("DEVFLEET_DOCKER_OWNER_UID") else (int(cfg["docker_owner_uid"]) if cfg.get("docker_owner_uid") is not None else None)),
+        enable_shared_caches=bool(cfg.get("enable_shared_caches", False)),
+        enable_an

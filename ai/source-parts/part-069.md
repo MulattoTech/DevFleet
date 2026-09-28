@@ -1,205 +1,1052 @@
 # DevFleet source part 069
 
 Full-source UTF-8 byte interval [3162000, 3208500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 11523939fba91dc22c46cabf2ebe0310915a422d4d1ce0f0987331a89fcd4d4e
+Payload SHA-256: 74599f9694ea7ce61747b57a842e7be6f76740e34b9016e4659b2b00cc648d3f
 
 <!-- BEGIN SOURCE SLICE -->
- not found.")
+session(request)
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        if not valid_ui_csrf(csrf_token, request):
+            raise HTTPException(403, "A valid session CSRF token is required.")
+        expected = f"{request.url.scheme}://{request.url.netloc}"
+        origin = request.headers.get("origin", "").strip()
+        referer = request.headers.get("referer", "").strip()
+        candidate = origin if origin.lower() not in {"", "null"} else referer
+        if candidate:
+            try:
+                p = urlsplit(candidate)
+                request_parts = urlsplit(expected)
+                same_scheme = p.scheme.lower() == request_parts.scheme.lower()
+                same_host = (p.hostname or "").lower() == (
+                    request_parts.hostname or ""
+                ).lower()
+
+                def effective_port(parts):
+                    if parts.port is not None:
+                        return parts.port
+                    return {"http": 80, "https": 443}.get(parts.scheme.lower())
+
+                same_port = effective_port(p) == effective_port(request_parts)
+            except ValueError:
+                same_scheme = same_host = same_port = False
+            if not (same_scheme and same_host and same_port):
+                LOGGER.warning(
+                    "Rejected form origin: origin=%r referer=%r fetch_site=%r fetch_mode=%r fetch_dest=%r scheme=%r host=%r path=%r user_agent=%r",
+                    origin,
+                    referer,
+                    request.headers.get("sec-fetch-site", ""),
+                    request.headers.get("sec-fetch-mode", ""),
+                    request.headers.get("sec-fetch-dest", ""),
+                    request.url.scheme,
+                    request.headers.get("host", ""),
+                    request.url.path,
+                    request.headers.get("user-agent", ""),
+                )
+                raise HTTPException(403, "Cross-origin form submission rejected.")
+        elif request.headers.get("sec-fetch-site", "").lower() != "same-origin":
+            LOGGER.warning(
+                "Rejected unverifiable form: origin=%r referer=%r fetch_site=%r fetch_mode=%r fetch_dest=%r scheme=%r host=%r path=%r user_agent=%r",
+                origin,
+                referer,
+                request.headers.get("sec-fetch-site", ""),
+                request.headers.get("sec-fetch-mode", ""),
+                request.headers.get("sec-fetch-dest", ""),
+                request.url.scheme,
+                request.headers.get("host", ""),
+                request.url.path,
+                request.headers.get("user-agent", ""),
+            )
+            raise HTTPException(403, "Cross-origin form submission rejected.")
 
 
-@app.post("/api/projects/{slug}/environment", dependencies=[Depends(check_api)])
-def api_project_environment_assign(slug: str, payload: dict | None = None):
-    payload = payload or {}
-    if not payload.get("wizard_confirmed"):
-        raise HTTPException(400, "Final wizard confirmation is required.")
-    _require_owned_project_for_mutation(slug, allow_legacy_migration=True)
-    runtime_isolation = str(payload.get("runtime_isolation") or "container")
-    resource_profile = str(payload.get("resource_profile") or "")
-    resource_limits = (
-        payload.get("resource_limits")
-        if isinstance(payload.get("resource_limits"), dict)
-        else None
+def peer_call(
+    method: str, path: str, payload: dict | None = None, timeout: float = 1800
+):
+    peer = load_peer()
+    if not peer.get("Url") or not peer.get("Token"):
+        raise ValueError("Peer is not configured.")
+    with httpx.Client(timeout=timeout) as client:
+        r = client.request(
+            method,
+            peer["Url"].rstrip("/") + path,
+            headers={"X-DevFleet-Token": peer["Token"]},
+            json=payload or {},
+        )
+        if r.status_code >= 400:
+            raise ValueError(f"Peer error {r.status_code}: {r.text[-1000:]}")
+        return r.json()
+
+
+def require_safe_start(slug: str, confirmed: bool) -> None:
+    project = safe_child(SETTINGS.workspaces, slug)
+    authoritative = load_authoritative_project_identity_for_mutation(project)
+    identity = validate_slug(
+        str(authoritative.get("identity") or authoritative.get("slug") or slug)
     )
-    selected = resource_limits or {}
+    try:
+        lease = __import__("json").loads(
+            (project / ".devfleet/ownership-lease.json").read_text()
+        )
+    except Exception:
+        lease = {}
+    if (
+        lease.get("active")
+        and lease.get("active_node")
+        and lease.get("active_node") != SETTINGS.node_name
+        and not confirmed
+    ):
+        raise ValueError(
+            f"Ownership lease belongs to {lease.get('active_node')}. Use guided transfer or acknowledge failover risk."
+        )
+    meta = authoritative
+    # A project already owned by this node is not a failover operation.  The
+    # peer may be offline while the local VM/container still needs an ordinary
+    # start or rebuild.  Foreign ownership leases remain blocked above.
+    local_host_ids = {
+        str(SETTINGS.node_name or "").strip().lower(),
+        str(SETTINGS.expected_host_name or "").strip().lower(),
+    }
+    recorded_host = str(meta.get("host_id") or "").strip().lower()
+    if recorded_host in local_host_ids and str(meta.get("runtime_provider") or "") in {
+        "",
+        "docker-compose",
+        "multipass-host-agent",
+    }:
+        return
+    state = peer_status()
+    if not state.get("configured"):
+        return
+    if not state.get("ok") and not confirmed:
+        raise ValueError(
+            "Peer is unreachable. Confirm failover risk only after verifying the project is not active there."
+        )
+    if state.get("ok"):
+        matches = [
+            x
+            for x in state["peer"].get("projects", [])
+            if (x.get("identity") or x.get("slug")) == identity
+        ]
+        if (
+            any(
+                x.get("running") or (x.get("lease") or {}).get("active")
+                for x in matches
+            )
+            and not confirmed
+        ):
+            raise ValueError(
+                "Peer reports this project running or holding the active ownership lease. Use guided ownership transfer or explicitly acknowledge failover risk."
+            )
+
+
+PROJECT_READ_ONLY_ACTIONS = frozenset({
+    "inspect",
+    "runtime-health",
+    "logs",
+})
+PROJECT_MUTATING_ACTIONS = frozenset({
+    "start",
+    "stop",
+    "restart",
+    "rebuild",
+    "backup",
+    "bootstrap",
+    "health",
+    "test",
+    "codexpro",
+    "quarantine",
+    "destroy",
+    "restore-vault",
+    "restore-backup",
+    "analyze-force",
+    "reconcile-failed-migration",
+})
+PROJECT_ACTIONS = PROJECT_READ_ONLY_ACTIONS | PROJECT_MUTATING_ACTIONS
+
+
+def _canonical_restore_requested(payload: dict[str, Any]) -> bool:
+    value = payload.get("canonical", False)
+    if type(value) is not bool:
+        raise ValueError("Canonical Vault restore flag must be a JSON boolean.")
+    return value is True
+
+
+def _require_owned_project_for_mutation(
+    slug: str, *, allow_legacy_migration: bool = False
+) -> dict[str, Any]:
+    project = safe_child(SETTINGS.workspaces, slug)
+    if not project.is_dir() or project.is_symlink():
+        raise HTTPException(404, "Project not found.")
+    try:
+        return load_authoritative_project_identity_for_mutation(
+            project, allow_legacy_migration=allow_legacy_migration
+        )
+    except (OSError, ValueError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+def _project_action_task(slug: str, action: str, payload: dict[str, Any]):
+    def task(ctx):
+        if action in PROJECT_MUTATING_ACTIONS:
+            load_authoritative_project_identity_for_mutation(
+                safe_child(SETTINGS.workspaces, slug)
+            )
+
+        def progress(value: int, message: str, step: str | None = None) -> None:
+            if ctx is not None:
+                ctx.update(value, message, step)
+
+        if action == "start":
+            progress(10, "Checking ownership and analyzer")
+            require_safe_start(slug, bool(payload.get("confirm_failover")))
+            progress(35, "Building and starting project services")
+            result = start_project(slug, bool(payload.get("confirm_failover")))
+        elif action == "stop":
+            progress(20, "Stopping project services")
+            result = stop_project(slug)
+        elif action == "restart":
+            progress(20, "Restarting project runtime")
+            result = restart_project(slug)
+        elif action == "inspect":
+            progress(25, "Inspecting project runtime")
+            result = inspect_runtime(slug)
+        elif action == "runtime-health":
+            progress(25, "Checking project runtime health")
+            result = runtime_health(slug)
+        elif action == "rebuild":
+            progress(10, "Checking ownership and analyzer")
+            require_safe_start(slug, bool(payload.get("confirm_failover")))
+            progress(30, "Rebuilding project images and services")
+            result = rebuild_project(slug)
+        elif action == "backup":
+            progress(15, "Creating append-only encrypted backup")
+            result = backup_project(slug)
+        elif action == "bootstrap":
+            progress(15, "Installing project dependencies")
+            result = bootstrap_project(slug)
+        elif action == "health":
+            progress(25, "Running project health check")
+            result = health_project(slug)
+        elif action == "test":
+            progress(15, "Running project test command")
+            result = test_project(slug)
+        elif action == "codexpro":
+            progress(15, "Checking and bootstrapping CodexPro")
+            result = bootstrap_codexpro(slug)
+        elif action == "logs":
+            progress(20, "Reading bounded project logs")
+            result = project_logs(slug)
+        elif action == "quarantine":
+            progress(10, "Stopping project and verifying backup before quarantine")
+            result = quarantine_project(slug)
+        elif action == "destroy":
+            progress(10, "Creating and verifying backup before permanent destruction")
+            result = destroy_project(slug, str(payload.get("confirm_slug") or ""), str(payload.get("confirm_phrase") or ""))
+        elif action == "restore-vault":
+            canonical = _canonical_restore_requested(payload)
+            if canonical and (
+                str(payload.get("confirm_slug") or "") != slug
+                or str(payload.get("confirm_phrase") or "")
+                != f"RESTORE CANONICAL {slug}"
+            ):
+                raise ValueError("Canonical Vault restore requires exact confirmation.")
+            if canonical:
+                raise ValueError(
+                    "Standalone canonical Vault restore is disabled; use restore-copy or guided ownership transfer."
+                )
+            progress(10, "Restoring project from encrypted vault")
+            result = restore_from_vault(slug, canonical)
+        elif action == "restore-backup":
+            progress(10, "Verifying backup identity and archive hash")
+            result = restore_backup(slug, str(payload.get("backup_id") or ""), confirm_restore=True, allow_overwrite=bool(payload.get("allow_overwrite")))
+        elif action == "analyze-force":
+            progress(20, "Running complete uncached analyzer scan")
+            result = analyze_project(safe_child(SETTINGS.workspaces, slug), force=True)
+        elif action == "reconcile-failed-migration":
+            progress(10, "Reconciling failed migration ownership")
+            result = reconcile_failed_migration(slug, str(payload.get("migration_snapshot") or ""), str(payload.get("confirm_phrase") or ""))
+        else:
+            raise ValueError("Unknown action.")
+        if ctx is not None:
+            ctx.log(str(result)[-4000:])
+            ctx.update(90, "Operation command completed")
+        return result
+
+    return task
+
+
+def _action_idempotency_key(slug: str, action: str, payload: dict[str, Any], supplied: str = "") -> str:
+    supplied = str(supplied or payload.get("idempotency_key") or "").strip()
+    if supplied and not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", supplied):
+        raise HTTPException(400, "Idempotency key must be 1-128 safe identifier characters.")
+    if supplied:
+        return f"project-action:{slug}:{action}:{supplied}"
+    if action in {"start", "stop", "restart"}:
+        return f"project-action:{slug}:{action}"
+    if action == "restore-backup" and payload.get("backup_id"):
+        return f"project-action:{slug}:{action}:{payload['backup_id']}"
+    return ""
+
+
+def redirect(op_id: str):
+    return RedirectResponse("/?operation=" + op_id, 303)
+
+
+def _form_resource_limits(
+    profile: str, cpus: str, ram_gb: str, disk_gb: str, pid_limit: str, pid_mode: str
+) -> dict | None:
+    # Presets deliberately ignore custom fields: browsers retain hidden inputs and
+    # an old custom value must never silently override a selected preset.
+    profile = str(profile or "").strip().lower()
+    if profile and profile != "custom":
+        if profile not in RESOURCE_PROFILES:
+            raise HTTPException(400, "Unknown resource profile.")
+        return None
+    if profile == "custom":
+        try:
+            return custom_resource_metadata(
+                {
+                    "cpus": cpus,
+                    "memory_gb": ram_gb,
+                    "disk_gb": disk_gb,
+                    "pids": pid_limit,
+                    "pid_mode": pid_mode,
+                }
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    values = {
+        "cpus": cpus,
+        "memory_gb": ram_gb,
+        "disk_gb": disk_gb,
+        "pids": pid_limit,
+        "pid_mode": pid_mode,
+    }
+    if (
+        not any(str(value or "").strip() for value in (cpus, ram_gb, disk_gb))
+        and str(pid_limit or "4096") == "4096"
+        and str(pid_mode or "private") == "private"
+    ):
+        return None
+    selected = (
+        RESOURCE_PROFILES.get(str(profile or "").lower())
+        or RESOURCE_PROFILES["standard"]
+    )
+    return {
+        "cpus": cpus or selected.cpus,
+        "memory_gb": ram_gb or selected.memory_gb,
+        "disk_gb": disk_gb or selected.disk_gb,
+        "pids": pid_limit or selected.pids,
+        "pid_mode": pid_mode or "private",
+    }
+
+
+def ui_wants_json(request: Request) -> bool:
+    return (
+        "application/json" in request.headers.get("accept", "").lower()
+        or "x-devfleet-ui" in request.headers
+    )
+
+
+def _preflight(
+    slug: str,
+    runtime_isolation: str = "",
+    resource_profile: str = "",
+    custom_cpus: str = "",
+    custom_ram_gb: str = "",
+    custom_disk_gb: str = "",
+    pid_mode: str = "private",
+    pid_limit: str = "4096",
+) -> dict:
+    project = safe_child(SETTINGS.workspaces, slug)
+    meta = _require_owned_project_for_mutation(slug, allow_legacy_migration=True)
+    inspection = inspect_workspace(project)
+    selected = str(
+        runtime_isolation or meta.get("runtime_isolation") or "container"
+    ).lower()
+    blockers = []
+    warnings = []
+    if selected not in {"container", "vm"}:
+        blockers.append("Choose a supported environment type.")
+    selected_profile = str(
+        resource_profile or meta.get("resource_profile") or "standard"
+    ).lower()
+    try:
+        limits = _form_resource_limits(
+            selected_profile,
+            custom_cpus,
+            custom_ram_gb,
+            custom_disk_gb,
+            pid_limit,
+            pid_mode,
+        )
+        if limits is None:
+            profile = RESOURCE_PROFILES.get(
+                selected_profile
+            ) or recommend_resource_profile(
+                scale=str(meta.get("project_scale") or ""),
+                intent=str(meta.get("intent") or ""),
+                project_kind=str(meta.get("project_kind") or ""),
+                language=str(meta.get("language") or ""),
+                framework=str(meta.get("framework") or ""),
+            )
+            selected_profile = profile.name
+            limits = profile.limits(selected)
+    except HTTPException as exc:
+        limits = {}
+        blockers.append(str(exc.detail))
+    try:
+        capacity_result = get_host_capacity()
+        capacity = (
+            capacity_result.get("capacity", capacity_result)
+            if isinstance(capacity_result, dict)
+            else {}
+        )
+    except Exception as exc:
+        capacity = {"status": "unavailable", "error": str(exc)[-500:]}
+        blockers.append("Host capacity could not be inspected.")
+    capacity_ready = False
+    if limits and isinstance(capacity, dict):
+        capacity_ready, reason = capacity_allows(capacity, limits)
+        if not capacity_ready:
+            blockers.append(reason)
+    archive_ready = bool(inspection.get("safe_for_archive"))
+    if not archive_ready:
+        blockers.append("Workspace contains symlinks and cannot be safely archived.")
+    compose_ready = (
+        selected == "vm"
+        or (project / "compose.yaml").is_file()
+        or (project / "docker-compose.yml").is_file()
+        or (project / "docker-compose.yaml").is_file()
+    )
+    if not compose_ready:
+        blockers.append("Container assignment requires a supported Compose file.")
+    worktree_ready = not (selected == "vm" and bool(meta.get("worktree")))
+    if not worktree_ready:
+        blockers.append("Linked Git worktrees cannot be assigned to a dedicated VM.")
+    command_readiness = project_command_readiness(project)
+    lifecycle_commands_ready = selected != "vm" or bool(command_readiness.get("ready"))
+    if not lifecycle_commands_ready:
+        missing = ", ".join(command_readiness.get("missing_required") or [])
+        invalid = ", ".join((command_readiness.get("invalid_required") or {}).keys())
+        detail = "; ".join(
+            part
+            for part in (
+                f"missing {missing}" if missing else "",
+                f"unsafe or unsupported {invalid}" if invalid else "",
+            )
+            if part
+        )
+        blockers.append(
+            "Dedicated VM lifecycle commands are not ready"
+            + (f": {detail}" if detail else ".")
+        )
+    inspection_ok = True
+    migration_ready = (
+        inspection_ok
+        and archive_ready
+        and compose_ready
+        and worktree_ready
+        and lifecycle_commands_ready
+        and capacity_ready
+        and not blockers
+    )
+    return {
+        "ok": migration_ready,
+        "read_only": True,
+        "project_id": meta.get("project_id"),
+        "slug": slug,
+        "workspace": inspection,
+        "current_runtime": detect_runtime(slug),
+        "selected_environment": selected,
+        "selected_resource_profile": selected_profile,
+        "selected_limits": limits,
+        "capacity": capacity,
+        "inspection_ok": inspection_ok,
+        "migration_ready": migration_ready,
+        "capacity_ready": capacity_ready,
+        "archive_ready": archive_ready,
+        "compose_ready": compose_ready,
+        "worktree_ready": worktree_ready,
+        "lifecycle_commands_ready": lifecycle_commands_ready,
+        "lifecycle_commands": command_readiness,
+        "blockers": blockers,
+        "warnings": warnings,
+        "target_vm_name": (
+            f"devfleet-project-{slug}"
+            if len(f"devfleet-project-{slug}") <= 60
+            else "deterministic-name-hashed-by-host-agent"
+        ),
+        "migration_would_be_performed": False,
+    }
+
+
+def operation_or_404(op_id: str) -> dict:
+    try:
+        return get_operation(op_id)
+    except (FileNotFoundError, ValueError):
+        raise HTTPException(404, "Operation not found.")
+
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True, "service": "devfleet", "agent_version": __version__}
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, next: str = "/"):
+    token = login_csrf_token()
+    response = templates.TemplateResponse(
+        request,
+        "login.html",
+        {
+            "csrf_token": token,
+            "next": safe_next(next),
+            "version": __version__,
+            "error": "",
+        },
+    )
+    response.set_cookie(
+        LOGIN_CSRF_COOKIE,
+        token,
+        max_age=600,
+        httponly=True,
+        samesite="strict",
+        secure=request.url.scheme == "https",
+        path="/",
+    )
+    return response
+
+
+@app.post("/login", response_class=HTMLResponse)
+def login_submit(
+    request: Request,
+    username: str = Form(""),
+    password: str = Form(""),
+    next: str = Form("/"),
+    keep_signed_in: bool = Form(False),
+    csrf_token: str = Form(""),
+):
+    target = safe_next(next)
+    source = request.client.host if request.client else None
+
+    def rejected(
+        status_code: int = 401,
+        error: str = "The username, password, or sign-in form token was not accepted.",
+    ):
+        token = request.cookies.get(LOGIN_CSRF_COOKIE) or login_csrf_token()
+        response = templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "csrf_token": token,
+                "next": target,
+                "version": __version__,
+                "error": error,
+            },
+            status_code=status_code,
+        )
+        response.set_cookie(
+            LOGIN_CSRF_COOKIE,
+            token,
+            max_age=600,
+            httponly=True,
+            samesite="strict",
+            secure=request.url.scheme == "https",
+            path="/",
+        )
+        return response
+
+    if not validate_login_csrf(request.cookies.get(LOGIN_CSRF_COOKIE), csrf_token):
+        return rejected()
+    if not valid_credentials(username, password, source=source):
+        retry_after = login_retry_after(username, source)
+        if retry_after:
+            response = rejected(429, "Too many sign-in attempts. Try again shortly.")
+            response.headers["Retry-After"] = str(retry_after)
+            return response
+        return rejected()
+    token, ttl, _csrf = issue_session(username, keep_signed_in)
+    response = RedirectResponse(target, 303)
+    response.set_cookie(
+        SESSION_COOKIE, token, max_age=ttl, **session_cookie_options(request)
+    )
+    response.delete_cookie(LOGIN_CSRF_COOKIE, path="/")
+    return response
+
+
+@app.post("/logout")
+def logout(request: Request, csrf_token: str = Form("")):
+    ui(request, csrf_token)
+    revoke_session(request.cookies.get(SESSION_COOKIE))
+    response = RedirectResponse("/login?logged_out=1", 303)
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response
+
+
+@app.get("/api/status", dependencies=[Depends(check_api)])
+def api_status(refresh: bool = False):
+    return local_status(live=refresh)
+
+
+@app.get("/api/node/status", dependencies=[Depends(check_api)])
+def api_node_status():
+    return runtime_status()
+
+
+@app.get("/api/host/status", dependencies=[Depends(check_api)])
+def api_host_status():
+    return host_control_status()
+
+
+@app.get("/api/host/capacity", dependencies=[Depends(check_api)])
+def api_host_capacity():
+    try:
+        return get_host_capacity()
+    except Exception as exc:
+        return {"ok": False, "status": "unavailable", "error": str(exc)[-500:]}
+
+
+@app.get("/api/provider/status", dependencies=[Depends(check_api)])
+def api_provider_status():
+    try:
+        return get_provider_status()
+    except Exception as exc:
+        return {"ok": False, "status": "unavailable", "error": str(exc)[-500:]}
+
+
+@app.get("/api/cluster/status", dependencies=[Depends(check_api)])
+def api_cluster_status():
+    return cluster_status()
+
+
+@app.get("/api/containers", dependencies=[Depends(check_api)])
+def api_containers():
+    return {"containers": list_containers()}
+
+
+@app.get("/api/containers/{container_ref}/inspect", dependencies=[Depends(check_api)])
+def api_container_inspect(container_ref: str):
+    try:
+        return inspect_container(container_ref)
+    except ValueError as exc:
+        raise HTTPException(403, "Container is not an authorized DevFleet-owned resource.") from exc
+
+
+@app.get("/api/containers/{container_ref}/logs", dependencies=[Depends(check_api)])
+def api_container_logs(container_ref: str, tail: int = 200):
+    try:
+        return {"logs": container_logs(container_ref, tail)}
+    except ValueError as exc:
+        raise HTTPException(403, "Container is not an authorized DevFleet-owned resource.") from exc
+
+
+@app.post("/api/containers/{container_ref}/{action}", dependencies=[Depends(check_api)])
+def api_container_action(container_ref: str, action: str, payload: dict | None = None):
+    payload = payload or {}
+    if action == "remove" and not payload.get("confirm_remove"):
+        raise HTTPException(400, "Removing a container requires explicit confirmation.")
+    try:
+        return {"ok": True, "output": container_action(container_ref, action)}
+    except ValueError as exc:
+        raise HTTPException(403, "Container is not an authorized DevFleet-owned resource.") from exc
+
+
+@app.get("/cluster/status")
+def cluster_status_ui(request: Request, refresh: bool = False):
+    ui(request)
+    return JSONResponse(cluster_status() if refresh else cluster_snapshot())
+
+
+@app.get("/containers/{container_ref}/inspect")
+def container_inspect_ui(request: Request, container_ref: str):
+    ui(request)
+    try:
+        return JSONResponse(inspect_container(container_ref))
+    except ValueError as exc:
+        raise HTTPException(403, "Container is not an authorized DevFleet-owned resource.") from exc
+
+
+@app.get("/containers/{container_ref}/logs")
+def container_logs_ui(request: Request, container_ref: str, tail: int = 200):
+    ui(request)
+    try:
+        return JSONResponse({"logs": container_logs(container_ref, tail)})
+    except ValueError as exc:
+        raise HTTPException(403, "Container is not an authorized DevFleet-owned resource.") from exc
+
+
+@app.get("/peer/containers/{container_ref}/inspect")
+def peer_container_inspect_ui(request: Request, container_ref: str):
+    ui(request)
+    return JSONResponse(
+        peer_call(
+            "GET", f"/api/containers/{validate_container_ref(container_ref)}/inspect"
+        )
+    )
+
+
+@app.get("/peer/containers/{container_ref}/logs")
+def peer_container_logs_ui(request: Request, container_ref: str, tail: int = 200):
+    ui(request)
+    return JSONResponse(
+        peer_call(
+            "GET",
+            f"/api/containers/{validate_container_ref(container_ref)}/logs?tail={max(1,min(int(tail),1000))}",
+        )
+    )
+
+
+@app.post("/containers/{container_ref}/{action}")
+def container_action_ui(
+    request: Request,
+    container_ref: str,
+    action: str,
+    confirm_remove: bool = Form(False),
+    csrf_token: str = Form(""),
+):
+    ui(request, csrf_token)
+    if action == "remove" and not confirm_remove:
+        raise HTTPException(400, "Removing a container requires explicit confirmation.")
+    try:
+        return JSONResponse({"ok": True, "output": container_action(container_ref, action)})
+    except ValueError as exc:
+        raise HTTPException(403, "Container is not an authorized DevFleet-owned resource.") from exc
+
+
+@app.post("/peer/containers/{container_ref}/{action}")
+def peer_container_action_ui(
+    request: Request,
+    container_ref: str,
+    action: str,
+    confirm_remove: bool = Form(False),
+    csrf_token: str = Form(""),
+):
+    ui(request, csrf_token)
+    if action == "remove" and not confirm_remove:
+        raise HTTPException(400, "Removing a container requires explicit confirmation.")
+    return JSONResponse(
+        {
+            "ok": True,
+            "output": peer_call(
+                "POST",
+                f"/api/containers/{validate_container_ref(container_ref)}/{action}",
+                {"confirm_remove": bool(confirm_remove)},
+            ),
+        }
+    )
+
+
+@app.get("/api/operations", dependencies=[Depends(check_api)])
+def api_operations():
+    return {"operations": list_operations()}
+
+
+@app.get("/api/operations/{op_id}", dependencies=[Depends(check_api)])
+def api_operation(op_id: str):
+    return operation_or_404(op_id)
+
+
+@app.get("/operations/{op_id}")
+def operation_ui(request: Request, op_id: str):
+    ui(request)
+    return operation_or_404(op_id)
+
+
+@app.get("/ui/operations/{op_id}")
+def ui_operation(request: Request, op_id: str):
+    ui(request)
+    return JSONResponse(operation_or_404(op_id))
+
+
+@app.get("/", response_class=HTMLResponse)
+def index(
+    request: Request, operation: str = "", view: str = "overview", project: str = ""
+):
+    ui(request)
+    op = None
+    if operation:
+        try:
+            op = get_operation(operation)
+        except Exception:
+            pass
+    status = local_status()
+    cluster = cluster_snapshot()
+    peer_node = next(
+        (
+            node
+            for node in cluster.get("nodes", [])
+            if node.get("id") == "devfleet-failover"
+        ),
+        {},
+    )
+    peer = {
+        "configured": bool(peer_node),
+        "ok": bool(peer_node.get("reachable")),
+        "peer": peer_node,
+        "status": peer_node.get("status", "unavailable"),
+        "error": peer_node.get("error", ""),
+    }
+    allowed_views = {
+        "overview",
+        "projects",
+        "project",
+        "infrastructure",
+        "activity",
+        "settings",
+    }
+    selected_view = view if view in allowed_views else "overview"
+    selected_project = next(
+        (item for item in status.get("projects", []) if item.get("slug") == project),
+        None,
+    )
+    if selected_view == "project" and selected_project is None:
+        raise HTTPException(404, "Project not found.")
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {
+            "status": status,
+            "version": __version__,
+            "peer": peer,
+            "cluster": cluster,
+            "quarantine": list_quarantine() if SETTINGS.quarantine.exists() else [],
+            "templates_catalog": TEMPLATES,
+            "operation": op,
+            "csrf_token": ui_csrf_token(request),
+            "view": selected_view,
+            "selected_project": selected_project,
+            "resource_profiles": RESOURCE_PROFILES,
+            "runtime_isolations": RUNTIME_ISOLATIONS,
+        },
+    )
+
+
+@app.get("/api/templates/recommend", dependencies=[Depends(check_api)])
+def api_recommend(
+    language: str = "",
+    framework: str = "",
+    scale: str = "",
+    intent: str = "",
+    project_kind: str = "",
+):
+    return {
+        "template": recommend_template(language, framework, scale, intent, project_kind)
+    }
+
+
+@app.get("/api/runtime/recommend", dependencies=[Depends(check_api)])
+def api_runtime_recommend(
+    language: str = "",
+    framework: str = "",
+    scale: str = "",
+    intent: str = "",
+    project_kind: str = "",
+):
+    resource = recommend_resource_profile(
+        scale=scale,
+        intent=intent,
+        project_kind=project_kind,
+        language=language,
+        framework=framework,
+    )
+    return {
+        "resource_profile": resource.name,
+        "resource_limits": resource.__dict__,
+        "runtime_isolation": recommend_runtime_isolation(
+            scale=scale, intent=intent, project_kind=project_kind
+        ),
+        "runtime_options": RUNTIME_ISOLATIONS,
+    }
+
+
+@app.post("/projects/create")
+def project_create(
+    request: Request,
+    slug: str = Form(...),
+    display_name: str = Form(""),
+    template: str = Form("auto"),
+    git_url: str = Form(""),
+    target: str = Form("local"),
+    language: str = Form(""),
+    framework: str = Form(""),
+    scale: str = Form("small"),
+    intent: str = Form("prototype"),
+    testing_level: str = Form("standard"),
+    profile: str = Form("balanced"),
+    resource_profile: str = Form(""),
+    runtime_isolation: str = Form(""),
+    use_ollama: bool = Form(False),
+    worktree_source: str = Form(""),
+    worktree_branch: str = Form(""),
+    project_kind: str = Form(""),
+    custom_cpus: str = Form(""),
+    custom_ram_gb: str = Form(""),
+    custom_disk_gb: str = Form(""),
+    pid_mode: str = Form("private"),
+    pid_limit: str = Form("4096"),
+    csrf_token: str = Form(""),
+):
+    ui(request, csrf_token)
+    payload = {
+        "slug": slug,
+        "display_name": display_name,
+        "template": template,
+        "git_url": git_url,
+        "language": language,
+        "framework": framework,
+        "scale": scale,
+        "intent": intent,
+        "testing_level": testing_level,
+        "profile": profile,
+        "resource_profile": resource_profile,
+        "resource_limits": _form_resource_limits(
+            resource_profile,
+            custom_cpus,
+            custom_ram_gb,
+            custom_disk_gb,
+            pid_limit,
+            pid_mode,
+        ),
+        "runtime_isolation": runtime_isolation,
+        "use_ollama": use_ollama,
+        "worktree_source": worktree_source,
+        "worktree_branch": worktree_branch,
+        "project_kind": project_kind,
+    }
+    if profile == "fast":
+        raise HTTPException(
+            400,
+            "Use the explicit Fast profile acknowledgement after creating the project in Balanced mode.",
+        )
+
+    def task(ctx):
+        ctx.update(10, "Validating project request", "validate")
+        result = (
+            peer_call("POST", "/api/projects/create", payload)
+            if target == "peer"
+            else create_project(operation_context=ctx, **payload)
+        )
+        ctx.update(90, "Project runtime provisioned", "verify")
+        return result
+
+    return redirect(
+        submit_operation("peer-create" if target == "peer" else "create", slug, task)
+    )
+
+
+@app.get("/projects/{slug}", response_class=HTMLResponse)
+def project_page(request: Request, slug: str):
+    ui(request)
+    return index(
+        request,
+        operation=request.query_params.get("operation", ""),
+        view="project",
+        project=slug,
+    )
+
+
+@app.get("/projects/{slug}/workspace")
+def project_workspace(request: Request, slug: str):
+    ui(request)
+    _require_owned_project_for_mutation(slug)
+    result = open_workspace(slug)
+    if not result.get("ok"):
+        raise HTTPException(
+            409, str(result.get("error") or "Workspace is not ready to open.")
+        )
+    return RedirectResponse(str(result["launcher_uri"]), status_code=307)
+
+
+@app.post("/projects/{slug}/environment")
+def project_environment(
+    request: Request,
+    slug: str,
+    runtime_isolation: str = Form("container"),
+    resource_profile: str = Form(""),
+    custom_cpus: str = Form(""),
+    custom_ram_gb: str = Form(""),
+    custom_disk_gb: str = Form(""),
+    pid_mode: str = Form("private"),
+    pid_limit: str = Form("4096"),
+    wizard_confirmed: bool = Form(False),
+    csrf_token: str = Form(""),
+):
+    ui(request, csrf_token)
+    if not wizard_confirmed:
+        raise HTTPException(
+            400,
+            "Complete the Environment, Resources, Review, and Confirm stages before applying this assignment.",
+        )
+    _require_owned_project_for_mutation(slug, allow_legacy_migration=True)
     preflight = _preflight(
         slug,
         runtime_isolation,
         resource_profile,
-        str(selected.get("cpus", "")),
-        str(selected.get("memory_gb", "")),
-        str(selected.get("disk_gb", "")),
-        str(selected.get("pid_mode", "private")),
-        str(selected.get("pids", "4096")),
+        custom_cpus,
+        custom_ram_gb,
+        custom_disk_gb,
+        pid_mode,
+        pid_limit,
     )
     if not preflight["migration_ready"]:
         raise HTTPException(
             409,
             "Environment preflight is not ready: " + "; ".join(preflight["blockers"]),
         )
-    op = submit_operation(
+    limits = _form_resource_limits(
+        resource_profile,
+        custom_cpus,
+        custom_ram_gb,
+        custom_disk_gb,
+        pid_limit,
+        pid_mode,
+    )
+
+    def task(ctx):
+        ctx.update(
+            8, "Validating the existing workspace and selected environment", "validate"
+        )
+        result = assign_project_runtime(
+            slug, runtime_isolation, resource_profile, limits, operation_context=ctx
+        )
+        ctx.log(json.dumps(result, default=str)[-4000:])
+        return result
+
+    operation_id = submit_operation(
         "runtime-adoption",
         slug,
-        lambda ctx: assign_project_runtime(
-            slug,
-            runtime_isolation,
-            resource_profile,
-            resource_limits,
-            operation_context=ctx,
-        ),
+        task,
         idempotency_key=f'runtime-adoption:{slug}:{runtime_isolation}:{resource_profile or "current"}',
     )
-    return JSONResponse(
-        {"ok": True, "operation_id": op, "message": "Environment assignment queued."},
-        status_code=202,
-    )
-
-
-@app.post("/api/projects/create", dependencies=[Depends(check_api)])
-def api_create(payload: dict):
-    defaults = {
-        "slug": "", "display_name": "", "template": "generic", "git_url": "",
-        "language": "", "framework": "", "scale": "small", "intent": "prototype",
-        "testing_level": "standard", "profile": "", "resource_profile": "",
-        "resource_limits": None, "runtime_isolation": "", "use_ollama": True,
-        "worktree_source": "", "worktree_branch": "", "project_kind": "",
-    }
-    values = {key: payload.get(key, default) for key, default in defaults.items()}
-    slug = validate_slug(str(values["slug"]))
-    supplied = str(payload.get("idempotency_key") or "").strip()
-    if supplied and not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", supplied):
-        raise HTTPException(400, "Idempotency key must be 1-128 safe identifier characters.")
-
-    def task(ctx):
-        return create_project(**values, operation_context=ctx)
-
-    operation_id = submit_operation("create", slug, task, idempotency_key=f"project-create:{slug}:{supplied or 'default'}")
-    return JSONResponse({"ok": True, "accepted": True, "operation_id": operation_id, "operation_url": f"/api/operations/{operation_id}"}, status_code=202)
-
-
-@app.post("/api/transfers/receive", dependencies=[Depends(check_api)])
-def api_receive_transfer(payload: dict):
-    try:
-        slug = validate_slug(str(payload.get("slug") or ""))
-        project_id = validate_project_id(str(payload.get("project_id") or ""))
-        deployment_id = validate_project_id(
-            str(payload.get("deployment_id") or "")
+    if ui_wants_json(request):
+        return JSONResponse(
+            {
+                "ok": True,
+                "operation_id": operation_id,
+                "message": "Environment assignment queued.",
+            },
+            status_code=202,
         )
-    except ValueError as exc:
-        raise HTTPException(400, "Transfer identity is invalid.") from exc
-    source_host_id = str(payload.get("source_host_id") or "")
-    destination_host_id = str(payload.get("destination_host_id") or "")
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", source_host_id):
-        raise HTTPException(400, "Transfer source host identity is invalid.")
-    if destination_host_id != SETTINGS.host_id:
-        raise HTTPException(409, "Transfer destination host identity does not match this node.")
-    if deployment_id != str(SETTINGS.deployment_id or ""):
-        raise HTTPException(409, "Transfer deployment identity does not match this node.")
-    if (
-        str(payload.get("confirm_slug") or "") != slug
-        or str(payload.get("confirm_phrase") or "") != f"RECEIVE TRANSFER {slug}"
-    ):
-        raise HTTPException(400, "Receive transfer requires exact confirmation.")
-
-    def task(ctx):
-        ctx.update(10, "Validating transfer destination ownership")
-        result = receive_transferred_project(
-            slug,
-            project_id,
-            deployment_id,
-            source_host_id,
-            destination_host_id,
-        )
-        ctx.update(90, "Transfer restored and rebound to this node")
-        return result
-
-    operation_id = submit_operation(
-        "receive-transfer",
-        slug,
-        task,
-        project_id=project_id,
-        idempotency_key=(
-            f"receive-transfer:{slug}:{project_id}:{deployment_id}:"
-            f"{source_host_id}:{destination_host_id}"
-        ),
-        host_id=SETTINGS.host_id,
-    )
-    return JSONResponse(
-        {
-            "ok": True,
-            "accepted": True,
-            "operation_id": operation_id,
-            "operation_url": f"/api/operations/{operation_id}",
-        },
-        status_code=202,
-    )
+    return redirect(operation_id)
 
 
-@app.post("/api/transfers/activate", dependencies=[Depends(check_api)])
-def api_activate_transfer(payload: dict):
-    try:
-        slug = validate_slug(str(payload.get("slug") or ""))
-        project_id = validate_project_id(str(payload.get("project_id") or ""))
-        deployment_id = validate_project_id(
-            str(payload.get("deployment_id") or "")
-        )
-    except ValueError as exc:
-        raise HTTPException(400, "Transfer identity is invalid.") from exc
-    source_host_id = str(payload.get("source_host_id") or "")
-    destination_host_id = str(payload.get("destination_host_id") or "")
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", source_host_id):
-        raise HTTPException(400, "Transfer source host identity is invalid.")
-    if destination_host_id != SETTINGS.host_id or source_host_id == destination_host_id:
-        raise HTTPException(
-            409, "Transfer destination host identity does not match this node."
-        )
-    if deployment_id != str(SETTINGS.deployment_id or ""):
-        raise HTTPException(409, "Transfer deployment identity does not match this node.")
-    if (
-        str(payload.get("confirm_slug") or "") != slug
-        or str(payload.get("confirm_phrase") or "")
-        != f"ACTIVATE TRANSFER {slug}"
-    ):
-        raise HTTPException(400, "Transfer activation requires exact confirmation.")
-
-    def task(ctx):
-        ctx.update(10, "Validating pending transfer authority")
-        result = activate_transferred_project(
-            slug,
-            project_id,
-            deployment_id,
-            source_host_id,
-            destination_host_id,
-        )
-        ctx.update(95, "Transfer activated and project started")
-        return result
-
-    operation_id = submit_operation(
-        "activate-transfer",
-        slug,
-        task,
-        project_id=project_id,
-        idempotency_key=(
-            f"activate-transfer:{slug}:{project_id}:{deployment_id}:"
-            f"{source_host_id}:{destination_host_id}"
-        ),
-        host_id=SETTINGS.host_id,
-    )
-    return JSONResponse(
-        {
-            "ok": True,
-            "accepted": True,
-            "operation_id": operation_id,
-            "operation_url": f"/api/operations/{operation_id}",
-        },
-        status_code=202,
-    )
-
-
-@app.post("/api/projects/{slug}/{action}", dependencies=[Depends(check_api)])
-def api_action(request: Request, slug: str, action: str, payload: dict | None = None):
-    payload = payload or {}
+@app.post("/projects/{slug}/{action}")
+def project_action(
+    request: Request,
+    slug: str,
+    action: str,
+    confirm_failover: bool = Form(False),
+    confirm_quarantine: bool = Form(False),
+    confirm_slug: str = Form(""),
+    confirm_phrase: str = Form(""),
+    backup_id: str = Form(""),
+    confirm_restore: bool = Form(False),
+    allow_overwrite: bool = Form(False),
+    csrf_token: str = Form(""),
+):
+    ui(request, csrf_token)
     if action not in PROJECT_ACTIONS:
-        raise HTTPException(404, "Unknown action")
+        raise HTTPException(404, "Unknown project action.")
     project = safe_child(SETTINGS.workspaces, slug)
     if not project.is_dir() or project.is_symlink():
         raise HTTPException(404, "Project not found.")
@@ -222,855 +1069,260 @@ def api_action(request: Request, slug: str, action: str, payload: dict | None = 
             409,
             f"Runtime action unavailable: {capabilities['status_reason'] or 'environment is not ready.'}",
         )
-    if action == "quarantine" and not payload.get("confirm_quarantine"):
+    if action == "quarantine" and not confirm_quarantine:
         raise HTTPException(400, "Quarantine requires explicit acknowledgement.")
     if action == "destroy" and (
-        payload.get("confirm_slug") != slug
-        or payload.get("confirm_phrase") != f"DESTROY {slug}"
+        confirm_slug != slug or confirm_phrase != f"DESTROY {slug}"
     ):
         raise HTTPException(400, "Permanent destruction requires exact confirmation.")
-    if action == "restore-backup" and (not payload.get("confirm_restore") or not payload.get("backup_id")):
+    if action == "restore-backup" and (not confirm_restore or not backup_id):
         raise HTTPException(400, "Backup restore requires an identified backup and explicit confirmation.")
-    if action == "restore-vault":
-        try:
-            canonical = _canonical_restore_requested(payload)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
-        payload["canonical"] = canonical
-        if canonical and (
-            str(payload.get("confirm_slug") or "") != slug
-            or str(payload.get("confirm_phrase") or "")
-            != f"RESTORE CANONICAL {slug}"
-        ):
-            raise HTTPException(
-                400, "Canonical Vault restore requires exact confirmation."
-            )
-        if canonical:
-            raise HTTPException(
-                409,
-                "Standalone canonical Vault restore is disabled; use restore-copy or guided ownership transfer.",
-            )
-    task = _project_action_task(slug, action, payload)
-    if action in PROJECT_READ_ONLY_ACTIONS:
-        return {"ok": True, "output": task(None)}
-    idempotency_key = _action_idempotency_key(slug, action, payload, request.headers.get("X-Idempotency-Key", ""))
-    operation_id = submit_operation(
-        action,
-        slug,
-        task,
-        project_id=str(metadata.get("project_id") or ""),
-        runtime_id=str(metadata.get("runtime_id") or ""),
-        idempotency_key=idempotency_key,
-        host_id=str(metadata.get("host_id") or SETTINGS.host_id),
-    )
-    return JSONResponse({"ok": True, "accepted": True, "operation_id": operation_id, "operation_url": f"/api/operations/{operation_id}"}, status_code=202)
 
-```
+    payload = {
+        "confirm_failover": confirm_failover,
+        "confirm_quarantine": confirm_quarantine,
+        "confirm_slug": confirm_slug,
+        "confirm_phrase": confirm_phrase,
+        "backup_id": backup_id,
+        "confirm_restore": confirm_restore,
+        "allow_overwrite": allow_overwrite,
+    }
+    shared_task = _project_action_task(slug, action, payload)
+    def task(ctx):
+        return shared_task(ctx)
+
+    idempotency_key = _action_idempotency_key(slug, action, payload)
+    operation_id = submit_operation(action, slug, task, idempotency_key=idempotency_key)
+    if ui_wants_json(request):
+        return JSONResponse({"ok": True, "operation_id": operation_id}, status_code=202)
+    return redirect(operation_id)
 
 
-## FILE: source/app/devfleet/metadata_io.py
-
-SHA256: 188ee5ed02c51d802e85cfa75a1017e9fc2c5a897a51083ba4a09bd564afd290 | Bytes: 22797 | Git mode: 100644
-
-```
-"""Read and replace project metadata through a stable filesystem identity.
-
-Linux is the deployed target. Its directory-relative, no-follow operations are
-the authoritative contract. Windows compatibility pins directories against
-rename with native handles, but is not evidence of the POSIX security contract.
-This module intentionally has no application settings or third-party imports.
-"""
-from __future__ import annotations
-
-import contextlib
-import json
-import os
-from pathlib import Path
-import re
-import stat
-import sys
-from dataclasses import dataclass
-from typing import Any
-import uuid
-
-
-# Compute this before tests wrap os.open to inject deterministic substitutions.
-POSIX_FD_HARDENING = (
-    os.name == "posix"
-    and all(hasattr(os, flag) for flag in ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK"))
-    and all(fn in os.supports_dir_fd for fn in (os.open, os.stat, os.mkdir, os.unlink, os.rename, os.link))
-    and os.stat in os.supports_follow_symlinks
-)
-_Identity = tuple[int, int, int]
-_Version = tuple[int, int, int, int, int, int, int]
-
-
-class MetadataSafetyError(ValueError):
-    """The observed metadata object no longer has its authorized identity."""
-
-
-@dataclass(frozen=True)
-class MetadataBinding:
-    workspace: str
-    directory_lineage: tuple[tuple[str, _Identity], ...]
-    file_identity: _Identity | None
-    file_version: _Version | None
-    posix: bool
-
-    def same_directory_lineage(self, other: MetadataBinding) -> bool:
-        return (
-            isinstance(other, MetadataBinding)
-            and self.workspace == other.workspace
-            and self.directory_lineage == other.directory_lineage
-            and self.posix == other.posix
+@app.post("/projects/{slug}/profile")
+def project_profile(
+    request: Request,
+    slug: str,
+    profile: str = Form(...),
+    confirm_fast: bool = Form(False),
+    allow_devices: bool = Form(False),
+    allow_privileged: bool = Form(False),
+    csrf_token: str = Form(""),
+):
+    ui(request, csrf_token)
+    profile = profile.lower()
+    if profile not in {"strict", "balanced", "fast"}:
+        raise HTTPException(400, "Unknown profile.")
+    if profile == "fast" and not confirm_fast:
+        raise HTTPException(400, "Fast Trusted mode requires explicit acknowledgement.")
+    if (allow_devices or allow_privileged) and (profile != "fast" or not confirm_fast):
+        raise HTTPException(
+            400, "Device or privileged access requires Fast Trusted acknowledgement."
         )
+    project = safe_child(SETTINGS.workspaces, slug)
+    meta = _require_owned_project_for_mutation(slug)
+    previous = str(meta.get("profile") or SETTINGS.development_profile)
+    meta.setdefault("profile_history", []).append(
+        {
+            "from": previous,
+            "to": profile,
+            "time": __import__("time").strftime(
+                "%Y-%m-%dT%H:%M:%SZ", __import__("time").gmtime()
+            ),
+        }
+    )
+    meta["profile_history"] = meta["profile_history"][-50:]
+    meta["profile"] = profile
+    meta["allow_tailnet_ports"] = profile != "strict"
+    meta["allow_devices"] = bool(allow_devices) if profile == "fast" else False
+    meta["allow_privileged"] = bool(allow_privileged) if profile == "fast" else False
+    commit_project_metadata(project, meta)
+    analyze_project(project, profile, force=True)
+    return RedirectResponse("/", 303)
 
 
-@dataclass(frozen=True)
-class MetadataRecord:
-    value: Any
-    raw: bytes
-    binding: MetadataBinding
+@app.post("/peer/projects/{slug}/{action}")
+def peer_project_action(
+    request: Request,
+    slug: str,
+    action: str,
+    confirm_failover: bool = Form(False),
+    confirm_quarantine: bool = Form(False),
+    csrf_token: str = Form(""),
+):
+    ui(request, csrf_token)
+    payload = {
+        "confirm_failover": bool(confirm_failover),
+        "confirm_quarantine": bool(confirm_quarantine),
+    }
+
+    def task(ctx):
+        ctx.update(15, "Sending authenticated action to peer")
+        result = peer_call("POST", f"/api/projects/{slug}/{action}", payload)
+        ctx.log(str(result)[-4000:])
+        ctx.update(90, "Peer action completed")
+        return result
+
+    return redirect(submit_operation("peer-" + action, slug, task))
 
 
-def enable_inherited_backup_read(fd: int, *, parent: Path | int, directory: bool = False) -> None:
-    """Retain only an already-inherited backup grant on a newly created inode.
+@app.post("/repair")
+def repair(request: Request, csrf_token: str = Form("")):
+    ui(request, csrf_token)
 
-    Creating atomic files as 0600 (or metadata directories as 0700) masks named
-    default ACL entries. Reactivate read/traverse for the configured backup UID,
-    not write, while preserving every other principal's previous effective access.
-    No ACL or no backup grant means the object remains private. Call only on the
-    pinned descriptor of an unpublished file or a directory just created here.
-    """
-    if sys.platform != "linux":
-        return
-    import errno
-    import pwd
-    import struct
-
-    try:
-        backup_uid = pwd.getpwnam("devfleet-backup").pw_uid
-    except KeyError:
-        return
-    try:
-        raw = os.getxattr(fd, "system.posix_acl_access")
-        # Ancestors are deliberately pinned with O_PATH (traverse-only), which
-        # fgetxattr rejects. The kernel's /proc/self/fd link retains that exact
-        # live directory identity without reopening an attacker-controlled path.
-        policy_target = f"/proc/self/fd/{parent}" if isinstance(parent, int) else parent
-        policy = os.getxattr(policy_target, "system.posix_acl_default")
-    except OSError as exc:
-        if exc.errno in (errno.ENODATA, errno.ENOTSUP, errno.EOPNOTSUPP):
-            return
-        raise
-    if len(raw) < 4 or (len(raw) - 4) % 8 or struct.unpack("<I", raw[:4])[0] != 2:
-        raise MetadataSafetyError("Inherited metadata ACL has an unsupported format.")
-    entries = list(struct.iter_unpack("<HHI", raw[4:]))
-    masks = [permissions for tag, permissions, _uid in entries if tag == 0x10]
-    grants = [permissions for tag, permissions, uid in entries
-              if tag == 0x02 and uid == backup_uid]
-    if not grants:
-        return
-    if len(masks) != 1 or len(grants) != 1 or any(permissions & ~7 for _, permissions, _ in entries):
-        raise MetadataSafetyError("Inherited metadata ACL is ambiguous.")
-    needed = 0x05 if directory else 0x04
-    if grants[0] & needed != needed:
-        return
-    # The parent's mask may itself deliberately deny an otherwise named grant.
-    # A raw inherited entry alone is not authorization to override that denial.
-    if len(policy) < 4 or (len(policy) - 4) % 8 or struct.unpack("<I", policy[:4])[0] != 2:
-        raise MetadataSafetyError("Default metadata ACL has an unsupported format.")
-    parent_entries = list(struct.iter_unpack("<HHI", policy[4:]))
-    parent_masks = [permissions for tag, permissions, _uid in parent_entries if tag == 0x10]
-    parent_grants = [permissions for tag, permissions, uid in parent_entries
-                     if tag == 0x02 and uid == backup_uid]
-    if not parent_grants:
-        return
-    if len(parent_masks) != 1 or len(parent_grants) != 1:
-        raise MetadataSafetyError("Default metadata ACL is ambiguous.")
-    if (parent_grants[0] & parent_masks[0] & needed) != needed:
-        return
-    mask = masks[0]
-    owner = os.fstat(fd)
-    owner_permissions = stat.S_IMODE(owner.st_mode) >> 6
-    # A named ACL entry for the inode's own publisher is not an unrelated
-    # principal: it already has the owner rights. Preserve its explicitly
-    # inherited grant so non-root restore does not erase publisher access when
-    # the restoring account becomes the inode owner. Parent policy still limits
-    # that grant; no other masked principal is reactivated.
-    publisher_access = next((permissions & owner_permissions & parent_masks[0]
-                             for tag, permissions, uid in parent_entries
-                             if tag == 0x02 and uid == owner.st_uid), 0)
-    updated = []
-    for tag, permissions, uid in entries:
-        if tag == 0x02 and uid == backup_uid:
-            permissions = needed
-        elif tag == 0x02 and uid == owner.st_uid:
-            permissions &= publisher_access
-        elif tag in (0x02, 0x04, 0x08):
-            # Widening the shared ACL mask must not revive another named user,
-            # the owning group, or a named group that mode 0600/0700 had denied.
-            permissions &= mask
-        elif tag == 0x10:
-            permissions = mask | needed | publisher_access
-        updated.append((tag, permissions, uid))
-    encoded = struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *entry) for entry in updated)
-    os.setxattr(fd, "system.posix_acl_access", encoded)
-
-
-def _identity(info: os.stat_result) -> _Identity:
-    return int(info.st_dev), int(info.st_ino), stat.S_IFMT(info.st_mode)
-
-
-def _version(info: os.stat_result) -> _Version:
-    return (*_identity(info), int(info.st_nlink), int(info.st_size),
-            int(info.st_mtime_ns), int(info.st_ctime_ns))
-
-
-def _require_kind(info: os.stat_result, kind: int) -> None:
-    if (
-        stat.S_IFMT(info.st_mode) != kind
-        or getattr(info, "st_file_attributes", 0) & 0x400  # Windows reparse point.
-    ):
-        raise MetadataSafetyError("Metadata path contains an alias or an unsupported object.")
-    if kind == stat.S_IFREG and info.st_nlink != 1:
-        raise MetadataSafetyError("Metadata file has an unexpected hard-link count.")
-
-
-def _lexical_workspace(project: Path) -> Path:
-    project = Path(project)
-    if ".." in project.parts:
-        raise MetadataSafetyError("Metadata workspace may not contain parent traversal.")
-    return Path(os.path.abspath(os.fspath(project)))
-
-
-def _pin_windows_directory(path: Path):
-    """Deny directory rename/deletion while compatibility I/O uses its pathname."""
-    import ctypes
-    from ctypes import wintypes
-
-    class FileInformation(ctypes.Structure):
-        _fields_ = [
-            ("attributes", wintypes.DWORD),
-            ("creation", wintypes.FILETIME),
-            ("access", wintypes.FILETIME),
-            ("write", wintypes.FILETIME),
-            ("volume", wintypes.DWORD),
-            ("size_high", wintypes.DWORD),
-            ("size_low", wintypes.DWORD),
-            ("links", wintypes.DWORD),
-            ("index_high", wintypes.DWORD),
-            ("index_low", wintypes.DWORD),
+    def task(ctx):
+        ctx.update(20, "Running non-destructive node repair")
+        result = run(["/usr/local/bin/devfleet-user-repair"], timeout=600).stdout[
+            -8000:
         ]
+        ctx.log(result)
+        ctx.update(90, "Repair health checks completed")
+        return result
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
-                                  wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD,
-                                  wintypes.HANDLE]
-    kernel.CreateFileW.restype = wintypes.HANDLE
-    kernel.GetFileInformationByHandle.argtypes = [wintypes.HANDLE, ctypes.POINTER(FileInformation)]
-    kernel.GetFileInformationByHandle.restype = wintypes.BOOL
-    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel.CloseHandle.restype = wintypes.BOOL
-    # FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES; share read/write, deliberately
-    # omit FILE_SHARE_DELETE. Attribute-only handles do not enforce that denial.
-    # OPEN_EXISTING; BACKUP_SEMANTICS | OPEN_REPARSE_POINT.
-    handle = kernel.CreateFileW(str(path), 0x81, 0x3, None, 3, 0x02200000, None)
-    if handle == ctypes.c_void_p(-1).value:
-        raise ctypes.WinError(ctypes.get_last_error())
+    return redirect(submit_operation("repair", "node", task))
+
+
+@app.post("/projects/{slug}/transfer-to-peer")
+def transfer(request: Request, slug: str, csrf_token: str = Form("")):
+    ui(request, csrf_token)
+    metadata = _require_owned_project_for_mutation(slug)
+    if metadata.get("runtime_isolation") == "vm":
+        raise HTTPException(
+            409,
+            "Dedicated-VM peer transfer is blocked until a verified node-to-node VM transfer protocol is available. The current VM remains the canonical owner.",
+        )
+    state = peer_node_status()
+    if not state.get("ok"):
+        raise HTTPException(
+            409,
+            "DevFleetFailover is offline or unavailable; ownership transfer is disabled.",
+        )
+    project_id = str(metadata.get("project_id") or "")
+    deployment_id = str(metadata.get("deployment_id") or "")
+    source_host_id = str(metadata.get("host_id") or "")
     try:
-        info = FileInformation()
-        if not kernel.GetFileInformationByHandle(handle, ctypes.byref(info)):
-            raise ctypes.WinError(ctypes.get_last_error())
-        if not info.attributes & 0x10 or info.attributes & 0x400:
-            raise MetadataSafetyError("Metadata parent is not a real directory.")
-    except BaseException:
-        kernel.CloseHandle(handle)
-        raise
-    return lambda: kernel.CloseHandle(handle)
-
-
-class _MetadataLocation:
-    def __init__(self, project: Path, *, create_directory: bool = False):
-        self.project = _lexical_workspace(project)
-        self.directory = self.project / ".devfleet"
-        self._create_directory = create_directory
-        self._edges: list[tuple[Path, int | None, str, int | None, _Identity]] = []
-        self._windows_closers: list[Any] = []
-
-    def __enter__(self):
-        if not POSIX_FD_HARDENING and os.name != "nt":
-            raise MetadataSafetyError("Required descriptor-relative metadata primitives are unavailable.")
-        try:
-            parent_fd = None
-            current = Path(self.directory.anchor)
-            for index, name in enumerate(self.directory.parts):
-                created_here = False
-                current = Path(name) if index == 0 else current / name
-                try:
-                    observed = self._stat_directory(current, parent_fd, name)
-                except FileNotFoundError:
-                    if not self._create_directory or current != self.directory:
-                        raise
-                    try:
-                        if POSIX_FD_HARDENING:
-                            os.mkdir(name, 0o700, dir_fd=parent_fd)
-                        else:
-                            current.mkdir(mode=0o700)
-                        created_here = True
-                    except FileExistsError:
-                        pass
-                    observed = self._stat_directory(current, parent_fd, name)
-                _require_kind(observed, stat.S_IFDIR)
-                if POSIX_FD_HARDENING:
-                    # The backup identity may only traverse ancestors such as
-                    # /home/devrunner. O_PATH pins those without requiring list
-                    # permission; the metadata directory remains fsync-capable.
-                    access = os.O_RDONLY if current == self.directory else getattr(os, "O_PATH", os.O_RDONLY)
-                    flags = access | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
-                    fd = os.open(name if parent_fd is not None else current, flags, dir_fd=parent_fd)
-                    self._edges.append((current, parent_fd, name, fd, _identity(observed)))
-                    actual = os.fstat(fd)
-                    _require_kind(actual, stat.S_IFDIR)
-                    if _identity(actual) != _identity(observed):
-                        raise MetadataSafetyError("Metadata directory changed before it could be opened.")
-                    if created_here:
-                        enable_inherited_backup_read(fd, parent=parent_fd, directory=True)
-                    parent_fd = fd
-                else:
-                    closer = _pin_windows_directory(current)
-                    self._windows_closers.append(closer)
-                    actual = os.lstat(current)
-                    _require_kind(actual, stat.S_IFDIR)
-                    if _identity(actual) != _identity(observed):
-                        raise MetadataSafetyError("Metadata directory changed before it could be pinned.")
-                    self._edges.append((current, None, name, None, _identity(actual)))
-            self.assert_directories()
-            return self
-        except BaseException:
-            self.__exit__(None, None, None)
-            raise
-
-    def __exit__(self, *_args):
-        for _path, _parent, _name, fd, _expected in reversed(self._edges):
-            if fd is not None:
-                os.close(fd)
-        self._edges.clear()
-        for closer in reversed(self._windows_closers):
-            closer()
-        self._windows_closers.clear()
-
-    @staticmethod
-    def _stat_directory(path: Path, parent_fd: int | None, name: str):
-        return (os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-                if parent_fd is not None else os.lstat(path))
-
-    @property
-    def directory_fd(self) -> int | None:
-        return self._edges[-1][3]
-
-    def assert_directories(self) -> None:
-        for path, parent_fd, name, fd, expected in self._edges:
-            current = self._stat_directory(path, parent_fd, name)
-            _require_kind(current, stat.S_IFDIR)
-            if _identity(current) != expected or (fd is not None and _identity(os.fstat(fd)) != expected):
-                raise MetadataSafetyError("Metadata directory binding changed during the operation.")
-
-    def stat_file(self, name: str = "project.json") -> os.stat_result:
-        return (os.stat(name, dir_fd=self.directory_fd, follow_symlinks=False)
-                if POSIX_FD_HARDENING else os.lstat(self.directory / name))
-
-    def binding(self, file_info: os.stat_result | None) -> MetadataBinding:
-        return MetadataBinding(
-            os.path.normcase(str(self.project)),
-            tuple((os.path.normcase(str(path)), expected) for path, _parent, _name, _fd, expected in self._edges),
-            _identity(file_info) if file_info is not None else None,
-            _version(file_info) if file_info is not None else None,
-            POSIX_FD_HARDENING,
+        validate_project_id(project_id)
+        validate_project_id(deployment_id)
+    except ValueError as exc:
+        raise HTTPException(409, "Project transfer identity is incomplete.") from exc
+    if not source_host_id:
+        raise HTTPException(409, "Project transfer source host identity is missing.")
+    if (
+        deployment_id != str(SETTINGS.deployment_id or "")
+        or source_host_id != SETTINGS.host_id
+    ):
+        raise HTTPException(
+            409, "Project transfer source is not owned by this node and deployment."
+        )
+    peer_node = state.get("node") if isinstance(state.get("node"), dict) else {}
+    peer_identity = (
+        peer_node.get("node_identity")
+        if isinstance(peer_node.get("node_identity"), dict)
+        else {}
+    )
+    destination_host_id = str(peer_node.get("node") or "")
+    if (
+        not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", destination_host_id
+        )
+        or destination_host_id == source_host_id
+        or str(peer_identity.get("deployment_id") or "") != deployment_id
+    ):
+        raise HTTPException(
+            409, "Peer transfer identity is not bound to this deployment."
         )
 
-    def assert_binding(self, expected: MetadataBinding) -> None:
-        self.assert_directories()
-        try:
-            current = self.stat_file()
-        except FileNotFoundError:
-            current = None
-        if current is not None:
-            _require_kind(current, stat.S_IFREG)
-        observed = self.binding(current)
-        if observed != expected:
-            raise MetadataSafetyError("Metadata identity or contents changed during the operation.")
+    def task(ctx):
+        with project_transfer_lock(slug):
+            return guided_transfer(
+                slug,
+                ctx,
+                stop=stop_project,
+                backup=backup_project,
+                assert_quiesced=assert_project_quiesced_for_transfer,
+                project_id=project_id,
+                deployment_id=deployment_id,
+                source_host_id=source_host_id,
+                destination_host_id=destination_host_id,
+                finalize_source=finalize_source_transfer,
+                peer_call=peer_call,
+            )
 
-
-def read_project_metadata(project: Path) -> MetadataRecord:
-    with _MetadataLocation(project) as location:
-        observed = location.stat_file()
-        _require_kind(observed, stat.S_IFREG)
-        expected = location.binding(observed)
-        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0)
-        if POSIX_FD_HARDENING:
-            flags |= os.O_NOFOLLOW | os.O_NONBLOCK
-            fd = os.open("project.json", flags, dir_fd=location.directory_fd)
-        else:
-            fd = os.open(location.directory / "project.json", flags)
-        try:
-            actual = os.fstat(fd)
-            _require_kind(actual, stat.S_IFREG)
-            if _version(actual) != _version(observed):
-                raise MetadataSafetyError("Metadata file changed before it could be opened.")
-            with os.fdopen(fd, "rb", closefd=False) as handle:
-                raw = handle.read()
-            if _version(os.fstat(fd)) != _version(observed):
-                raise MetadataSafetyError("Metadata file changed while it was being read.")
-            location.assert_binding(expected)
-            value = json.loads(raw.decode("utf-8"))
-            location.assert_binding(expected)
-            if _version(os.fstat(fd)) != _version(observed):
-                raise MetadataSafetyError("Metadata file changed while it was being parsed.")
-            return MetadataRecord(value, raw, expected)
-        finally:
-            os.close(fd)
-
-
-def write_project_metadata(
-    project: Path, value: Any, *, expected: MetadataBinding | None = None,
-    create: bool = False,
-) -> MetadataBinding:
-    raw = (json.dumps(value, indent=2, sort_keys=True, default=str) + "\n").encode("utf-8")
-    return write_project_metadata_bytes(project, raw, expected=expected, create=create)
-
-
-def write_project_metadata_bytes(
-    project: Path, raw: bytes, *, expected: MetadataBinding | None = None,
-    create: bool = False,
-) -> MetadataBinding:
-    """Replace metadata inside pinned parents, preserving raw rollback bytes.
-
-    The prior binding is checked immediately before publication. Replacement is
-    not an inode compare-and-swap against a hostile writer of the same directory:
-    callers still serialize cooperating writers. Even a concurrent parent rename
-    cannot redirect the POSIX write into its replacement directory.
-    """
-    if not isinstance(raw, bytes):
-        raise TypeError("Metadata bytes must be bytes.")
-    with _MetadataLocation(project, create_directory=create) as location:
-        try:
-            current = location.stat_file()
-        except FileNotFoundError:
-            current = None
-        if current is not None:
-            _require_kind(current, stat.S_IFREG)
-        if expected is None:
-            if not create or current is not None:
-                raise MetadataSafetyError("Existing metadata writes require the prior identity binding.")
-            expected = location.binding(None)
-        location.assert_binding(expected)
-        temporary = f".project.json.{uuid.uuid4().hex}.tmp"
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0)
-        fd = None
-        temporary_identity = None
-        try:
-            if POSIX_FD_HARDENING:
-                fd = os.open(temporary, flags | os.O_NOFOLLOW, 0o600, dir_fd=location.directory_fd)
-            else:
-                fd = os.open(location.directory / temporary, flags, 0o600)
-            _require_kind(os.fstat(fd), stat.S_IFREG)
-            temporary_identity = _identity(os.fstat(fd))
-            with os.fdopen(fd, "wb", closefd=False) as handle:
-                handle.write(raw)
-                handle.flush()
-                enable_inherited_backup_read(fd, parent=location.directory_fd)
-                os.fsync(fd)
-            written = os.fstat(fd)
-            _require_kind(written, stat.S_IFREG)
-            written_version = _version(written)
-            location.assert_binding(expected)
-            staged = location.stat_file(temporary)
-            _require_kind(staged, stat.S_IFREG)
-            if _version(staged) != written_version or _version(os.fstat(fd)) != written_version:
-                raise MetadataSafetyError("Metadata temporary file changed before replacement.")
-            if POSIX_FD_HARDENING:
-                if expected.file_identity is None:
-                    # Atomic first publication must not overwrite a file that
-                    # appeared after the absence check. Link only if absent,
-                    # then drop the temporary name before the regular-file check.
-                    os.link(temporary, "project.json", src_dir_fd=location.directory_fd,
-                            dst_dir_fd=location.directory_fd, follow_symlinks=False)
-                    os.unlink(temporary, dir_fd=location.directory_fd)
-                else:
-                    os.replace(temporary, "project.json", src_dir_fd=location.directory_fd,
-                               dst_dir_fd=location.directory_fd)
-                os.fsync(location.directory_fd)
-            else:
-                # CRT descriptors deny file deletion; parent directory handles
-                # remain pinned while the temporary file is closed and renamed.
-                os.close(fd)
-                fd = None
-                replace = os.rename if expected.file_identity is None else os.replace
-                replace(location.directory / temporary, location.directory / "project.json")
-            location.assert_directories()
-            committed = location.stat_file()
-            _require_kind(committed, stat.S_IFREG)
-            if _identity(committed) != temporary_identity:
-                raise MetadataSafetyError("Committed metadata does not match the written file.")
-            binding = location.binding(committed)
-            location.assert_binding(binding)
-            return binding
-        finally:
-            if fd is not None:
-                os.close(fd)
-            if temporary_identity is not None:
-                with contextlib.suppress(OSError):
-                    if _identity(location.stat_file(temporary)) == temporary_identity:
-                        if POSIX_FD_HARDENING:
-                            os.unlink(temporary, dir_fd=location.directory_fd)
-                        else:
-                            os.unlink(location.directory / temporary)
-
-
-def metadata_identity_matches(
-    value: Any, slug: str, project_id: str,
-    deployment_id: str | None = None, host_id: str | None = None,
-) -> bool:
-    if not isinstance(value, dict) or isinstance(value.get("schema_version"), bool):
-        return False
-    try:
-        schema = int(value.get("schema_version"))
-    except (TypeError, ValueError, OverflowError):
-        return False
-    return bool(
-        schema >= 3
-        and value.get("managed_by") == "devfleet"
-        and value.get("slug") == slug
-        and (value.get("identity") if value.get("identity") is not None else slug) == slug
-        and value.get("project_id") == project_id
-        and (deployment_id is None or value.get("deployment_id") == deployment_id)
-        and (host_id is None or value.get("host_id") == host_id)
+    return redirect(
+        submit_operation(
+            "ownership-transfer",
+            slug,
+            task,
+            project_id=project_id,
+            runtime_id=str(metadata.get("runtime_id") or ""),
+            host_id=source_host_id,
+            idempotency_key=(
+                f"ownership-transfer:{slug}:{project_id}:{deployment_id}:"
+                f"{source_host_id}:{destination_host_id}"
+            ),
+        )
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    if len(args) not in {4, 5, 6} or args[0] != "--identity":
-        return 2
-    _action, workspace, slug, project_id, *optional = args
-    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,62}", slug) or not re.fullmatch(
-        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", project_id
-    ):
-        return 2
+@app.post("/quarantine/restore")
+def restore(request: Request, name: str = Form(...), csrf_token: str = Form("")):
+    ui(request, csrf_token)
+
+    def task(ctx):
+        ctx.update(20, "Restoring reversible quarantine entry")
+        result = restore_quarantine(name)
+        ctx.update(90, "Quarantine entry restored")
+        return result
+
+    return redirect(submit_operation("restore-quarantine", name, task))
+
+
+@app.get("/projects/{slug}/logs", response_class=HTMLResponse)
+def logs(request: Request, slug: str):
+    ui(request)
+    safe_child(SETTINGS.workspaces, slug)
+    return RedirectResponse(f"/projects/{slug}?tab=logs", 303)
+
+
+@app.get("/ui/projects/{slug}/logs")
+def ui_project_logs(request: Request, slug: str, tail: int = 150):
+    ui(request)
+    project = safe_child(SETTINGS.workspaces, slug)
+    if not project.is_dir():
+        raise HTTPException(404, "Project not found.")
+    meta = _require_owned_project_for_mutation(slug)
+    capabilities = project_capabilities(slug, meta)
+    if not capabilities["can_query_logs"]:
+        return JSONResponse(
+            {
+                "ok": False,
+                "slug": slug,
+                "state": capabilities["lifecycle_state"],
+                "terminal": True,
+                "logs": "Start the project to view live logs.",
+                "capabilities": capabilities,
+            },
+            status_code=409,
+        )
+    bounded = max(1, min(int(tail), 500))
     try:
-        record = read_project_metadata(Path(workspace))
-        return 0 if metadata_identity_matches(record.value, slug, project_id, *optional) else 1
-    except (OSError, ValueError, UnicodeError):
-        return 1
+        logs_value = project_logs(slug, tail=bounded)
+    except FileNotFoundError:
+        raise HTTPException(404, "Project not found.")
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(503, f"Project logs unavailable: {str(exc)[-500:]}")
+    return JSONResponse(
+        {
+            "ok": True,
+            "slug": slug,
+            "tail": bounded,
+            "provider": meta.get("runtime_provider")
+            or meta.get("runtime_isolation")
+            or "unknown",
+            "logs": str(logs_value)[-30000:],
+        }
+    )
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-```
-
-
-## FILE: source/app/devfleet/node_registry.py
-
-SHA256: ffd562d4c2685dacea1e183e708530ea4ccf04c20f19e2969d827190b286600b | Bytes: 5199 | Git mode: 100644
-
-```
-"""Durable Primary/Surrogate node identity registry without leader election."""
-from __future__ import annotations
-
-import json
-import uuid
-from pathlib import Path
-from typing import Any, Iterable
-
-from .core import SETTINGS, atomic_json, now_iso
-
-VALID_ROLES = {"primary", "surrogate", "server"}
-
-
-def _new_id() -> str:
-    return str(uuid.uuid4())
-
-
-class NodeRegistry:
-    def __init__(self, path: Path | None = None) -> None:
-        self.path = path or SETTINGS.runtime_root / "node-registry.json"
-
-    def _empty(self) -> dict[str, Any]:
-        return {"schema_version": 1, "deployment_id": "", "nodes": []}
-
-    def load(self) -> dict[str, Any]:
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return self._empty()
-        if not isinstance(data, dict) or not isinstance(data.get("nodes", []), list):
-            raise ValueError("Node registry is invalid; refusing to infer identities.")
-        data.setdefault("schema_version", 1)
-        data.setdefault("deployment_id", "")
-        return data
-
-    def _save(self, data: dict[str, Any]) -> None:
-        if not data.get("deployment_id"):
-            raise ValueError("A deployment identity is required.")
-        atomic_json(self.path, data)
-
-    def ensure_local(self, *, node_name: str, node_role: str, friendly_name: str = "", deployment_id: str | None = None, coordinator_node_id: str | None = None, capabilities: Iterable[str] = ()) -> dict[str, Any]:
-        role = str(node_role or "").strip().lower()
-        if role not in VALID_ROLES:
-            raise ValueError(f"Unsupported node role: {node_role}")
-        data = self.load()
-        requested_deployment = str(deployment_id or data.get("deployment_id") or "").strip()
-        if not requested_deployment:
-            requested_deployment = _new_id()
-        if data.get("deployment_id") and data["deployment_id"] != requested_deployment:
-            raise ValueError("Deployment identity mismatch; refusing to create a second deployment.")
-        data["deployment_id"] = requested_deployment
-        name = str(node_name or "").strip()
-        if not name:
-            raise ValueError("Node name is required.")
-        existing = next((n for n in data["nodes"] if isinstance(n, dict) and n.get("node_name") == name), None)
-        if existing is not None:
-            if existing.get("node_role") != role or existing.get("deployment_id") != requested_deployment:
-                raise ValueError("Existing node identity conflicts with the requested role or deployment.")
-            existing.update({"friendly_name": friendly_name or existing.get("friendly_name") or name, "capabilities": sorted({str(x) for x in capabilities} | set(existing.get("capabilities") or [])), "coordinator_node_id": coordinator_node_id or existing.get("coordinator_node_id"), "last_seen": now_iso(), "connectivity": "online"})
-            self._save(data)
-            return dict(existing)
-        if role == "surrogate" and not coordinator_node_id:
-            raise ValueError("A Surrogate requires an explicit coordinator_node_id.")
-        node = {"deployment_id": requested_deployment, "node_id": _new_id(), "node_name": name, "friendly_name": friendly_name or name, "node_role": role, "capabilities": sorted({str(x) for x in capabilities}), "coordinator_node_id": coordinator_node_id if role == "surrogate" else None, "protocol_version": 1, "devfleet_version": "", "health": "unknown", "connectivity": "online", "last_seen": now_iso(), "failover_priority": 100, "compute_capacity": {}, "vault_capability": False, "storage_capacity": {}, "tailscale": {"node": "", "ipv4": "", "ipv6": ""}, "registration_state": "registered"}
-        data["nodes"].append(node)
-        self._save(data)
-        return dict(node)
-
-    def register(self, node: dict[str, Any]) -> dict[str, Any]:
-        required = ("deployment_id", "node_id", "node_name", "node_role")
-        if any(not str(node.get(key) or "").strip() for key in required):
-            raise ValueError("Node registration requires deployment, node, name, and role identities.")
-        role = str(node["node_role"]).lower()
-        if role not in VALID_ROLES:
-            raise ValueError("Unsupported node role.")
-        data = self.load()
-        if data.get("deployment_id") and data["deployment_id"] != node["deployment_id"]:
-            raise ValueError("Node belongs to a different deployment.")
-        data["deployment_id"] = node["deployment_id"]
-        existing = next((n for n in data["nodes"] if n.get("node_id") == node["node_id"]), None)
-        if existing is not None:
-            if any(existing.get(key) != node.get(key) for key in ("node_name", "node_role", "deployment_id")):
-                raise ValueError("Duplicate node ID has conflicting identity.")
-            existing.update(node)
-            existing["last_seen"] = now_iso()
-            self._save(data)
-            return dict(existing)
-        data["nodes"].append(dict(node))
-        self._save(data)
-        return dict(node)
-
-    def list_nodes(self) -> list[dict[str, Any]]:
-        return [dict(item) for item in self.load()["nodes"] if isinstance(item, dict)]
-
-```
-
-
-## FILE: source/app/devfleet/ollama.py
-
-SHA256: 5805e067353f237924b00fff0b0c595db779ccea061b7ad5e34186052dec0e6e | Bytes: 943 | Git mode: 100644
-
-```
-from __future__ import annotations
-from typing import Any
-import httpx
-from .core import SETTINGS
-def ollama_health(*,queue_probe:bool=False)->dict[str,Any]:
- if not SETTINGS.ollama_base_url:return {'configured':False}
- base=SETTINGS.ollama_base_url.rstrip('/')
- try:
-  r=httpx.get(base+'/models',timeout=1.5);r.raise_for_status();models=r.json().get('data',[]);names=[str(x.get('id','')) for x in models]
-  out={'configured':True,'ok':True,'endpoint':base,'model':SETTINGS.ollama_model,'model_available':SETTINGS.ollama_model in names,'models':names[:20],'profile':SETTINGS.ollama_profile}
-  if queue_probe:
-   p=httpx.post(base+'/chat/completions',json={'model':SETTINGS.ollama_model,'messages':[{'role':'user','content':'Reply OK'}],'max_tokens':4},timeout=60);out['queue_response']=p.status_code
-  return out
- except Exception as exc:return {'configured':True,'ok':False,'endpoint':base,'error':str(exc),'profile':SETTINGS.ollama_profile}
-
-```
-
-
-## FILE: source/app/devfleet/operations.py
-
-SHA256: d60334d923abed24439342e38ce4061e702b76a64813082718d29946e6832437 | Bytes: 12217 | Git mode: 100644
-
-```
-"""Durable, bounded operation state with per-project serialization."""
-from __future__ import annotations
-
-import json
-import secrets
-import threading
-import time
-import traceback
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any, Callable
-
-from .core import SETTINGS, atomic_json, now_iso
-
-
-OP_ID_RE = r"^[a-z0-9][a-z0-9._-]{1,127}$"
-_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="devfleet-op")
-_ADMISSION = threading.BoundedSemaphore(2)
-_LOCK = threading.RLock()
-_ACTIVE_LOCKS: dict[str, threading.Lock] = {}
-_WORKER_INSTANCE_ID = secrets.token_hex(12)
-_LEASE_SECONDS = 45
-_QUEUED_SECONDS = 15
-_HEARTBEAT_INTERVAL_SECONDS = max(1, _LEASE_SECONDS // 3)
-
-
-def _lease_until() -> str:
-    return (datetime.now(timezone.utc) + timedelta(seconds=_LEASE_SECONDS)).isoformat()
-
-
-def _lease_expired(value: Any) -> bool:
-    if not value:
-        return True
-    try:
-        timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return True
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=timezone.utc)
-    return timestamp <= datetime.now(timezone.utc)
-
-
-def _queued_expired(data: dict[str, Any]) -> bool:
-    return _lease_expired(data.get("queued_deadline_at") or data.get("lease_expires_at"))
-
-
-def reconcile_operations() -> list[str]:
-    """Mark work that lost its process lease as recoverable, never as complete."""
-    recovered: list[str] = []
-    if not SETTINGS.operations.exists():
-        return recovered
-    for record_path in SETTINGS.operations.glob("*.json"):
-        try:
-            data = json.loads(record_path.read_text(encoding="utf-8"))
-            if not isinstance(data, dict) or data.get("state") not in {"queued", "running"}:
-                continue
-            # Worker identity is diagnostic only.  Lease expiry, not a process
-            # restart or instance-id mismatch, is the authority for orphaning
-            # work.  A live foreign worker must retain ownership during a
-            # rolling restart.
-            expired = _queued_expired(data) if data.get("state") == "queued" else _lease_expired(data.get("lease_expires_at"))
-            if not expired:
-                continue
-            op_id = str(data.get("operation_id") or data.get("id") or record_path.stem)
-            update_operation(
-                op_id,
-                state="interrupted",
-                current_step="reconciliation-required",
-                message="The previous worker stopped before this operation reached a terminal state.",
-                recovery_required=True,
-                worker_instance_id=None,
-                lease_expires_at=None,
-                reconciled_at=now_iso(),
-                log="Worker lease expired or belonged to a previous process instance.",
-            )
-            recovered.append(op_id)
-        except (OSError, ValueError, json.JSONDecodeError):
-            continue
-    return recovered
-
-
-def _path(op_id: str) -> Path:
-    import re
-
-    if not re.fullmatch(OP_ID_RE, str(op_id or "")):
-        raise ValueError("Invalid operation id.")
-    return SETTINGS.operations / f"{op_id}.json"
-
-
-def _load(op_id: str) -> dict[str, Any]:
-    path = _path(op_id)
-    last_error: Exception | None = None
-    for _ in range(5):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            break
-        except (PermissionError, json.JSONDecodeError) as exc:
-            last_error = exc
-            time.sleep(0.01)
-        except OSError as exc:
-            raise FileNotFoundError(op_id) from exc
-    else:
-        raise FileNotFoundError(op_id) from last_error
-    if not isinstance(data, dict):
-        raise ValueError("Operation record is not an object.")
-    return data
-
-
-def update_operation(op_id: str, **changes: Any) -> dict[str, Any]:
-    with _LOCK:
-        data = _load(op_id)
-        log = changes.pop("log", None)
-        if log:
-            data.setdefault("log", []).append({"time": now_iso(), "message": str(log)[-4000:]})
-            data["log"] = data["log"][-200:]
-        data.update(changes)
-        data["updated_at"] = now_iso()
-        atomic_json(_path(op_id), data)
-        return data
-
-
-def _renew_operation_lease(op_id: str) -> bool:
-    """Renew only a still-running operation owned by this worker."""
-    with _LOCK:
-        try:
-            data = _load(op_id)
-        except (FileNotFoundError, ValueError):
-            return False
-        if data.get("state") != "running" or data.get("worker_instance_id") != _WORKER_INSTANCE_ID:
-            return False
-        data["lease_expires_at"] = _lease_until()
-        data["heartbeat_at"] = now_iso()
-        data["updated_at"] = now_iso()
-        atomic_json(_path(op_id), data)
-        return True
-
-
-def _operation_heartbeat(op_id: str, stop: threading.Event) -> None:
-    while not stop.wait(_HEARTBEAT_INTERVAL_SECONDS):
-        if not _renew_operation_lease(op_id):
-            return
-
-
-@dataclass
-class OperationContext:
-    operation_id: str
-
-    def update(self, progress: int, message: str, step: str | None = None) -> None:
-        changes: dict[str, Any] = {"progress": max(0, min(100, int(progress))), "message": str(message)}
-        if step:
-            changes["current_step"] = step
-        changes.update({"last_progress_at": now_iso(), "lease_expires_at": _lease_until()})
-        update_operation(self.operation_id, **changes)
-
-    def log(self, message: str) -> None:
-        update_operation(self.operation_id, log=message)
-
-    def set_runtime(self, runtime_id: str) -> None:
-        update_operation(self.operation_id, runtime_id=runtime_id)
-
-
-def _find_idempotent(key: str) -> str | None:
-    if not key or not SETTINGS.operations.exists():
-        return None
-    for record_path in SETTINGS.operations.glob("*.json"):
-        try:
-            data = json.loads(record_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if data.get("idempotency_key") == key and data.get("state") in {"queued", "running"}:
-            if (data.get("state") == "queued" and _queued_expired(data)) or (data.get("state") == "running" and _lease_expired(data.get(
+@app.get("/api/projects/{slug}/runtime", dependencies=[Depends(check_api)])
+def api_project_runtime(slug: str):
+    project = safe_child(SETTI

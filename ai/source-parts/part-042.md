@@ -1,240 +1,487 @@
 # DevFleet source part 042
 
 Full-source UTF-8 byte interval [1906500, 1953000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: ea6a9e7e5f8576d48dd359c398a933377a1c3c7007bc5ca74a11c70243bed041
+Payload SHA-256: 08c9d82f4fde3d3a50052b775a2be31458ae0251f03dfd82e30fc669c7af06b6
 
 <!-- BEGIN SOURCE SLICE -->
-tionContext|Out-Null}catch{$unsupportedRoleRejected=$true};Check $unsupportedRoleRejected 'unsupported shorthand role fails closed before observation'
-Check (& $realPhaseModule {param($name) Test-DevFleetLifecycleStageMarkerName 'stage-compute-devfleet-primary-multipass-resolved.complete' $name} $productComputeName) 'collector allowlists the production-bound Multipass resolution boundary'
-Check (& $realPhaseModule {Test-DevFleetLifecycleStageMarkerName 'stage-compute-devfleet-primary-instance-launched.complete' 'devfleet-primary'}) 'collector allowlists the bound launch boundary'
-Check (& $realPhaseModule {Test-DevFleetLifecycleStageMarkerName 'stage-compute-devfleet-primary-payload-extracted.complete' 'devfleet-primary'}) 'collector allowlists the bound extraction boundary'
-Check (-not (& $realPhaseModule {Test-DevFleetLifecycleStageMarkerName 'stage-vault-payload-extracted.complete' 'devfleet-primary'})) 'Desktop collector does not indiscriminately authorize Vault markers'
-Check (& $realPhaseModule {Test-DevFleetLifecycleStageMarkerName 'stage-compute-devfleet-failover-payload-extracted.complete' 'devfleet-failover' 'devfleet-vault'}) 'Laptop collector authorizes candidate Failover markers'
-Check (& $realPhaseModule {Test-DevFleetLifecycleStageMarkerName 'stage-vault-payload-extracted.complete' 'devfleet-failover' 'devfleet-vault'}) 'Laptop collector authorizes the required Vault marker path'
-Check (-not (& $realPhaseModule {Test-DevFleetLifecycleStageMarkerName 'stage-compute-devfleet-primary-arbitrary-heartbeat.complete' 'devfleet-primary'})) 'collector rejects arbitrary host breadcrumbs as semantic stages'
-Check (-not (& $realPhaseModule {Test-DevFleetLifecycleStageMarkerName 'stage-compute-devfleet-primary-multipass-resolved.complete' 'DevFleet-E2E-Linux-01'})) 'cleanup L2 identity cannot authorize product Primary stage markers'
-$normalizedMarkerError=& $realPhaseModule {param($value) ConvertTo-NormalizedLifecycleObservation $value} ([pscustomobject]@{stageMarkerErrors=@([pscustomobject]@{name='stage-compute-unexpected.complete';error='stage marker name is not allowlisted'})})
-Check (@($normalizedMarkerError.stageMarkerErrors).Count -eq 1 -and [string]$normalizedMarkerError.stageMarkerErrors[0].name -eq 'stage-compute-unexpected.complete') 'normalized evidence preserves the exact rejected stage marker name'
-$explicitExitObservation=[pscustomobject]@{terminalFailure=$true;failure='candidate process exited before a durable checkpoint or completion state';error='candidate process exited before a durable checkpoint or completion state';status='TERMINAL_FAILURE'}
-$normalizedExitObservation=& $realPhaseModule {param($value) ConvertTo-NormalizedLifecycleObservation $value} $explicitExitObservation
-Check ([string]$normalizedExitObservation.failure -eq 'candidate process exited before a durable checkpoint or completion state') 'explicit product-owned terminal failure survives observation normalization'
-$unclassifiedProductFailure=& $realPhaseModule {param($value) Get-WpfFailureDescriptor -Report $value} ([pscustomobject]@{status='PRODUCT_FAILURE';error='Candidate UI reported a product failure.'})
-Check ([string]$unclassifiedProductFailure.failureClass -eq 'UNCLASSIFIED_PRODUCT_FAILURE' -and [string]$unclassifiedProductFailure.error -eq 'Candidate UI reported a product failure.') 'product failure without optional class preserves its primary error under strict mode'
-$l2AbsentWithoutRuntime=Resolve-DevFleetNestedL2Inventory -ExpectedName 'DevFleet-E2E-Linux-01' -ExecutablePresent:$false
-Check ([string]$l2AbsentWithoutRuntime.status -eq 'UNVERIFIED' -and $null -eq $l2AbsentWithoutRuntime.present) 'Multipass executable absence alone cannot prove nested L2 absence'
-$emptyBackends=@([pscustomobject]@{provider='Hyper-V';status='PASS';names=@();verification='bounded Msvm inventory'},[pscustomobject]@{provider='VirtualBox';status='PASS';names=@();verification='bounded VBox inventory'})
-$l2BackendAbsent=Resolve-DevFleetNestedL2Inventory -ExpectedName 'DevFleet-E2E-Linux-01' -ExecutablePresent:$false -BackendInventories $emptyBackends
-Check ([string]$l2BackendAbsent.status -eq 'ABSENT' -and $l2BackendAbsent.present -eq $false -and @($l2BackendAbsent.backendInventories).Count -eq 2) 'successful in-L1 inventories of every supported backend prove exact nested L2 absence'
-$remotedEmptyBackends=@([pscustomobject]@{provider='Hyper-V';status='PASS';names=[System.Collections.ArrayList]::new();verification='bounded Msvm inventory'},[pscustomobject]@{provider='VirtualBox';status='PASS';names=[System.Collections.ArrayList]::new();verification='bounded VBox inventory'})
-$l2RemotedBackendAbsent=Resolve-DevFleetNestedL2Inventory -ExpectedName 'DevFleet-E2E-Linux-01' -ExecutablePresent:$false -BackendInventories $remotedEmptyBackends
-Check ([string]$l2RemotedBackendAbsent.status -eq 'ABSENT' -and $l2RemotedBackendAbsent.present -eq $false -and @($l2RemotedBackendAbsent.backendInventories).Count -eq 2) 'PowerShell-remoted empty backend name collections preserve complete in-L1 absence evidence'
-$backendPresent=@([pscustomobject]@{provider='Hyper-V';status='PASS';names=@('DevFleet-E2E-Linux-01');verification='bounded Msvm inventory'},[pscustomobject]@{provider='VirtualBox';status='PASS';names=@();verification='bounded VBox inventory'})
-$l2BackendPresent=Resolve-DevFleetNestedL2Inventory -ExpectedName 'DevFleet-E2E-Linux-01' -ExecutablePresent:$false -BackendInventories $backendPresent
-Check ([string]$l2BackendPresent.status -eq 'PRESENT' -and $l2BackendPresent.present -eq $true) 'an exact nested name in a supported backend remains PRESENT even when Multipass CLI is absent'
-$l2BackendIncomplete=Resolve-DevFleetNestedL2Inventory -ExpectedName 'DevFleet-E2E-Linux-01' -ExecutablePresent:$false -BackendInventories @([pscustomobject]@{provider='Hyper-V';status='PASS';names=@();verification='bounded Msvm inventory'})
-Check ([string]$l2BackendIncomplete.status -eq 'UNVERIFIED' -and $null -eq $l2BackendIncomplete.present) 'an incomplete supported-backend inventory cannot claim nested L2 absence'
-$l2Present=Resolve-DevFleetNestedL2Inventory -ExpectedName 'DevFleet-E2E-Linux-01' -ExecutablePresent:$true -InventoryJson '{"list":[{"name":"DevFleet-E2E-Linux-01"}]}'
-Check ([string]$l2Present.status -eq 'PRESENT' -and $l2Present.present -eq $true) 'nested L2 inventory identifies the exact owned instance'
-$l2OtherOnly=Resolve-DevFleetNestedL2Inventory -ExpectedName 'DevFleet-E2E-Linux-01' -ExecutablePresent:$true -InventoryJson '{"list":[{"name":"foreign-instance"}]}'
-Check ([string]$l2OtherOnly.status -eq 'ABSENT' -and $l2OtherOnly.inventoryCount -eq 1) 'nested L2 inventory distinguishes unrelated instance names'
-$l2Malformed=Resolve-DevFleetNestedL2Inventory -ExpectedName 'DevFleet-E2E-Linux-01' -ExecutablePresent:$true -InventoryJson 'not-json'
-Check ([string]$l2Malformed.status -eq 'UNVERIFIED' -and $null -eq $l2Malformed.present) 'malformed nested inventory fails closed as unverified'
-function Invoke-NestedResolverRegressionCase {
-    param([hashtable]$Parameters)
-    try { return Resolve-DevFleetNestedL2Inventory @Parameters }
-    catch { return [pscustomobject]@{status='THREW';present=$null;errorType=$_.Exception.GetType().FullName} }
-}
-$l2MissingList=Invoke-NestedResolverRegressionCase @{ExpectedName='DevFleet-E2E-Linux-01';ExecutablePresent=$true;InventoryJson='{"instances":[]}'}
-Check ([string]$l2MissingList.status -eq 'UNVERIFIED' -and $null -eq $l2MissingList.present) 'valid JSON without the required Multipass list field is incomplete, not absence'
-$l2WrongListType=Invoke-NestedResolverRegressionCase @{ExpectedName='DevFleet-E2E-Linux-01';ExecutablePresent=$true;InventoryJson='{"list":"not-an-array"}'}
-Check ([string]$l2WrongListType.status -eq 'UNVERIFIED' -and $null -eq $l2WrongListType.present) 'Multipass list with the wrong type is unverified'
-$l2MissingBackendNames=Invoke-NestedResolverRegressionCase @{ExpectedName='DevFleet-E2E-Linux-01';ExecutablePresent=$false;BackendInventories=@([pscustomobject]@{provider='Hyper-V';status='PASS';verification='bounded Msvm inventory'},[pscustomobject]@{provider='VirtualBox';status='PASS';names=@();verification='bounded VBox inventory'})}
-Check ([string]$l2MissingBackendNames.status -eq 'UNVERIFIED' -and $null -eq $l2MissingBackendNames.present) 'successful backend row without a names inventory is incomplete'
-$l2InvalidBackendNames=Invoke-NestedResolverRegressionCase @{ExpectedName='DevFleet-E2E-Linux-01';ExecutablePresent=$false;BackendInventories=@([pscustomobject]@{provider='Hyper-V';status='PASS';names='not-an-array';verification='bounded Msvm inventory'},[pscustomobject]@{provider='VirtualBox';status='PASS';names=@();verification='bounded VBox inventory'})}
-Check ([string]$l2InvalidBackendNames.status -eq 'UNVERIFIED' -and $null -eq $l2InvalidBackendNames.present) 'backend names must be a complete array before absence can be claimed'
-$l2Failed=Resolve-DevFleetNestedL2Inventory -ExpectedName 'DevFleet-E2E-Linux-01' -ExecutablePresent:$true -InventoryJson '{}' -ExitCode 1
-Check ([string]$l2Failed.status -eq 'UNVERIFIED' -and $null -eq $l2Failed.present) 'failed nested inventory cannot claim absence'
-$emptyGuestInventory='{"list":[]}'|ConvertFrom-Json
-$emptyGuestHasListProperty=($null -ne $emptyGuestInventory -and $null -ne $emptyGuestInventory.PSObject.Properties['list'])
-$emptyGuestRecords=if($emptyGuestHasListProperty){@($emptyGuestInventory.list)}elseif($emptyGuestInventory -is [System.Array]){@($emptyGuestInventory)}else{$null}
-Check ($emptyGuestHasListProperty -and @($emptyGuestRecords).Count -eq 0) 'empty in-L1 Multipass list remains a valid inventory'
-$firstServicing=[pscustomobject]@{cbs=$false;windowsUpdate=$false;pendingCount=2;RunspaceId=[guid]::NewGuid();PSComputerName='L1'}
-$secondServicing=[pscustomobject]@{cbs=$false;windowsUpdate=$false;pendingCount=2;RunspaceId=[guid]::NewGuid();PSComputerName='L1'}
-$servicingMetadataMatch=& $realPhaseModule {param($first,$second) Test-ProductServicingSamplesMatch -First $first -Second $second} $firstServicing $secondServicing
-Check ([bool]$servicingMetadataMatch) 'servicing settlement ignores per-session remoting metadata'
-$secondServicing.pendingCount=3
-$servicingStateMismatch=& $realPhaseModule {param($first,$second) Test-ProductServicingSamplesMatch -First $first -Second $second} $firstServicing $secondServicing
-Check (-not [bool]$servicingStateMismatch) 'servicing settlement detects semantic state changes'
-$servicingMissingState=& $realPhaseModule {param($first,$second) Test-ProductServicingSamplesMatch -First $first -Second $second} $firstServicing ([pscustomobject]@{cbs=$false;windowsUpdate=$false})
-Check (-not [bool]$servicingMissingState) 'servicing settlement fails closed on incomplete samples'
-$source=Get-Content -Raw $module
-Check ($source -match 'Invoke-HostAgentAuthenticatedJson' -and $source -notmatch 'Invoke-RestMethod -Uri ''http://127\.0\.0\.1:8790/healthz''') 'observer uses authenticated Host Agent protocol'
-Check ($source -match 'progressSamples' -and $source -match 'cpuSeconds' -and $source -match 'Bootstrap-Install' -and $source -match 'Get-NetTCPConnection') 'observer records forward progress evidence'
-Check ($source -match 'EvidenceLabel' -and $source -match 'resume-generation-' -and $source -match 'processStartTime' -and $source -match 'bootIdentity') 'WPF lifecycle legs have distinct immutable identity evidence'
-Check ($source -match "PSObject\.Properties\['list'\]") 'in-L1 inventory observer checks list property presence rather than truthiness'
+'11111111-1111-1111-1111-111111111111';State=if($case -eq 'off'){'Off'}else{'Running'}}}
+        $config=[pscustomobject]@{NestedLinux=[pscustomobject]@{Name='DevFleet-E2E-fixture-L2'}}
+        $KeepLab=($case -eq 'keep-lab')
+        $WorkspaceRoot=$root
+        $caught=$null
+        try { & $handler 3>$null } catch {$caught=$_.Exception.Message}
+        Check ($case+': primary failure preserved') ($caught -eq 'PRIMARY_FIXTURE_FAILURE' -and $global:DevFleetCleanupFixture.shown -eq 'PRIMARY_FIXTURE_FAILURE')
+        $expectedStop=if($case -in @('running-durable','off')){1}else{0}
+        Check ($case+': stop requires durable exact cleanup') ($global:DevFleetCleanupFixture.stopCalls -eq $expectedStop -and $global:DevFleetCleanupFixture.terminalCalls -eq $expectedStop)
+        if($case -eq 'off'){Check 'already-Off guest never opened' ($global:DevFleetCleanupFixture.logonCalls -eq 0)}
+        $path=Join-Path $runDir 'failure-cleanup.json'
+        $exists=Test-Path $path
+        Check ($case+': separate cleanup outcome persisted') $exists
+        if($exists){
+            $raw=Get-Content $path -Raw;$e=$raw|ConvertFrom-Json
+            $expected=if($expectedStop){'COMPLETED'}elseif($KeepLab -or $case -eq 'no-target'){'NOT_RUN'}else{'FAIL'}
+            Check ($case+': cleanup outcome truthful and non-certifying') ($e.status -eq $expected -and -not $e.certifiedReleaseCleanup -and $e.runId -eq $runId)
+            Check ($case+': private exception omitted') ($raw -notmatch 'PRIVATE_FIXTURE_SECRET')
+        }
+    }
+} finally {if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force};Remove-Variable -Name DevFleetCleanupFixture -Scope Global -ErrorAction SilentlyContinue}
+$failed=@($checks|Where-Object {-not $_.pass})
+[ordered]@{scope='VM_FREE_NATIVE_FAILURE_HANDLER_REGRESSION';releaseCredit=$false;status=if($failed.Count){'FAIL'}else{'PASS'};passed=$checks.Count-$failed.Count;total=$checks.Count;checks=@($checks)}|ConvertTo-Json -Depth 6
+if($failed.Count){exit 1}
 
-# Behavioral seam: these tests use only an injected observation, clock, and
-# sleep provider. They are intentionally VM-free and exercise the same wait
-# loop used by the real observer.
-function LifecycleObs([hashtable]$Values) {
-    $base=[ordered]@{checkpointPresent=$false;checkpoint=$null;matchingConsumedReceipt=$false;installStateValid=$false;canonicalOwnershipValid=$false;authenticatedHealthOk=$false;terminalFailure=$false;processTree=@();timestampUtc='2026-01-01T00:00:00Z';progress=[ordered]@{checkpointGeneration=1;checkpointState='waiting-for-reboot';completedStages=@('bootstrap');resumeStage='install';stages=@([ordered]@{name='DevFleet.Setup';path='C:\DevFleet.Setup.exe';commandClass='candidate-child'});cpuSeconds=0;installStateSha256=$null;ownershipSha256=$null;receiptMatch=$false;health=$false;hostAgentTaskState='Running';listener=$false}}
-    foreach($k in $Values.Keys){$base[$k]=$Values[$k]};[pscustomobject]$base
+```
+
+
+## FILE: automation/release-e2e/tests/Test-FullReleasePromotionContract.ps1
+
+SHA256: 9fd4f72b6c481e77aa30e5406fddc41959cda99d6a32adaa92abcb981b0cc457 | Bytes: 3918 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param(
+    [string]$WorkspaceRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+)
+
+$ErrorActionPreference = 'Stop'
+$modulePath = Join-Path $WorkspaceRoot 'automation/release-e2e/modules/FullRelease.psm1'
+Import-Module $modulePath -Force -DisableNameChecking
+$checks = [Collections.Generic.List[object]]::new()
+
+function Check([string]$Name, [bool]$Pass) {
+    $checks.Add([pscustomobject]@{ name = $Name; pass = $Pass })
 }
-function RunInjectedWait([object[]]$Samples,[int]$NoProgress=2,[int]$Absolute=20,[double]$CpuThreshold=1.0) {
-    $global:DevFleetTestClock=[datetime]'2026-01-01T00:00:00Z';$script:testIndex=0
-    $clock={ $current=[datetime]$global:DevFleetTestClock; $global:DevFleetTestClock=$current.AddSeconds(5); return $current };$sleep={param($seconds)}
-    $provider={param($state)$i=[Math]::Min([int]$state.observationIndex,$state.providerContext.Count-1);return $state.providerContext[$i]}
-    $testEvidenceDir=Join-Path ([IO.Path]::GetTempPath()) ("devfleet-observer-test-{0}" -f ([guid]::NewGuid().ToString('N')));New-Item -ItemType Directory -Path $testEvidenceDir -Force|Out-Null;[void]$script:testEvidenceDirs.Add($testEvidenceDir)
-    $path=Join-Path $testEvidenceDir 'observer-result.json'
-    try{$result=Wait-DevFleetProductLifecycleTransition -Session ([pscustomobject]@{}) -TransactionId ('a'*32) -PayloadSha256 ('b'*64) -Action 'FreshInstall' -Role 'Primary / Desktop' -PriorGeneration 1 -MaxGeneration 3 -BudgetSeconds $Absolute -NoProgressBudgetSeconds $NoProgress -AbsoluteBudgetSeconds $Absolute -PollSeconds 10 -CpuDeltaThreshold $CpuThreshold -ExpectedDevFleetVersion '1.2.13' -ExpectedInstallerVersion '1.4.1' -EvidencePath $path -ObservationProvider $provider -ObservationProviderContext $Samples -ClockProvider $clock -SleepProvider $sleep;$result|Add-Member -NotePropertyName testEvidencePath -NotePropertyValue $path -Force;return $result}
-    finally{$script:testIndex=0}
+
+$runId = 'FullRelease-fixture-current'
+$validResult = [pscustomobject]@{
+    status = 'PASS'
+    runId = $runId
+    postCleanupFinalization = [pscustomobject]@{
+        status = 'PASS'
+        cleanupConsumed = $true
+        reconcileAfterCleanup = $true
+        liveChecks = [pscustomobject]@{ l1ExactOff = $true; l2ExactAbsent = $true }
+    }
 }
-function RunInjectedWaitWithStep([object[]]$Samples,[int]$NoProgress,[int]$Absolute,[int]$StepSeconds) {
-    $global:DevFleetLongClock=[datetime]'2026-01-01T00:00:00Z'
-    $clock={ $current=[datetime]$global:DevFleetLongClock; $global:DevFleetLongClock=$current.AddSeconds($StepSeconds); return $current }
-    $provider={param($state)$i=[Math]::Min([int]$state.observationIndex,$state.providerContext.Count-1);return $state.providerContext[$i]}
-    $testEvidenceDir=Join-Path ([IO.Path]::GetTempPath()) ("devfleet-observer-long-{0}" -f ([guid]::NewGuid().ToString('N')));New-Item -ItemType Directory -Path $testEvidenceDir -Force|Out-Null;[void]$script:testEvidenceDirs.Add($testEvidenceDir)
-    $path=Join-Path $testEvidenceDir 'observer-result.json'
-    $result=Wait-DevFleetProductLifecycleTransition -Session ([pscustomobject]@{}) -TransactionId ('a'*32) -PayloadSha256 ('b'*64) -Action 'FreshInstall' -Role 'Primary / Desktop' -PriorGeneration 1 -MaxGeneration 3 -BudgetSeconds $Absolute -NoProgressBudgetSeconds $NoProgress -AbsoluteBudgetSeconds $Absolute -PollSeconds 10 -ExpectedDevFleetVersion '1.2.13' -ExpectedInstallerVersion '1.4.1' -EvidencePath $path -ObservationProvider $provider -ObservationProviderContext $Samples -ClockProvider $clock -SleepProvider {param($seconds)}
-    $result|Add-Member -NotePropertyName testEvidencePath -NotePropertyValue $path -Force
-    return $result
+
+$state = @{
+    full_release_run_id = $null
+    full_release_current = $false
+    full_release_passed = $false
+    validation_evidence_current = $false
+    internal_promotion_allowed = $false
+    public_promotion_allowed = $false
+    public_publisher_trust = $false
+    status = 'IN_PROGRESS'
+    release_status = 'IN_PROGRESS'
 }
-function CompletionSample([hashtable]$Values){$sample=LifecycleObs @{matchingConsumedReceipt=$true;installStateValid=$true;canonicalOwnershipValid=$true;authenticatedHealthOk=$true};$sample.progress.checkpointGeneration=0;$sample.progress.checkpointState='';$sample.progress.resumeStage='';foreach($k in $Values.Keys){$sample|Add-Member -NotePropertyName $k -NotePropertyValue $Values[$k] -Force};return $sample}
-function Check-WaitTerminalEvidence([psobject]$Result,[string]$Name){$path=[string]$Result.testEvidencePath;$dir=if($path){Split-Path -Parent $path}else{''};$journal=if($dir){Join-Path $dir 'product-lifecycle-progress.jsonl'}else{''};$current=if($dir){Join-Path $dir 'product-lifecycle-progress-current.json'}else{''};$present=($path -and (Test-Path -LiteralPath $path) -and (Test-Path -LiteralPath $journal) -and (Test-Path -LiteralPath $current));$matches=$false;if($present){try{$last=@(Get-Content -LiteralPath $journal|Where-Object{$_})[-1]|ConvertFrom-Json;$matches=([string]$last.event -eq 'TERMINAL' -and [string]$last.terminalReason -eq [string]$Result.outcome)}catch{}};Check ($present -and $matches) "$Name writes terminal/current/journal evidence"}
-function ProviderForm([int]$Kind,[hashtable]$Values){if($Kind -eq 0){return [pscustomobject]$Values};if($Kind -eq 1){return $Values};if($Kind -eq 2){$ordered=[ordered]@{};foreach($key in $Values.Keys){$ordered[$key]=$Values[$key]};return $ordered};$generic=[Collections.Generic.Dictionary[string,object]]::new();foreach($key in $Values.Keys){$generic[$key]=$Values[$key]};return $generic}
-$staticRole=LifecycleObs @{}
-$staticRole.progress.guestProgressMarkers=@([ordered]@{instanceName='devfleet-primary';nodeRole='primary';marker=[ordered]@{schemaVersion=1;transactionId='a'*32;payloadSha256='b'*64;sequence=9;component='rootlessRuntime';state='STARTED';updatedUtc='2026-01-01T00:00:00Z';packageVersion='1.2.13';nodeRole='primary'}})
-$staticRoleCopy=$staticRole|ConvertTo-Json -Depth 16|ConvertFrom-Json
-Check (-not (& $realPhaseModule {param($a,$b) Test-ProductMeaningfulProgress -Previous $a -Current $b -TransactionId ('a'*32) -PayloadSha256 ('b'*64)} $staticRole $staticRoleCopy)) 'unchanged serialized per-role marker does not reset semantic progress'
-$advancedRole=$staticRole|ConvertTo-Json -Depth 16|ConvertFrom-Json
-$advancedRole.progress.guestProgressMarkers[0].marker.sequence=10
-$advancedRole.progress.guestProgressMarkers[0].marker.state='COMPLETED'
-Check (& $realPhaseModule {param($a,$b) Test-ProductMeaningfulProgress -Previous $a -Current $b -TransactionId ('a'*32) -PayloadSha256 ('b'*64)} $staticRole $advancedRole) 'completed per-role component advances semantic progress'
-$staticRoleResult=RunInjectedWait @($staticRole,$staticRoleCopy,$staticRoleCopy) 60 120
-Check ([string]$staticRoleResult.outcome -eq 'NO_PROGRESS_TIMEOUT') 'repeated per-role STARTED marker naturally reaches the no-progress deadline'
-Check-WaitTerminalEvidence $staticRoleResult 'static per-role marker timeout'
-$twoRoles=$staticRole|ConvertTo-Json -Depth 16|ConvertFrom-Json
-$vaultRecord=$staticRole.progress.guestProgressMarkers[0]|ConvertTo-Json -Depth 12|ConvertFrom-Json
-$vaultRecord.instanceName='devfleet-vault';$vaultRecord.nodeRole='vault';$vaultRecord.marker.nodeRole='vault';$vaultRecord.marker.component='restServer';$vaultRecord.marker.packageVersion='vault'
-$twoRoles.progress.guestProgressMarkers=@($twoRoles.progress.guestProgressMarkers[0],$vaultRecord)
-$reorderedRoles=$twoRoles|ConvertTo-Json -Depth 16|ConvertFrom-Json
-$reorderedRoles.progress.guestProgressMarkers=@($reorderedRoles.progress.guestProgressMarkers[1],$reorderedRoles.progress.guestProgressMarkers[0])
-Check (-not (& $realPhaseModule {param($a,$b) Test-ProductMeaningfulProgress -Previous $a -Current $b -TransactionId ('a'*32) -PayloadSha256 ('b'*64)} $twoRoles $reorderedRoles)) 'unchanged Failover/Vault marker ordering is not progress'
-$stable=LifecycleObs @{}
-$stableResult=RunInjectedWait @($stable,$stable,$stable) 60 120
-Check ([string]$stableResult.outcome -eq 'NO_PROGRESS_TIMEOUT') 'OBS-01 stable lifecycle naturally returns NO_PROGRESS_TIMEOUT'
-Check ([int]$stableResult.progressSampleCount -ge 2) 'OBS-01 bounded timeline has repeated observations'
-$churn=LifecycleObs @{};$churn.processTree=@([ordered]@{ProcessId=100;Name='powershell.exe';CommandLine='-ServerMode V2SocketServerMode'})
-$churnResult=RunInjectedWait @($churn,$churn,$churn) 60 120
-Check ([string]$churnResult.outcome -eq 'NO_PROGRESS_TIMEOUT') 'OBS-02/03 observer remoting and V2SocketServerMode churn do not reset clock'
-$tiny=LifecycleObs @{};$tiny.progress.cpuSeconds=.2
-$tinyResult=RunInjectedWait @($stable,$tiny,$tiny,$tiny) 60 120
-Check ([string]$tinyResult.outcome -eq 'NO_PROGRESS_TIMEOUT') 'OBS-04 tiny CPU noise does not reset clock'
-$meaningful=LifecycleObs @{};$meaningful.progress.cpuSeconds=2
-$meaningfulResult=RunInjectedWait @($stable,$meaningful,$meaningful,$meaningful,$meaningful) 60 120
-Check ([string]$meaningfulResult.outcome -eq 'NO_PROGRESS_TIMEOUT') 'OBS-05 CPU delta is activity only and cannot reset the semantic deadline'
-$durable=LifecycleObs @{};$durable.progress.resumeStage='next-stage'
-$durableResult=RunInjectedWait @($stable,$durable,$durable,$durable,$durable) 60 120
-Check ([string]$durableResult.outcome -eq 'NO_PROGRESS_TIMEOUT' -and [int]$durableResult.progressSampleCount -gt [int]$meaningfulResult.progressSampleCount) 'OBS-05 durable resume-stage transition resets semantic deadline'
-$markerPrior=[pscustomobject]@{transactionId='a'*32;payloadSha256='b'*64;sequence=1;component='packagePrerequisites';state='STARTED';nodeRole='primary'}
-$markerNext=[pscustomobject]@{transactionId='a'*32;payloadSha256='b'*64;sequence=2;component='packagePrerequisites';state='COMPLETED';nodeRole='primary'}
-$markerObservation=LifecycleObs @{};$markerObservation.progress.guestProgressMarker=$markerNext
-$markerPrevious=LifecycleObs @{};$markerPrevious.progress.guestProgressMarker=$markerPrior
-Check (& $realPhaseModule {param($a,$b) Test-ProductMeaningfulProgress -Previous $a -Current $b -TransactionId ('a'*32) -PayloadSha256 ('b'*64)} $markerPrevious $markerObservation) 'OBS-07 matching monotonic guest marker is semantic progress'
-$timestampMarker=LifecycleObs @{};$timestampMarker.progress.guestProgressMarker=($markerPrior|ConvertTo-Json|ConvertFrom-Json)
-Check (-not (& $realPhaseModule {param($a,$b) Test-ProductMeaningfulProgress -Previous $a -Current $b -TransactionId ('a'*32) -PayloadSha256 ('b'*64)} $markerPrevious $timestampMarker)) 'OBS-07 timestamp-only/same-sequence marker rewrite is not progress'
-$foreignMarker=LifecycleObs @{};$foreignMarker.progress.guestProgressMarker=[pscustomobject]@{transactionId='c'*32;payloadSha256='b'*64;sequence=2;component='packagePrerequisites';state='COMPLETED';nodeRole='primary'}
-Check (-not (& $realPhaseModule {param($a,$b) Test-ProductMeaningfulProgress -Previous $a -Current $b -TransactionId ('a'*32) -PayloadSha256 ('b'*64)} $markerPrevious $foreignMarker)) 'OBS-07 stale transaction marker is rejected'
-$payloadMarker=LifecycleObs @{};$payloadMarker.progress.guestProgressMarker=[pscustomobject]@{transactionId='a'*32;payloadSha256='c'*64;sequence=2;component='packagePrerequisites';state='COMPLETED';nodeRole='primary'}
-Check (-not (& $realPhaseModule {param($a,$b) Test-ProductMeaningfulProgress -Previous $a -Current $b -TransactionId ('a'*32) -PayloadSha256 ('b'*64)} $markerPrevious $payloadMarker)) 'OBS-07 payload-mismatched marker is rejected'
-$validMarkerJson=[ordered]@{schemaVersion=1;transactionId='a'*32;payloadSha256='b'*64;sequence=1;component='secretsInput';state='STARTED';updatedUtc='2026-01-01T00:00:00Z';packageVersion='1.2.13';nodeRole='primary'}|ConvertTo-Json -Compress
-$validMarkerRead=Resolve-GuestProgressMarkerRead -Text $validMarkerJson -ExitCode 0 -ExpectedTransactionId ('a'*32) -ExpectedPayloadSha256 ('b'*64) -InstanceName 'devfleet-primary'
-$absentMarkerRead=Resolve-GuestProgressMarkerRead -Text '' -ExitCode 44 -ExpectedTransactionId ('a'*32) -ExpectedPayloadSha256 ('b'*64) -InstanceName 'devfleet-primary'
-$failedMarkerRead=Resolve-GuestProgressMarkerRead -Text 'transport detail' -ExitCode 5 -ExpectedTransactionId ('a'*32) -ExpectedPayloadSha256 ('b'*64) -InstanceName 'devfleet-primary'
-$timeoutMarkerRead=Resolve-GuestProgressMarkerRead -Text '' -ExitCode $null -TimedOut -ExpectedTransactionId ('a'*32) -ExpectedPayloadSha256 ('b'*64) -InstanceName 'devfleet-primary'
-$malformedMarkerRead=Resolve-GuestProgressMarkerRead -Text '{not-json' -ExitCode 0 -ExpectedTransactionId ('a'*32) -ExpectedPayloadSha256 ('b'*64) -InstanceName 'devfleet-primary'
-$incompleteMarkerRead=Resolve-GuestProgressMarkerRead -Text '{"schemaVersion":1}' -ExitCode 0 -ExpectedTransactionId ('a'*32) -ExpectedPayloadSha256 ('b'*64) -InstanceName 'devfleet-primary'
-$wrongRoleShapeJson=([ordered]@{schemaVersion=1;transactionId='a'*32;payloadSha256='b'*64;sequence=1;component='restServer';state='STARTED';updatedUtc='2026-01-01T00:00:00Z';packageVersion='1.2.13';nodeRole='primary'}|ConvertTo-Json -Compress)
-$wrongRoleShapeRead=Resolve-GuestProgressMarkerRead -Text $wrongRoleShapeJson -ExitCode 0 -ExpectedTransactionId ('a'*32) -ExpectedPayloadSha256 ('b'*64) -InstanceName 'devfleet-primary'
-$wrongMarkerJson=([ordered]@{schemaVersion=1;transactionId='c'*32;payloadSha256='b'*64;sequence=1;component='secretsInput';state='STARTED';updatedUtc='2026-01-01T00:00:00Z';packageVersion='1.2.13';nodeRole='primary'}|ConvertTo-Json -Compress)
-$wrongMarkerRead=Resolve-GuestProgressMarkerRead -Text $wrongMarkerJson -ExitCode 0 -ExpectedTransactionId ('a'*32) -ExpectedPayloadSha256 ('b'*64) -InstanceName 'devfleet-primary'
-Check ([string]$validMarkerRead.status -eq 'VALID' -and [string]$validMarkerRead.marker.component -eq 'secretsInput') 'guest marker reader accepts a valid current marker'
-Check ([string]$absentMarkerRead.status -eq 'ABSENT' -and [int]$absentMarkerRead.exitCode -eq 44) 'guest marker reader requires an explicit remote absence exit code'
-Check ([string]$failedMarkerRead.status -eq 'NATIVE_FAILURE' -and [int]$failedMarkerRead.exitCode -eq 5) 'guest marker reader preserves a nonzero native read failure'
-Check ([string]$timeoutMarkerRead.status -eq 'TIMEOUT') 'guest marker reader keeps timeout distinct from absence'
-Check ([string]$malformedMarkerRead.status -eq 'MALFORMED') 'guest marker reader keeps invalid JSON distinct from absence'
-Check ([string]$incompleteMarkerRead.status -eq 'MALFORMED') 'guest marker reader fails an incomplete marker schema closed'
-Check ([string]$wrongRoleShapeRead.status -eq 'MALFORMED') 'guest marker reader rejects a component/version/role combination from the wrong bootstrap contract'
-Check ([string]$wrongMarkerRead.status -eq 'IDENTITY_MISMATCH' -and $null -eq $wrongMarkerRead.marker) 'guest marker reader rejects wrong transaction identity before attachment'
-$failedGuestJson=[ordered]@{schemaVersion=1;transactionId='a'*32;payloadSha256='b'*64;sequence=2;component='secretsInput';state='TIMED_OUT';updatedUtc='2026-01-01T00:00:01Z';packageVersion='1.2.13';nodeRole='primary'}|ConvertTo-Json -Compress
-$failedGuestRead=Resolve-GuestProgressMarkerRead -Text $failedGuestJson -ExitCode 0 -ExpectedTransactionId ('a'*32) -ExpectedPayloadSha256 ('b'*64) -InstanceName 'devfleet-primary'
-$failedGuestObservation=Add-GuestProgressMarkerObservation -Observation (LifecycleObs @{}) -ReadResult $failedGuestRead
-Check ([bool]$failedGuestObservation.terminalFailure -and [string]$failedGuestObservation.status -eq 'TERMINAL_FAILURE' -and [string]$failedGuestObservation.failure -match 'secretsInput reported TIMED_OUT') 'valid guest failure marker becomes an immediate product terminal'
-foreach($attachmentRead in @($validMarkerRead,$absentMarkerRead,$timeoutMarkerRead,$failedGuestRead)){
-    $attachmentObservation=LifecycleObs @{}
-    $attachmentObservation.progress.guestProgressMarkerStatus='DEFERRED'
-    $attachmentObservation|Add-Member -NotePropertyName progressMarker -NotePropertyValue ($attachmentObservation.progress|ConvertTo-Json -Compress -Depth 20) -Force
-    $attached=Add-GuestProgressMarkerObservation -Observation $attachmentObservation -ReadResult $attachmentRead
-    Check ([string]$attached.progressMarker -ceq ($attached.progress|ConvertTo-Json -Compress -Depth 20)) "guest marker attachment refreshes serialized evidence for $([string]$attachmentRead.status)"
+$promoted = $null
+$promotionError = $null
+try { $promoted = Set-FullReleasePassState -FinalizationState $state -Result $validResult -ExpectedRunId $runId } catch { $promotionError = $_.Exception.Message }
+Check 'valid completed FullRelease promotes only its current evidence flags' (
+    -not $promotionError -and
+    [bool]$promoted.full_release_current -and
+    [bool]$promoted.full_release_passed -and
+    [bool]$promoted.validation_evidence_current -and
+    -not [bool]$promoted.internal_promotion_allowed -and
+    -not [bool]$promoted.public_promotion_allowed -and
+    -not [bool]$promoted.public_publisher_trust -and
+    [string]$promoted.full_release_run_id -ceq $runId
+)
+
+$rejectedState = @{
+    full_release_run_id = $null
+    full_release_current = $false
+    full_release_passed = $false
+    validation_evidence_current = $false
+    internal_promotion_allowed = $false
+    public_promotion_allowed = $false
+    public_publisher_trust = $false
 }
-$inputStart=LifecycleObs @{};$inputStart.progress.guestProgressMarker=$validMarkerRead.marker
-$inputCompleted=LifecycleObs @{};$inputCompleted.progress.guestProgressMarker=[pscustomobject]@{schemaVersion=1;transactionId='a'*32;payloadSha256='b'*64;sequence=2;component='secretsInput';state='COMPLETED';packageVersion='1.2.13';nodeRole='primary'}
-Check (& $realPhaseModule {param($a,$b) Test-ProductMeaningfulProgress -Previous $a -Current $b -TransactionId ('a'*32) -PayloadSha256 ('b'*64)} $inputStart $inputCompleted) 'bound secrets input acknowledgement advances semantic guest progress'
-$longProgressSamples=@();for($i=1;$i -le 6;$i++){$sample=LifecycleObs @{};$sample.progress.operationStatus='Invoking actual connected installation chain';$sample.progress.guestProgressMarker=[pscustomobject]@{transactionId='a'*32;payloadSha256='b'*64;sequence=$i;component=if($i -lt 3){'packagePrerequisites'}elseif($i -lt 5){'dockerRepositoryAndInstall'}else{'tailscaleRepositoryAndInstall'};state=if($i%2){'STARTED'}else{'COMPLETED'};nodeRole='primary'};$longProgressSamples+=$sample};$longCompletion=CompletionSample @{};$longCompletion.progress.operationStatus='Invoking actual connected installation chain';$longCompletion.progress.guestProgressMarker=[pscustomobject]@{transactionId='a'*32;payloadSha256='b'*64;sequence=7;component='rootlessRuntime';state='STARTED';nodeRole='primary'};$longProgressSamples+=$longCompletion
-$longProgressResult=RunInjectedWaitWithStep $longProgressSamples 1800 7200 200
-$longProgressElapsed=([datetime]$longProgressResult.lastMeaningfulProgressUtc-[datetime]$longProgressResult.startUtc).TotalSeconds
-Check ([string]$longProgressResult.outcome -eq 'COMPLETED' -and $longProgressElapsed -gt 1800 -and @($longProgressSamples.progress.operationStatus|Select-Object -Unique).Count -eq 1) 'transaction/payload-bound durable guest progress carries a static WPF status beyond 1800 simulated seconds within the fixed owner deadline'
-$heartbeatSamples=@();for($i=0;$i -lt 20;$i++){$sample=LifecycleObs @{};$sample.progress.cpuSeconds=($i*2);$sample.progress.resumeStage="step-$i";$heartbeatSamples+=$sample};$absoluteResult=RunInjectedWait $heartbeatSamples 7200 120
-Check ([string]$absoluteResult.outcome -eq 'ABSOLUTE_TIMEOUT') 'OBS-06 immutable absolute deadline cannot be extended'
-$global:DevFleetInheritedClock=[datetime]'2026-01-01T00:01:50Z';$inheritedClock={$value=[datetime]$global:DevFleetInheritedClock;$global:DevFleetInheritedClock=$value.AddSeconds(5);$value};$inheritedDir=Join-Path ([IO.Path]::GetTempPath()) ("devfleet-observer-inherited-{0}" -f ([guid]::NewGuid().ToString('N')));New-Item -ItemType Directory -Path $inheritedDir -Force|Out-Null;[void]$script:testEvidenceDirs.Add($inheritedDir);$inheritedResult=Wait-DevFleetProductLifecycleTransition -Session ([pscustomobject]@{}) -TransactionId ('a'*32) -PayloadSha256 ('b'*64) -Role 'Primary / Desktop' -ExpectedDevFleetVersion '1.2.13' -ExpectedInstallerVersion '1.4.1' -NoProgressBudgetSeconds 60 -AbsoluteBudgetSeconds 120 -AbsoluteDeadlineUtc '2026-01-01T00:02:00Z' -ObservationProvider {param($s)$s.providerContext} -ObservationProviderContext $stable -ClockProvider $inheritedClock -SleepProvider {param($seconds)} -EvidencePath (Join-Path $inheritedDir 'observer.json')
-Check ([string]$inheritedResult.outcome -eq 'ABSOLUTE_TIMEOUT' -and [int]$inheritedResult.effectiveAbsoluteBudgetSeconds -eq 10 -and [datetime]$inheritedResult.absoluteLifecycleDeadlineUtc -eq [datetime]'2026-01-01T00:02:00Z') 'inherited lifecycle owner deadline charges already-consumed time and never grants a fresh child budget'
-$badVersionRejected=$false;try{Wait-DevFleetProductLifecycleTransition -Session ([pscustomobject]@{}) -TransactionId ('a'*32) -PayloadSha256 ('b'*64) -Role 'Primary / Desktop' -ExpectedDevFleetVersion '' -ExpectedInstallerVersion '1.4.1' -AbsoluteBudgetSeconds 1}catch{$badVersionRejected=$true}
-Check ($badVersionRejected) 'OBS-06 expected version identity is fail-closed'
-Check ([int]$stableResult.effectiveNoProgressBudgetSeconds -eq 60 -and [int]$stableResult.effectiveAbsoluteBudgetSeconds -eq 120 -and [int]$stableResult.requestedBudgetSeconds -eq 120) 'OBS-06 effective budgets preserve requested finite values without silent clamping'
-$policy=Get-HarnessBudgetPolicy -Config (Get-Content (Join-Path $WorkspaceRoot 'automation\release-e2e\config\devfleet-e2e.defaults.json') -Raw|ConvertFrom-Json)
-Check ([int]$policy.observerAbsoluteBudgetSeconds -gt [int]$policy.productTransactionAbsoluteBudgetSeconds -and [int]$policy.fullReleaseWatchdogSeconds -gt [int]$policy.observerAbsoluteBudgetSeconds -and [int]$policy.exactProofOuterWatchdogSeconds -gt [int]$policy.exactProofInnerBoundSeconds) 'OBS-15 composed parent deadlines strictly dominate their children'
-Check ((Assert-HarnessBudgetPolicy -Policy $policy) -eq $true) 'OBS-16 invalid hierarchy policy is rejected by the authoritative validator'
-$genJump=LifecycleObs @{checkpointPresent=$true;checkpoint=[pscustomobject]@{checkpointGeneration=3;transactionId='a'*32;payloadSha256='b'*64;action='FreshInstall';role='Primary / Desktop';state='waiting-for-reboot'}}
-Check ((Get-DurableProgressClassification -Observation $genJump -PriorCheckpoint $prior -MaxGeneration 3) -eq 'TERMINAL_FAILURE') 'OBS-07/09 generation jump fails closed'
-$foreign=LifecycleObs @{checkpointPresent=$true;checkpoint=[pscustomobject]@{checkpointGeneration=2;transactionId='c'*32;payloadSha256='b'*64;action='FreshInstall';role='Primary / Desktop';state='waiting-for-reboot'}}
-Check ((Get-DurableProgressClassification -Observation $foreign -PriorCheckpoint $prior -MaxGeneration 3) -eq 'TERMINAL_FAILURE') 'OBS-10 foreign transaction fails closed'
-$complete2=LifecycleObs @{matchingConsumedReceipt=$true;installStateValid=$true;canonicalOwnershipValid=$true;authenticatedHealthOk=$true}
-$complete2.progress.checkpointGeneration=0;$complete2.progress.checkpointState='';$complete2.progress.resumeStage=''
-Check ((Get-DurableProgressClassification -Observation $complete2 -PriorCheckpoint $prior) -eq 'COMPLETED') 'OBS-11 matching consumed receipt and authenticated health completes'
-$orderedComplete=[ordered]@{checkpointPresent=$false;checkpoint=$null;matchingConsumedReceipt=$true;installStateValid=$true;canonicalOwnershipValid=$true;authenticatedHealthOk=$true;progress=[ordered]@{checkpointGeneration=0;checkpointState='';completedStages=@('complete');resumeStage='';stages=@();productChildInstances=@();cpuSeconds=0;receiptMatch=$true;health=$true;hostAgentTaskState='Running';listener=$true}}
-$orderedCompleteResult=RunInjectedWait @($orderedComplete) 60 120
-Check ([string]$orderedCompleteResult.outcome -eq 'COMPLETED') 'OBS-11 exact production-shaped zero checkpoint generation completes'
-$orderedCheckpoint=[ordered]@{checkpointGeneration=2;generation=2;transactionId='a'*32;payloadSha256='b'*64;action='FreshInstall';role='Primary / Desktop';state='waiting-for-reboot'};$orderedNext=[ordered]@{checkpointPresent=$true;checkpoint=$orderedCheckpoint;matchingConsumedReceipt=$false;installStateValid=$false;canonicalOwnershipValid=$false;authenticatedHealthOk=$false;progress=[ordered]@{checkpointGeneration=2;checkpointState='waiting-for-reboot';completedStages=@('bootstrap');resumeStage='install';stages=@();productChildInstances=@();cpuSeconds=1;receiptMatch=$false;health=$false;hostAgentTaskState='Running';listener=$true}}
-$orderedNextResult=RunInjectedWait @($orderedNext) 60 120
-Check ([string]$orderedNextResult.outcome -eq 'NEXT_REBOOT') 'OBS-11 OrderedDictionary checkpoint reaches NEXT_REBOOT with exact binding'
-$generationZeroDir=Join-Path ([IO.Path]::GetTempPath()) ("devfleet-observer-generation-zero-{0}" -f ([guid]::NewGuid().ToString('N')));New-Item -ItemType Directory -Path $generationZeroDir -Force|Out-Null;[void]$script:testEvidenceDirs.Add($generationZeroDir)
-$generationZeroTx='f'*32;$generationZeroCheckpoint=[pscustomobject]@{checkpointGeneration=1;generation=1;transactionId=$generationZeroTx;payloadSha256='b'*64;action='FreshInstall';role='Primary / Desktop';state='waiting-for-reboot'};$generationZeroObservation=LifecycleObs @{checkpointPresent=$true;checkpoint=$generationZeroCheckpoint};$global:DevFleetGenerationZeroClock=[datetime]'2026-01-01T00:00:00Z';$generationZeroClock={$value=[datetime]$global:DevFleetGenerationZeroClock;$global:DevFleetGenerationZeroClock=$value.AddSeconds(1);$value};$generationZeroProvider={param($state)$state.providerContext};$generationZeroResult=Wait-DevFleetProductLifecycleTransition -Session ([pscustomobject]@{}) -TransactionId '' -PayloadSha256 ('b'*64) -Action 'FreshInstall' -Role 'Primary / Desktop' -PriorGeneration 0 -MaxGeneration 3 -BudgetSeconds 60 -NoProgressBudgetSeconds 60 -AbsoluteBudgetSeconds 60 -ExpectedDevFleetVersion '1.2.13' -ExpectedInstallerVersion '1.4.1' -EvidencePath (Join-Path $generationZeroDir 'observer.json') -ObservationProvider $generationZeroProvider -ObservationProviderContext $generationZeroObservation -ClockProvider $generationZeroClock -SleepProvider {param($seconds)}
-Check ([string]$generationZeroResult.outcome -eq 'NEXT_REBOOT' -and [string]$generationZeroResult.checkpoint.transactionId -eq $generationZeroTx) 'OBS-12 generation-zero observer safely adopts the first exact transaction checkpoint'
-$generationZeroBindingTx='e'*32;$generationZeroBindingActiveTransaction=[pscustomobject]@{path='C:\ProgramData\DevFleet\active-transaction.json';transactionId=$generationZeroBindingTx;payloadSha256='b'*64;action='FreshInstall';role='Desktop';preparedUtc='2026-01-01T00:00:00Z'}
-$generationZeroBindingStageMarkers=@([pscustomobject]@{name='stage-compute-devfleet-primary-multipass-resolved.complete';transactionId=$generationZeroBindingTx;payloadSha256='b'*64;action='FreshInstall';role='Desktop';stage='stage-compute-devfleet-primary-multipass-resolved';completedUtc='2026-01-01T00:00:05Z'})
-$generationZeroBindingActive=LifecycleObs @{activeTransaction=$generationZeroBindingActiveTransaction}
-$generationZeroBindingStage=LifecycleObs @{activeTransaction=$generationZeroBindingActiveTransaction;stageMarkers=$generationZeroBindingStageMarkers}
-$generationZeroBindingComplete=LifecycleObs @{activeTransaction=$generationZeroBindingActiveTransaction;stageMarkers=$generationZeroBindingStageMarkers;receipt=[pscustomobject]@{transactionId=$generationZeroBindingTx;payloadSha256='b'*64;action='FreshInstall';role='Primary / Desktop'};matchingConsumedReceipt=$true;installStateValid=$true;canonicalOwnershipValid=$true;authenticatedHealthOk=$true}
-$generationZeroBindingComplete.progress.checkpointGeneration=0;$generationZeroBindingComplete.progress.checkpointState='';$generationZeroBindingComplete.progress.resumeStage=''
-$generationZeroBindingTrace=[Collections.Generic.List[string]]::new();$generationZeroBindingSamples=@($generationZeroBindingActive,$generationZeroBindingStage,$generationZeroBindingComplete)
-$generationZeroBindingProvider={param($state)[void]$generationZeroBindingTrace.Add([string]$state.transactionId);$generationZeroBindingSamples[[Math]::Min([int]$state.observationIndex,$generationZeroBindingSamples.Count-1)]}
-$global:DevFleetGenerationZeroBindingClock=[datetime]'2026-01-01T00:00:00Z';$generationZeroBindingClock={$value=[datetime]$global:DevFleetGenerationZeroBindingClock;$global:DevFleetGenerationZeroBindingClock=$value.AddSeconds(1);$value}
-$generationZeroBindingDir=Join-Path ([IO.Path]::GetTempPath()) ("devfleet-observer-generation-zero-binding-{0}" -f ([guid]::NewGuid().ToString('N')));New-Item -ItemType Directory -Path $generationZeroBindingDir -Force|Out-Null;[void]$script:testEvidenceDirs.Add($generationZeroBindingDir)
-$generationZeroBindingResult=Wait-DevFleetProductLifecycleTransition -Session ([pscustomobject]@{}) -TransactionId '' -PayloadSha256 ('b'*64) -Action 'FreshInstall' -Role 'Primary / Desktop' -PriorGeneration 0 -MaxGeneration 3 -BudgetSeconds 60 -NoProgressBudgetSeconds 60 -AbsoluteBudgetSeconds 60 -ExpectedDevFleetVersion '1.2.13' -ExpectedInstallerVersion '1.4.1' -ExpectedComputeInstanceName 'devfleet-primary' -InvocationStartUtc '2026-01-01T00:00:00Z' -EvidencePath (Join-Path $generationZeroBindingDir 'observer.json') -ObservationProvider $generationZeroBindingProvider -ObservationProviderContext $generationZeroBindingSamples -ClockProvider $generationZeroBindingClock -SleepProvider {param($seconds)}
-Check ([string]$generationZeroBindingResult.outcome -eq 'COMPLETED' -and $generationZeroBindingTrace.Count -ge 3 -and [string]$generationZeroBindingTrace[0] -eq '' -and [string]$generationZeroBindingTrace[1] -eq '' -and [string]$generationZeroBindingTrace[2] -ceq $generationZeroBindingTx) 'OBS-17 generation-zero observer adopts a current candidate-bound stage-marker transaction before receipt consumption'
-$completionForms=@([pscustomobject]$orderedComplete,@{checkpointPresent=$false;checkpoint=$null;matchingConsumedReceipt=$true;installStateValid=$true;canonicalOwnershipValid=$true;authenticatedHealthOk=$true;progress=[ordered]@{checkpointGeneration=0;checkpointState='';completedStages=@('complete');resumeStage='';stages=@();productChildInstances=@();cpuSeconds=0}},$orderedComplete)
-$genericCompletion=[Collections.Generic.Dictionary[string,object]]::new();foreach($key in $orderedComplete.Keys){$genericCompletion[$key]=$orderedComplete[$key]};$completionForms+=,$genericCompletion
-foreach($index in 0..($completionForms.Count-1)){Check ((Get-DurableProgressClassification -Observation ([psobject]$completionForms[$index]) -PriorCheckpoint $prior) -eq 'COMPLETED') "OBS-11 production-shaped completion representation $($index+1) returns COMPLETED"}
-$global:DevFleetDeadlineClock=[datetime]'2026-01-01T00:00:00Z';$global:DevFleetDeadlineCalls=0;$deadlineClock={if($global:DevFleetDeadlineCalls -lt 2){$global:DevFleetDeadlineCalls++;$current=[datetime]$global:DevFleetDeadlineClock;if($global:DevFleetDeadlineCalls -eq 2){$global:DevFleetDeadlineClock=$current.AddSeconds(61)};return $current};return [datetime]$global:DevFleetDeadlineClock};$deadlineProvider={param($s)$s.providerContext};$deadlineDir=Join-Path ([IO.Path]::GetTempPath()) ("devfleet-observer-deadline-{0}" -f ([guid]::NewGuid().ToString('N')));New-Item -ItemType Directory -Path $deadlineDir -Force|Out-Null;[void]$script:testEvidenceDirs.Add($deadlineDir);$deadlineResult=Wait-DevFleetProductLifecycleTransition -Session ([pscustomobject]@{}) -TransactionId ('a'*32) -PayloadSha256 ('b'*64) -Role 'Primary / Desktop' -ExpectedDevFleetVersion '1.2.13' -ExpectedInstallerVersion '1.4.1' -NoProgressBudgetSeconds 60 -AbsoluteBudgetSeconds 60 -ObservationProvider $deadlineProvider -ObservationProviderContext $complete2 -ClockProvider $deadlineClock -EvidencePath (Join-Path $deadlineDir 'observer.json')
-Check ([string]$deadlineResult.outcome -eq 'ABSOLUTE_TIMEOUT' -and [string]$deadlineResult.terminalReason -match 'after observation') 'OBS-11 completion one tick after absolute deadline fails closed'
-$journalResult=RunInjectedWait @($stable,$stable,$stable) 60 120
-Check ($journalResult.startUtc -and $journalResult.absoluteLifecycleDeadlineUtc) 'OBS-13 terminal result includes bounded clock evidence'
-Check ((Test-Path -LiteralPath $journalResult.testEvidencePath) -and (Test-Path -LiteralPath ([IO.Path]::Combine([IO.Path]::GetDirectoryName([string]$journalResult.testEvidencePath),'product-lifecycle-progress.jsonl'))) -and (@(Get-Content -LiteralPath ([IO.Path]::Combine([IO.Path]::GetDirectoryName([string]$journalResult.testEvidencePath),'product-lifecycle-progress.jsonl')) | Where-Object { $_ -match '"event":"START"' }).Count -ge 1)) 'OBS-14 interruption journal exists before first observation'
-Check ($source -match 'product-lifecycle-progress.jsonl' -and $source -match "event='TERMINAL'") 'OBS-14 interruption-safe incremental journal/current snapshot is wired'
-$errorEvidenceDir=Join-Path ([IO.Path]::GetTempPath()) ("devfleet-observer-error-{0}" -f ([guid]::NewGuid().ToString('N')));New-Item -ItemType Directory -Path $errorEvidenceDir -Force|Out-Null;[void]$script:testEvidenceDirs.Add($errorEvidenceDir);$errorProvider={param($s)throw 'controlled provider failure'};$errorResult=Wait-DevFleetProductLifecycleTransition -Session ([pscustomobject]@{}) -TransactionId ('a'*32) -PayloadSha256 ('b'*64) -Role 'Primary / Desktop' -ExpectedDevFleetVersion '1.2.13' -ExpectedInstallerVersion '1.4.1' -ObservationProvider $errorProvider -EvidencePath (Join-Path $errorEvidenceDir 'observer.json')
-Check ([string]$errorResult.outcome -eq 'TERMINAL_FAILURE' -and (Test-Path -LiteralPath (Join-Path $errorEvidenceDir 'observer.json'))) 'observer provider error normalizes to strict-safe terminal evidence'
-$transportRecoveryDir=Join-Path ([IO.Path]::GetTempPath()) ("devfleet-observer-transport-recovery-{0}" -f ([guid]::NewGuid().ToString('N')));New-Item -ItemType Directory -Path $transportRecoveryDir -Force|Out-Null;[void]$script:testEvidenceDirs.Add($transportRecoveryDir);$global:DevFleetTransportRecoveryClock=[datetime]'2026-01-01T00:00:00Z';$transportRecoveryClock={$value=[datetime]$global:DevFleetTransportRecoveryClock;$global:DevFleetTransportRecoveryClock=$value.AddSeconds(5);$value};$transportRecoveryProvider={param($s)if([int]$s.observationIndex -lt 2){throw 'The background process reported an error with the following message: "The Hyper-V socket target process has ended."'};return $s.providerContext};$transportRecoveryResult=Wait-DevFleetProductLifecycleTransition -Session ([pscustomobject]@{}) -TransactionId ('a'*32) -PayloadSha256 ('b'*64) -Role 'Primary / Desktop' -ExpectedDevFleetVersion '1.2.13' -ExpectedInstallerVersion '1.4.1' -NoProgressBudgetSeconds 60 -AbsoluteBudgetSeconds 120 -ObservationProvider $transportRecoveryProvider -ObservationProviderContext (LifecycleObs @{}) -ClockProvider $transportRecoveryClock -SleepProvider {param($seconds)} -EvidencePath (Join-Path $transportRecoveryDir 'observer.json')
-Check ([string]$transportRecoveryResult.outcome -eq 'NO_PROGRESS_TIMEOUT' -and @($transportRecoveryResult.transportRecoveryAttempts).Count -eq 2) 'transient Hyper-V transport failure is retried finitely without resetting lifecycle deadlines'
-Check ([string]$transportRecoveryResult.transportRecoveryAttempts[0].error -match 'Hyper-V socket target process has ended' -and [int]$transportRecoveryResult.transportRecoveryAttempts[0].delaySeconds -le 5) 'transport recovery evidence records the bounded error and delay'
-$credentialErrorDir=Join-Path ([IO.Path]::GetTempPath()) ("devfleet-observer-credential-error-{0}" -f ([guid]::NewGuid().ToString('N')));New-Item -ItemType Directory -Path $credentialErrorDir -Force|Out-Null;[void]$script:testEvidenceDirs.Add($credentialErrorDir)
-$credentialErrorProvider={param($s)throw 'LAB_CREDENTIAL_STALE: canonical E
+$blockedResult = [pscustomobject]@{
+    status = 'BLOCKED'
+    runId = $runId
+    postCleanupFinalization = $validResult.postCleanupFinalization
+}
+$blockedError = $null
+try { Set-FullReleasePassState -FinalizationState $rejectedState -Result $blockedResult -ExpectedRunId $runId | Out-Null } catch { $blockedError = $_.Exception.Message }
+Check 'blocked FullRelease cannot promote any flag' (
+    $blockedError -and
+    -not [bool]$rejectedState.full_release_current -and
+    -not [bool]$rejectedState.full_release_passed -and
+    -not [bool]$rejectedState.validation_evidence_current
+)
+
+$mismatchState = @{
+    full_release_run_id = $null
+    full_release_current = $false
+    full_release_passed = $false
+    validation_evidence_current = $false
+    internal_promotion_allowed = $false
+    public_promotion_allowed = $false
+    public_publisher_trust = $false
+}
+$mismatchError = $null
+try { Set-FullReleasePassState -FinalizationState $mismatchState -Result $validResult -ExpectedRunId 'FullRelease-other-run' | Out-Null } catch { $mismatchError = $_.Exception.Message }
+Check 'mismatched FullRelease RunId cannot promote any flag' (
+    $mismatchError -and
+    -not [bool]$mismatchState.full_release_current -and
+    -not [bool]$mismatchState.full_release_passed -and
+    -not [bool]$mismatchState.validation_evidence_current
+)
+
+$result = [ordered]@{
+    status = if (@($checks | Where-Object { -not $_.pass }).Count) { 'FAIL' } else { 'PASS' }
+    scope = 'LOCAL_FULLRELEASE_POSTCLEANUP_PROMOTION_BOUNDARY'
+    passed = @($checks | Where-Object pass).Count
+    total = $checks.Count
+    checks = @($checks)
+}
+$result | ConvertTo-Json -Depth 8
+if ($result.status -ne 'PASS') { exit 1 }
+Write-Host "PASS $($result.passed)/$($result.total) FullRelease promotion checks; no VM, checkpoint, runtime, or auth operation performed."
+
+```
+
+
+## FILE: automation/release-e2e/tests/Test-GuestSessionCredentialRetryBoundary.ps1
+
+SHA256: 46bfe5205671bf500bacdffb549ddc4553f601c57f3c445aa9b9a7a529fe5f1e | Bytes: 7247 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([string]$WorkspaceRoot)
+$ErrorActionPreference='Stop'
+if(-not $WorkspaceRoot){$WorkspaceRoot=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path}
+Import-Module (Join-Path $WorkspaceRoot 'automation/release-e2e/modules/GuestSession.psm1') -Force
+$module=Get-Module GuestSession
+$passed=0;$failures=[Collections.Generic.List[string]]::new()
+function Check([bool]$Condition,[string]$Name){if($Condition){$script:passed++}else{$script:failures.Add($Name)}}
+$vmId=[guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2'
+$vmName='DevFleet-E2E-Win11-01'
+# All credentials and VM/session operations below are isolated fixtures.
+& $module {
+    $script:FixtureCredential=[pscredential]::new('fixture-user',(ConvertTo-SecureString 'fixture-only-not-a-password' -AsPlainText -Force))
+    $script:FixtureTargetName='DevFleet-E2E-Win11-01'
+    function script:Get-DevFleetE2ECredential { $script:FixtureCredential }
+    function script:Get-VM { param($Id,$Name,$ErrorAction) [pscustomobject]@{Name=$script:FixtureTargetName} }
+    function script:Start-Sleep { param($Seconds) $script:FixtureSleepSeconds += $Seconds }
+    $script:OriginalOpener=(Get-Command New-BoundedVmPSSession).ScriptBlock.ToString()
+    function script:New-BoundedVmPSSession {
+        param($VmId,$VmName,$Credential)
+        if(-not [object]::ReferenceEquals($Credential,$script:FixtureCredential)){throw 'Fixture credential identity mismatch'}
+        $index=$script:FixtureAttempts;$script:FixtureAttempts++
+        $value=$script:FixtureErrors[[Math]::Min($index,$script:FixtureErrors.Count-1)]
+        if($null -ne $value){throw $value}
+        return [pscustomobject]@{fixtureSession=$true}
+    }
+}
+function Set-Case([object[]]$Errors){
+    & $module {param($row)$script:FixtureErrors=$row.errors;$script:FixtureAttempts=0;$script:FixtureSleepSeconds=0} ([pscustomobject]@{errors=$Errors})
+}
+function Invoke-Case([string]$Mode){if($Mode -eq 'ById'){Connect-DevFleetGuest -VmId $vmId}else{Connect-DevFleetGuest -VmName $vmName}}
+try {
+    $cases=@(
+        @{name='generic denial';error='Access is denied.';code='LAB_SESSION_ACCESS_DENIED';auth='UNVERIFIED'},
+        @{name='typed denial';error=[UnauthorizedAccessException]::new('DEMO_SECRET_DO_NOT_RETURN');code='LAB_SESSION_ACCESS_DENIED';auth='UNVERIFIED'},
+        @{name='invalid response';error='The credential is invalid.';code='LAB_GUEST_AUTHENTICATION_REJECTED';auth='REJECTED'},
+        @{name='typed logon rejection';error=[ComponentModel.Win32Exception]::new(1326);code='LAB_GUEST_AUTHENTICATION_REJECTED';auth='REJECTED'},
+        @{name='nested native denial';error=[InvalidOperationException]::new('outer DEMO_SECRET_DO_NOT_RETURN',[UnauthorizedAccessException]::new('inner DEMO_SECRET_DO_NOT_RETURN'));code='LAB_SESSION_ACCESS_DENIED';auth='UNVERIFIED'},
+        @{name='unrelated credential text';error='Credential parameter conversion failed DEMO_SECRET_DO_NOT_RETURN';code='LAB_SESSION_OPEN_FAILED';auth='UNVERIFIED'},
+        @{name='unknown failure';error='unclassified DEMO_SECRET_DO_NOT_RETURN';code='LAB_SESSION_OPEN_FAILED';auth='UNVERIFIED'},
+        @{name='bounded timeout';error='Guest session establishment exceeded its finite 60-second open deadline.';code='LAB_SESSION_OPEN_TIMEOUT';auth='UNVERIFIED'},
+        @{name='known socket transport';error='Hyper-V socket target process has ended.';code='LAB_SESSION_TRANSPORT_FAILED';auth='UNVERIFIED'}
+    )
+    foreach($mode in @('ById','ByName')){
+        Set-Case @('The running command stopped because a remote session might have ended.',$null)
+        $session=Invoke-Case $mode
+        Check ($session.fixtureSession -and (& $module {$script:FixtureAttempts}) -eq 2) "$mode transient then success uses two attempts"
+        Check ((& $module {$script:FixtureSleepSeconds}) -eq 5) "$mode success preserves bounded backoff"
+        foreach($case in $cases){
+            Set-Case @($case.error);$failure=$null
+            try {Invoke-Case $mode|Out-Null}catch{$failure=$_.Exception}
+            Check ($null -ne $failure -and $failure.Message.StartsWith($case.code+':')) "$mode $($case.name) truthful failure classification"
+            Check ((& $module {$script:FixtureAttempts}) -eq 3 -and (& $module {$script:FixtureSleepSeconds}) -eq 10) "$mode $($case.name) original attempt cap and waits"
+            Check ($null -ne $failure -and $failure.Data['authenticationOutcome'] -eq $case.auth -and $failure.Data['attemptCount'] -eq 3) "$mode $($case.name) safe structured diagnostics"
+            Check ($null -ne $failure -and $failure.ToString() -notmatch 'DEMO_SECRET_DO_NOT_RETURN|LAB_CREDENTIAL_STALE') "$mode $($case.name) no arbitrary error text or stale-password claim"
+            if($case.code -eq 'LAB_SESSION_TRANSPORT_FAILED'){
+                Check ($failure.Message -match 'Hyper-V socket target process has ended') "$mode known transport retains existing recovery discriminator"
+            }
+        }
+        & $module {$script:FixtureTargetName='protected-production'};Set-Case @($null)
+        $rejected=$false;try{Invoke-Case $mode|Out-Null}catch{$rejected=$true}
+        Check ($rejected -and (& $module {$script:FixtureAttempts}) -eq 0) "$mode rejects foreign target before opening a session"
+        & $module {$script:FixtureTargetName='DevFleet-E2E-Win11-01'}
+    }
+    # Real local PowerShell pipeline, with only New-PSSession replaced by dummy I/O.
+    # This verifies EndInvoke error handling without Hyper-V, WinRM or real secrets.
+    & $module {
+        function script:New-FixtureOpenerPipeline {
+            $pipeline=[powershell]::Create()
+            $null=$pipeline.AddScript('function New-PSSession { param($Credential,$VMId,$VMName,$ErrorAction) throw [ComponentModel.Win32Exception]::new(1326) }').Invoke()
+            $pipeline.Commands.Clear()
+            return $pipeline
+        }
+        $body=$script:OriginalOpener.Replace('$pipeline=[powershell]::Create()','$pipeline=New-FixtureOpenerPipeline')
+        if($body -ceq $script:OriginalOpener){throw 'Expected opener I/O factory not found'}
+        Set-Item Function:script:New-BoundedVmPSSession -Value ([scriptblock]::Create($body))
+    }
+    $nativeFailure=$null
+    try{Connect-DevFleetGuest -VmId $vmId|Out-Null}catch{$nativeFailure=$_.Exception}
+    Check ($null -ne $nativeFailure -and $nativeFailure.Message.StartsWith('LAB_GUEST_AUTHENTICATION_REJECTED:')) 'real opener propagates native authentication rejection into safe classification'
+    Check ($null -ne $nativeFailure -and $nativeFailure.Data['nativeErrorCode'] -eq 1326) 'real opener preserves native error code rather than flattening to text'
+    Check ((& $module {$script:GuestSessionPipelines.Count}) -eq 0) 'failed native openers retain no live session pipelines'
+} finally {
+    & $module {
+        foreach($name in @('New-BoundedVmPSSession','New-FixtureOpenerPipeline','Get-DevFleetE2ECredential','Get-VM','Start-Sleep')){Remove-Item "Function:$name" -ErrorAction SilentlyContinue}
+        $script:FixtureCredential=$null
+    }
+    Remove-Module GuestSession -Force
+}
+[pscustomobject]@{status=if($failures.Count){'FAIL'}else{'PASS'};passed=$passed;failures=@($failures);vmOperations=0;realCredentialReads=0}|ConvertTo-Json -Depth 4
+if($failures.Count){exit 1}
+
+```
+
+
+## FILE: automation/release-e2e/tests/Test-GuestSessionLifetime.ps1
+
+SHA256: 6174a017eb71991983d877da9b4101f5bb99e4d365a545f2e34f5065a6be8625 | Bytes: 4463 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([string]$WorkspaceRoot)
+$ErrorActionPreference='Stop'
+if(-not $WorkspaceRoot){$WorkspaceRoot=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path}
+Import-Module (Join-Path $WorkspaceRoot 'automation/release-e2e/modules/GuestSession.psm1') -Force
+$module=Get-Module GuestSession
+$passed=0;$failures=[Collections.Generic.List[string]]::new();$owned=[Collections.Generic.List[object]]::new()
+function Check([bool]$Condition,[string]$Name){if($Condition){$script:passed++}else{$script:failures.Add($Name)}}
+function New-LocalFixtureSession {
+    # Exercise native PowerShell session/pipeline lifetime on the local host.
+    # This named-pipe session needs no VM, credentials, network or service change.
+    $pipeline=[powershell]::Create()
+    $row=[pscustomobject]@{pipeline=$pipeline;session=$null};$script:owned.Add($row)
+    $null=$pipeline.AddCommand('New-PSSession').AddParameter('UseWindowsPowerShell').AddParameter('ErrorAction','Stop')
+    $async=$pipeline.BeginInvoke()
+    if(-not $async.AsyncWaitHandle.WaitOne(15000)){$pipeline.Stop();throw 'Local session fixture exceeded15s.'}
+    $session=@($pipeline.EndInvoke($async))|Select-Object -First 1
+    if(-not $session){throw 'Local fixture returned no native session.'}
+    $row.session=$session
+    & $module {param($s,$p)$script:GuestSessionPipelines[[string]$s.InstanceId]=$p} $session $pipeline
+    return $row
+}
+try {
+    foreach($i in 1..3){
+        $row=New-LocalFixtureSession
+        Check ((Invoke-Command -Session $row.session -ScriptBlock {'alive'}) -ceq 'alive') "native session $i stays usable while opener is retained"
+        Remove-DevFleetGuestSession -Session $row.session
+        Check ([string]$row.session.State -ceq 'Closed' -and (& $module {$script:GuestSessionPipelines.Count}) -eq 0) "native close $i removes its registry entry"
+        $disposed=$false;try{$null=$row.pipeline.Invoke()}catch{$disposed=$_.Exception.ToString() -match 'ObjectDisposedException|disposed'}
+        Check $disposed "native close $i disposes the completed opener"
+    }
+    $first=New-LocalFixtureSession;$second=New-LocalFixtureSession
+    Remove-DevFleetGuestSession -Session $first.session
+    Check ((& $module {$script:GuestSessionPipelines.Count}) -eq 1 -and (Invoke-Command -Session $second.session -ScriptBlock {'other-alive'}) -ceq 'other-alive') 'closing one session preserves the other live session and opener'
+    Remove-DevFleetGuestSession -Session $first.session
+    Check ((& $module {$script:GuestSessionPipelines.Count}) -eq 1) 'closing an already closed session cannot remove another owner'
+    Remove-DevFleetGuestSession -Session $second.session
+    Check ((& $module {$script:GuestSessionPipelines.Count}) -eq 0) 'last native close leaves no retained opener'
+    $retained=New-LocalFixtureSession
+    & $module {function script:Remove-PSSession {param($Session,$ErrorAction)throw 'controlled native removal failure'}}
+    try {
+        $failedClose=$false;try{Remove-DevFleetGuestSession -Session $retained.session}catch{$failedClose=$true}
+        Check ($failedClose -and [string]$retained.session.State -ceq 'Opened' -and (& $module {$script:GuestSessionPipelines.Count}) -eq 1) 'failed native removal preserves the live session opener'
+        Check ((Invoke-Command -Session $retained.session -ScriptBlock {'still-alive'}) -ceq 'still-alive') 'failed removal does not invalidate the still open native session'
+        $quietCloseReturned=$false;try{Remove-DevFleetGuestSession -Session $retained.session -ErrorAction SilentlyContinue;$quietCloseReturned=$true}catch{}
+        Check ($quietCloseReturned -and (& $module {$script:GuestSessionPipelines.Count}) -eq 1) 'caller-selected quiet cleanup preserves the primary error and live opener'
+    } finally {& $module {Remove-Item Function:Remove-PSSession -ErrorAction SilentlyContinue}}
+    Remove-DevFleetGuestSession -Session $retained.session
+    Check ((& $module {$script:GuestSessionPipelines.Count}) -eq 0) 'subsequent successful close disposes the retained opener'
+} finally {
+    foreach($row in $owned){if($row.session){Remove-PSSession -Session $row.session -ErrorAction SilentlyContinue};$row.pipeline.Dispose()}
+    & $module {$script:GuestSessionPipelines.Clear()}
+}
+[pscustomobject]@{status=if($failures.Count){'FAIL'}else{'PASS'};passed=$passed;failures=@($failures);nativeTransport='local UseWindowsPowerShell';vmOperations=0}|ConvertTo-Json -Depth 4
+if($failures.Count){exit 1}
+
+```
+
+
+## FILE: automation/release-e2e/tests/Test-InstallerSelfTestStandardToken.ps1
+
+SHA256: 98203d79c9986c2f0b52f29513b3a027441d0355d605bb1ed18ad318dd9755ff | Bytes: 5243 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([string]$WorkspaceRoot,[string]$CandidatePath)
+$ErrorActionPreference='Stop';if([string]::IsNullOrWhiteSpace($WorkspaceRoot)){$WorkspaceRoot=Join-Path $PSScriptRoot '..\..\..'};$workspace=(Resolve-Path -LiteralPath $WorkspaceRoot -ErrorAction Stop).Path
+Import-Module (Join-Path $workspace 'automation\release-e2e\modules\Candidate.psm1') -Force
+$token=Get-WindowsTokenEvidence
+if(-not[bool]$token.standardNonAdministratorToken){throw 'Standard-token self-test requires a genuinely non-administrator, non-elevated medium-integrity caller.'}
+$fingerprint=Get-CandidateFingerprint -WorkspaceRoot $workspace -CandidatePath $CandidatePath
+if([string]$fingerprint.privateSigningProfile -ne 'PRIVATE_SELF_SIGNED'-or-not $fingerprint.authenticode-or[string]$fingerprint.authenticode.status -ne 'PASS'){throw 'Standard-token evidence requires the exact signed candidate and valid private Authenticode evidence.'}
+foreach($tuple in @([string]$fingerprint.gitCommit,[string]$fingerprint.shippingInputIdentity,[string]$fingerprint.releaseFingerprintId,[string]$fingerprint.toolingFingerprintId)){if($tuple -notmatch '^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$'){throw 'Candidate tuple is incomplete or malformed.'}}
+$runId='standard-token-'+(Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')+'-'+[guid]::NewGuid().ToString('N').Substring(0,8);$runRelative="evidence/standard-token/$runId";$runDir=Join-Path $workspace ($runRelative.Replace('/','\'))
+if(Test-Path -LiteralPath $runDir){throw "Standard-token evidence run already exists: $runId"};New-Item -ItemType Directory -Path $runDir -Force|Out-Null
+$rawReport=Join-Path $runDir 'installer-self-test-raw.txt';$canonical=Join-Path $runDir 'standard-token-evidence.json'
+$before=@(Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Directory -Filter 'DevFleet-Setup-SelfTest-*' -ErrorAction SilentlyContinue|ForEach-Object FullName)
+$result=Invoke-CandidateSelfTest -Fingerprint $fingerprint -ReportPath $rawReport
+$after=@(Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Directory -Filter 'DevFleet-Setup-SelfTest-*' -ErrorAction SilentlyContinue|ForEach-Object FullName);$residual=@($after|Where-Object{$_-notin$before});$failed=@($result.requiredChecks.GetEnumerator()|Where-Object{-not[bool]$_.Value})
+if($result.exitCode-ne 0-or[string]$result.result-ne 'PASS'-or$failed.Count-ne 0-or$residual.Count-ne 0){throw "Signed candidate standard-token self-test failed: exit=$($result.exitCode); result=$($result.result); failedChecks=$(@($failed.Name)-join ','); residualScratch=$($residual.Count)."}
+if(-not[bool]$result.token.standardNonAdministratorToken){throw 'Candidate self-test token evidence was not a standard non-administrator token.'}
+function Write-AtomicJson([string]$Path,[object]$Value){$tmp="$Path.$([guid]::NewGuid().ToString('N')).tmp";try{[IO.File]::WriteAllText($tmp,(($Value|ConvertTo-Json -Depth 20)+[Environment]::NewLine),[Text.UTF8Encoding]::new($false));Move-Item -LiteralPath $tmp -Destination $Path -Force}finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}}
+$runnerRelative='automation/release-e2e/tests/Test-InstallerSelfTestStandardToken.ps1';$runnerPath=Join-Path $workspace ($runnerRelative.Replace('/','\'))
+$required=[ordered]@{pass=([string]$result.result-eq'PASS');payloadExtraction=[bool]$result.requiredChecks.extraction;bootstrapEntrypoint=[bool]$result.requiredChecks.bootstrap;parameterContract=[bool]$result.requiredChecks.parameterContract;embeddedTarCount=[bool]$result.requiredChecks.embeddedTarCount;factoryResetBackupGate=[bool]$result.requiredChecks.factoryResetBackupGate;planSafety=[bool]$result.requiredChecks.planSafety;devfleetVersion=[bool]$result.requiredChecks.devfleet;installerVersion=[bool]$result.requiredChecks.installer;payloadSha=[bool]$result.requiredChecks.payloadSha}
+$evidence=[ordered]@{schemaVersion=1;runId=$runId;status='PASS';standardNonAdministratorToken=$true;runDirectory=$runRelative;rawReportPath="$runRelative/installer-self-test-raw.txt";canonicalEvidencePath="$runRelative/standard-token-evidence.json";generatedAtUtc=(Get-Date).ToUniversalTime().ToString('o');candidateBuildCommit=[string]$fingerprint.gitCommit;repositoryHead=[string]$fingerprint.repositoryHead;shippingInputIdentity=[string]$fingerprint.shippingInputIdentity;releaseFingerprintId=[string]$fingerprint.releaseFingerprintId;toolingFingerprintId=[string]$fingerprint.toolingFingerprintId;exe=[ordered]@{sha256=[string]$fingerprint.candidate.sha256;bytes=[int64]$fingerprint.candidate.bytes};tar=[ordered]@{sha256=[string]$fingerprint.tar.sha256;bytes=[int64]$fingerprint.tar.bytes};runner=[ordered]@{path=$runnerRelative;sha256=(Get-FileHash -LiteralPath $runnerPath -Algorithm SHA256).Hash.ToLowerInvariant()};token=$result.token;exitCode=[int]$result.exitCode;reportSha256=[string]$result.reportSha256;requiredChecks=$required;residualSelfTestScratchCount=$residual.Count}
+Write-AtomicJson $canonical $evidence
+$pointer=Join-Path $workspace 'evidence\CURRENT-STANDARD-TOKEN.json';Write-AtomicJson $pointer $evidence
+Set-ItemProperty -LiteralPath $rawReport -Name IsReadOnly -Value $true;Set-ItemProperty -LiteralPath $canonical -Name IsReadOnly -Value $true
+$evidence|ConvertTo-Json -Depth 20
+
+```
+
+
+## FILE: automation/release-e2e/tests/Test-InteractiveLogonContracts.ps1
+
+SHA256: 0be399f64a28eaa682abe10da2ea592af918741c3015b0f6727b9bddac1f26bb | Bytes: 17232 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([Parameter(Mandatory)][string]$WorkspaceRoot)
+$ErrorActionPreference='Stop'
+$modulePath=Join-Path $WorkspaceRoot 'automation\release-e2e\modules\InteractiveLogon.psm1'
+$source=Get-Content -LiteralPath $modulePath -Raw
+Import-Module $modulePath -Force
+$total=0;$passed=0;$failures=[System.Collections.Generic.List[string]]::new()
+function Assert-That([bool]$Condition,[string]$Name){$script:total++;if($Condition){$script:passed++}else{$script:failures.Add($Name)}}
+function Throws([scriptblock]$Action){try{&$Action|Out-Null;return $false}catch{return $true}}
+
+$target=Get-DevFleetE2EInteractiveLogonTarget
+Assert-That ($target.name -ceq 'DevFleet-E2E-Win11-01' -and $target.id -eq [guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2') 'exact authorized L1 identity is immutable'
+Assert-That ($target.user -ceq 'E2EAdmin' -and $target.domain -ceq 'DEVFLEET-E2E-01') 'exact E2EAdmin account contract'
+Assert-That (Assert-DevFleetE2EL1Identity -Vm ([pscustomobject]@{Name=$target.name;Id=$target.id})) 'exact L1 GUID and name accepted'
+Assert-That (Throws { Assert-DevFleetE2EL1Identity -Vm ([pscustomobject]@{Name='DevFleet-E2E-Win11-02';Id=$target.id}) }) 'wrong L1 name rejected'
+Assert-That (Throws { Assert-DevFleetE2EL1Identity -Vm ([pscustomobject]@{Name=$target.name.ToLowerInvariant();Id=$target.id}) }) 'case-mismatched exact L1 name rejected'
+Assert-That (Throws { Assert-DevFleetE2EL1Identity -Vm ([pscustomobject]@{Name=$target.name;Id=[guid]::NewGuid()}) }) 'wrong L1 GUID rejected'
+
+$good=[pscustomobject]@{computer='DEVFLEET-E2E-01';activeInteractiveSessionId=1;boundExplorer=@([pscustomobject]@{pid=4242;owner='DEVFLEET-E2E-01\E2EAdmin';sessionId=1})}
+$proof=Assert-DevFleetE2EInteractiveDesktop -State $good
+Assert-That ($proof.status -eq 'PASS' -and $proof.sessionId -eq 1 -and $proof.explorerPid -eq 4242) 'exact E2EAdmin Explorer session accepted'
+Assert-That (Throws { Assert-DevFleetE2EInteractiveDesktop -State ($good|Select-Object * -ExcludeProperty activeInteractiveSessionId|Add-Member -NotePropertyName activeInteractiveSessionId -NotePropertyValue 0 -PassThru) }) 'Session 0 rejected'
+Assert-That (Throws { Assert-DevFleetE2EInteractiveDesktop -State ($good|Select-Object * -ExcludeProperty boundExplorer|Add-Member -NotePropertyName boundExplorer -NotePropertyValue @() -PassThru) }) 'missing Explorer rejected'
+$wrongUser=$good|ConvertTo-Json -Depth 5|ConvertFrom-Json;$wrongUser.boundExplorer[0].owner='DEVFLEET-E2E-01\OtherUser'
+Assert-That (Throws { Assert-DevFleetE2EInteractiveDesktop -State $wrongUser }) 'wrong-user Explorer rejected'
+$wrongSession=$good|ConvertTo-Json -Depth 5|ConvertFrom-Json;$wrongSession.boundExplorer[0].sessionId=2
+Assert-That (Throws { Assert-DevFleetE2EInteractiveDesktop -State $wrongSession }) 'wrong Explorer SessionId rejected'
+Assert-That ((Get-DevFleetE2EInteractiveDesktopFailureCategory -Stage pssession) -eq 'pssession-unavailable') 'PowerShell Direct failure remains distinct'
+Assert-That ((Get-DevFleetE2EInteractiveDesktopFailureCategory -Stage guest-state) -eq 'guest-state-collection-failure') 'guest state failure remains distinct'
+Assert-That ((Get-DevFleetE2EInteractiveDesktopFailureCategory -State ([pscustomobject]@{activeInteractiveSessionId=0;explorer=@()}) -Stage assertion) -eq 'no-active-e2eadmin-session') 'no active E2EAdmin session remains distinct'
+Assert-That ((Get-DevFleetE2EInteractiveDesktopFailureCategory -State ([pscustomobject]@{activeInteractiveSessionId=1;explorer=@()}) -Stage assertion) -eq 'explorer-absent') 'Explorer absent remains distinct'
+Assert-That ((Get-DevFleetE2EInteractiveDesktopFailureCategory -State ([pscustomobject]@{activeInteractiveSessionId=1;explorer=@([pscustomobject]@{owner='DEVFLEET-E2E-01\OtherUser'})}) -Stage assertion) -eq 'wrong-explorer-user') 'wrong Explorer user remains distinct'
+Assert-That ((Get-DevFleetE2EInteractiveDesktopFailureCategory -State ([pscustomobject]@{activeInteractiveSessionId=1;explorer=@([pscustomobject]@{owner='DEVFLEET-E2E-01\E2EAdmin'})}) -Stage assertion) -eq 'wrong-noninteractive-session') 'wrong or noninteractive session remains distinct'
+Assert-That ($source -match '\$expectedActive=.*\$_.user -ieq ''E2EAdmin''' -and $source -match '\$bound=.*\$_.domain -ieq ''DEVFLEET-E2E-01''') 'quser case normalization does not reject the exact interactive principal'
+Assert-That ($source -match 'owner="\$\(\$owner\.Domain\)\\\$\(\$owner\.User\)"') 'Explorer owner identity preserves the CIM domain and user fields'
+
+Assert-That ($source -match 'Get-DevFleetE2ECredential' -and $source -match 'secrets.json' -or $source -match 'Secrets\.psm1') 'canonical DPAPI credential authority is used'
+Assert-That ($source -match 'LsaOpenPolicy' -and $source -match 'LsaStorePrivateData' -and $source -match 'LsaClose' -and $source -match 'LsaNtStatusToWinError') 'LSA protected DefaultPassword implementation exists'
+Assert-That ($source -match 'LsaStorePrivateData\(policy, ref key, IntPtr\.Zero\)' -and $source -match 'ClearAndProbe\(' -and $source -match '0x4' -and $source -match '\$clearAndProbeError -notin @\(0,2,1168\)' -and $source -match 'ZeroFreeGlobalAllocUnicode' -and $source -match 'ZeroFreeBSTR') 'LSA clear independently verifies absence and unmanaged secret zeroing are bounded'
+Assert-That ($source -match "InteractiveLogonMode = 'native-winlogon'" -and $source -match "SetValue\('AutoLogonCount',100" -and $source -notmatch 'AutoLogonCount -Value 1\b' -and $source -notmatch 'AutoLogonCount -Value 2\b') 'native Winlogon mode uses the historically successful bounded allowance'
+$nativeArmStart=$source.IndexOf('function Set-DevFleetE2EWinlogonAutologon');$nativeArmEnd=$source.IndexOf('function Restore-DevFleetE2EWinlogonBaseline',$nativeArmStart);$nativeArm=$source.Substring($nativeArmStart,$nativeArmEnd-$nativeArmStart)
+Assert-That ($nativeArm -match 'param\(\[securestring\]\$securePassword\)' -and $nativeArm -match 'SecureStringToBSTR' -and $nativeArm -match 'PtrToStringBSTR' -and $nativeArm -match 'ZeroFreeBSTR' -and $nativeArm -match 'SetValue\(''DefaultPassword'',\$plain') 'ordinary DefaultPassword write is confined to the bounded guest-only SecureString conversion helper'
+Assert-That ($nativeArm -match 'COMPUTERNAME.*DEVFLEET-E2E-01' -and $nativeArm -match 'SetValue\(''DefaultDomainName'',\[string\]\$env:COMPUTERNAME' -and $nativeArm -match 'SetValue\(''AutoLogonCount'',100') 'native helper asserts exact guest and uses exact local computer domain'
+Assert-That ($nativeArm -match 'OpenSubKey\(\$path,\$true\)' -and $nativeArm -match 'Flush\(\)' -and $nativeArm -notmatch 'Set-ItemProperty') 'native Winlogon mutation uses one direct guest RegistryKey handle and explicit flush'
+Assert-That ($nativeArm -notmatch 'ForceAutoLogon|IgnoreShiftOverride' -and $nativeArm -match 'defaultPasswordPresent=\$true') 'native helper adds no experimental Winlogon behavior and returns non-secret verification only'
+Assert-That ($source -match 'Get-AssertedDevFleetE2EL1' -and $source -match 'Get-DevFleetE2ECredential' -and $source -match 'pre-existing ordinary DefaultPassword') 'helper requires exact L1 identity and canonical DPAPI credential authority'
+Assert-That ($source -match 'MaximumLength = \(ushort\)\(key.Length \+ 2\)' -and $source -match 'MaximumLength = \(ushort\)\(privateData.Length \+ 2\)') 'LSA strings include terminating WCHAR capacity'
+Assert-That ($source -match 'Compare\(' -and $source -match 'secretMatchesCredential' -and $source -match 'secretPresent') 'LSA arm compares protected secret to canonical credential inside the guest without revealing it'
+Assert-That ($source -match 'attributes.Length = 0') 'LSA reserved object attributes remain zero initialized'
+Assert-That ($source -match 'IgnoreShiftOverridePresent' -and $source -match 'IgnoreShiftOverride=if' -and $nativeArm -notmatch 'IgnoreShiftOverride -Value') 'Winlogon shift bypass is baseline tracked and never forced by native mode'
+Assert-That ($source -match 'ForceAutoLogonPresent' -and $source -match 'ForceAutoLogon=if' -and $nativeArm -notmatch 'ForceAutoLogon -Value') 'Winlogon forced autologon is baseline tracked and never forced by native mode'
+Assert-That ($source -match 'DeleteValue\(''DefaultPassword'',\$false\)' -and $source -match 'ordinaryDefaultPasswordPresent=\$false') 'ordinary DefaultPassword is removed during cleanup'
+Assert-That ($source -match 'function Restore-DevFleetE2EWinlogonBaseline[\s\S]*Invoke-Command[\s\S]*-ArgumentList \$Baseline \| Out-Null') 'Winlogon baseline restore returns one authoritative result object'
+Assert-That ($source -match 'Restart-VM -VM' -and $source -match 'Remove-PSSession' -and $source -match 'QuietSettleSeconds' -and $source -match 'armDeadlineSeconds=120' -and $source -match 'rebootCount=1') 'host-controlled one-reboot quiet-settle and hard deadline are explicit'
+Assert-That ($source -match 'function Disarm-DevFleetE2EInteractiveLogon' -and $source -match 'function Assert-DevFleetE2EInteractiveDesktopAfterDisarm' -and $source -match 'survivesDisarm') 'disarm and active-session survival proof exist'
+Assert-That ($source -match 'function Clear-DevFleetE2EInteractiveLogonState' -and $source -match 'autologonStateCleared=\$true') 'final cleanup removes all autologon state'
+Assert-That ($source -match 'lsaClearedBeforeArm' -and $source -match 'lsaDefaultPasswordPresent=\$false' -and $source -match 'ordinaryDefaultPasswordPresent=\$false') 'native arm clears residual LSA state and disarm proves both credential authorities absent'
+Assert-That ($source -match 'DevFleetE2EGuestComputer' -and $source -match "expectedComputer='DEVFLEET-E2E-01'") 'guest identity is distinct from the Hyper-V host VM identity'
+Assert-That ($source -match 'pollProgress' -and $source -match 'pssession-unavailable' -and $source -match 'guest-state-collection-failure' -and $source -match 'wrong-explorer-user' -and $source -match 'lastSuccessfullyCollectedState' -and $source -match 'guestObservationCount') 'desktop wait preserves concise categorized progression and bounded final failure'
+Assert-That ($source -notmatch 'Write-Host[^\r\n]*(?:Secret|Password|credential)' -and $source -notmatch 'ConvertTo-Json[^\r\n]*(?:plain|secureSecret)') 'credential material is not written to logs or evidence'
+Assert-That ($source -match 'function Get-DevFleetE2EPreLogonPolicyState' -and $source -match 'LegalNoticeCaption' -and $source -match 'LegalNoticeText' -and $source -match 'utf16leSha256') 'pre-logon banner policy captures structural UTF-16 evidence'
+Assert-That ($source -match 'function Remove-DevFleetE2EPreLogonPolicy' -and $source -match 'function Restore-DevFleetE2EPreLogonPolicy' -and $source -match 'RegistryValueKind' -and $source -match 'LOGON_BANNER_POLICY_REASSERTED') 'banner suppression is bounded and restores exact disposable-lab policy'
+$policyFixture=[ordered]@{caption=[ordered]@{present=$true;registryValueKind='String';utf16CodeUnitCount=1;stringLength=1;isZeroLength=$false;isOnlyNulCharacters=$false;isOnlyWhitespace=$false;utf16leSha256='fixture';rawValue='not-durable'};text=[ordered]@{present=$true;registryValueKind='String';utf16CodeUnitCount=1;stringLength=1;isZeroLength=$false;isOnlyNulCharacters=$false;isOnlyWhitespace=$false;utf16leSha256='fixture';rawValue='not-durable'};source='unknown';sourceEvidence=[ordered]@{localPolicyRegistryPath=$true;domainPolicyRegistryPath=$false;policyManagerPath=$false}}
+$policyStructure=Get-DevFleetE2EPreLogonPolicyStructure -State $policyFixture
+Assert-That ($source -match 'rawValue' -and $source -match 'function Get-PolicyStructure' -and $source -match 'preLogonPolicyRestored' -and -not ($policyStructure.caption.Keys -contains 'rawValue') -and -not ($policyStructure.text.Keys -contains 'rawValue')) 'banner contents remain transient and cleanup truth is exposed without durable plaintext'
+$armOrder=@($nativeArm.IndexOf('SetValue'),$nativeArm.IndexOf('GetValueNames'),$nativeArm.IndexOf('Invoke-DevFleetE2ERegistryPersistenceBarrier'),$nativeArm.IndexOf('Get-DevFleetE2EWinlogonBaseline'))
+Assert-That (($armOrder|Where-Object{$_ -ge 0}).Count -eq 4 -and $armOrder[0] -lt $armOrder[1] -and $armOrder[1] -lt $armOrder[2] -and $armOrder[2] -lt $armOrder[3]) 'Winlogon arm orders writes, readback, persistence barrier, and post-flush readback'
+$armFunction=$source.Substring($source.IndexOf('function Arm-DevFleetE2EInteractiveLogon'),$source.IndexOf('function Restart-DevFleetE2EL1')-$source.IndexOf('function Arm-DevFleetE2EInteractiveLogon'))
+Assert-That ($armFunction.IndexOf('registryPersistenceBarrier') -ge 0 -and $armFunction.IndexOf('Remove-PSSession') -gt $armFunction.IndexOf('registryPersistenceBarrier')) 'Winlogon persistence completes before arm session removal and host restart path'
+$policyRemove=$source.Substring($source.IndexOf('function Remove-DevFleetE2EPreLogonPolicy'),$source.IndexOf('function Restore-DevFleetE2EPreLogonPolicy')-$source.IndexOf('function Remove-DevFleetE2EPreLogonPolicy'))
+Assert-That ($policyRemove.IndexOf('DeleteValue') -lt $policyRemove.IndexOf('Invoke-DevFleetE2ERegistryPersistenceBarrier') -and $policyRemove.IndexOf('Invoke-DevFleetE2ERegistryPersistenceBarrier') -lt $policyRemove.IndexOf('Get-DevFleetE2EPreLogonPolicyState') -and $policyRemove -match 'preLogonPolicySuppressionPersisted') 'pre-logon suppression orders mutation, barrier, and verification with truthful persistence'
+$policyRestore=$source.Substring($source.IndexOf('function Restore-DevFleetE2EPreLogonPolicy'),$source.IndexOf('function Set-DevFleetE2EWinlogonAutologon')-$source.IndexOf('function Restore-DevFleetE2EPreLogonPolicy'))
+Assert-That ($policyRestore.IndexOf('SetValue') -lt $policyRestore.IndexOf('Invoke-DevFleetE2ERegistryPersistenceBarrier') -and $policyRestore.IndexOf('Invoke-DevFleetE2ERegistryPersistenceBarrier') -lt $policyRestore.IndexOf('Get-DevFleetE2EPreLogonPolicyState') -and $policyRestore -match 'preLogonPolicyRestorationPersisted') 'pre-logon restoration orders mutation, barrier, reread, and persistence evidence'
+$disarmFunction=$source.Substring($source.IndexOf('function Disarm-DevFleetE2EInteractiveLogon'),$source.IndexOf('function Clear-DevFleetE2EInteractiveLogonState')-$source.IndexOf('function Disarm-DevFleetE2EInteractiveLogon'))
+Assert-That ($disarmFunction.IndexOf('Restore-DevFleetE2EWinlogonBaseline') -lt $disarmFunction.IndexOf('Invoke-DevFleetE2EGuestLsa -Session $session -Clear') -and $disarmFunction.IndexOf('Invoke-DevFleetE2EGuestLsa -Session $session -Clear') -lt $disarmFunction.IndexOf('registryCleanupPersisted') -and $disarmFunction -match 'autologonBaselinePersistenceConfirmed' -and $disarmFunction -match 'preLogonPolicyRestorationPersisted') 'disarm removes ordinary registry state before durable LSA clear and PASS evidence'
+$clearFunction=$source.Substring($source.IndexOf('function Clear-DevFleetE2EInteractiveLogonState'),$source.IndexOf('function Assert-DevFleetE2EInteractiveDesktopAfterDisarm')-$source.IndexOf('function Clear-DevFleetE2EInteractiveLogonState'))
+Assert-That ($clearFunction.IndexOf('DeleteValue') -lt $clearFunction.IndexOf('Invoke-DevFleetE2ERegistryPersistenceBarrier') -and $clearFunction.IndexOf('Invoke-DevFleetE2ERegistryPersistenceBarrier') -lt $clearFunction.IndexOf('Get-DevFleetE2EWinlogonBaseline') -and $clearFunction -match 'temporaryDefaultPasswordRemovalPersisted') 'final clear orders transient removal, persistence barrier, reread, and force-stop evidence'
+
+$realPhase=Get-Content -LiteralPath (Join-Path $WorkspaceRoot 'automation\release-e2e\modules\executors\Invoke-RealProductPhase.psm1') -Raw
+$wpfDriver=Get-Content -LiteralPath (Join-Path $WorkspaceRoot 'automation\release-e2e\modules\executors\Invoke-WpfUiAutomation.ps1') -Raw
+Assert-That ($realPhase -match 'Arm-DevFleetE2EInteractiveLogon' -and $realPhase -match 'Restart-DevFleetE2EL1' -and $realPhase -match 'Wait-DevFleetE2EInteractiveDesktop' -and $realPhase -match 'Disarm-DevFleetE2EInteractiveLogon') 'legitimate product reboot re-arms one-shot autologon'
+Assert-That ($realPhase -match 'New-ScheduledTaskPrincipal -UserId \(\[string\]\$spec\.taskPrincipalUserId\)' -and $realPhase -match 'Resolve-TaskSid' -and $realPhase -match 'principalSidSha256' -and $realPhase -match 'driverIdentity' -and $realPhase -match 'candidateIdentity' -and $realPhase -match 'interactiveProof\.sessionId') 'driver and candidate share exact interactive Explorer session'
+Assert-That ($wpfDriver -match '\$driverPid\s*=\s*\[int\]\$PID' -and $wpfDriver -match 'driverSessionId' -and $wpfDriver -match 'processId=\[int\]\$process\.Id' -and $wpfDriver -match 'sessionId=\[int\]\$process\.SessionId') 'WPF driver records its own PID/session separately from candidate'
+$rebootStart=$realPhase.IndexOf('function Invoke-ProductRebootBoundary {');$rebootEnd=$realPhase.IndexOf('function New-ProductLifecycleCompletionAuthority {',$rebootStart);$rebootPath=$realPhase.Substring($rebootStart,$rebootEnd-$rebootStart)
+Assert-That ($rebootPath -notmatch 'Restart-Computer -Force' -and $rebootPath -notmatch 'AutoLogonCount.*100') 'product reboot path has no guest self-reboot or synthetic autologon retry'
+
+[pscustomobject]@{status=if($failures.Count -eq 0){'PASS'}else{'FAIL'};passed=$passed;total=$total;failures=@($failures)}|ConvertTo-Json -Depth 6
+
+```
+
+
+## FILE: automation/release-e2e/tests/Test-LifecycleObserverBehavior.ps1
+
+SHA256: 06eba1d0d13ede6fe3f63ff246d31b5bc725ef6901a430521e9641c2b4cb52f0 | Bytes: 99553 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([string]$WorkspaceRoot)
+$ErrorActionPreference='Stop'
+if(-not $WorkspaceRoot){$WorkspaceRoot=(Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path}
+$module=Join-Path $WorkspaceRoot 'automation\release-e2e\modules\executors\Invoke-RealProductPhase.psm1'
+Import-Module $module -Force
+Import-Module (Join-Path $WorkspaceRoot 'automation\release-e2e\modules\HarnessBudget.psm1') -Force
+Import-Module (Join-Path $WorkspaceRoot 'automation\release-e2e\modules\GuestSession.psm1') -Force
+$passed=0;$failed=[System.Collections.Generic.List[string]]::new();$script:testEvidenceDirs=[System.Collections.Generic.List[string]]::new();$lifeRoot=$null
+try {
+function Check([bool]$Condition,[string]$Name){if($Condition){$script:passed++}else{[void]$script:failed.Add($Name)}}
+$prior=[pscustomobject]@{checkpointGeneration=1;transactionId='a'*32;payloadSha256='b'*64;action='FreshInstall';role='Primary / Desktop';state='waiting-for-reboot'}
+function Obs([hashtable]$Values){$base=[ordered]@{checkpointPresent=$false;checkpoint=$null;matchingConsumedReceipt=$false;installStateValid=$false;canonicalOwnershipValid=$false;authenticatedHealthOk=$false;terminalFailure=$false};foreach($k in $Values.Keys){$base[$k]=$Values[$k]};[pscustomobject]$base}
+$next=Obs @{checkpointPresent=$true;checkpoint=[pscustomobject]@{checkpointGeneration=2;transactionId='a'*32;payloadSha256='b'*64;action='FreshInstall';role='Primary / Desktop';state='waiting-for-reboot'}}
+Check ((Get-DurableProgressClassification -Observation $next -PriorCheckpoint $prior -MaxGeneration 3) -eq 'NEXT_REBOOT') 'generation advancement returns NEXT_REBOOT'
+$gen1=Obs @{checkpointPresent=$true;checkpoint=$prior}
+Check ((Get-DurableProgressClassification -Observation $gen1 -PriorCheckpoint $prior -MaxGeneration 3) -eq 'NO_PROGRESS') 'generation 1 persistence is not another reboot'
+$complete=Obs @{matchingConsumedReceipt=$true;installStateValid=$true;canonicalOwnershipValid=$true;authenticatedHealthOk=$true}
+Check ((Get-DurableProgressClassification -Observation $complete -PriorCheckpoint $prior) -eq 'COMPLETED') 'matching receipt/install/ownership/authenticated health returns COMPLETED'
+$mismatch=Obs @{checkpointPresent=$true;checkpoint=[pscustomobject]@{checkpointGeneration=2;transactionId='c'*32;payloadSha256='b'*64;action='FreshInstall';role='Primary / Desktop';state='waiting-for-reboot'}}
+$mismatch.terminalFailure=$true
+Check ((Get-DurableProgressClassification -Observation $mismatch -PriorCheckpoint $prior) -eq 'TERMINAL_FAILURE') 'binding mismatch returns TERMINAL_FAILURE'
+$completedCheckpoint=Obs @{checkpointPresent=$true;checkpoint=$next.checkpoint;matchingConsumedReceipt=$true;installStateValid=$true;canonicalOwnershipValid=$true;authenticatedHealthOk=$true;status='COMPLETED'}
+Check ((Get-DurableProgressClassification -Observation $completedCheckpoint -PriorCheckpoint $prior -MaxGeneration 3) -eq 'TERMINAL_FAILURE') 'COMPLETED carrying an active checkpoint fails closed'
+$hiddenForeignCheckpoint=Obs @{checkpointPresent=$false;checkpoint=$mismatch.checkpoint}
+Check ((Get-DurableProgressClassification -Observation $hiddenForeignCheckpoint -PriorCheckpoint $prior -MaxGeneration 3) -eq 'TERMINAL_FAILURE') 'checkpointPresent false cannot hide a foreign checkpoint'
+$flagWithoutCheckpoint=Obs @{checkpointPresent=$true;checkpoint=$null}
+Check ((Get-DurableProgressClassification -Observation $flagWithoutCheckpoint -PriorCheckpoint $prior -MaxGeneration 3) -eq 'TERMINAL_FAILURE') 'checkpointPresent true with null checkpoint fails closed'
+$pending=Obs @{}
+Check ((Get-DurableProgressClassification -Observation $pending -PriorCheckpoint $prior) -ne 'NO_PROGRESS_TIMEOUT') 'DURABLE_PENDING is an intermediate observation, never timeout'
+Check ((Get-Command Wait-DevFleetProductLifecycleTransition).Name -eq 'Wait-DevFleetProductLifecycleTransition') 'observer is callable at runtime'
+$realPhaseModule=Get-Module Invoke-RealProductPhase
+# A source test must remain runnable while shipping edits await a new signed
+# candidate. Bind a temporary fixture inventory to an exact copy of this config;
+# never modify the live CURRENT-CANDIDATE authority to run a unit regression.
+$identityFixture=Join-Path ([IO.Path]::GetTempPath()) ('devfleet-observer-identity-'+[guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path (Join-Path $identityFixture 'source/config') -Force|Out-Null
+[void]$script:testEvidenceDirs.Add($identityFixture)
+$identityConfig=Join-Path $identityFixture 'source/config/devfleet.config.json'
+Copy-Item -LiteralPath (Join-Path $WorkspaceRoot 'source/config/devfleet.config.json') -Destination $identityConfig
+$identityHash=(Get-FileHash -LiteralPath $identityConfig).Hash.ToLowerInvariant()
+[ordered]@{candidateIsCurrent=$true;sourceChangedSinceCandidate=$false;rebuildRequired=$false;shippingInputIdentity=('c'*64);candidateShippingInputIdentity=('c'*64);candidateGitCommit=('d'*40);candidateShippingInputs=@([ordered]@{root='source';path='config/devfleet.config.json';sha256=$identityHash})}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $identityFixture 'CURRENT-CANDIDATE.json') -Encoding utf8NoBOM
+$productionContext=[pscustomobject]@{workspaceRoot=$identityFixture;r

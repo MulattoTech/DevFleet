@@ -83,11 +83,11 @@
   {
     "path": ".agents/skills/devfleet-certification-orchestrator/SKILL.md",
     "gitMode": "100644",
-    "gitBlob": "dc7e1e8b087f0703ab62477a60e0c94d214a95e6",
-    "bytes": 11215,
-    "sha256": "ac4722243f4de7a5e0d6d6e513a37e7b91a55c5fc875c113a5274ef5bb2a252f",
+    "gitBlob": "89d98e8625bfd7f03ae8ebcb3138c62b2dee1eb1",
+    "bytes": 13054,
+    "sha256": "ffda625a8d306d493dce3fdd6dbd668c4149f3e94e89a53f927331c58282b4ba",
     "destination": "github-repository/.agents/skills/devfleet-certification-orchestrator/SKILL.md",
-    "lfSha256": "ac4722243f4de7a5e0d6d6e513a37e7b91a55c5fc875c113a5274ef5bb2a252f"
+    "lfSha256": "ffda625a8d306d493dce3fdd6dbd668c4149f3e94e89a53f927331c58282b4ba"
   },
   {
     "path": ".agents/skills/devfleet-certification-orchestrator/scripts/FreshAttemptAdmission.ps1",
@@ -146,11 +146,11 @@
   {
     "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py",
     "gitMode": "100644",
-    "gitBlob": "15e217902784c001a0b92b96163b4391d6643e7c",
-    "bytes": 14012,
-    "sha256": "390aaf940dbce71efe84c37a4100214ee0d86e2d5f3389127f153db18f7e45a4",
+    "gitBlob": "64daef29a82d116a7a0ce4ab979f7ff75bfbc99e",
+    "bytes": 33508,
+    "sha256": "ff071a21d1c16ec3edd272eb8dd4ed163c3a32b021f5d9459c12923f0842cc08",
     "destination": "github-repository/.agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py",
-    "lfSha256": "390aaf940dbce71efe84c37a4100214ee0d86e2d5f3389127f153db18f7e45a4"
+    "lfSha256": "ff071a21d1c16ec3edd272eb8dd4ed163c3a32b021f5d9459c12923f0842cc08"
   },
   {
     "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/guest_auth_diagnosis.py",
@@ -196,6 +196,42 @@
     "sha256": "6f4bc5f5dcbf14324c13889e4066b3b5560f9a7e86df086a7e28ec6f7bd2a777",
     "destination": "github-repository/.agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_one_diagnostic_successor.py",
     "lfSha256": "6f4bc5f5dcbf14324c13889e4066b3b5560f9a7e86df086a7e28ec6f7bd2a777"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair2_successor.py",
+    "gitMode": "100644",
+    "gitBlob": "661c2c133d5f4ff543102d9a13de30d5ac39a31c",
+    "bytes": 5798,
+    "sha256": "c6dfe26882762f28038aa79fdb05727efe86312f3d981d3ed361c96567e05b9e",
+    "destination": "github-repository/.agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair2_successor.py",
+    "lfSha256": "c6dfe26882762f28038aa79fdb05727efe86312f3d981d3ed361c96567e05b9e"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair3_successor.py",
+    "gitMode": "100644",
+    "gitBlob": "63db3a2911d7025b1b3cc7d10634ded2f1235c24",
+    "bytes": 7316,
+    "sha256": "af9eb3ad99073405be07e0c73eb9f4fe676ee0efdebd931c05b4bbc8a8f9b8e4",
+    "destination": "github-repository/.agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair3_successor.py",
+    "lfSha256": "af9eb3ad99073405be07e0c73eb9f4fe676ee0efdebd931c05b4bbc8a8f9b8e4"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair4_successor.py",
+    "gitMode": "100644",
+    "gitBlob": "c19e9b49617fb8daf067f6c8aca918b22f0b7892",
+    "bytes": 4498,
+    "sha256": "90c8d331205d7756b0d52d59df02c30767c813c897dd95422f1cce4c9191a2be",
+    "destination": "github-repository/.agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair4_successor.py",
+    "lfSha256": "90c8d331205d7756b0d52d59df02c30767c813c897dd95422f1cce4c9191a2be"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair_successor.py",
+    "gitMode": "100644",
+    "gitBlob": "42592bd75956762dbbb5d52324c44d6ef15aaebb",
+    "bytes": 6408,
+    "sha256": "e4624eddff607aadd50ce32915a0bb55387ab3b7b73b2cff2dfdaf1aff54ca49",
+    "destination": "github-repository/.agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair_successor.py",
+    "lfSha256": "e4624eddff607aadd50ce32915a0bb55387ab3b7b73b2cff2dfdaf1aff54ca49"
   },
   {
     "path": ".agents/skills/devfleet-certification-orchestrator/tests/Test-CertificationOrchestratorVmFree.ps1",
@@ -560,11 +596,11 @@
   {
     "path": "automation/release-e2e/modules/BaselineLineage.psm1",
     "gitMode": "100644",
-    "gitBlob": "2ff19ee10e1c4612c4ca2f62709d5f75d2656893",
-    "bytes": 9063,
-    "sha256": "a3b3c2d0ae7ca17a38ee7a1554a3e00bd2b0e900ab82b2971077d9a22f879a0b",
+    "gitBlob": "915e9834c38ffbf8dbfddba7318cf51ca15114f9",
+    "bytes": 9065,
+    "sha256": "d29e14c6be17a8a8e8604cbcbfcd15d7501d81cd00cb788175d535748b20af75",
     "destination": "github-repository/automation/release-e2e/modules/BaselineLineage.psm1",
-    "lfSha256": "a3b3c2d0ae7ca17a38ee7a1554a3e00bd2b0e900ab82b2971077d9a22f879a0b"
+    "lfSha256": "d29e14c6be17a8a8e8604cbcbfcd15d7501d81cd00cb788175d535748b20af75"
   },
   {
     "path": "automation/release-e2e/modules/Candidate.psm1",
@@ -767,11 +803,11 @@
   {
     "path": "automation/release-e2e/modules/executors/Invoke-RealProductPhase.psm1",
     "gitMode": "100644",
-    "gitBlob": "04a496f20295b55717cb1b51a087cb5720418fe2",
-    "bytes": 344483,
-    "sha256": "75a9ae97cb6cedb6afd0f8286c08e4eb085f68b941e524f519a3f5620ef31d90",
+    "gitBlob": "2be74c2567902b0aa12f47ee68b502dbfb9fdfc5",
+    "bytes": 347094,
+    "sha256": "cbfcbfcdd2322fb4dc92f49d61a49c58a98608648a213360d130b5cb4451e3ef",
     "destination": "github-repository/automation/release-e2e/modules/executors/Invoke-RealProductPhase.psm1",
-    "lfSha256": "75a9ae97cb6cedb6afd0f8286c08e4eb085f68b941e524f519a3f5620ef31d90"
+    "lfSha256": "cbfcbfcdd2322fb4dc92f49d61a49c58a98608648a213360d130b5cb4451e3ef"
   },
   {
     "path": "automation/release-e2e/modules/executors/Invoke-RealUseAcceptance.py",
@@ -1181,11 +1217,11 @@
   {
     "path": "automation/release-e2e/tests/Test-NestedPrimaryReadiness.ps1",
     "gitMode": "100644",
-    "gitBlob": "01cd40d00efea1e8a6f08fb53d648ab6e435a352",
-    "bytes": 7138,
-    "sha256": "0a68b7434923f44cd33db97fa17ff2ff6e624cebc58d64e115046138e1e2f79b",
+    "gitBlob": "0ce10c37118378ec50de31a885ecb40a85f2d8e3",
+    "bytes": 9664,
+    "sha256": "167cd8a464fee826bfdfb77507f54ac008d84cd964094966001a43703986f142",
     "destination": "github-repository/automation/release-e2e/tests/Test-NestedPrimaryReadiness.ps1",
-    "lfSha256": "0a68b7434923f44cd33db97fa17ff2ff6e624cebc58d64e115046138e1e2f79b"
+    "lfSha256": "167cd8a464fee826bfdfb77507f54ac008d84cd964094966001a43703986f142"
   },
   {
     "path": "automation/release-e2e/tests/Test-NestedProductScenarioArgumentBinding.ps1",
@@ -1721,19 +1757,20 @@
   {
     "path": "installer-source/DevFleet.Setup/Payload/devfleet-v1.2.13.tar.gz",
     "gitMode": "100644",
-    "gitBlob": "7ffaf8b02203c6b2201ebde91af4090271900826",
-    "bytes": 529614,
-    "sha256": "48a41161394f5743808eec150631d87de6619ad2c3315f037a7bd23050adb29a",
-    "destination": "github-repository/installer-source/DevFleet.Setup/Payload/devfleet-v1.2.13.tar.gz"
+    "gitBlob": "20396f517fdb76e3f5fd89b65fd7394a785e9296",
+    "bytes": 530862,
+    "sha256": "e3176c500f652d6023dcb611ccd580567ed9448da343a5fd4c3649214ca0b654",
+    "destination": "github-repository/installer-source/DevFleet.Setup/Payload/devfleet-v1.2.13.tar.gz",
+    "lfSha256": "f017c122928f50185cf5e9fcc89a94a6ca99f67cdb8b8ab93f5de5d28cb0c739"
   },
   {
     "path": "installer-source/DevFleet.Setup/PayloadManifest.cs",
     "gitMode": "100644",
-    "gitBlob": "5189608731b13ce32323a750a13a512f1fd86f14",
+    "gitBlob": "439835762fb44dbf09458199f9415f4e59ee5e77",
     "bytes": 345,
-    "sha256": "8022cd17ccf21ac2827ac93ef21fa8922f38b61b2c9d078bfb802c031357335f",
+    "sha256": "3d59d604bf39f55204d33e3135ac256b0c4322458afd2e153ad2b61308c56e1d",
     "destination": "github-repository/installer-source/DevFleet.Setup/PayloadManifest.cs",
-    "lfSha256": "8022cd17ccf21ac2827ac93ef21fa8922f38b61b2c9d078bfb802c031357335f"
+    "lfSha256": "3d59d604bf39f55204d33e3135ac256b0c4322458afd2e153ad2b61308c56e1d"
   },
   {
     "path": "installer-source/DevFleet.Setup/Services/InstallerLifecycle.cs",
@@ -1801,11 +1838,11 @@
   {
     "path": "installer-source/INSTALLER-BUILD-MANIFEST.json",
     "gitMode": "100644",
-    "gitBlob": "d8b66472360c4c99a46a916761f6fdd5e86091f3",
+    "gitBlob": "6924c7e43235307dd02d25df7724db3c20a9ca10",
     "bytes": 594,
-    "sha256": "cef183d146be489ce3b0c9f868b26c6125a5f7733b5a51271ffcadfaf0cf4dcd",
+    "sha256": "daec80a6ce234bbdf9c29b823e98b8d4878a5181203afe2a5162efbe8b126cb5",
     "destination": "github-repository/installer-source/INSTALLER-BUILD-MANIFEST.json",
-    "lfSha256": "cef183d146be489ce3b0c9f868b26c6125a5f7733b5a51271ffcadfaf0cf4dcd"
+    "lfSha256": "daec80a6ce234bbdf9c29b823e98b8d4878a5181203afe2a5162efbe8b126cb5"
   },
   {
     "path": "installer-source/INSTALLER-OWNERSHIP-MODEL.md",
@@ -1882,11 +1919,11 @@
   {
     "path": "installer-source/OFFLINE-PAYLOAD-SHA256.txt",
     "gitMode": "100644",
-    "gitBlob": "2134d896d80336cbfc7136be0d61cfb9198a6ac0",
+    "gitBlob": "55b628a3fad3fe8308eeb71efea2c1c2071a6e3f",
     "bytes": 98,
-    "sha256": "5b09b852e593be0807c384c9375c76a3d5a9a858cb706b8fceae9d06459e4f56",
+    "sha256": "c5841878571b984f9c696efc951eecf48e7035f218771a726e29dd858cfe93d3",
     "destination": "github-repository/installer-source/OFFLINE-PAYLOAD-SHA256.txt",
-    "lfSha256": "5b09b852e593be0807c384c9375c76a3d5a9a858cb706b8fceae9d06459e4f56"
+    "lfSha256": "c5841878571b984f9c696efc951eecf48e7035f218771a726e29dd858cfe93d3"
   },
   {
     "path": "installer-source/Prepare-ReleaseInputs.ps1",
@@ -2044,11 +2081,11 @@
   {
     "path": "source/CHECKSUMS.sha256",
     "gitMode": "100644",
-    "gitBlob": "45cc95d924e741e1a07956089f3fecf83193b000",
-    "bytes": 77861,
-    "sha256": "2d7eb896c3b391816e8d8cd892a99b54641d99918ce22cd1d393103a348abf23",
+    "gitBlob": "4207a5e0eef9bb5911e112e27a71dc2b7f72ff6e",
+    "bytes": 77967,
+    "sha256": "9a68f8aae772cd3e761b58075618fe35b01a76fd1668059a7a5b33c255a951c4",
     "destination": "github-repository/source/CHECKSUMS.sha256",
-    "lfSha256": "2d7eb896c3b391816e8d8cd892a99b54641d99918ce22cd1d393103a348abf23"
+    "lfSha256": "9a68f8aae772cd3e761b58075618fe35b01a76fd1668059a7a5b33c255a951c4"
   },
   {
     "path": "source/DevFleet-v1.1.0-FILE-CHANGES.md",
@@ -2323,11 +2360,11 @@
   {
     "path": "source/app/devfleet/projects.py",
     "gitMode": "100644",
-    "gitBlob": "73c771059f8c31187b020fcefd374f65ec0d4c6c",
-    "bytes": 196892,
-    "sha256": "6ff44e69f1eb4219d8ba2f0a4bc8416c11c7378ce3cdabfcb7f8e78ee33e272b",
+    "gitBlob": "01f81aa419461164c6025491adbb4e4241d67c40",
+    "bytes": 197999,
+    "sha256": "69e28afc1b739e74d8118ac34f4222db40f58b80a87fbef2f58c3be368bc4671",
     "destination": "github-repository/source/app/devfleet/projects.py",
-    "lfSha256": "6ff44e69f1eb4219d8ba2f0a4bc8416c11c7378ce3cdabfcb7f8e78ee33e272b"
+    "lfSha256": "69e28afc1b739e74d8118ac34f4222db40f58b80a87fbef2f58c3be368bc4671"
   },
   {
     "path": "source/app/devfleet/request_guards.py",
@@ -7766,6 +7803,15 @@
     "lfSha256": "7fb003753a830ba6f20ece02678ff9a96016cc5b35b6a4a84e04a275d7145b1c"
   },
   {
+    "path": "source/tests/test_safety_backup_lease_drift.py",
+    "gitMode": "100644",
+    "gitBlob": "3803428ec244ee85855dcb7842acb75149ee6ac1",
+    "bytes": 4109,
+    "sha256": "fb7ee1c2c975d37447ddb4ef91ccb7673adfe7a84f7ba446f7ee6db9c39d2a2a",
+    "destination": "github-repository/source/tests/test_safety_backup_lease_drift.py",
+    "lfSha256": "fb7ee1c2c975d37447ddb4ef91ccb7673adfe7a84f7ba446f7ee6db9c39d2a2a"
+  },
+  {
     "path": "source/tests/test_security_config.py",
     "gitMode": "100644",
     "gitBlob": "a4aef4ec14afcedfddb6de5cfb87655f39e327f8",
@@ -8479,11 +8525,11 @@
   {
     "path": "tools/Build-AIAuditBundle.ps1",
     "gitMode": "100644",
-    "gitBlob": "078ca7f6c51e6ba5967f6244cdb56af310e7f01c",
-    "bytes": 95333,
-    "sha256": "4befd0c71379996d857fff6abb84ca07bd4bb021851d70a1e36c72926b3f8b58",
+    "gitBlob": "bc437c90c77068100a6d3256ddf0db0b98a881dd",
+    "bytes": 98855,
+    "sha256": "b629ddf29c295f25cd7e4072b6d06d8a43e78270686b44309ab43d3a984c744f",
     "destination": "github-repository/tools/Build-AIAuditBundle.ps1",
-    "lfSha256": "4befd0c71379996d857fff6abb84ca07bd4bb021851d70a1e36c72926b3f8b58"
+    "lfSha256": "b629ddf29c295f25cd7e4072b6d06d8a43e78270686b44309ab43d3a984c744f"
   },
   {
     "path": "tools/Build-ChatGPT-AuditBundle.ps1",
@@ -8578,11 +8624,11 @@
   {
     "path": "tools/baseline_lineage.py",
     "gitMode": "100644",
-    "gitBlob": "40c833a5bcdbaba74dd172652279bc26cf1e59de",
-    "bytes": 32796,
-    "sha256": "421e922e581def7c52827bb40e43b8e45a17669f43f8e7bba777bd924b38fe80",
+    "gitBlob": "e8f3294c4b8e5dbc3ef7761b5ee7342d340e6416",
+    "bytes": 60663,
+    "sha256": "52613d825b166702fa1ea1e2a61df01e5233a9ba7be36ca128a7d2adb5bbd5a7",
     "destination": "github-repository/tools/baseline_lineage.py",
-    "lfSha256": "421e922e581def7c52827bb40e43b8e45a17669f43f8e7bba777bd924b38fe80"
+    "lfSha256": "52613d825b166702fa1ea1e2a61df01e5233a9ba7be36ca128a7d2adb5bbd5a7"
   },
   {
     "path": "tools/compute_shipping_input_identity.py",
@@ -8619,6 +8665,24 @@
     "sha256": "e65e234f040d84909033ce93152a27ba0ee6948c58892cf6bcf9fe6ccb0e90d9",
     "destination": "github-repository/tools/run_portable_audit_tests.py",
     "lfSha256": "e65e234f040d84909033ce93152a27ba0ee6948c58892cf6bcf9fe6ccb0e90d9"
+  },
+  {
+    "path": "tools/test_baseline_generation3.py",
+    "gitMode": "100644",
+    "gitBlob": "1c017459f75b45d82f1370ef3f4631bab3f22da4",
+    "bytes": 11201,
+    "sha256": "801f0d7885ad41b73112c0025aee5f789d9ec3e4cbb52f650a267bca0af5a2f1",
+    "destination": "github-repository/tools/test_baseline_generation3.py",
+    "lfSha256": "801f0d7885ad41b73112c0025aee5f789d9ec3e4cbb52f650a267bca0af5a2f1"
+  },
+  {
+    "path": "tools/test_baseline_generation4.py",
+    "gitMode": "100644",
+    "gitBlob": "0158762100762f2eebcece4d5a32c024ba0e28b8",
+    "bytes": 14749,
+    "sha256": "5fda914ef2dc9fd8978149fe13b2d24d05fbe322a67e6563347908314aa4e72c",
+    "destination": "github-repository/tools/test_baseline_generation4.py",
+    "lfSha256": "5fda914ef2dc9fd8978149fe13b2d24d05fbe322a67e6563347908314aa4e72c"
   },
   {
     "path": "tools/test_baseline_lineage.py",
@@ -8675,6 +8739,15 @@
     "lfSha256": "9a823f6a74ca782ed6e7f2d3b8051bc9f79a0fa41557b61a494c4bf39c23f2f5"
   },
   {
+    "path": "tools/test_repair3_validator.py",
+    "gitMode": "100644",
+    "gitBlob": "f6784ff8a4a3efa79f1e86480c2a317585374ab9",
+    "bytes": 3911,
+    "sha256": "058ac7dac7ef6ce504a7103a110bf800d0d2aa7290b2d177ec0e9a2ae0e6148d",
+    "destination": "github-repository/tools/test_repair3_validator.py",
+    "lfSha256": "058ac7dac7ef6ce504a7103a110bf800d0d2aa7290b2d177ec0e9a2ae0e6148d"
+  },
+  {
     "path": "tools/test_validate_native_proof.py",
     "gitMode": "100644",
     "gitBlob": "b2338f8507b88ff6a03f602d7b80a5dd284f70db",
@@ -8704,10 +8777,10 @@
   {
     "path": "tools/validate_release_bundle.py",
     "gitMode": "100644",
-    "gitBlob": "938a3c44f4fab34f813fb539044da1de29bc88ec",
-    "bytes": 110347,
-    "sha256": "3bef9437795a08669e9fc2584f1ad1bf3d353d35b6416bd46d4a659206f7e4f7",
+    "gitBlob": "0ac32a6c4ce580af54eb5c52777f2cbc2f0295b1",
+    "bytes": 128592,
+    "sha256": "2fd84920a5fc7a6ee730c3e5629e5c56ed9c10f1e60766220b727f85939885da",
     "destination": "github-repository/tools/validate_release_bundle.py",
-    "lfSha256": "3bef9437795a08669e9fc2584f1ad1bf3d353d35b6416bd46d4a659206f7e4f7"
+    "lfSha256": "2fd84920a5fc7a6ee730c3e5629e5c56ed9c10f1e60766220b727f85939885da"
   }
 ]

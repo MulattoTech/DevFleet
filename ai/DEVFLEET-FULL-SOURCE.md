@@ -1,6 +1,6 @@
 # DevFleet complete tracked source text
 
-Provenance HEAD 110fc2ee4fe611518e302b0185e9499a8e8a7e40.
+Provenance original certification source HEAD 78e92440a51717f09f92676cba9c0b2e67d7b06c.
 Original byte hashes/modes are in ORIGINAL-SOURCE-INVENTORY.json.
 Binary files are indexed and included as real files in the repository.
 
@@ -1274,7 +1274,7 @@ The August 26 recovery record shows an agent-generated random guest password sav
 
 ## FILE: .agents/skills/devfleet-certification-orchestrator/SKILL.md
 
-SHA256: ac4722243f4de7a5e0d6d6e513a37e7b91a55c5fc875c113a5274ef5bb2a252f | Bytes: 11215 | Git mode: 100644
+SHA256: ffda625a8d306d493dce3fdd6dbd668c4149f3e94e89a53f927331c58282b4ba | Bytes: 13054 | Git mode: 100644
 
 ```
 ---
@@ -1316,28 +1316,19 @@ Also read `AGENTS.md`, `docs/ai/devfleet-release/START-HERE.md`, `docs/ai/devfle
 - Never reset, stash, clean, or discard the existing dirty evidence tree wholesale.
 - Never rebuild/sign unless a newly proven shipping defect requires it.
 - Never claim PASS from mocks, fastlane, diagnostics, or historical evidence.
-## Current frozen candidate tuple
-Treat these as expected until a fresh native read proves otherwise:
-- branch: `v1.2.13-audit-remediation`
-- repository HEAD: `3e54aa87b098d8b45f0cab066c8a5fe414ddfdde`
-- candidate build commit: `4f1ca4570466f1595c0f05fb84eab408f6e99b31`
-- shipping input identity: `e4f92a35bb9983d951747eafaeef2cc133a7a695ff73c0b46809cbdcb590ecb0`
-- release fingerprint: `b83cfcb13fd2b6bf3f8bbb0a576318b9166790527007ce7fef1ec45069d1541f`
-- tooling fingerprint: `ce38270ae38b901cc74e9fb7d5dc26d9ad4923ac8fd0b0a0423374dd6a3ba17e`
-- signed EXE SHA-256: `178d792d9a3dea995b21e1bff88b5864d554f70750fbc74c37d7006a9e5076e9`
-- shipping source remains frozen unless native evidence proves a material defect.
+## Current candidate tuple
+Read the current native candidate, qualification, journal, accepted baseline, and artifact records together. Recompute source and artifact hashes from actual files. Preserve the signed shipping inputs unless native evidence proves a material defect. A tuple copied into this skill or an old handoff is historical context, never current authority.
 
 ## Exact disposable lab
 - L1: `DevFleet-E2E-Win11-01`
 - L1 GUID: `84b7d8b8-ee6c-4085-aa29-4b0adc316de2`
-- CLEAN checkpoint: `DevFleet-E2E-CLEAN`
-- CLEAN GUID: `19865b76-4c3a-44f7-ba39-841e9d3c40c9`
+- Accepted CLEAN checkpoint: read the current native baseline pointer and its hash-bound receipt. The original `DevFleet-E2E-CLEAN` / `19865b76-4c3a-44f7-ba39-841e9d3c40c9` is historical lineage, not an automatic restore target.
 - nested L2 expected name: `DevFleet-E2E-Linux-01`
 Final state must be L1 OFF and nested L2 proven ABSENT using supported in-L1 inventory.
 
 ## Historical admission snapshot on 2026-09-25 (not the current campaign)
-- The last recorded standard-token receipt for this tuple is PASS: `standard-token-20260925T100200Z-c0299d15`. Reconcile current native identity before using it.
-- It is bound to the tuple above and came from `MULATTOTECHBOX\Developer`, Medium integrity, non-admin, non-elevated.
+- The then-recorded standard-token receipt was PASS: `standard-token-20260925T100200Z-c0299d15`. Reconcile current native identity before using any receipt.
+- It was bound to the September 25 tuple and came from `MULATTOTECHBOX\Developer`, Medium integrity, non-admin, non-elevated.
 - Exact CLEAN credential rehearsal proved the current Dylan DPAPI store has username `E2EAdmin` but its password is invalid.
 - The exact CLEAN rehearsal returned L1 to OFF.
 - Campaign B has zero recorded counters but later unreserved token/readiness invocations. Their accounting and sole owner need a native decision; do not infer unused allowance from zero counters.
@@ -1381,6 +1372,12 @@ This is VM-free, non-certifying qualification: static readiness, fastlane regres
 release-tooling tests, aggregate harness, audit coherence, git diff validation, shipping
 Python tests, installer tests, and candidate-tuple immutability. It writes logs only under
 `%LOCALAPPDATA%\DevFleet\CertificationPreflight\`.
+
+Run the full VM-free sweep once after the candidate tuple and relevant inputs are frozen. Capture its structured stdout as JSON outside the checkout and record its RunId, result path, SHA-256, exit code, and exact candidate/tooling/artifact tuple. Reuse that PASS only while the retained result says `fullLocalSweep=true`, `certificationCredit=false`, the tuple still matches, and no tested input or prerequisite has changed. A new chat, model, or documentation-only edit is not itself a reason to repeat the sweep. After a changed source/tooling input or failed group, rerun the relevant narrow suite first; repeat the full sweep when native staleness or the next gate requires it. If a known prerequisite is still blocked, run static readiness and the narrow relevant VM-free test rather than spending another full sweep. None of these results replace fresh raw HostSafety, exact owner/admission, accepted checkpoint, authenticated guest readiness, proofs, FullRelease, or final acceptance.
+
+Before starting an expensive native stage, prevalidate its downstream RunId grammar and ownership/reservation contract against the actual entrypoint, along with current tuple, qualification, accepted baseline, and fresh HostSafety. Earlier FullRelease evidence spent about 11 minutes in install work before a downstream RunId grammar rejection; this ordering catches that class of orchestration error without weakening any gate. Do not reserve, mutate the VM, or claim credit from this static check.
+
+Before charging a finite build/sign slot, prevalidate the post-build wrapper against the actual native output schema, including PowerShell enum serialization (Authenticode `Valid` can serialize as JSON numeric `0`), and run read-only artifact verification on a representative preserved output. A wrapper false-negative does not justify rerunning or refunding a charged native attempt; retain its terminal evidence and correct the wrapper before any separately authorized continuation, and assess reuse of verified signed output before rebuilding.
 
 After a legitimate matching credential/baseline prerequisite is established and a
 fresh diagnostic admission is valid, run
@@ -2112,7 +2109,7 @@ if (-not $LiveGuestAuth -and -not $result.staticPrerequisitesPass) { exit 2 }
 
 ## FILE: .agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py
 
-SHA256: 390aaf940dbce71efe84c37a4100214ee0d86e2d5f3389127f153db18f7e45a4 | Bytes: 14012 | Git mode: 100644
+SHA256: ff071a21d1c16ec3edd272eb8dd4ed163c3a32b021f5d9459c12923f0842cc08 | Bytes: 33508 | Git mode: 100644
 
 ```
 """Prospective DevFleet attempt journal; never produces certification evidence.
@@ -2134,15 +2131,63 @@ import tempfile
 
 POLICY_ID = 'DF-FRESH-CERTIFICATION-20260926'
 ONE_DIAGNOSTIC_ID = POLICY_ID + '-R2-D1'
+REPAIR_ID = POLICY_ID + '-R2-REPAIR-1'
+REPAIR2_ID = POLICY_ID + '-R2-REPAIR-2'
+REPAIR3_ID = POLICY_ID + '-R2-REPAIR-3'
+REPAIR4_ID = POLICY_ID + '-R2-REPAIR-4'
+REPAIR3_CANDIDATE_COMMIT = 'be0f1473838b4c2255d22efd99b25a58fd588a78'
+REPAIR3_SHIPPING_SHA256 = '4d7d2dcfd486adb622e413ed9abe894df6d105457e91aa0f96779d776a5e4b44'
+REPAIR3_SIGNED_EXE_SHA256 = '1ee8059ea9ae253ab358b9aec5241aae1019676cb54544b5f352080cdf132908'
+REPAIR3_FAILED_LEDGER_SHA256 = 'dffe7810cc2f1833ed73a9514a8a49e4d65eed67eac0bf936bf81a1c8d6521ff'
+REPAIR3_RECEIPT_SHA256 = 'b071752cc2042b3405c05856780f74bbecdc11d0c647c8b602404c73829034b6'
 LIMITS = {'standard-token': 3, 'laptop-proof': 3, 'desktop-proof': 3,
           'fullrelease': 3, 'diagnostic': 6, 'maintenance': 3, 'build-sign': 3}
 ONE_DIAGNOSTIC_LIMITS = {operation: (1 if operation == 'diagnostic' else 0)
                          for operation in LIMITS}
+REPAIR_LIMITS = {operation: (1 if operation in ('standard-token', 'diagnostic',
+                                               'laptop-proof', 'desktop-proof',
+                                               'fullrelease') else 0)
+                 for operation in LIMITS}
+REPAIR_SEQUENCE = (('standard-token', 'PASS_NATIVE_STANDARD_TOKEN'),
+                   ('diagnostic', 'PASS_READY_FOR_PROOF_RESERVATION'),
+                   ('laptop-proof', 'NATIVE_LAPTOP_PROOF_PASS'),
+                   ('desktop-proof', 'NATIVE_DESKTOP_PROOF_PASS'),
+                   ('fullrelease', 'NATIVE_FULLRELEASE_PASS'))
+REPAIR2_LIMITS = {operation: (1 if operation in ('build-sign', 'standard-token',
+                                                'diagnostic', 'laptop-proof',
+                                                'desktop-proof', 'fullrelease') else 0)
+                  for operation in LIMITS}
+REPAIR2_SEQUENCE = (('build-sign', 'PASS_NATIVE_BUILD_SIGN'),) + REPAIR_SEQUENCE
+REPAIR3_LIMITS = {operation: (1 if operation in ('standard-token', 'diagnostic',
+                                                'laptop-proof', 'desktop-proof',
+                                                'fullrelease') else 0)
+                  for operation in LIMITS}
+REPAIR3_SEQUENCE = REPAIR_SEQUENCE
+REPAIR4_LIMITS = dict(REPAIR3_LIMITS)
+REPAIR4_SEQUENCE = REPAIR_SEQUENCE
+
+
+def sequence_for(policy_id):
+    if policy_id == REPAIR2_ID:
+        return REPAIR2_SEQUENCE
+    if policy_id == REPAIR3_ID:
+        return REPAIR3_SEQUENCE
+    if policy_id == REPAIR4_ID:
+        return REPAIR4_SEQUENCE
+    return REPAIR_SEQUENCE
 
 
 def limits_for(policy_id):
     if policy_id == ONE_DIAGNOSTIC_ID:
         return ONE_DIAGNOSTIC_LIMITS
+    if policy_id == REPAIR_ID:
+        return REPAIR_LIMITS
+    if policy_id == REPAIR2_ID:
+        return REPAIR2_LIMITS
+    if policy_id == REPAIR3_ID:
+        return REPAIR3_LIMITS
+    if policy_id == REPAIR4_ID:
+        return REPAIR4_LIMITS
     if policy_id in (POLICY_ID, POLICY_ID + '-R2'):
         return LIMITS
     raise ValueError('Unsupported explicitly authorized campaign')
@@ -2207,9 +2252,122 @@ def atomic_write(path, value):
     finally:
         if os.path.exists(temporary): os.unlink(temporary)
 
-def initialize(ledger, authorization, predecessors, policy_id=POLICY_ID):
+def _load_repair3_receipt(path):
+    if not path:
+        raise ValueError('Repair3 immutable artifact receipt is required')
+    path = safe_path(path)
+    if not path.is_file():
+        raise ValueError('Repair3 immutable artifact receipt is required')
+    receipt = strict_json(path)
+    if digest(path) != REPAIR3_RECEIPT_SHA256:
+        raise ValueError('Repair3 artifact receipt source identity differs')
+    required = {'schemaVersion', 'contract', 'status', 'certificationCredit',
+                'repositoryHead', 'failedAttemptLedgerSha256',
+                'shippingInputIdentity', 'artifacts', 'signatureStatus',
+                'publicPromotionAllowed', 'publicPublisherTrust'}
+    if not isinstance(receipt, dict) or not required.issubset(receipt):
+        raise ValueError('Repair3 artifact receipt is malformed')
+    if receipt['schemaVersion'] != 1 or receipt['contract'] != 'devfleet-signed-build-output-inspection-v1':
+        raise ValueError('Repair3 artifact receipt schema is unsupported')
+    if receipt['status'] != 'PASS_VERIFIED_SIGNED_OUTPUT_WITH_FAILED_ADMISSION' or receipt['certificationCredit'] is not False:
+        raise ValueError('Repair3 artifact receipt is not non-certifying verified output')
+    if receipt['repositoryHead'] != REPAIR3_CANDIDATE_COMMIT:
+        raise ValueError('Repair3 artifact receipt candidate binding differs')
+    if receipt['failedAttemptLedgerSha256'] != REPAIR3_FAILED_LEDGER_SHA256:
+        raise ValueError('Repair3 artifact receipt failed ledger binding differs')
+    if receipt['shippingInputIdentity'] != REPAIR3_SHIPPING_SHA256:
+        raise ValueError('Repair3 artifact receipt shipping binding differs')
+    if receipt['signatureStatus'] != 'Valid' or receipt['publicPromotionAllowed'] is not False or receipt['publicPublisherTrust'] is not False:
+        raise ValueError('Repair3 artifact receipt signature/trust boundary differs')
+    artifacts = receipt['artifacts']
+    if not isinstance(artifacts, list) or len(artifacts) != 4:
+        raise ValueError('Repair3 artifact receipt must bind four artifacts')
+    names = set()
+    for artifact in artifacts:
+        if (not isinstance(artifact, dict)
+                or not {'name', 'path', 'sha256'}.issubset(artifact)
+                or not isinstance(artifact['name'], str) or not artifact['name']
+                or not isinstance(artifact['path'], str) or not artifact['path']
+                or not re.fullmatch(r'[a-f0-9]{64}', str(artifact['sha256']))):
+            raise ValueError('Repair3 artifact receipt contains malformed artifact')
+        if artifact['name'] in names:
+            raise ValueError('Repair3 artifact receipt contains duplicate artifact')
+        names.add(artifact['name'])
+    if names != {'exe', 'tar', 'portable', 'installerSource'}:
+        raise ValueError('Repair3 artifact receipt does not bind the exact four artifacts')
+    exe = next(artifact for artifact in artifacts if artifact['name'] == 'exe')
+    if exe['sha256'] != REPAIR3_SIGNED_EXE_SHA256:
+        raise ValueError('Repair3 artifact receipt signed executable binding differs')
+    return path
+
+
+def initialize(ledger, authorization, predecessors, policy_id=POLICY_ID, artifact_receipt=None):
     limits = limits_for(policy_id)
-    if policy_id == ONE_DIAGNOSTIC_ID:
+    if policy_id == REPAIR4_ID:
+        if len(predecessors) != 2 or safe_path(predecessors[0]) == safe_path(predecessors[1]):
+            raise ValueError('Fourth repair successor requires distinct terminal snapshot and live repair3 predecessor')
+        if safe_path(authorization) in (safe_path(predecessors[0]), safe_path(predecessors[1]), safe_path(ledger)):
+            raise ValueError('Fourth repair authorization must be a distinct source')
+        if digest(predecessors[0]) != digest(predecessors[1]):
+            raise ValueError('Fourth repair predecessor snapshot differs from live repair3 ledger')
+        parents = [load(p) for p in predecessors]
+        if any(p['policyId'] != REPAIR3_ID or p['activeRunId'] is not None
+               or len(p['attempts']) != len(REPAIR3_SEQUENCE)
+               or p['attempts'][-1].get('state') != 'TERMINAL'
+               or p['attempts'][-1].get('operation') != 'fullrelease'
+               or p['attempts'][-1].get('exitCode') != 2
+               or p['attempts'][-1].get('classification') != 'NATIVE_FULLRELEASE_BLOCKED'
+               for p in parents):
+            raise ValueError('Fourth repair successor requires terminal blocked repair3 FullRelease predecessor')
+        if parents[0]['authorization']['sha256'] == digest(authorization):
+            raise ValueError('Fourth repair successor requires separate explicit authorization')
+    elif policy_id == REPAIR3_ID:
+        if len(predecessors) != 2 or safe_path(predecessors[0]) == safe_path(predecessors[1]):
+            raise ValueError('Third repair successor requires distinct terminal snapshot and live repair2 predecessor')
+        if digest(predecessors[0]) != digest(predecessors[1]):
+            raise ValueError('Third repair predecessor snapshot differs from live repair2 ledger')
+        parents = [load(p) for p in predecessors]
+        if any(p['policyId'] != REPAIR2_ID or p['activeRunId'] is not None
+               or len(p['attempts']) != 1
+               or p['attempts'][-1].get('state') != 'TERMINAL'
+               or p['attempts'][-1].get('operation') != 'build-sign'
+               or p['attempts'][-1].get('exitCode') != 2
+               or p['attempts'][-1].get('classification') != 'BUILD_SIGN_BLOCKED'
+               for p in parents):
+            raise ValueError('Third repair successor requires terminal failed repair2 build-sign predecessor')
+        if parents[0]['authorization']['sha256'] == digest(authorization):
+            raise ValueError('Third repair successor requires separate explicit authorization')
+        artifact_receipt = _load_repair3_receipt(artifact_receipt)
+        receipt_data = strict_json(artifact_receipt)
+        if digest(predecessors[0]) != receipt_data['failedAttemptLedgerSha256']:
+            raise ValueError('Third repair predecessor does not match verified failed ledger')
+    elif policy_id == REPAIR2_ID:
+        if len(predecessors) != 2 or safe_path(predecessors[0]) == safe_path(predecessors[1]):
+            raise ValueError('Second repair successor requires distinct terminal snapshot and live repair predecessor')
+        if digest(predecessors[0]) != digest(predecessors[1]):
+            raise ValueError('Second repair predecessor snapshot differs from live repair ledger')
+        parents = [load(p) for p in predecessors]
+        if any(p['policyId'] != REPAIR_ID or p['activeRunId'] is not None
+               or len(p['attempts']) != len(REPAIR_SEQUENCE)
+               or p['attempts'][-1].get('state') != 'TERMINAL'
+               or p['attempts'][-1].get('operation') != 'fullrelease'
+               or p['attempts'][-1].get('exitCode') != 2
+               or p['attempts'][-1].get('classification') != 'NATIVE_FULLRELEASE_BLOCKED'
+               for p in parents):
+            raise ValueError('Second repair successor requires terminal failed FullRelease predecessor')
+        if parents[0]['authorization']['sha256'] == digest(authorization):
+            raise ValueError('Second repair successor requires separate explicit authorization')
+    elif policy_id == REPAIR_ID:
+        if len(predecessors) != 2 or safe_path(predecessors[0]) == safe_path(predecessors[1]):
+            raise ValueError('Repair successor requires distinct terminal snapshot and live R2 predecessor')
+        if digest(predecessors[0]) != digest(predecessors[1]):
+            raise ValueError('Repair predecessor snapshot differs from live R2')
+        parents = [load(p) for p in predecessors]
+        if any(p['policyId'] != POLICY_ID + '-R2' or p['activeRunId'] is not None for p in parents):
+            raise ValueError('Repair successor requires inactive R2 predecessor')
+        if parents[0]['authorization']['sha256'] == digest(authorization):
+            raise ValueError('Repair successor requires separate explicit authorization')
+    elif policy_id == ONE_DIAGNOSTIC_ID:
         parents = [load(p) for p in predecessors]
         if len(parents) != 1 or parents[0]['policyId'] != POLICY_ID + '-R2' or parents[0]['activeRunId'] is not None:
             raise ValueError('One-diagnostic successor requires one terminal R2 predecessor')
@@ -2232,12 +2390,15 @@ def initialize(ledger, authorization, predecessors, policy_id=POLICY_ID):
                 'authorization':{'path':str(authorization),'sha256':digest(authorization)},
                 'predecessors':[{'path':str(safe_path(p)),'sha256':digest(p)} for p in predecessors],
                 'limits':dict(limits),'attempts':[],'activeRunId':None,'certificationCredit':False}
+        if policy_id == REPAIR3_ID:
+            data['artifactReceipt'] = {'path': str(artifact_receipt),
+                                       'sha256': digest(artifact_receipt)}
         atomic_write(ledger,data)
     return status(ledger)
 
 def load(ledger):
     data = strict_json(ledger)
-    if not isinstance(data,dict) or type(data.get('schemaVersion')) is not int or data['schemaVersion'] != 1 or data.get('policyId') not in (POLICY_ID, POLICY_ID+'-R2', ONE_DIAGNOSTIC_ID):
+    if not isinstance(data,dict) or type(data.get('schemaVersion')) is not int or data['schemaVersion'] != 1 or data.get('policyId') not in (POLICY_ID, POLICY_ID+'-R2', ONE_DIAGNOSTIC_ID, REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID):
         raise ValueError('Unsupported campaign schema/identity')
     if data.get('certificationCredit') is not False:
         raise ValueError('Attempt accounting cannot grant certification credit')
@@ -2248,6 +2409,112 @@ def load(ledger):
     auth = data.get('authorization',{})
     if digest(safe_path(auth['path'])) != auth.get('sha256'):
         raise ValueError('Authorization source changed')
+    if data['policyId'] == REPAIR3_ID:
+        receipt = data.get('artifactReceipt')
+        if not isinstance(receipt, dict) or set(receipt) != {'path', 'sha256'}:
+            raise ValueError('Repair3 artifact receipt binding is missing')
+        receipt_path = _load_repair3_receipt(receipt['path'])
+        if digest(receipt_path) != receipt.get('sha256'):
+            raise ValueError('Repair3 artifact receipt changed')
+        if receipt_path == safe_path(ledger):
+            raise ValueError('Repair3 artifact receipt cannot be the ledger')
+    if data['policyId'] == REPAIR_ID:
+        predecessors = data.get('predecessors')
+        if not isinstance(predecessors, list) or len(predecessors) != 2:
+            raise ValueError('Repair predecessors are missing')
+        paths = [safe_path(p['path']) for p in predecessors]
+        if paths[0] in (paths[1], safe_path(ledger)) or paths[1] == safe_path(ledger):
+            raise ValueError('Repair predecessors are not distinct from successor')
+        if any(digest(path) != row.get('sha256') for path, row in zip(paths, predecessors)):
+            raise ValueError('Repair predecessor changed')
+        if digest(paths[0]) != digest(paths[1]):
+            raise ValueError('Repair snapshot and live R2 diverged')
+        parents = [load(path) for path in paths]
+        if any(parent['policyId'] != POLICY_ID + '-R2' or parent['activeRunId'] is not None
+               for parent in parents):
+            raise ValueError('Repair predecessor is not inactive R2')
+        r2_predecessors = parents[0].get('predecessors')
+        if not isinstance(r2_predecessors, list) or len(r2_predecessors) != 1:
+            raise ValueError('R2 predecessor lineage is missing')
+        base_path = safe_path(r2_predecessors[0]['path'])
+        if base_path in (*paths, safe_path(ledger)) or digest(base_path) != r2_predecessors[0].get('sha256'):
+            raise ValueError('R2 predecessor lineage changed')
+        base = load(base_path)
+        if base['policyId'] != POLICY_ID or base['activeRunId'] is not None:
+            raise ValueError('R2 predecessor is not inactive base campaign')
+        if parents[0]['authorization']['sha256'] == auth['sha256']:
+            raise ValueError('Repair successor authorization repeats R2 source')
+    if data['policyId'] == REPAIR2_ID:
+        predecessors = data.get('predecessors')
+        if not isinstance(predecessors, list) or len(predecessors) != 2:
+            raise ValueError('Second repair predecessors are missing')
+        paths = [safe_path(p['path']) for p in predecessors]
+        if paths[0] in (paths[1], safe_path(ledger)) or paths[1] == safe_path(ledger):
+            raise ValueError('Second repair predecessors are not distinct from successor')
+        if any(digest(path) != row.get('sha256') for path, row in zip(paths, predecessors)):
+            raise ValueError('Second repair predecessor changed')
+        if digest(paths[0]) != digest(paths[1]):
+            raise ValueError('Second repair snapshot and live predecessor diverged')
+        parents = [load(path) for path in paths]
+        if any(parent['policyId'] != REPAIR_ID or parent['activeRunId'] is not None
+               or len(parent['attempts']) != len(REPAIR_SEQUENCE)
+               or parent['attempts'][-1].get('state') != 'TERMINAL'
+               or parent['attempts'][-1].get('operation') != 'fullrelease'
+               or parent['attempts'][-1].get('exitCode') != 2
+               or parent['attempts'][-1].get('classification') != 'NATIVE_FULLRELEASE_BLOCKED'
+               for parent in parents):
+            raise ValueError('Second repair predecessor is not the terminal blocked first repair')
+        if parents[0]['authorization']['sha256'] == auth['sha256']:
+            raise ValueError('Second repair authorization repeats first repair source')
+    if data['policyId'] == REPAIR3_ID:
+        predecessors = data.get('predecessors')
+        if not isinstance(predecessors, list) or len(predecessors) != 2:
+            raise ValueError('Third repair predecessors are missing')
+        paths = [safe_path(p['path']) for p in predecessors]
+        if paths[0] in (paths[1], safe_path(ledger)) or paths[1] == safe_path(ledger):
+            raise ValueError('Third repair predecessors are not distinct from successor')
+        if any(digest(path) != row.get('sha256') for path, row in zip(paths, predecessors)):
+            raise ValueError('Third repair predecessor changed')
+        if digest(paths[0]) != digest(paths[1]):
+            raise ValueError('Third repair snapshot and live predecessor diverged')
+        parents = [load(path) for path in paths]
+        if any(parent['policyId'] != REPAIR2_ID or parent['activeRunId'] is not None
+               or len(parent['attempts']) != 1
+               or parent['attempts'][-1].get('state') != 'TERMINAL'
+               or parent['attempts'][-1].get('operation') != 'build-sign'
+               or parent['attempts'][-1].get('exitCode') != 2
+               or parent['attempts'][-1].get('classification') != 'BUILD_SIGN_BLOCKED'
+               for parent in parents):
+            raise ValueError('Third repair predecessor is not the terminal blocked repair2 build-sign')
+        receipt_data = strict_json(receipt['path'])
+        if digest(paths[0]) != receipt_data['failedAttemptLedgerSha256']:
+            raise ValueError('Third repair predecessor does not match verified failed ledger')
+        if parents[0]['authorization']['sha256'] == auth['sha256']:
+            raise ValueError('Third repair authorization repeats repair2 source')
+    if data['policyId'] == REPAIR4_ID:
+        predecessors = data.get('predecessors')
+        if not isinstance(predecessors, list) or len(predecessors) != 2:
+            raise ValueError('Fourth repair predecessors are missing')
+        paths = [safe_path(p['path']) for p in predecessors]
+        if paths[0] in (paths[1], safe_path(ledger)) or paths[1] == safe_path(ledger):
+            raise ValueError('Fourth repair predecessors are not distinct from successor')
+        if safe_path(auth['path']) in (*paths, safe_path(ledger)):
+            raise ValueError('Fourth repair authorization is not a distinct source')
+        if any(digest(path) != row.get('sha256') for path, row in zip(paths, predecessors)):
+            raise ValueError('Fourth repair predecessor changed')
+        if digest(paths[0]) != digest(paths[1]):
+            raise ValueError('Fourth repair snapshot and live predecessor diverged')
+        parents = [load(path) for path in paths]
+        if any(parent['policyId'] != REPAIR3_ID or parent['activeRunId'] is not None
+               or len(parent['attempts']) != len(REPAIR3_SEQUENCE)
+               or parent['attempts'][-1].get('state') != 'TERMINAL'
+               or parent['attempts'][-1].get('operation') != 'fullrelease'
+               or parent['attempts'][-1].get('exitCode') != 2
+               or parent['attempts'][-1].get('classification') != 'NATIVE_FULLRELEASE_BLOCKED'
+               for parent in parents):
+            raise ValueError('Fourth repair predecessor is not the terminal blocked repair3 FullRelease')
+        if parents[0]['authorization']['sha256'] == auth['sha256']:
+            raise ValueError('Fourth repair authorization repeats repair3 source')
     if data['policyId'] == ONE_DIAGNOSTIC_ID:
         predecessors = data.get('predecessors')
         if not isinstance(predecessors, list) or len(predecessors) != 1:
@@ -2286,6 +2553,17 @@ def load(ledger):
         raise ValueError('Ambiguous active attempt')
     if any(sum(a['operation']==op for a in attempts)>limit for op,limit in expected_limits.items()):
         raise ValueError('Campaign allowance exceeded')
+    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID):
+        sequence = sequence_for(data['policyId'])
+        if len(attempts) > len(sequence):
+            raise ValueError('Repair successor has too many phases')
+        for index, attempt in enumerate(attempts):
+            if attempt['operation'] != sequence[index][0]:
+                raise ValueError('Repair successor phase order changed')
+            if index < len(attempts) - 1 and (attempt.get('state') != 'TERMINAL'
+                    or attempt.get('exitCode') != 0
+                    or attempt.get('classification') != sequence[index][1]):
+                raise ValueError('Repair successor advanced past an unpassed prerequisite')
     return data
 
 def status(ledger):
@@ -2312,6 +2590,17 @@ def prepare(data, request):
     if data['activeRunId'] is not None: raise ValueError('Active attempt must be reconciled; crash is not a free replay')
     if any(a['runId']==request['runId'] for a in data['attempts']): raise ValueError('RunId has already been charged')
     if sum(a['operation']==request['operation'] for a in data['attempts'])>=limits[request['operation']]: raise ValueError('Operation allowance exhausted')
+    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID):
+        sequence = sequence_for(data['policyId'])
+        prior = data['attempts']
+        if (len(prior) >= len(sequence)
+                or request['operation'] != sequence[len(prior)][0]
+                or any(a['operation'] != expected_operation
+                       or a.get('state') != 'TERMINAL'
+                       or a.get('exitCode') != 0
+                       or a.get('classification') != expected_result
+                       for a, (expected_operation, expected_result) in zip(prior, sequence))):
+            raise ValueError('Repair successor phase order or prerequisite result is invalid')
     result=json.loads(json.dumps(request,allow_nan=False))
     result.update(state='RESERVED_CHARGED',reservedUtc=utc(),certificationCredit=False)
     return result
@@ -2340,10 +2629,11 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command',choices=['initialize','status','reserve','finish'])
     parser.add_argument('--ledger',required=True); parser.add_argument('--authorization'); parser.add_argument('--predecessor',action='append',default=[])
-    parser.add_argument('--policy-id',choices=[POLICY_ID,POLICY_ID+'-R2',ONE_DIAGNOSTIC_ID],default=POLICY_ID)
+    parser.add_argument('--policy-id',choices=[POLICY_ID,POLICY_ID+'-R2',ONE_DIAGNOSTIC_ID,REPAIR_ID,REPAIR2_ID,REPAIR3_ID,REPAIR4_ID],default=POLICY_ID)
+    parser.add_argument('--artifact-receipt')
     parser.add_argument('--request'); parser.add_argument('--dry-run',action='store_true')
     args=parser.parse_args()
-    if args.command=='initialize': result=initialize(args.ledger,args.authorization,args.predecessor,args.policy_id)
+    if args.command=='initialize': result=initialize(args.ledger,args.authorization,args.predecessor,args.policy_id,args.artifact_receipt)
     elif args.command=='status': result=status(args.ledger)
     elif args.command=='reserve': result=reserve(args.ledger,strict_json(args.request),args.dry_run)
     else:
@@ -2899,6 +3189,465 @@ class OneDiagnosticSuccessorTests(unittest.TestCase):
         self.r2.write_bytes(self.r2.read_bytes() + b' ')
         with self.assertRaisesRegex(ValueError, 'predecessor changed'):
             self.journal.status(self.d1)
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+```
+
+
+## FILE: .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair2_successor.py
+
+SHA256: c6dfe26882762f28038aa79fdb05727efe86312f3d981d3ed361c96567e05b9e | Bytes: 5798 | Git mode: 100644
+
+```
+"""VM-free fail-closed admission for one new signed-candidate repair successor."""
+import importlib.util
+import pathlib
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+
+HERE = pathlib.Path(__file__).resolve().parent
+
+
+class Repair2SuccessorTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('fresh_attempts', HERE / 'fresh_attempts.py')
+        self.journal = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.journal)
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = pathlib.Path(temp.name)
+        self.auth = [self.root / name for name in ('base-auth.md', 'r2-auth.md', 'repair1-auth.md', 'repair2-auth.md')]
+        for index, path in enumerate(self.auth):
+            path.write_text(f'distinct owner authorization {index}', encoding='utf-8')
+        self.base, self.r2, self.r2_snapshot, self.repair1, self.repair1_snapshot, self.repair2 = [
+            self.root / name for name in ('base.json', 'r2.json', 'r2-snapshot.json', 'repair1.json', 'repair1-snapshot.json', 'repair2.json')
+        ]
+        self.journal.initialize(self.base, self.auth[0], [])
+        self.journal.initialize(self.r2, self.auth[1], [self.base], self.journal.POLICY_ID + '-R2')
+        self.r2_snapshot.write_bytes(self.r2.read_bytes())
+        self.journal.initialize(self.repair1, self.auth[2], [self.r2_snapshot, self.r2], self.journal.REPAIR_ID)
+
+    def request(self, operation, run_id):
+        return {'runId': run_id, 'operation': operation,
+                'owner': {'pid': 1234, 'startUtc': datetime.now(timezone.utc).isoformat()},
+                'tuple': {'repositoryHead': 'a' * 40}, 'entrypoint': 'native-test.ps1',
+                'entrypointSha256': 'b' * 64, 'arguments': [],
+                'changedCondition': 'new signed candidate after fail-closed permanent-delete block',
+                'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+
+    def terminal_repair1(self):
+        for index, (operation, classification) in enumerate(self.journal.REPAIR_SEQUENCE):
+            request = self.request(operation, f'repair1-{index}')
+            self.journal.reserve(self.repair1, request)
+            code = 2 if operation == 'fullrelease' else 0
+            result = 'NATIVE_FULLRELEASE_BLOCKED' if code else classification
+            self.journal.finish(self.repair1, request['runId'], request['owner'], code, result, [])
+        self.repair1_snapshot.write_bytes(self.repair1.read_bytes())
+
+    def test_terminal_predecessor_and_exact_allowance(self):
+        self.terminal_repair1()
+        prior = self.repair1.read_bytes()
+        status = self.journal.initialize(self.repair2, self.auth[3],
+                                         [self.repair1_snapshot, self.repair1], self.journal.REPAIR2_ID)
+        self.assertEqual(self.repair1.read_bytes(), prior)
+        self.assertEqual(self.repair1_snapshot.read_bytes(), prior)
+        self.assertEqual(status['remaining'], {'standard-token': 1, 'laptop-proof': 1,
+                                               'desktop-proof': 1, 'fullrelease': 1,
+                                               'diagnostic': 1, 'maintenance': 0, 'build-sign': 1})
+        with self.assertRaises(ValueError):
+            self.journal.reserve(self.repair2, self.request('standard-token', 'out-of-order'), dry_run=True)
+        with self.assertRaises(ValueError):
+            self.journal.reserve(self.repair2, self.request('maintenance', 'disallowed'), dry_run=True)
+        request = self.request('build-sign', 'new-build')
+        self.journal.reserve(self.repair2, request)
+        self.journal.finish(self.repair2, request['runId'], request['owner'], 0,
+                            'PASS_NATIVE_BUILD_SIGN', [])
+        self.assertEqual(self.journal.status(self.repair2)['remaining']['build-sign'], 0)
+        with self.assertRaises(ValueError):
+            self.journal.reserve(self.repair2, self.request('build-sign', 'second-build'), dry_run=True)
+
+    def test_predecessor_or_authorization_drift_fails_closed(self):
+        with self.assertRaises(ValueError):
+            self.journal.initialize(self.repair2, self.auth[3], [self.repair1, self.repair1], self.journal.REPAIR2_ID)
+        self.terminal_repair1()
+        with self.assertRaises(ValueError):
+            self.journal.initialize(self.repair2, self.auth[2], [self.repair1_snapshot, self.repair1], self.journal.REPAIR2_ID)
+        self.repair1_snapshot.write_bytes(self.repair1_snapshot.read_bytes() + b' ')
+        with self.assertRaises(ValueError):
+            self.journal.initialize(self.repair2, self.auth[3], [self.repair1_snapshot, self.repair1], self.journal.REPAIR2_ID)
+        self.repair1_snapshot.write_bytes(self.repair1.read_bytes())
+        self.journal.initialize(self.repair2, self.auth[3], [self.repair1_snapshot, self.repair1], self.journal.REPAIR2_ID)
+        self.repair1.write_bytes(self.repair1.read_bytes() + b' ')
+        with self.assertRaisesRegex(ValueError, 'predecessor changed'):
+            self.journal.status(self.repair2)
+
+    def test_failed_build_sign_blocks_qualification(self):
+        self.terminal_repair1()
+        self.journal.initialize(self.repair2, self.auth[3], [self.repair1_snapshot, self.repair1], self.journal.REPAIR2_ID)
+        request = self.request('build-sign', 'failed-build')
+        self.journal.reserve(self.repair2, request)
+        self.journal.finish(self.repair2, request['runId'], request['owner'], 2, 'BUILD_SIGN_BLOCKED', [])
+        with self.assertRaises(ValueError):
+            self.journal.reserve(self.repair2, self.request('standard-token', 'qualification'), dry_run=True)
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+```
+
+
+## FILE: .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair3_successor.py
+
+SHA256: af9eb3ad99073405be07e0c73eb9f4fe676ee0efdebd931c05b4bbc8a8f9b8e4 | Bytes: 7316 | Git mode: 100644
+
+```
+"""VM-free prospective admission tests for the R2 repair-3 policy."""
+import importlib.util
+import json
+import pathlib
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+
+HERE = pathlib.Path(__file__).resolve().parent
+
+
+class Repair3SuccessorTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('fresh_attempts', HERE / 'fresh_attempts.py')
+        self.journal = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.journal)
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = pathlib.Path(temp.name)
+        self.auth = [self.root / name for name in ('base.md', 'r2.md', 'r3.md')]
+        for i, path in enumerate(self.auth):
+            path.write_text(f'distinct authorization {i}', encoding='utf-8')
+        self.base, historical, historical_snapshot, repair1, repair1_snapshot, self.r2, self.r2_snapshot, self.r3, self.receipt = [
+            self.root / name for name in ('base.json', 'historical.json', 'historical-snapshot.json',
+                                          'repair1.json', 'repair1-snapshot.json', 'r2.json',
+                                          'r2-snapshot.json', 'r3.json', 'inspection.json')]
+        self.journal.initialize(self.base, self.auth[0], [])
+        self.journal.initialize(historical, self.auth[1], [self.base], self.journal.POLICY_ID + '-R2')
+        historical_snapshot.write_bytes(historical.read_bytes())
+        self.journal.initialize(repair1, self.auth[2], [historical_snapshot, historical], self.journal.REPAIR_ID)
+        for index, (operation, classification) in enumerate(self.journal.REPAIR_SEQUENCE):
+            request = self.request(operation, f'repair1-{index}')
+            self.journal.reserve(repair1, request)
+            code = 2 if operation == 'fullrelease' else 0
+            self.journal.finish(repair1, request['runId'], request['owner'], code,
+                                'NATIVE_FULLRELEASE_BLOCKED' if code else classification, [])
+        repair1_snapshot.write_bytes(repair1.read_bytes())
+        self.journal.initialize(self.r2, self.auth[1], [repair1_snapshot, repair1], self.journal.REPAIR2_ID)
+        self._terminal_repair2()
+        self.r2_snapshot.write_bytes(self.r2.read_bytes())
+        self.receipt.write_text(json.dumps({
+            'schemaVersion': 1,
+            'contract': 'devfleet-signed-build-output-inspection-v1',
+            'status': 'PASS_VERIFIED_SIGNED_OUTPUT_WITH_FAILED_ADMISSION',
+            'certificationCredit': False,
+            'repositoryHead': self.journal.REPAIR3_CANDIDATE_COMMIT,
+            'failedAttemptLedgerSha256': self.journal.REPAIR3_FAILED_LEDGER_SHA256,
+            'shippingInputIdentity': self.journal.REPAIR3_SHIPPING_SHA256,
+            'artifacts': [
+                {'name': 'exe', 'path': 'candidate.exe', 'sha256': self.journal.REPAIR3_SIGNED_EXE_SHA256},
+                {'name': 'tar', 'path': 'candidate.tar.gz', 'sha256': '2' * 64},
+                {'name': 'portable', 'path': 'candidate.zip', 'sha256': '3' * 64},
+                {'name': 'installerSource', 'path': 'installer.zip', 'sha256': '4' * 64},
+            ],
+            'signatureStatus': 'Valid', 'publicPromotionAllowed': False,
+            'publicPublisherTrust': False,
+        }), encoding='utf-8')
+        actual_dir = pathlib.Path(r'C:\Users\Dylan\Documents\Codex\2026-08-12\ex-2\work\DevFleet-v1.2.13-development\audit\agent-memory\attempts\DF-FRESH-CERTIFICATION-20260926-R2-REPAIR-2')
+        actual_ledger = actual_dir / 'ledger.json'
+        actual_receipt = actual_dir / 'signed-build-output-inspection.json'
+        self.r2.write_bytes(actual_ledger.read_bytes())
+        self.r2_snapshot.write_bytes(actual_ledger.read_bytes())
+        self.receipt = actual_receipt
+
+    def request(self, operation, run_id):
+        return {'runId': run_id, 'operation': operation,
+                'owner': {'pid': 1234, 'startUtc': datetime.now(timezone.utc).isoformat()},
+                'tuple': {'repositoryHead': self.journal.REPAIR3_CANDIDATE_COMMIT},
+                'entrypoint': 'native-test.ps1', 'entrypointSha256': 'b' * 64,
+                'arguments': [], 'changedCondition': 'wrapper numeric signatureStatus admission correction',
+                'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+
+    def _terminal_repair2(self):
+        request = self.request('build-sign', 'repair2-build-sign')
+        self.journal.reserve(self.r2, request)
+        self.journal.finish(self.r2, request['runId'], request['owner'], 2, 'BUILD_SIGN_BLOCKED', [])
+
+    def initialize(self):
+        return self.journal.initialize(self.r3, self.auth[2],
+                                       [self.r2_snapshot, self.r2], self.journal.REPAIR3_ID,
+                                       self.receipt)
+
+    def test_exact_allowance_and_strict_sequence(self):
+        status = self.initialize()
+        self.assertEqual(status['remaining'], {'standard-token': 1, 'laptop-proof': 1,
+                                               'desktop-proof': 1, 'fullrelease': 1,
+                                               'diagnostic': 1, 'maintenance': 0,
+                                               'build-sign': 0})
+        with self.assertRaises(ValueError):
+            self.journal.reserve(self.r3, self.request('build-sign', 'rebuild'), dry_run=True)
+        with self.assertRaises(ValueError):
+            self.journal.reserve(self.r3, self.request('diagnostic', 'out-of-order'), dry_run=True)
+        for index, (operation, classification) in enumerate(self.journal.REPAIR3_SEQUENCE):
+            request = self.request(operation, f'repair3-{index}')
+            self.journal.reserve(self.r3, request)
+            self.journal.finish(self.r3, request['runId'], request['owner'], 0, classification, [])
+        self.assertEqual(self.journal.status(self.r3)['attemptCount'], 5)
+
+    def test_rejects_wrong_predecessor_or_reused_authorization(self):
+        with self.assertRaises(ValueError):
+            self.journal.initialize(self.r3, self.auth[2], [self.r2, self.r2], self.journal.REPAIR3_ID, self.receipt)
+        with self.assertRaises(ValueError):
+            reused = self.journal.load(self.r2)['authorization']['path']
+            self.journal.initialize(self.r3, reused, [self.r2_snapshot, self.r2], self.journal.REPAIR3_ID, self.receipt)
+
+    def test_receipt_is_required_and_immutable(self):
+        with self.assertRaises(ValueError):
+            self.journal.initialize(self.r3, self.auth[2], [self.r2_snapshot, self.r2], self.journal.REPAIR3_ID)
+        tampered = self.root / 'tampered-inspection.json'
+        tampered.write_bytes(self.receipt.read_bytes() + b' ')
+        with self.assertRaisesRegex(ValueError, 'source identity differs'):
+            self.journal.initialize(self.r3, self.auth[2],
+                                    [self.r2_snapshot, self.r2], self.journal.REPAIR3_ID, tampered)
+
+    def test_substitute_predecessor_is_rejected(self):
+        self.initialize()
+        self.r2_snapshot.write_bytes(self.r2.read_bytes() + b' ')
+        with self.assertRaisesRegex(ValueError, 'predecessor changed'):
+            self.journal.status(self.r3)
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+```
+
+
+## FILE: .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair4_successor.py
+
+SHA256: 90c8d331205d7756b0d52d59df02c30767c813c897dd95422f1cce4c9191a2be | Bytes: 4498 | Git mode: 100644
+
+```
+"""VM-free admission checks for a proposed fourth repair successor.
+
+This test copies the terminal native predecessor; it never reserves a live RunId.
+"""
+import importlib.util
+import pathlib
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+
+
+HERE = pathlib.Path(__file__).resolve().parent
+NATIVE_REPAIR3 = (HERE.parents[4] / 'audit' / 'agent-memory' / 'attempts'
+                  / 'DF-FRESH-CERTIFICATION-20260926-R2-REPAIR-3' / 'ledger.json')
+
+
+class Repair4SuccessorTests(unittest.TestCase):
+    def setUp(self):
+        if not NATIVE_REPAIR3.is_file():
+            self.skipTest('Original native repair-3 ledger is unavailable')
+        spec = importlib.util.spec_from_file_location('fresh_attempts', HERE / 'fresh_attempts.py')
+        self.journal = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.journal)
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = pathlib.Path(temp.name)
+        self.live = self.root / 'repair3-live.json'
+        self.snapshot = self.root / 'repair3-terminal-snapshot.json'
+        self.live.write_bytes(NATIVE_REPAIR3.read_bytes())
+        self.snapshot.write_bytes(self.live.read_bytes())
+        self.authorization = self.root / 'distinct-owner-approval.md'
+        self.authorization.write_text('distinct proposed fourth repair authorization', encoding='utf-8')
+        self.successor = self.root / 'repair4.json'
+
+    def initialize(self):
+        return self.journal.initialize(self.successor, self.authorization,
+                                       [self.snapshot, self.live], self.journal.REPAIR4_ID)
+
+    def request(self, operation, run_id):
+        return {'runId': run_id, 'operation': operation,
+                'owner': {'pid': 1234, 'startUtc': datetime.now(timezone.utc).isoformat()},
+                'tuple': {'repositoryHead': 'a' * 40},
+                'entrypoint': 'reviewed-native-test.ps1', 'entrypointSha256': 'b' * 64,
+                'arguments': [], 'changedCondition': 'focused nested Primary readiness diagnosis',
+                'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+
+    def test_exact_allowance_order_and_no_refund(self):
+        status = self.initialize()
+        self.assertEqual(status['remaining'], {'standard-token': 1, 'laptop-proof': 1,
+                                               'desktop-proof': 1, 'fullrelease': 1,
+                                               'diagnostic': 1, 'maintenance': 0,
+                                               'build-sign': 0})
+        with self.assertRaises(ValueError):
+            self.journal.reserve(self.successor, self.request('diagnostic', 'out-of-order'), dry_run=True)
+        for index, (operation, result) in enumerate(self.journal.REPAIR4_SEQUENCE):
+            request = self.request(operation, f'repair4-{index}')
+            self.journal.reserve(self.successor, request)
+            self.journal.finish(self.successor, request['runId'], request['owner'], 0, result, [])
+        self.assertEqual(self.journal.status(self.successor)['attemptCount'], 5)
+        with self.assertRaises(ValueError):
+            self.journal.reserve(self.successor, self.request('fullrelease', 'extra'), dry_run=True)
+
+    def test_rejects_reused_authorization_and_changed_predecessor(self):
+        old_auth = self.journal.load(self.live)['authorization']['path']
+        with self.assertRaises(ValueError):
+            self.journal.initialize(self.successor, old_auth,
+                                    [self.snapshot, self.live], self.journal.REPAIR4_ID)
+        with self.assertRaises(ValueError):
+            self.journal.initialize(self.successor, self.snapshot,
+                                    [self.snapshot, self.live], self.journal.REPAIR4_ID)
+        self.initialize()
+        self.snapshot.write_bytes(self.snapshot.read_bytes() + b' ')
+        with self.assertRaisesRegex(ValueError, 'predecessor changed'):
+            self.journal.status(self.successor)
+
+    def test_rejects_wrong_parent_and_distinct_snapshot(self):
+        with self.assertRaises(ValueError):
+            self.journal.initialize(self.successor, self.authorization,
+                                    [self.live, self.live], self.journal.REPAIR4_ID)
+        self.snapshot.write_bytes(self.live.read_bytes() + b' ')
+        with self.assertRaises(ValueError):
+            self.initialize()
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+```
+
+
+## FILE: .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair_successor.py
+
+SHA256: e4624eddff607aadd50ce32915a0bb55387ab3b7b73b2cff2dfdaf1aff54ca49 | Bytes: 6408 | Git mode: 100644
+
+```
+"""Fail-closed accounting for one proposed R2 repair successor; no lab access."""
+import importlib.util
+import pathlib
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+
+HERE = pathlib.Path(__file__).resolve().parent
+
+
+class RepairSuccessorTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('fresh_attempts', HERE / 'fresh_attempts.py')
+        self.journal = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.journal)
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = pathlib.Path(temp.name)
+        self.base_auth = self.root / 'base-authorization.md'
+        self.r2_auth = self.root / 'r2-authorization.md'
+        self.repair_auth = self.root / 'repair-authorization.md'
+        for path, content in ((self.base_auth, 'base owner authorization'),
+                              (self.r2_auth, 'R2 owner authorization'),
+                              (self.repair_auth, 'separate bounded repair authorization')):
+            path.write_text(content, encoding='utf-8')
+        self.base = self.root / 'base.json'
+        self.r2 = self.root / 'r2.json'
+        self.snapshot = self.root / 'r2-terminal-snapshot.json'
+        self.repair = self.root / 'r2-repair.json'
+        self.journal.initialize(self.base, self.base_auth, [])
+        self.journal.initialize(self.r2, self.r2_auth, [self.base], self.journal.POLICY_ID + '-R2')
+
+    def request(self, operation, run_id):
+        return {'runId': run_id, 'operation': operation,
+                'owner': {'pid': 1234, 'startUtc': datetime.now(timezone.utc).isoformat()},
+                'tuple': {'repositoryHead': 'a' * 40}, 'entrypoint': 'native-test.ps1',
+                'entrypointSha256': 'b' * 64, 'arguments': [],
+                'changedCondition': 'bounded repair successor behavioral test',
+                'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+
+    def initialize(self):
+        self.snapshot.write_bytes(self.r2.read_bytes())
+        return self.journal.initialize(self.repair, self.repair_auth,
+                                       [self.snapshot, self.r2], self.journal.REPAIR_ID)
+
+    def succeed(self, operation, number):
+        request = self.request(operation, f'repair-{number}')
+        self.journal.reserve(self.repair, request)
+        expected = dict(self.journal.REPAIR_SEQUENCE)[operation]
+        self.journal.finish(self.repair, request['runId'], request['owner'], 0,
+                            expected, [])
+
+    def test_exact_finite_limits_preserve_r2(self):
+        before = self.r2.read_bytes()
+        status = self.initialize()
+        self.assertEqual(self.r2.read_bytes(), before)
+        self.assertEqual(self.snapshot.read_bytes(), before)
+        self.assertEqual(status['remaining'], {'standard-token': 1, 'laptop-proof': 1,
+                                               'desktop-proof': 1, 'fullrelease': 1,
+                                               'diagnostic': 1, 'maintenance': 0,
+                                               'build-sign': 0})
+        for operation in ('maintenance', 'build-sign'):
+            with self.assertRaises(ValueError):
+                self.journal.reserve(self.repair, self.request(operation, operation), dry_run=True)
+        with self.assertRaises(ValueError):
+            self.journal.reserve(self.repair, self.request('diagnostic', 'out-of-order'), dry_run=True)
+        self.succeed('standard-token', 1)
+        self.journal.reserve(self.repair, self.request('diagnostic', 'repair-diagnostic'))
+        self.assertEqual(self.journal.status(self.repair)['remaining']['diagnostic'], 0)
+        self.assertIsNone(self.journal.status(self.r2)['active'])
+
+    def test_missing_or_reused_authorization_or_wrong_predecessors_rejected(self):
+        self.snapshot.write_bytes(self.r2.read_bytes())
+        for predecessors, authorization in (([self.snapshot], self.repair_auth),
+                                            ([self.r2, self.r2], self.repair_auth),
+                                            ([self.snapshot, self.r2], self.r2_auth)):
+            with self.assertRaises(ValueError):
+                self.journal.initialize(self.repair, authorization,
+                                        predecessors, self.journal.REPAIR_ID)
+
+    def test_snapshot_and_live_r2_must_match_and_remain_pinned(self):
+        self.snapshot.write_bytes(self.r2.read_bytes() + b' ')
+        with self.assertRaises(ValueError):
+            self.journal.initialize(self.repair, self.repair_auth,
+                                    [self.snapshot, self.r2], self.journal.REPAIR_ID)
+        self.initialize()
+        self.r2.write_bytes(self.r2.read_bytes() + b' ')
+        with self.assertRaisesRegex(ValueError, 'predecessor changed'):
+            self.journal.status(self.repair)
+
+    def test_existing_successor_cannot_reset_or_refund(self):
+        self.initialize()
+        for number, operation in enumerate(('standard-token', 'diagnostic',
+                                            'laptop-proof', 'desktop-proof')):
+            self.succeed(operation, number)
+        request = self.request('fullrelease', 'repair-fullrelease')
+        self.journal.reserve(self.repair, request)
+        self.journal.finish(self.repair, request['runId'], request['owner'], 2,
+                            'BLOCKED', [])
+        with self.assertRaises(ValueError):
+            self.journal.initialize(self.repair, self.repair_auth,
+                                    [self.snapshot, self.r2], self.journal.REPAIR_ID)
+        with self.assertRaises(ValueError):
+            self.journal.reserve(self.repair,
+                                 self.request('fullrelease', 'repair-second'), dry_run=True)
+
+    def test_failed_qualification_blocks_later_phases(self):
+        self.initialize()
+        request = self.request('standard-token', 'repair-standard-failed')
+        self.journal.reserve(self.repair, request)
+        self.journal.finish(self.repair, request['runId'], request['owner'], 2,
+                            'STANDARD_TOKEN_BLOCKED', [])
+        with self.assertRaises(ValueError):
+            self.journal.reserve(self.repair,
+                                 self.request('diagnostic', 'repair-next'), dry_run=True)
 
 
 if __name__ == '__main__':
@@ -6517,7 +7266,7 @@ SHA256: 8c6950ea31bc4e517f4c0ffc31f17ae6244fe9fe94df5646046fb1c6d07095b7 | Bytes
 
 ## FILE: automation/release-e2e/modules/BaselineLineage.psm1
 
-SHA256: a3b3c2d0ae7ca17a38ee7a1554a3e00bd2b0e900ab82b2971077d9a22f879a0b | Bytes: 9063 | Git mode: 100644
+SHA256: d29e14c6be17a8a8e8604cbcbfcd15d7501d81cd00cb788175d535748b20af75 | Bytes: 9065 | Git mode: 100644
 
 ```
 Set-StrictMode -Version Latest
@@ -6549,8 +7298,8 @@ function Get-DevFleetAcceptedBaseline {
     $pointerItem=Get-Item -LiteralPath $pointerPath -Force -ErrorAction Stop
     if(($pointerItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $pointerItem.Length -gt 1048576){throw 'Accepted baseline pointer is linked or oversized.'}
     $pointer=Get-Content -LiteralPath $pointerPath -Raw -ErrorAction Stop|ConvertFrom-Json -ErrorAction Stop
-    if([int]$pointer.generation -eq 2){
-        # The generation-2 reader validates the complete archived pointer and
+    if([int]$pointer.generation -in @(2,3,4)){
+        # The rebound reader validates the complete archived pointer and
         # immutable receipt chain in the native strict-JSON transaction module.
         $expected=[ordered]@{
             repositoryHead=[string]$Fingerprint.repositoryHead
@@ -13357,7 +14106,7 @@ if __name__ == "__main__":
 
 ## FILE: automation/release-e2e/modules/executors/Invoke-RealProductPhase.psm1
 
-SHA256: 75a9ae97cb6cedb6afd0f8286c08e4eb085f68b941e524f519a3f5620ef31d90 | Bytes: 344483 | Git mode: 100644
+SHA256: cbfcbfcdd2322fb4dc92f49d61a49c58a98608648a213360d130b5cb4451e3ef | Bytes: 347094 | Git mode: 100644
 
 ```
 Set-StrictMode -Version Latest
@@ -15926,7 +16675,7 @@ function Get-DevFleetNestedPrimaryReadinessScriptBlock {
             $serviceCommand=[Environment]::ExpandEnvironmentVariables([string]$service.PathName)
             if($serviceCommand -notmatch [regex]::Escape($expectedDaemon)){throw 'Multipass service executable does not match the trusted installation.'}
             if([string]$service.StartName -notin @('LocalSystem','NT AUTHORITY\SYSTEM')){throw 'Multipass service identity is not LocalSystem.'}
-            $before=[string]$service.State;$initialPid=[int]$service.ProcessId;$forced=$false
+            $before=[string]$service.State;$initialPid=[int]$service.ProcessId;$forced=$false;$autoRestarted=$false
             if($before -ne 'Stopped'){& $ServiceControlProvider 'stop'}
             $stopDeadline=([datetime](& $ClockProvider)).AddSeconds(20);if($OwnerDeadlineUtc -lt $stopDeadline){$stopDeadline=$OwnerDeadlineUtc}
             do{$service=@(& $ServiceLookupProvider);if($service.Count -ne 1){throw "Expected exactly one Multipass service during stop; found $($service.Count)."};$service=$service[0];if([string]$service.State -eq 'Stopped'){break};& $SleepProvider 250}while([datetime](& $ClockProvider) -lt $stopDeadline)
@@ -15940,14 +16689,24 @@ function Get-DevFleetNestedPrimaryReadinessScriptBlock {
                 & $DaemonStopProvider $daemonPid;$forced=$true
                 $forcedDeadline=([datetime](& $ClockProvider)).AddSeconds(10);if($OwnerDeadlineUtc -lt $forcedDeadline){$forcedDeadline=$OwnerDeadlineUtc}
                 do{& $SleepProvider 250;$service=@(& $ServiceLookupProvider);if($service.Count -ne 1){throw "Expected exactly one Multipass service after daemon termination; found $($service.Count)."};$service=$service[0]}while([string]$service.State -ne 'Stopped' -and [datetime](& $ClockProvider) -lt $forcedDeadline)
-                if([string]$service.State -ne 'Stopped'){throw "Multipass service did not reach Stopped after exact daemon termination; state=$([string]$service.State)."}
+                if([string]$service.State -eq 'Running'){
+                    # SCM may restart the service immediately after its exact daemon exits.
+                    # Accept only a distinct trusted daemon; the caller must still re-probe
+                    # Multipass JSON inventory and the configured Primary's SSH readiness.
+                    $replacementPid=[int]$service.ProcessId
+                    if($replacementPid -le 0 -or $replacementPid -eq $daemonPid){throw 'Multipass service is Running without a new exact daemon PID after termination.'}
+                    $replacement=& $DaemonLookupProvider $replacementPid
+                    $replacementPath='';try{$replacementPath=[string]$replacement.Path}catch{}
+                    if([string]$replacement.ProcessName -cne 'multipassd' -or [string]::IsNullOrWhiteSpace($replacementPath) -or [IO.Path]::GetFullPath($replacementPath) -cne [IO.Path]::GetFullPath($expectedDaemon)){throw 'Multipass service auto-restarted outside the trusted daemon identity.'}
+                    $autoRestarted=$true
+                }elseif([string]$service.State -ne 'Stopped'){throw "Multipass service did not reach Stopped after exact daemon termination; state=$([string]$service.State)."}
             }
             if([datetime](& $ClockProvider) -ge $OwnerDeadlineUtc){throw 'Multipass control-plane recovery exhausted the readiness deadline before restart.'}
-            & $ServiceControlProvider 'start'
+            if(-not $autoRestarted){& $ServiceControlProvider 'start'}
             $startDeadline=([datetime](& $ClockProvider)).AddSeconds(45);if($OwnerDeadlineUtc -lt $startDeadline){$startDeadline=$OwnerDeadlineUtc}
             do{$service=@(& $ServiceLookupProvider);if($service.Count -ne 1){throw "Expected exactly one Multipass service during start; found $($service.Count)."};$service=$service[0];if([string]$service.State -eq 'Running'){break};& $SleepProvider 250}while([datetime](& $ClockProvider) -lt $startDeadline)
             if([string]$service.State -ne 'Running'){throw "Multipass service did not return to Running before the readiness deadline; state=$([string]$service.State)."}
-            [pscustomobject]@{status='PASS';service='Multipass';reason=$Reason;stateBefore=$before;stateAfter=[string]$service.State;forcedDaemonTermination=$forced;trustedDaemonPath=$expectedDaemon;ownerDeadlineUtc=$OwnerDeadlineUtc.ToUniversalTime().ToString('o')}
+            [pscustomobject]@{status='PASS';service='Multipass';reason=$Reason;stateBefore=$before;stateAfter=[string]$service.State;forcedDaemonTermination=$forced;trustedDaemonPath=$expectedDaemon;autoRestarted=$autoRestarted;ownerDeadlineUtc=$OwnerDeadlineUtc.ToUniversalTime().ToString('o')}
         }
         function Get-ExactNestedPrimaryVm {
             param([Parameter(Mandatory)][string]$ExpectedName)
@@ -15970,10 +16729,13 @@ function Get-DevFleetNestedPrimaryReadinessScriptBlock {
         # remain mandatory below. The recovery is confined to the exact
         # product Primary inside this disposable L1.
         $primaryReadiness=$null;$controlPlaneRecovery=$null;$inventoryResult=$null;$inventoryError=''
+        # Retain only categorical readiness telemetry on failure. Raw guest output,
+        # service command lines, addresses, and credentials do not belong here.
+        $readinessTrace=[ordered]@{inventory='UNVERIFIED';controlPlane='NONE';hyperVBefore='UNVERIFIED';hyperVCycle='NONE';infoAttempts=0;infoTimeouts=0;lastInfoClass='NOT_RUN'}
         try{$inventoryResult=& $probeInvoker @('list','--format','json') 30}catch{$inventoryError=$_.Exception.Message}
         if($inventoryError -or $inventoryResult.exitCode -ne 0){
             $failureClass=if($inventoryError){'TIMEOUT_OR_TRANSPORT_ERROR'}else{"NONZERO_EXIT_$([int]$inventoryResult.exitCode)"}
-            try{$controlPlaneRecovery=& $controlPlaneRecoveryInvoker $failureClass $readinessDeadline}catch{throw "MULTIPASS_CONTROL_PLANE_RECOVERY_FAILED: $($_.Exception.Message)"}
+            try{$controlPlaneRecovery=& $controlPlaneRecoveryInvoker $failureClass $readinessDeadline;$readinessTrace.controlPlane='RECOVERED'}catch{throw "MULTIPASS_CONTROL_PLANE_RECOVERY_FAILED: $($_.Exception.Message)"}
             $remaining=[int][Math]::Floor(($readinessDeadline-[datetime](& $ClockProvider)).TotalSeconds)
             if($remaining -le 0){throw 'MULTIPASS_CONTROL_PLANE_RECOVERY_FAILED: recovery exhausted the 180-second readiness deadline.'}
             $inventoryResult=$null;$inventoryError=''
@@ -15985,22 +16747,26 @@ function Get-DevFleetNestedPrimaryReadinessScriptBlock {
         $inventory=($inventoryRaw -join "`n")|ConvertFrom-Json
         $instances=@($inventory.list|Where-Object name -ceq $primary)
         if($instances.Count -ne 1){throw "Expected exactly one configured Primary instance inside L1; found $($instances.Count)."}
+        $readinessTrace.inventory='PASS'
         if(-not $primaryReadiness){$primaryReadiness=[ordered]@{initialMultipassState=[string]$instances[0].state;initialInfoExitCode=$null;recovery=if($controlPlaneRecovery){'bounded-Multipass-control-plane-recovery'}else{'none'};controlPlaneRecovery=$controlPlaneRecovery;hyperVStateBefore=$null;ipv4=$null;ready=$false}}else{$primaryReadiness.initialMultipassState=[string]$instances[0].state}
         $infoResult=$null;$infoError=''
         $remaining=[int][Math]::Floor(($readinessDeadline-[datetime](& $ClockProvider)).TotalSeconds)
-        if($remaining -gt 0){try{$infoResult=& $probeInvoker @('info',$primary) ([Math]::Min(90,$remaining))}catch{$infoError=$_.Exception.Message}}else{$infoError='readiness deadline exhausted before initial info probe'}
+        if($remaining -gt 0){$readinessTrace.infoAttempts++;try{$infoResult=& $probeInvoker @('info',$primary) ([Math]::Min(90,$remaining))}catch{$infoError=$_.Exception.Message;if($infoError -like 'Nested Multipass operation timed out*'){$readinessTrace.infoTimeouts++}}}else{$infoError='readiness deadline exhausted before initial info probe'}
         $primaryReadiness.initialInfoExitCode=if($infoResult){$infoResult.exitCode}else{$null}
         $infoText=if($infoResult){@($infoResult.stdout)-join "`n"}else{$infoError}
         $ipv4Match=[regex]::Match($infoText,'(?im)^\s*IPv4:\s*(?<ip>\S+)\s*$')
         $infoReady=($infoResult -and $infoResult.exitCode -eq 0 -and $ipv4Match.Success -and $ipv4Match.Groups['ip'].Value -notmatch '^(--|-)$')
+        $readinessTrace.lastInfoClass=if($infoReady){'READY'}elseif($infoResult -and $infoResult.exitCode -ne 0){'NONZERO'}elseif($infoResult){'NO_IPV4'}elseif($infoError -like 'Nested Multipass operation timed out*'){'TIMEOUT'}else{'TRANSPORT_ERROR'}
         # Checkpoint restore may preserve Hyper-V Running state without a
         # usable Multipass management address.  Reset only the nested VM in
         # this disposable L1, then wait for Multipass to report IPv4/SSH.
         if(-not $infoReady -or [string]$instances[0].state -ceq 'Stopped'){
             $primaryVm=Get-ExactNestedPrimaryVm -ExpectedName $primary
             $primaryReadiness.hyperVStateBefore=$primaryVm.State.ToString()
+            $readinessTrace.hyperVBefore=$primaryVm.State.ToString()
             if($primaryVm.State -ne 'Off'){& $VmStopProvider $primaryVm}
             & $VmStartProvider (& $VmLookupProvider -Id ([guid]$primaryVm.Id))|Out-Null
+            $readinessTrace.hyperVCycle='PASS'
             $primaryReadiness.recovery='bounded-disposable-nested-HyperV-powercycle'
         }
         $ready=$infoReady;$lastInfo=$infoText
@@ -16008,14 +16774,16 @@ function Get-DevFleetNestedPrimaryReadinessScriptBlock {
         while(-not $ready -and [datetime](& $ClockProvider) -lt $readinessDeadline){
             $remaining=[int][Math]::Floor(($readinessDeadline-[datetime](& $ClockProvider)).TotalSeconds);if($remaining -le 0){break}
             $infoResult=$null
-            try{$infoResult=& $probeInvoker @('info',$primary) ([Math]::Min(30,$remaining));$lastInfo=@($infoResult.output)-join "`n"}catch{$lastInfo=$_.Exception.Message}
+            $readinessTrace.infoAttempts++
+            try{$infoResult=& $probeInvoker @('info',$primary) ([Math]::Min(30,$remaining));$lastInfo=@($infoResult.output)-join "`n"}catch{$lastInfo=$_.Exception.Message;if($lastInfo -like 'Nested Multipass operation timed out*'){$readinessTrace.infoTimeouts++}}
             if($infoResult){$infoStdout=@($infoResult.stdout)-join "`n";$ipv4Match=[regex]::Match($infoStdout,'(?im)^\s*IPv4:\s*(?<ip>\S+)\s*$')}else{$ipv4Match=$null}
+            $readinessTrace.lastInfoClass=if(-not $infoResult){if($lastInfo -like 'Nested Multipass operation timed out*'){'TIMEOUT'}else{'TRANSPORT_ERROR'}}elseif($infoResult.exitCode -ne 0){'NONZERO'}elseif(-not $ipv4Match.Success -or $ipv4Match.Groups['ip'].Value -match '^(--|-)$'){'NO_IPV4'}else{'READY'}
             if($infoResult -and $infoResult.exitCode -eq 0 -and $ipv4Match.Success -and $ipv4Match.Groups['ip'].Value -notmatch '^(--|-)$'){
                 $ready=$true;$primaryReadiness.ipv4=$ipv4Match.Groups['ip'].Value;break
             }
             $remaining=[int][Math]::Floor(($readinessDeadline-[datetime](& $ClockProvider)).TotalSeconds);if($remaining -gt 0){& $SleepProvider ([Math]::Min(5000,$remaining*1000))}
         }
-        if(-not $ready){throw "Configured Primary did not become Multipass/SSH-ready within 180 seconds. Last info: $lastInfo"}
+        if(-not $ready){$traceText=@($readinessTrace.GetEnumerator()|ForEach-Object{"$($_.Key)=$($_.Value)"}) -join ';';throw "Configured Primary did not become Multipass/SSH-ready within 180 seconds. READINESS_TRACE: $traceText"}
         $primaryReadiness.ready=$true
         return $primaryReadiness
     }
@@ -22856,7 +23624,7 @@ Write-Host "PASS $count Campaign E Multipass diagnostic collector behavioral che
 
 ## FILE: automation/release-e2e/tests/Test-NestedPrimaryReadiness.ps1
 
-SHA256: 0a68b7434923f44cd33db97fa17ff2ff6e624cebc58d64e115046138e1e2f79b | Bytes: 7138 | Git mode: 100644
+SHA256: 167cd8a464fee826bfdfb77507f54ac008d84cd964094966001a43703986f142 | Bytes: 9664 | Git mode: 100644
 
 ```
 $ErrorActionPreference='Stop'
@@ -22866,19 +23634,21 @@ $originalComputerName=$env:COMPUTERNAME
 $checks=0
 try {
     $env:COMPUTERNAME='DEVFLEET-E2E-UNIT'
-    foreach($case in @('ready','inventory-timeout','inventory-timeout-forced','control-plane-recovery-failure','info-unready','wrong-instance','malformed-inventory','wrong-immutable-id','wrong-host')){
+    foreach($case in @('ready','inventory-timeout','inventory-timeout-forced','inventory-timeout-auto-restart','inventory-timeout-auto-restart-wrong-path','inventory-timeout-reused-pid','control-plane-recovery-failure','info-unready','info-timeout-exhausted','wrong-instance','malformed-inventory','wrong-immutable-id','wrong-host')){
         $multipassPath=Join-Path $env:ProgramFiles 'Multipass/bin/multipass.exe'
         $multipassDaemon=Join-Path (Split-Path -Parent $multipassPath) 'multipassd.exe'
-        $state=@{case=$case;calls=[Collections.Generic.List[string]]::new();probes=[Collections.Generic.List[object]]::new();mutations=[Collections.Generic.List[string]]::new();serviceControls=[Collections.Generic.List[string]]::new();daemonStops=[Collections.Generic.List[int]]::new();serviceState='Running';clock=[datetime]'2026-09-22T14:18:29Z';infoCount=0;listCount=0}
+        $state=@{case=$case;calls=[Collections.Generic.List[string]]::new();probes=[Collections.Generic.List[object]]::new();mutations=[Collections.Generic.List[string]]::new();serviceControls=[Collections.Generic.List[string]]::new();daemonStops=[Collections.Generic.List[int]]::new();serviceState='Running';servicePid=42;clock=[datetime]'2026-09-22T14:18:29Z';infoCount=0;listCount=0}
         $probe={param($Arguments,$TimeoutSeconds)
             $operation=[string]$Arguments[0];$state.calls.Add($operation);$state.probes.Add([pscustomobject]@{operation=$operation;timeoutSeconds=[int]$TimeoutSeconds})
             if($operation -eq 'list'){
                 $state.listCount++
-                if($state.case -in @('inventory-timeout','inventory-timeout-forced','control-plane-recovery-failure','wrong-immutable-id') -and $state.listCount -eq 1){throw 'native inventory TIMEOUT'}
+                if($state.case -in @('inventory-timeout','inventory-timeout-forced','inventory-timeout-auto-restart','inventory-timeout-auto-restart-wrong-path','inventory-timeout-reused-pid','control-plane-recovery-failure','wrong-immutable-id') -and $state.listCount -eq 1){throw 'native inventory TIMEOUT'}
                 $stdout=if($state.case -eq 'malformed-inventory'){'not-json'}elseif($state.case -eq 'wrong-instance'){'{"list":[{"name":"foreign","state":"Running"}]}'}else{'{"list":[{"name":"devfleet-primary","state":"Running"}]}'}
             }elseif($operation -eq 'info'){
                 $state.infoCount++
+                if($state.case -eq 'info-timeout-exhausted' -and $state.infoCount -gt 1){$state.clock=$state.clock.AddSeconds([int]$TimeoutSeconds);throw "Nested Multipass operation timed out after $TimeoutSeconds seconds: info devfleet-primary"}
                 $stdout=if($state.case -in @('info-unready','wrong-immutable-id') -and $state.infoCount -eq 1){'IPv4: --'}else{'IPv4: 10.0.0.2'}
+                if($state.case -eq 'info-timeout-exhausted'){$stdout='IPv4: --'}
             }else{throw 'Readiness attempted an unexpected operation'}
             [pscustomobject]@{exitCode=0;stdout=@($stdout);stderr=@();output=@($stdout)}
         }.GetNewClosure()
@@ -22889,15 +23659,15 @@ try {
         $start={param($Vm)if($Vm.Id -ne [guid]'11111111-1111-1111-1111-111111111111'){throw 'Wrong exact start target'};$state.mutations.Add('start')}.GetNewClosure()
         $serviceLookup={
             if($state.case -eq 'control-plane-recovery-failure'){throw 'controlled Multipass service recovery failure'}
-            [pscustomobject]@{Name='Multipass';State=$state.serviceState;ProcessId=42;PathName="`"$multipassDaemon`"";StartName='LocalSystem'}
+            [pscustomobject]@{Name='Multipass';State=$state.serviceState;ProcessId=$state.servicePid;PathName="`"$multipassDaemon`"";StartName='LocalSystem'}
         }.GetNewClosure()
         $serviceControl={param($Action)
             $state.serviceControls.Add([string]$Action)
-            if($Action -eq 'stop'){$state.serviceState=if($state.case -eq 'inventory-timeout-forced'){'Stop Pending'}else{'Stopped'}}
+            if($Action -eq 'stop'){$state.serviceState=if($state.case -in @('inventory-timeout-forced','inventory-timeout-auto-restart','inventory-timeout-auto-restart-wrong-path','inventory-timeout-reused-pid')){'Stop Pending'}else{'Stopped'}}
             elseif($Action -eq 'start'){$state.serviceState='Running'}else{throw 'Unexpected service control action'}
         }.GetNewClosure()
-        $daemonLookup={param($Id)if($Id -ne 42){throw 'Wrong daemon PID'};[pscustomobject]@{ProcessName='multipassd';Path=$multipassDaemon}}.GetNewClosure()
-        $daemonStop={param($Id)if($Id -ne 42){throw 'Wrong daemon stop PID'};$state.daemonStops.Add([int]$Id);$state.serviceState='Stopped'}.GetNewClosure()
+        $daemonLookup={param($Id)if($Id -ne 42 -and -not($Id -eq 43 -and $state.case -in @('inventory-timeout-auto-restart','inventory-timeout-auto-restart-wrong-path'))){throw 'Wrong daemon PID'};[pscustomobject]@{ProcessName='multipassd';Path=if($Id -eq 43 -and $state.case -eq 'inventory-timeout-auto-restart-wrong-path'){'C:\Untrusted\multipassd.exe'}else{$multipassDaemon}}}.GetNewClosure()
+        $daemonStop={param($Id)if($Id -ne 42){throw 'Wrong daemon stop PID'};$state.daemonStops.Add([int]$Id);$state.serviceState=if($state.case -in @('inventory-timeout-auto-restart','inventory-timeout-auto-restart-wrong-path','inventory-timeout-reused-pid')){'Running'}else{'Stopped'};if($state.case -in @('inventory-timeout-auto-restart','inventory-timeout-auto-restart-wrong-path')){$state.servicePid=43}}.GetNewClosure()
         $clock={$state.clock}.GetNewClosure()
         $sleep={param($Milliseconds)$state.clock=$state.clock.AddMilliseconds([int]$Milliseconds)}.GetNewClosure()
         $recoverArgs=@{
@@ -22906,24 +23676,29 @@ try {
         if($case -eq 'wrong-host'){$env:COMPUTERNAME=$originalComputerName}
         $failure=$null;$result=$null
         try{$result=& $readyBlock -Primary 'devfleet-primary' -MultipassPath $multipassPath -NativeProbeProvider $probe -VmLookupProvider $lookup -VmStopProvider $stop -VmStartProvider $start @recoverArgs}catch{$failure=$_.Exception.Message}
-        $expectedFailure=$case -in @('control-plane-recovery-failure','wrong-instance','malformed-inventory','wrong-immutable-id','wrong-host')
+        $expectedFailure=$case -in @('inventory-timeout-auto-restart-wrong-path','inventory-timeout-reused-pid','control-plane-recovery-failure','info-timeout-exhausted','wrong-instance','malformed-inventory','wrong-immutable-id','wrong-host')
         if($expectedFailure){
-            if(-not $failure -or $state.mutations.Count){throw "Readiness did not fail closed without mutation: $case"}
+            if(-not $failure -or ($case -ne 'info-timeout-exhausted' -and $state.mutations.Count)){throw "Readiness did not fail closed without mutation: $case"}
         }else{
             if($failure -or -not $result.ready -or $state.listCount -lt 1 -or $state.infoCount -lt 1){throw "Readiness bypassed inventory/info: $case / $failure"}
             $expectedMutations=if($case -eq 'info-unready'){'stop|start'}else{''}
             if(($state.mutations -join '|') -cne $expectedMutations){throw "Exact recovery sequence changed: $case"}
         }
-        $expectedServiceControls=if($case -in @('inventory-timeout','inventory-timeout-forced','wrong-immutable-id')){'stop|start'}else{''}
+        $expectedServiceControls=if($case -in @('inventory-timeout-auto-restart','inventory-timeout-auto-restart-wrong-path','inventory-timeout-reused-pid')){'stop'}elseif($case -in @('inventory-timeout','inventory-timeout-forced','wrong-immutable-id')){'stop|start'}else{''}
         if(($state.serviceControls -join '|') -cne $expectedServiceControls){throw "Control-plane recovery cardinality changed: $case"}
-        $expectedDaemonStops=if($case -eq 'inventory-timeout-forced'){1}else{0}
+        $expectedDaemonStops=if($case -in @('inventory-timeout-forced','inventory-timeout-auto-restart','inventory-timeout-auto-restart-wrong-path','inventory-timeout-reused-pid')){1}else{0}
         if($state.daemonStops.Count -ne $expectedDaemonStops){throw "Forced daemon recovery changed: $case"}
-        if($case -in @('inventory-timeout','inventory-timeout-forced') -and ([string]$result.controlPlaneRecovery.status -cne 'PASS' -or $state.listCount -ne 2 -or [bool]$result.controlPlaneRecovery.forcedDaemonTermination -ne ($case -eq 'inventory-timeout-forced'))){throw 'Inventory timeout did not recover the real control-plane path and re-probe inventory before guest mutation'}
+        if($case -in @('inventory-timeout','inventory-timeout-forced','inventory-timeout-auto-restart') -and ([string]$result.controlPlaneRecovery.status -cne 'PASS' -or $state.listCount -ne 2 -or [bool]$result.controlPlaneRecovery.forcedDaemonTermination -ne ($case -ne 'inventory-timeout'))){throw 'Inventory timeout did not recover the real control-plane path and re-probe inventory before guest mutation'}
+        if($case -eq 'inventory-timeout-reused-pid' -and $failure -cnotmatch 'exact daemon PID'){throw 'Recovery accepted a Running service without a new exact daemon PID'}
+        if($case -eq 'inventory-timeout-auto-restart-wrong-path' -and $failure -cnotmatch 'trusted daemon identity'){throw 'Recovery accepted a daemon outside the trusted installation'}
         if(@($state.probes|Where-Object{$_.operation -eq 'list' -and $_.timeoutSeconds -gt 30}).Count){throw "Inventory probe escaped its 30-second child bound: $case"}
         if($result -and $result.controlPlaneRecovery -and [datetime]$result.controlPlaneRecovery.ownerDeadlineUtc -ne [datetime]'2026-09-22T14:21:29Z'){throw "Control-plane recovery widened or replaced the 180-second owner deadline: $case"}
         if($state.clock -gt [datetime]'2026-09-22T14:21:29Z'){throw "Readiness exceeded the 180-second owner deadline: $case"}
         if($case -eq 'control-plane-recovery-failure' -and $failure -cnotmatch 'controlled Multipass service recovery failure'){throw 'Control-plane recovery failure lost its primary cause'}
         if($case -eq 'wrong-host' -and $state.calls.Count){throw 'Readiness called transport on the physical host'}
+        if($case -eq 'info-timeout-exhausted' -and ($state.mutations -join '|') -cne 'stop|start'){throw 'Timeout scenario did not retain exact nested VM recovery'}
+        if($case -eq 'info-timeout-exhausted' -and $failure -cnotmatch 'READINESS_TRACE:.*inventory=PASS.*hyperVBefore=Running.*infoTimeouts=[1-9]'){throw 'Timeout failure did not retain sanitized readiness trace'}
+        if($case -eq 'info-timeout-exhausted' -and $failure -cmatch 'Last info:|IPv4:|10\.0\.0\.2'){throw 'Timeout failure leaked raw nested info output'}
         $checks++;Write-Host "PASS $case"
     }
 }finally{$env:COMPUTERNAME=$originalComputerName}
@@ -29783,14 +30558,14 @@ public partial class MainWindow : Window
 
 ## FILE: installer-source/DevFleet.Setup/Payload/devfleet-v1.2.13.tar.gz
 
-SHA256: 48a41161394f5743808eec150631d87de6619ad2c3315f037a7bd23050adb29a | Bytes: 529614 | Git mode: 100644
+SHA256: e3176c500f652d6023dcb611ccd580567ed9448da343a5fd4c3649214ca0b654 | Bytes: 530862 | Git mode: 100644
 
 Binary file: retrieve the actual repository file at this path. It is not encoded into this reading document.
 
 
 ## FILE: installer-source/DevFleet.Setup/PayloadManifest.cs
 
-SHA256: 8022cd17ccf21ac2827ac93ef21fa8922f38b61b2c9d078bfb802c031357335f | Bytes: 345 | Git mode: 100644
+SHA256: 3d59d604bf39f55204d33e3135ac256b0c4322458afd2e153ad2b61308c56e1d | Bytes: 345 | Git mode: 100644
 
 ```
 namespace DevFleet.Setup;
@@ -29800,7 +30575,7 @@ internal static class PayloadManifest
     public const string DevFleetVersion = "1.2.13";
     public const string InstallerVersion = "1.4.1";
     public const string PayloadName = "devfleet-v1.2.13.tar.gz";
-    public const string PayloadSha256 = "48a41161394f5743808eec150631d87de6619ad2c3315f037a7bd23050adb29a";
+    public const string PayloadSha256 = "e3176c500f652d6023dcb611ccd580567ed9448da343a5fd4c3649214ca0b654";
 }
 ```
 
@@ -32817,7 +33592,7 @@ The application does not use a browser UI, winget, runtime network downloads, br
 
 ## FILE: installer-source/INSTALLER-BUILD-MANIFEST.json
 
-SHA256: cef183d146be489ce3b0c9f868b26c6125a5f7733b5a51271ffcadfaf0cf4dcd | Bytes: 594 | Git mode: 100644
+SHA256: daec80a6ce234bbdf9c29b823e98b8d4878a5181203afe2a5162efbe8b126cb5 | Bytes: 594 | Git mode: 100644
 
 ```
 {
@@ -32830,7 +33605,7 @@ SHA256: cef183d146be489ce3b0c9f868b26c6125a5f7733b5a51271ffcadfaf0cf4dcd | Bytes
   "singleFile": true,
   "payload": {
     "name": "devfleet-v1.2.13.tar.gz",
-    "sha256": "48a41161394f5743808eec150631d87de6619ad2c3315f037a7bd23050adb29a"
+    "sha256": "e3176c500f652d6023dcb611ccd580567ed9448da343a5fd4c3649214ca0b654"
   },
   "signing": "PRIVATE SELF-SIGNED AUTHENTICODE — exact candidate signing and verification required before release eligibility",
   "runtimeNetworkDownloads": false,
@@ -32958,10 +33733,10 @@ SHA256: ebae2e37de6de3d13ca931db09e4e88b96cf3ea2da6adea1400ce4cfb6937afa | Bytes
 
 ## FILE: installer-source/OFFLINE-PAYLOAD-SHA256.txt
 
-SHA256: 5b09b852e593be0807c384c9375c76a3d5a9a858cb706b8fceae9d06459e4f56 | Bytes: 98 | Git mode: 100644
+SHA256: c5841878571b984f9c696efc951eecf48e7035f218771a726e29dd858cfe93d3 | Bytes: 98 | Git mode: 100644
 
 ```
-48a41161394f5743808eec150631d87de6619ad2c3315f037a7bd23050adb29a  Payload/devfleet-v1.2.13.tar.gz
+e3176c500f652d6023dcb611ccd580567ed9448da343a5fd4c3649214ca0b654  Payload/devfleet-v1.2.13.tar.gz
 
 ```
 
@@ -33994,7 +34769,7 @@ Original safe remote-development baseline, preserved separately.
 
 ## FILE: source/CHECKSUMS.sha256
 
-SHA256: 2d7eb896c3b391816e8d8cd892a99b54641d99918ce22cd1d393103a348abf23 | Bytes: 77861 | Git mode: 100644
+SHA256: 9a68f8aae772cd3e761b58075618fe35b01a76fd1668059a7a5b33c255a951c4 | Bytes: 77967 | Git mode: 100644
 
 ```
 7c52807b9916d34cb980d01c85049e1443be953d813106b7931fe8e8d02feb50  BASELINE-v1.0.0-FILES.txt
@@ -34030,7 +34805,7 @@ ffd562d4c2685dacea1e183e708530ea4ccf04c20f19e2969d827190b286600b  app/devfleet/n
 5805e067353f237924b00fff0b0c595db779ccea061b7ad5e34186052dec0e6e  app/devfleet/ollama.py
 d60334d923abed24439342e38ce4061e702b76a64813082718d29946e6832437  app/devfleet/operations.py
 1cd0b8e2b31ac2ff724837205ac8f83d2ee6cb0916a679512f543b8557f2dcc5  app/devfleet/profiles.py
-6ff44e69f1eb4219d8ba2f0a4bc8416c11c7378ce3cdabfcb7f8e78ee33e272b  app/devfleet/projects.py
+69e28afc1b739e74d8118ac34f4222db40f58b80a87fbef2f58c3be368bc4671  app/devfleet/projects.py
 5162c54a20a1dfa99eea6eeed3773127a7f4714d067e7f5455b3adff1632f83a  app/devfleet/request_guards.py
 9bec3c14f6019fe4439065f8419dd7f11cc2de01ed9e9bd15bbbc5bf94102eb1  app/devfleet/resource_profiles.py
 0fde1265ee3895e9dd1b0369256eca1e55fa51532ff1918982ad03ee4f5e4aad  app/devfleet/runtime.py
@@ -34635,6 +35410,7 @@ f4af5c9897f923c4579ad5b5ede734d64067968ff58622b1bd25be24dccef66c  tests/test_rel
 de0445f35b1c084cd557e7edede914adf0282aa5931dc47fc6dcf86fc00bcdad  tests/test_remediation_contract.py
 084475db61c654d14637f96eaec248355c9f4c7d1c7e9c160835f622d62a66fc  tests/test_request_admission.py
 7fb003753a830ba6f20ece02678ff9a96016cc5b35b6a4a84e04a275d7145b1c  tests/test_runtime_architecture.py
+fb7ee1c2c975d37447ddb4ef91ccb7673adfe7a84f7ba446f7ee6db9c39d2a2a  tests/test_safety_backup_lease_drift.py
 e372fd0f3ddc6f2c90c244295828ad648abbcca689465ca29f7125d8e86ef6d5  tests/test_security_config.py
 3b38b5f668c5cf6e9868778a365f16a7b105f95b38e861a1165d8797d3e32744  tests/test_security_poison_harness.py
 e1284a9228410bb613bd8f942caf99d554e69d34d90f5e85e06a38f156531590  tests/test_transitive_hook_closure.py
@@ -41016,7 +41792,7 @@ def get_profile(name:str)->DevelopmentProfile:
 
 ## FILE: source/app/devfleet/projects.py
 
-SHA256: 6ff44e69f1eb4219d8ba2f0a4bc8416c11c7378ce3cdabfcb7f8e78ee33e272b | Bytes: 196892 | Git mode: 100644
+SHA256: 69e28afc1b739e74d8118ac34f4222db40f58b80a87fbef2f58c3be368bc4671 | Bytes: 197999 | Git mode: 100644
 
 ```
 from __future__ import annotations
@@ -41168,9 +41944,16 @@ def project_transfer_lock(slug: str):
         yield
 
 
-def _source_state_fingerprint(project: Path, *, include_generated: bool = False) -> str:
-    """Hash source paths and bytes, excluding only DevFleet's mutable metadata."""
+def _source_state_fingerprint(
+    project: Path,
+    *,
+    include_generated: bool = False,
+    exclude_ownership_lease: bool = False,
+    return_full_lease_variant: bool = False,
+) -> str | tuple[str, str]:
+    """Hash source bytes, optionally capturing both lease variants in one walk."""
     digest = hashlib.sha256()
+    full_digest = hashlib.sha256() if return_full_lease_variant else None
     for current, dirs, names in os.walk(project, topdown=True, followlinks=False):
         if not include_generated:
             dirs[:] = [d for d in dirs if d not in IGNORED_FINGERPRINT_DIRS]
@@ -41180,17 +41963,24 @@ def _source_state_fingerprint(project: Path, *, include_generated: bool = False)
             rel = path.relative_to(project).as_posix()
             if rel == ".devfleet/project.json":
                 continue
+            excluded_lease = exclude_ownership_lease and rel == ".devfleet/ownership-lease.json"
+            if excluded_lease and full_digest is None:
+                continue
             if path.is_symlink() or not path.is_file():
                 raise ValueError(
                     f"Workspace changed to an unsupported entry during destructive preparation: {rel}"
                 )
-            digest.update(rel.encode())
-            digest.update(b"\0")
+            targets = ([digest] if not excluded_lease else []) + ([full_digest] if full_digest else [])
+            for target in targets:
+                target.update(rel.encode())
+                target.update(b"\0")
             with path.open("rb") as handle:
                 for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(chunk)
-            digest.update(b"\0")
-    return digest.hexdigest()
+                    for target in targets:
+                        target.update(chunk)
+            for target in targets:
+                target.update(b"\0")
+    return (digest.hexdigest(), full_digest.hexdigest()) if full_digest else digest.hexdigest()
 
 
 def _safety_backup_fields(
@@ -45056,7 +45846,12 @@ def safety_backup_project(slug: str, _lock_held: bool = False) -> dict[str, Any]
             }
         )
         _write_project_metadata(project, meta)
-        before = _source_state_fingerprint(project, include_generated=True)
+        # backup_project records its verified backup in ownership-lease.json.
+        # Exclude that one self-update only from the during-backup comparison;
+        # the final binding still includes the complete post-backup lease.
+        before = _source_state_fingerprint(
+            project, include_generated=True, exclude_ownership_lease=True
+        )
         # Consistency is transaction-local and explicit.  The signature check
         # keeps older focused test doubles compatible without reintroducing
         # mutable module state.
@@ -45068,7 +45863,12 @@ def safety_backup_project(slug: str, _lock_held: bool = False) -> dict[str, Any]
             result = json.loads(backup_project(slug))
         result.setdefault("consistency_level", "quiesced")
         meta = load_authoritative_project_identity_for_mutation(project)
-        after = _source_state_fingerprint(project, include_generated=True)
+        after, bound_fingerprint = _source_state_fingerprint(
+            project,
+            include_generated=True,
+            exclude_ownership_lease=True,
+            return_full_lease_variant=True,
+        )
         if before != after:
             raise RuntimeError(
                 "Destructive deletion blocked: workspace changed during the safety backup; no deletion was performed."
@@ -45103,7 +45903,7 @@ def safety_backup_project(slug: str, _lock_held: bool = False) -> dict[str, Any]
             "runtime_id": str(meta.get("runtime_id") or ""),
             "backup_id": backup_id,
             "backup_sha256": backup_sha.lower(),
-            "source_state_fingerprint": after,
+            "source_state_fingerprint": bound_fingerprint,
             "fingerprint_policy": {
                 "schema_version": FINGERPRINT_POLICY_VERSION,
                 "algorithm": FINGERPRINT_ALGORITHM,
@@ -68371,6 +69171,94 @@ def test_host_agent_exposes_only_structured_runtime_operations():
 ```
 
 
+## FILE: source/tests/test_safety_backup_lease_drift.py
+
+SHA256: fb7ee1c2c975d37447ddb4ef91ccb7673adfe7a84f7ba446f7ee6db9c39d2a2a | Bytes: 4109 | Git mode: 100644
+
+```
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from devfleet import projects
+
+
+def test_safety_backup_allows_its_own_lease_update_but_binds_later_lease_drift(tmp_path, monkeypatch):
+    slug = "lease-race"
+    project = tmp_path / "workspaces" / slug
+    metadata = project / ".devfleet"
+    metadata.mkdir(parents=True)
+    (metadata / "project.json").write_text("{}", encoding="utf-8")
+    lease = metadata / "ownership-lease.json"
+    lease.write_text('{"last_backup":"old"}', encoding="utf-8")
+    (project / "README.md").write_text("stable", encoding="utf-8")
+    backup = tmp_path / "backup.tar.gz"
+    backup.write_bytes(b"verified archive")
+    sha = "a" * 64
+    identity = {
+        "project_id": "12345678-1234-1234-1234-123456789012",
+        "runtime_provider": "docker-compose",
+        "slug": slug,
+    }
+    monkeypatch.setattr(projects, "SETTINGS", SimpleNamespace(workspaces=tmp_path / "workspaces"))
+    monkeypatch.setattr(projects, "load_authoritative_project_identity_for_mutation", lambda _path: dict(identity))
+    monkeypatch.setattr(projects, "_write_project_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(projects, "load_meta", lambda _path: dict(identity))
+    monkeypatch.setattr(projects, "stop_project", lambda _slug: "stopped")
+    monkeypatch.setattr(projects, "running", lambda _path: False)
+    monkeypatch.setattr(projects, "validate_archive", lambda *_args: {"archive_sha256": sha})
+    stable_source = projects._source_state_fingerprint(
+        project, include_generated=True, exclude_ownership_lease=True
+    )
+
+    def backup_project(_slug, *, consistency_level, destructive):
+        assert consistency_level == "quiesced" and destructive
+        lease.write_text('{"last_backup":"new"}', encoding="utf-8")
+        return json.dumps({"backup_status": "verified", "backup_id": "fresh", "backup_path": str(backup), "backup_sha256": sha})
+
+    monkeypatch.setattr(projects, "backup_project", backup_project)
+    binding = projects.safety_backup_project(slug, _lock_held=True)["binding"]
+    excluded, full = projects._source_state_fingerprint(
+        project,
+        include_generated=True,
+        exclude_ownership_lease=True,
+        return_full_lease_variant=True,
+    )
+    assert excluded == stable_source
+    assert full == projects._source_state_fingerprint(project, include_generated=True)
+    assert binding["source_state_fingerprint"] == full
+    projects._assert_safety_binding_current(project, binding)
+
+    lease.write_text('{"last_backup":"tampered"}', encoding="utf-8")
+    with pytest.raises(RuntimeError, match="workspace changed after the safety backup"):
+        projects._assert_safety_binding_current(project, binding)
+
+
+def test_safety_backup_still_blocks_external_workspace_change(tmp_path, monkeypatch):
+    project = tmp_path / "workspaces" / "lease-race"
+    (project / ".devfleet").mkdir(parents=True)
+    (project / ".devfleet" / "project.json").write_text("{}", encoding="utf-8")
+    readme = project / "README.md"
+    readme.write_text("stable", encoding="utf-8")
+    identity = {"project_id": "12345678-1234-1234-1234-123456789012", "runtime_provider": "docker-compose", "slug": "lease-race"}
+    monkeypatch.setattr(projects, "SETTINGS", SimpleNamespace(workspaces=tmp_path / "workspaces"))
+    monkeypatch.setattr(projects, "load_authoritative_project_identity_for_mutation", lambda _path: dict(identity))
+    monkeypatch.setattr(projects, "_write_project_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(projects, "stop_project", lambda _slug: "stopped")
+    monkeypatch.setattr(projects, "running", lambda _path: False)
+
+    def backup_project(_slug, *, consistency_level, destructive):
+        readme.write_text("changed", encoding="utf-8")
+        return json.dumps({"backup_status": "verified", "backup_id": "fresh", "backup_sha256": "a" * 64})
+
+    monkeypatch.setattr(projects, "backup_project", backup_project)
+    with pytest.raises(RuntimeError, match="workspace changed during the safety backup"):
+        projects.safety_backup_project("lease-race", _lock_held=True)
+
+```
+
+
 ## FILE: source/tests/test_security_config.py
 
 SHA256: e372fd0f3ddc6f2c90c244295828ad648abbcca689465ca29f7125d8e86ef6d5 | Bytes: 1020 | Git mode: 100644
@@ -81888,7 +82776,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 ## FILE: tools/Build-AIAuditBundle.ps1
 
-SHA256: 4befd0c71379996d857fff6abb84ca07bd4bb021851d70a1e36c72926b3f8b58 | Bytes: 95333 | Git mode: 100644
+SHA256: b629ddf29c295f25cd7e4072b6d06d8a43e78270686b44309ab43d3a984c744f | Bytes: 98855 | Git mode: 100644
 
 ```
 [CmdletBinding()]
@@ -82549,18 +83437,59 @@ try {
         $baselineReceiptPath=Join-Path $Workspace (Join-Path 'evidence\baselines\receipts' $baselineReceiptFile)
         if((Get-Hash $baselineReceiptPath) -cne [string]$baselinePointer.receiptSha256){throw 'Accepted baseline receipt hash does not match its pointer.'}
         if(-not(Add-CompactFile $baselineReceiptPath (Join-Path $evidenceStage "baselines\receipts\$baselineReceiptFile"))){throw 'Accepted baseline receipt is missing.'}
-        if([int]$baselinePointer.generation -eq 2){
-            $previousHash=[string]$baselinePointer.previousPointerSha256
+        if([int]$baselinePointer.generation -in @(3,4)){
+            $baselineReceipt=Read-Json $baselineReceiptPath
+            foreach($sourceHash in @([string]$baselineReceipt.successorLedgerSha256,[string]$baselineReceipt.nativeInventorySha256)){
+                if($sourceHash -cnotmatch '^[0-9a-f]{64}$'){throw 'Rebound baseline source hash is invalid.'}
+                $sourcePath=Join-Path $Workspace "evidence\baselines\sources\$sourceHash.json"
+                if((Get-Hash $sourcePath) -cne $sourceHash){throw 'Rebound baseline source hash differs.'}
+                $stagedSource=Join-Path $evidenceStage "baselines\sources\$sourceHash.json"
+                if(-not(Add-CompactFile $sourcePath $stagedSource)){throw 'Rebound baseline source is missing.'}
+                if((Get-Hash $stagedSource) -cne $sourceHash){throw 'Rebound staged baseline source hash differs.'}
+            }
+            if([int]$baselinePointer.generation -eq 4){
+                $artifactBinding=$null
+                $ledgerSource=Join-Path $Workspace ("evidence\baselines\sources\{0}.json" -f [string]$baselineReceipt.successorLedgerSha256)
+                if(Test-Path -LiteralPath $ledgerSource -PathType Leaf){
+                    $ledgerSourceJson=Read-Json $ledgerSource
+                    $artifactBinding=$ledgerSourceJson.artifactReceipt
+                }
+                $artifactHash=[string]$artifactBinding.sha256
+                $artifactSource=[string]$artifactBinding.path
+                if($artifactHash -notmatch '^[0-9a-f]{64}$' -or [string]$baselineReceipt.artifactReceiptSha256 -cne $artifactHash){throw 'Repair-3 signed-output receipt hash is missing, malformed, or not bound by the baseline receipt.'}
+                if(-not(Test-Path -LiteralPath $artifactSource -PathType Leaf)){
+                    $artifactSource=Join-Path $Workspace ("evidence\baselines\sources\{0}.json" -f $artifactHash)
+                }
+                if(-not(Test-Path -LiteralPath $artifactSource -PathType Leaf) -or (Get-Hash $artifactSource) -cne $artifactHash){throw 'Repair-3 signed-output receipt is missing or hash-mismatched.'}
+                $artifactDestination=Join-Path $evidenceStage ("baselines\sources\{0}.json" -f $artifactHash)
+                if(-not(Add-CompactFile $artifactSource $artifactDestination) -or (Get-Hash $artifactDestination) -cne $artifactHash){throw 'Repair-3 signed-output receipt staging failed hash verification.'}
+            }
+        }
+        $cursor=$baselinePointer
+        if([int]$cursor.generation -lt 1 -or [int]$cursor.generation -gt 4){throw 'Unsupported accepted baseline generation.'}
+        while([int]$cursor.generation -gt 1){
+            $previousHash=[string]$cursor.previousPointerSha256
             if($previousHash -cnotmatch '^[0-9a-f]{64}$'){throw 'Rebound baseline predecessor hash is invalid.'}
             $historyPath=Join-Path $Workspace "evidence\baselines\history\$previousHash.json"
             if((Get-Hash $historyPath) -cne $previousHash){throw 'Rebound baseline predecessor pointer hash differs.'}
             $previousPointer=Read-Json $historyPath
             $previousReceiptFile=[string]$previousPointer.receiptFile
-            if([int]$previousPointer.generation -ne 1 -or $previousReceiptFile -cnotmatch '^[0-9a-f]{32}\.json$'){throw 'Rebound baseline predecessor pointer is invalid.'}
+            if([int]$previousPointer.generation -ne ([int]$cursor.generation-1) -or $previousReceiptFile -cnotmatch '^[0-9a-f]{32}\.json$'){throw 'Rebound baseline predecessor pointer is invalid.'}
             $previousReceiptPath=Join-Path $Workspace (Join-Path 'evidence\baselines\receipts' $previousReceiptFile)
             if((Get-Hash $previousReceiptPath) -cne [string]$previousPointer.receiptSha256){throw 'Rebound baseline predecessor receipt hash differs.'}
+            if([int]$previousPointer.generation -eq 3){
+                $previousReceipt=Read-Json $previousReceiptPath
+                foreach($sourceHash in @([string]$previousReceipt.successorLedgerSha256,[string]$previousReceipt.nativeInventorySha256)){
+                    if($sourceHash -cnotmatch '^[0-9a-f]{64}$'){throw 'Predecessor baseline source hash is invalid.'}
+                    $sourcePath=Join-Path $Workspace "evidence\baselines\sources\$sourceHash.json"
+                    if((Get-Hash $sourcePath) -cne $sourceHash){throw 'Predecessor baseline source hash differs.'}
+                    $stagedSource=Join-Path $evidenceStage "baselines\sources\$sourceHash.json"
+                    if(-not(Add-CompactFile $sourcePath $stagedSource)){throw 'Predecessor baseline source is missing.'}
+                }
+            }
             if(-not(Add-CompactFile $historyPath (Join-Path $evidenceStage "baselines\history\$previousHash.json"))){throw 'Rebound baseline predecessor pointer is missing.'}
             if(-not(Add-CompactFile $previousReceiptPath (Join-Path $evidenceStage "baselines\receipts\$previousReceiptFile"))){throw 'Rebound baseline predecessor receipt is missing.'}
+            $cursor=$previousPointer
         }
         if(-not(Add-CompactFile $baselinePointerPath (Join-Path $evidenceStage 'baselines\CURRENT.json'))){throw 'Accepted baseline pointer is missing.'}
     }
@@ -86464,7 +87393,7 @@ def resolve_bundle_layout(anchor: Path) -> BundleLayout:
 
 ## FILE: tools/baseline_lineage.py
 
-SHA256: 421e922e581def7c52827bb40e43b8e45a17669f43f8e7bba777bd924b38fe80 | Bytes: 32796 | Git mode: 100644
+SHA256: 52613d825b166702fa1ea1e2a61df01e5233a9ba7be36ca128a7d2adb5bbd5a7 | Bytes: 60663 | Git mode: 100644
 
 ```
 """Exact-L1 baseline adoption contract and atomic, non-promoting receipt.
@@ -86599,6 +87528,10 @@ def accepted_baseline(root, current_tuple=None):
         return {'name': OLD_NAME, 'id': OLD_ID, 'vmName': VM_NAME, 'vmId': VM_ID,
                 'predecessorId': None, 'receiptSha256': None, 'legacyOriginal': True}
     pointer = read_json(pointer_path)
+    if pointer.get('generation') == 4:
+        return _accepted_rebound_v4(root, pointer, current_tuple)
+    if pointer.get('generation') == 3:
+        return _accepted_rebound_v3(root, pointer, current_tuple)
     if pointer.get('generation') == 2:
         return _accepted_rebound_baseline(root, pointer, current_tuple)
     return _accepted_v1_baseline(root, pointer, current_tuple)
@@ -86735,6 +87668,430 @@ def _accepted_rebound_baseline(root, pointer, current_tuple=None):
     return {**old, 'receiptSha256': pointer['receiptSha256'],
             'receiptFile': filename, 'previousReceiptSha256': old['receiptSha256'],
             'generation': 2}
+
+
+def _accepted_rebound_v3(root, pointer, current_tuple=None):
+    """Validate the entire generation-1 -> 2 -> 3 immutable chain."""
+    state = _state(root)
+    require(pointer.get('schemaVersion') == 3
+            and pointer.get('contract') == 'devfleet-accepted-baseline-v3'
+            and pointer.get('generation') == 3 and pointer.get('status') == 'ACCEPTED',
+            'Generation-3 baseline pointer contract is invalid')
+    filename = pointer.get('receiptFile')
+    previous_hash = pointer.get('previousPointerSha256')
+    require(isinstance(filename, str) and re.fullmatch(r'[0-9a-f]{32}\.json', filename)
+            and isinstance(previous_hash, str) and HEX64.fullmatch(previous_hash),
+            'Generation-3 lineage reference is invalid')
+    history_path = state / 'history' / (previous_hash + '.json')
+    require(digest(history_path) == previous_hash,
+            'Generation-2 predecessor pointer hash differs')
+    previous = read_json(history_path)
+    require(previous.get('generation') == 2,
+            'Generation-3 predecessor is not generation 2')
+    receipt_path = state / 'receipts' / filename
+    require(digest(receipt_path) == pointer.get('receiptSha256'),
+            'Generation-3 receipt hash differs')
+    receipt = read_json(receipt_path)
+    old_tuple = exact_tuple(receipt.get('previousCandidate'))
+    new_tuple = exact_tuple(receipt.get('candidate'))
+    prior = _accepted_rebound_baseline(root, previous, old_tuple)
+    require(receipt.get('schemaVersion') == 3
+            and receipt.get('contract') == 'devfleet-baseline-rebind-receipt-v3'
+            and receipt.get('status') == 'REBOUND'
+            and receipt.get('certificationCredit') is False
+            and receipt.get('secretValuesRecorded') is False
+            and isinstance(receipt.get('receiptId'), str)
+            and receipt['receiptId'] + '.json' == filename
+            and receipt.get('previousPointerSha256') == previous_hash
+            and receipt.get('previousReceiptSha256') == prior['receiptSha256']
+            and receipt.get('replacement') == pointer.get('checkpoint')
+            and receipt.get('replacement') == previous.get('checkpoint'),
+            'Generation-3 receipt lineage differs')
+    for key in ('candidateBuildCommit', 'shippingInputIdentity',
+                'releaseFingerprintId', 'candidateSha256'):
+        require(old_tuple[key] == new_tuple[key],
+                'Generation-3 binding changed signed shipping identity: ' + key)
+    require(old_tuple['repositoryHead'] != new_tuple['repositoryHead']
+            and old_tuple['toolingFingerprintId'] != new_tuple['toolingFingerprintId'],
+            'Generation-3 binding lacks exact HEAD/tooling transition')
+    approval = receipt.get('approval') or {}
+    require(approval.get('schemaVersion') == 2
+            and approval.get('contract') == 'devfleet-baseline-rebind-approval-v2'
+            and approval.get('decision') == 'APPROVE'
+            and approval.get('approvedBy') == 'ACCOUNT_OWNER'
+            and approval.get('candidate') == new_tuple
+            and approval.get('replacement') == pointer['checkpoint']
+            and approval.get('previousReceiptSha256') == prior['receiptSha256']
+            and approval.get('sourceSha256') == receipt.get('approvalSha256')
+            and isinstance(receipt.get('approvalSha256'), str)
+            and HEX64.fullmatch(receipt['approvalSha256']),
+            'Generation-3 owner approval differs')
+    sources_dir = state / 'sources'
+    ledger_sha = receipt.get('successorLedgerSha256')
+    inventory_sha = receipt.get('nativeInventorySha256')
+    require(receipt.get('finalL1') == {'name': VM_NAME, 'id': VM_ID, 'state': 'Off'}
+            and receipt.get('successorPolicyId') == 'DF-FRESH-CERTIFICATION-20260926-R2-REPAIR-1'
+            and isinstance(ledger_sha, str) and HEX64.fullmatch(ledger_sha)
+            and isinstance(inventory_sha, str) and HEX64.fullmatch(inventory_sha),
+            'Generation-3 terminal lab or successor lineage differs')
+    ledger_source = sources_dir / (ledger_sha + '.json')
+    inventory_source = sources_dir / (inventory_sha + '.json')
+    require(ledger_source.is_file() and not ledger_source.is_symlink()
+            and inventory_source.is_file() and not inventory_source.is_symlink()
+            and digest(ledger_source) == ledger_sha
+            and digest(inventory_source) == inventory_sha,
+            'Generation-3 qualification or native inventory source differs')
+    if current_tuple is not None:
+        require(new_tuple == exact_tuple(current_tuple),
+                'Generation-3 baseline is bound to another candidate/material tuple')
+    return {**prior, 'receiptSha256': pointer['receiptSha256'],
+            'receiptFile': filename, 'previousReceiptSha256': prior['receiptSha256'],
+            'generation': 3}
+
+
+def _accepted_rebound_v4(root, pointer, current_tuple=None):
+    """Validate the immutable generation-1 through generation-4 candidate chain."""
+    state = _state(root)
+    require(pointer.get('schemaVersion') == 4
+            and pointer.get('contract') == 'devfleet-accepted-baseline-v4'
+            and pointer.get('generation') == 4 and pointer.get('status') == 'ACCEPTED',
+            'Generation-4 baseline pointer contract is invalid')
+    filename = pointer.get('receiptFile')
+    previous_hash = pointer.get('previousPointerSha256')
+    require(isinstance(filename, str) and re.fullmatch(r'[0-9a-f]{32}\.json', filename)
+            and isinstance(previous_hash, str) and HEX64.fullmatch(previous_hash),
+            'Generation-4 lineage reference is invalid')
+    history_path = state / 'history' / (previous_hash + '.json')
+    require(digest(history_path) == previous_hash,
+            'Generation-3 predecessor pointer hash differs')
+    previous = read_json(history_path)
+    require(previous.get('generation') == 3, 'Generation-4 predecessor is not generation 3')
+    receipt_path = state / 'receipts' / filename
+    require(digest(receipt_path) == pointer.get('receiptSha256'),
+            'Generation-4 receipt hash differs')
+    receipt = read_json(receipt_path)
+    old_tuple = exact_tuple(receipt.get('previousCandidate'))
+    new_tuple = exact_tuple(receipt.get('candidate'))
+    prior = _accepted_rebound_v3(root, previous, old_tuple)
+    require(receipt.get('schemaVersion') == 4
+            and receipt.get('contract') == 'devfleet-baseline-rebind-receipt-v4'
+            and receipt.get('status') == 'REBOUND'
+            and receipt.get('certificationCredit') is False
+            and receipt.get('secretValuesRecorded') is False
+            and isinstance(receipt.get('receiptId'), str)
+            and receipt['receiptId'] + '.json' == filename
+            and receipt.get('previousPointerSha256') == previous_hash
+            and receipt.get('previousReceiptSha256') == prior['receiptSha256']
+            and receipt.get('replacement') == pointer.get('checkpoint')
+            and receipt.get('replacement') == previous.get('checkpoint'),
+            'Generation-4 receipt lineage differs')
+    for key in TUPLE_KEYS:
+        require(old_tuple[key] != new_tuple[key],
+                'Generation-4 binding lacks distinct signed candidate identity: ' + key)
+    approval = receipt.get('approval') or {}
+    require(approval.get('schemaVersion') == 3
+            and approval.get('contract') == 'devfleet-baseline-rebind-approval-v3'
+            and approval.get('decision') == 'APPROVE'
+            and approval.get('approvedBy') == 'ACCOUNT_OWNER'
+            and approval.get('shippingChangeApproved') is True
+            and approval.get('previousCandidate') == old_tuple
+            and approval.get('candidate') == new_tuple
+            and approval.get('replacement') == pointer['checkpoint']
+            and approval.get('previousReceiptSha256') == prior['receiptSha256']
+            and approval.get('sourceSha256') == receipt.get('approvalSha256')
+            and isinstance(receipt.get('approvalSha256'), str)
+            and HEX64.fullmatch(receipt['approvalSha256']),
+            'Generation-4 owner approval differs')
+    ledger_sha = receipt.get('successorLedgerSha256')
+    inventory_sha = receipt.get('nativeInventorySha256')
+    require(receipt.get('finalL1') == {'name': VM_NAME, 'id': VM_ID, 'state': 'Off'}
+            and receipt.get('successorPolicyId') == 'DF-FRESH-CERTIFICATION-20260926-R2-REPAIR-3'
+            and isinstance(ledger_sha, str) and HEX64.fullmatch(ledger_sha)
+            and isinstance(inventory_sha, str) and HEX64.fullmatch(inventory_sha),
+            'Generation-4 terminal lab or successor lineage differs')
+    sources = state / 'sources'
+    for source_hash in (ledger_sha, inventory_sha):
+        source = sources / (source_hash + '.json')
+        require(source.is_file() and not source.is_symlink() and digest(source) == source_hash,
+                'Generation-4 qualification or native inventory source differs')
+    artifact_sha = receipt.get('artifactReceiptSha256')
+    require(isinstance(artifact_sha, str) and HEX64.fullmatch(artifact_sha),
+            'Generation-4 artifact receipt hash is missing or malformed')
+    artifact_source = sources / (artifact_sha + '.json')
+    require(artifact_source.is_file() and not artifact_source.is_symlink()
+            and digest(artifact_source) == artifact_sha,
+            'Generation-4 signed-output receipt source is absent or altered')
+    ledger_source = read_json(sources / (ledger_sha + '.json'))
+    require((ledger_source.get('artifactReceipt') or {}).get('sha256') == artifact_sha,
+            'Generation-4 ledger artifact receipt binding differs')
+    inspected = read_json(artifact_source)
+    require(inspected.get('schemaVersion') == 1
+            and inspected.get('contract') == 'devfleet-signed-build-output-inspection-v1'
+            and inspected.get('status') == 'PASS_VERIFIED_SIGNED_OUTPUT_WITH_FAILED_ADMISSION'
+            and inspected.get('certificationCredit') is False
+            and inspected.get('repositoryHead') == new_tuple['candidateBuildCommit']
+            and inspected.get('shippingInputIdentity') == new_tuple['shippingInputIdentity']
+            and inspected.get('signatureStatus') == 'Valid'
+            and inspected.get('publicPromotionAllowed') is False
+            and inspected.get('publicPublisherTrust') is False,
+            'Generation-4 signed-output receipt differs')
+    artifact_rows = inspected.get('artifacts')
+    require(isinstance(artifact_rows, list) and len(artifact_rows) == 4
+            and {row.get('name') for row in artifact_rows} ==
+                {'exe', 'tar', 'portable', 'installerSource'}
+            and next(row for row in artifact_rows if row.get('name') == 'exe').get('sha256') ==
+                new_tuple['candidateSha256'],
+            'Generation-4 signed-output artifact set differs')
+    if current_tuple is not None:
+        require(new_tuple == exact_tuple(current_tuple),
+                'Generation-4 baseline is bound to another candidate/material tuple')
+    return {**prior, 'receiptSha256': pointer['receiptSha256'],
+            'receiptFile': filename, 'previousReceiptSha256': prior['receiptSha256'],
+            'generation': 4}
+
+
+def _validate_v4_successor(ledger, new_tuple, journal_status):
+    """Require the prospective repair-3 journal and immutable signed-output receipt."""
+    remaining = {'standard-token': 0, 'diagnostic': 1, 'laptop-proof': 1,
+                 'desktop-proof': 1, 'fullrelease': 1, 'maintenance': 0,
+                 'build-sign': 0}
+    attempts = ledger.get('attempts') or []
+    require(ledger.get('policyId') == 'DF-FRESH-CERTIFICATION-20260926-R2-REPAIR-3'
+            and journal_status.get('policyId') == ledger['policyId']
+            and ledger.get('activeRunId') is None and journal_status.get('active') is None
+            and journal_status.get('attemptCount') == 1
+            and journal_status.get('remaining') == remaining
+            and isinstance(attempts, list) and len(attempts) == 1
+            and [a.get('operation') for a in attempts] == ['standard-token']
+            and all(a.get('state') == 'TERMINAL' and a.get('exitCode') == 0
+                    and a.get('certificationCredit') is False
+                    and isinstance(a.get('evidence'), list) and a['evidence'] for a in attempts)
+            and attempts[0].get('classification') == 'PASS_NATIVE_STANDARD_TOKEN'
+            and attempts[0].get('tuple') == new_tuple,
+            'Native third repair successor lacks exact terminal Developer qualification')
+    artifact = ledger.get('artifactReceipt') or {}
+    require(set(artifact) == {'path', 'sha256'} and isinstance(artifact.get('path'), str)
+            and HEX64.fullmatch(str(artifact.get('sha256', ''))),
+            'Native third repair successor artifact receipt binding is missing')
+    artifact_path = Path(artifact['path']).resolve(strict=True)
+    require(digest(artifact_path) == artifact['sha256'],
+            'Native third repair successor artifact receipt hash differs')
+    inspected = read_json(artifact_path)
+    require(inspected.get('schemaVersion') == 1
+            and inspected.get('contract') == 'devfleet-signed-build-output-inspection-v1'
+            and inspected.get('status') == 'PASS_VERIFIED_SIGNED_OUTPUT_WITH_FAILED_ADMISSION'
+            and inspected.get('certificationCredit') is False
+            and inspected.get('repositoryHead') == new_tuple['candidateBuildCommit']
+            and inspected.get('shippingInputIdentity') == new_tuple['shippingInputIdentity']
+            and inspected.get('signatureStatus') == 'Valid'
+            and inspected.get('publicPromotionAllowed') is False
+            and inspected.get('publicPublisherTrust') is False,
+            'Native third repair successor artifact receipt differs')
+    artifact_rows = inspected.get('artifacts')
+    require(isinstance(artifact_rows, list) and len(artifact_rows) == 4
+            and {row.get('name') for row in artifact_rows} ==
+                {'exe', 'tar', 'portable', 'installerSource'}
+            and next(row for row in artifact_rows if row.get('name') == 'exe').get('sha256') ==
+                new_tuple['candidateSha256'],
+            'Native third repair successor artifact set differs')
+    return artifact
+
+
+def rebind_gen4(root, tuple_path, approval_path, ledger_path, live_path):
+    """Append one separately approved new-shipping binding to accepted generation 3."""
+    state = _state(root)
+    with lock(state / '.adoption.lock'), lock(Path(str(ledger_path) + '.lock')):
+        pointer_path = state / 'CURRENT.json'
+        pointer = read_json(pointer_path)
+        require(pointer.get('generation') == 3,
+                'Generation-4 binding requires accepted generation 3')
+        old_receipt = read_json(state / 'receipts' / pointer['receiptFile'])
+        old_tuple = exact_tuple(old_receipt.get('candidate'))
+        prior = _accepted_rebound_v3(root, pointer, old_tuple)
+        new_tuple = exact_tuple(read_json(tuple_path))
+        for key in TUPLE_KEYS:
+            require(old_tuple[key] != new_tuple[key],
+                    'Generation-4 binding requires a distinct signed candidate: ' + key)
+        approval = read_json(approval_path)
+        require(approval.get('schemaVersion') == 3
+                and approval.get('contract') == 'devfleet-baseline-rebind-approval-v3'
+                and approval.get('decision') == 'APPROVE'
+                and approval.get('approvedBy') == 'ACCOUNT_OWNER'
+                and approval.get('shippingChangeApproved') is True
+                and approval.get('previousCandidate') == old_tuple
+                and approval.get('candidate') == new_tuple
+                and approval.get('replacement') == pointer['checkpoint']
+                and approval.get('previousReceiptSha256') == prior['receiptSha256'],
+                'Exact generation-4 account-owner approval is absent')
+        ledger = read_json(ledger_path)
+        journal = Path(root).resolve(strict=True) / '.agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py'
+        require(journal.is_file(), 'Native second repair successor journal is absent')
+        checked = subprocess.run([sys.executable, str(journal), 'status', '--ledger',
+                                  str(Path(ledger_path).resolve(strict=True))],
+                                 text=True, capture_output=True, timeout=20)
+        require(checked.returncode == 0, 'Native second repair successor journal rejected binding')
+        journal_status = json.loads(checked.stdout)
+        artifact = _validate_v4_successor(ledger, new_tuple, journal_status)
+        inventory_sha_before = digest(live_path)
+        live = read_json(live_path)
+        named = [x for x in live.get('snapshots', [])
+                 if isinstance(x, dict) and x.get('name') == NEW_NAME]
+        require(live.get('scope') == 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
+                and live.get('vm') == {'name': VM_NAME, 'id': VM_ID, 'state': 'Off'}
+                and timedelta(seconds=0) <= datetime.now(timezone.utc) - instant(live.get('observedUtc')) <= timedelta(minutes=2)
+                and len(named) == 1 and named[0].get('id') == prior['id']
+                and named[0].get('vmId') == VM_ID
+                and named[0].get('parentSnapshotId') == OLD_ID,
+                'Exact accepted checkpoint is not present with L1 Off')
+        ledger_bytes = Path(ledger_path).read_bytes()
+        inventory_bytes = Path(live_path).read_bytes()
+        ledger_sha = hashlib.sha256(ledger_bytes).hexdigest()
+        inventory_sha = hashlib.sha256(inventory_bytes).hexdigest()
+        require(inventory_sha == inventory_sha_before,
+                'Native inventory changed during generation-4 binding')
+        sources = state / 'sources'
+        sources.mkdir(parents=True, exist_ok=True)
+        _write_exclusive(sources / (ledger_sha + '.json'), ledger_bytes)
+        _write_exclusive(sources / (inventory_sha + '.json'), inventory_bytes)
+        _write_exclusive(sources / (artifact['sha256'] + '.json'), Path(artifact['path']).read_bytes())
+        previous_hash = digest(pointer_path)
+        history = state / 'history'
+        history.mkdir(parents=True, exist_ok=True)
+        _write_exclusive(history / (previous_hash + '.json'), pointer_path.read_bytes())
+        receipt_id = uuid.uuid4().hex
+        receipt = {'schemaVersion': 4, 'contract': 'devfleet-baseline-rebind-receipt-v4',
+                   'receiptId': receipt_id, 'status': 'REBOUND',
+                   'reboundUtc': datetime.now(timezone.utc).isoformat(),
+                   'certificationCredit': False, 'secretValuesRecorded': False,
+                   'previousPointerSha256': previous_hash,
+                   'previousReceiptSha256': prior['receiptSha256'],
+                   'previousCandidate': old_tuple, 'candidate': new_tuple,
+                   'replacement': pointer['checkpoint'],
+                   'approval': {**approval, 'sourceSha256': digest(approval_path)},
+                   'approvalSha256': digest(approval_path),
+                   'successorPolicyId': ledger['policyId'],
+                   'successorLedgerSha256': ledger_sha,
+                   'artifactReceiptSha256': artifact['sha256'],
+                   'finalL1': live['vm'], 'nativeInventorySha256': inventory_sha}
+        filename = receipt_id + '.json'
+        receipt_path = state / 'receipts' / filename
+        _write_exclusive(receipt_path, _json_bytes(receipt))
+        current = {'schemaVersion': 4, 'contract': 'devfleet-accepted-baseline-v4',
+                   'generation': 4, 'status': 'ACCEPTED',
+                   'receiptFile': filename, 'receiptSha256': digest(receipt_path),
+                   'previousPointerSha256': previous_hash,
+                   'checkpoint': pointer['checkpoint']}
+        _atomic_replace(pointer_path, _json_bytes(current))
+        return accepted_baseline(root, new_tuple)
+
+
+def rebind_gen3(root, tuple_path, approval_path, ledger_path, live_path):
+    """Append one separately approved exact-tuple binding to accepted generation 2."""
+    state = _state(root)
+    # Journal writers take ledger.json.lock. Hold that same lock until the
+    # immutable qualification snapshot and accepted pointer are committed.
+    with lock(state / '.adoption.lock'), lock(Path(str(ledger_path) + '.lock')):
+        pointer_path = state / 'CURRENT.json'
+        pointer = read_json(pointer_path)
+        require(pointer.get('generation') == 2,
+                'Generation-3 binding requires accepted generation 2')
+        old_receipt = read_json(state / 'receipts' / pointer['receiptFile'])
+        old_tuple = exact_tuple(old_receipt.get('candidate'))
+        prior = _accepted_rebound_baseline(root, pointer, old_tuple)
+        new_tuple = exact_tuple(read_json(tuple_path))
+        for key in ('candidateBuildCommit', 'shippingInputIdentity',
+                    'releaseFingerprintId', 'candidateSha256'):
+            require(old_tuple[key] == new_tuple[key],
+                    'Generation-3 binding changed signed shipping identity: ' + key)
+        require(old_tuple['repositoryHead'] != new_tuple['repositoryHead']
+                and old_tuple['toolingFingerprintId'] != new_tuple['toolingFingerprintId'],
+                'Generation-3 binding requires changed HEAD and tooling identity')
+        approval = read_json(approval_path)
+        require(approval.get('schemaVersion') == 2
+                and approval.get('contract') == 'devfleet-baseline-rebind-approval-v2'
+                and approval.get('decision') == 'APPROVE'
+                and approval.get('approvedBy') == 'ACCOUNT_OWNER'
+                and approval.get('candidate') == new_tuple
+                and approval.get('replacement') == pointer['checkpoint']
+                and approval.get('previousReceiptSha256') == prior['receiptSha256'],
+                'Exact generation-3 account-owner approval is absent')
+        ledger = read_json(ledger_path)
+        journal = Path(root).resolve(strict=True) / '.agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py'
+        require(journal.is_file(), 'Native repair successor journal is absent')
+        checked = subprocess.run([sys.executable, str(journal), 'status', '--ledger',
+                                  str(Path(ledger_path).resolve(strict=True))],
+                                 text=True, capture_output=True, timeout=20)
+        require(checked.returncode == 0, 'Native repair successor journal rejected binding')
+        journal_status = json.loads(checked.stdout)
+        required = {'standard-token': 0, 'diagnostic': 1, 'laptop-proof': 1,
+                    'desktop-proof': 1, 'fullrelease': 1, 'maintenance': 0,
+                    'build-sign': 0}
+        attempts = ledger.get('attempts') or []
+        require(ledger.get('policyId') == 'DF-FRESH-CERTIFICATION-20260926-R2-REPAIR-1'
+                and journal_status.get('policyId') == ledger['policyId']
+                and ledger.get('activeRunId') is None
+                and journal_status.get('active') is None
+                and journal_status.get('attemptCount') == 1
+                and journal_status.get('remaining') == required
+                and isinstance(attempts, list) and len(attempts) == 1
+                and attempts[0].get('operation') == 'standard-token'
+                and attempts[0].get('state') == 'TERMINAL'
+                and attempts[0].get('exitCode') == 0
+                and attempts[0].get('classification') == 'PASS_NATIVE_STANDARD_TOKEN'
+                and attempts[0].get('tuple') == new_tuple
+                and attempts[0].get('certificationCredit') is False
+                and isinstance(attempts[0].get('evidence'), list)
+                and len(attempts[0]['evidence']) >= 1,
+                'Native repair successor lacks exact terminal Developer qualification')
+        inventory_sha_before = digest(live_path)
+        live = read_json(live_path)
+        named = [x for x in live.get('snapshots', [])
+                 if isinstance(x, dict) and x.get('name') == NEW_NAME]
+        require(live.get('scope') == 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
+                and live.get('vm') == {'name': VM_NAME, 'id': VM_ID, 'state': 'Off'}
+                and timedelta(seconds=0) <= datetime.now(timezone.utc) - instant(live.get('observedUtc')) <= timedelta(minutes=2)
+                and len(named) == 1 and named[0].get('id') == prior['id']
+                and named[0].get('vmId') == VM_ID
+                and named[0].get('parentSnapshotId') == OLD_ID,
+                'Exact accepted checkpoint is not present with L1 Off')
+        ledger_bytes = Path(ledger_path).read_bytes()
+        inventory_bytes = Path(live_path).read_bytes()
+        ledger_sha = hashlib.sha256(ledger_bytes).hexdigest()
+        inventory_sha = hashlib.sha256(inventory_bytes).hexdigest()
+        require(inventory_sha == inventory_sha_before,
+                'Native inventory changed during generation-3 binding')
+        sources_dir = state / 'sources'
+        sources_dir.mkdir(parents=True, exist_ok=True)
+        _write_exclusive(sources_dir / (ledger_sha + '.json'), ledger_bytes)
+        _write_exclusive(sources_dir / (inventory_sha + '.json'), inventory_bytes)
+        previous_hash = digest(pointer_path)
+        history_dir = state / 'history'
+        history_dir.mkdir(parents=True, exist_ok=True)
+        _write_exclusive(history_dir / (previous_hash + '.json'), pointer_path.read_bytes())
+        receipt_id = uuid.uuid4().hex
+        receipt = {'schemaVersion': 3, 'contract': 'devfleet-baseline-rebind-receipt-v3',
+                   'receiptId': receipt_id, 'status': 'REBOUND',
+                   'reboundUtc': datetime.now(timezone.utc).isoformat(),
+                   'certificationCredit': False, 'secretValuesRecorded': False,
+                   'previousPointerSha256': previous_hash,
+                   'previousReceiptSha256': prior['receiptSha256'],
+                   'previousCandidate': old_tuple, 'candidate': new_tuple,
+                   'replacement': pointer['checkpoint'],
+                   'approval': {**approval, 'sourceSha256': digest(approval_path)},
+                   'approvalSha256': digest(approval_path),
+                   'successorPolicyId': ledger['policyId'],
+                   'successorLedgerSha256': ledger_sha,
+                   'finalL1': live['vm'], 'nativeInventorySha256': inventory_sha}
+        filename = receipt_id + '.json'
+        receipt_path = state / 'receipts' / filename
+        _write_exclusive(receipt_path, _json_bytes(receipt))
+        current = {'schemaVersion': 3, 'contract': 'devfleet-accepted-baseline-v3',
+                   'generation': 3, 'status': 'ACCEPTED',
+                   'receiptFile': filename, 'receiptSha256': digest(receipt_path),
+                   'previousPointerSha256': previous_hash,
+                   'checkpoint': pointer['checkpoint']}
+        _atomic_replace(pointer_path, _json_bytes(current))
+        return accepted_baseline(root, new_tuple)
 
 
 def rebind(root, tuple_path, approval_path, ledger_path, live_path):
@@ -87032,14 +88389,24 @@ def main():
     binding = sub.add_parser('rebind')
     for flag in ('root', 'tuple', 'approval', 'ledger', 'live'):
         binding.add_argument('--' + flag, required=True)
+    binding3 = sub.add_parser('rebind-gen3')
+    for flag in ('root', 'tuple', 'approval', 'ledger', 'live'):
+        binding3.add_argument('--' + flag, required=True)
+    binding4 = sub.add_parser('rebind-gen4')
+    for flag in ('root', 'tuple', 'approval', 'ledger', 'live'):
+        binding4.add_argument('--' + flag, required=True)
     args = parser.parse_args()
     if args.command == 'inspect':
         value = accepted_baseline(args.root, read_json(args.tuple) if args.tuple else None)
     elif args.command == 'adopt':
         value = adopt(args.root, args.proposal, args.approval, args.auth, args.live, args.tuple,
                       args.ledger)
-    else:
+    elif args.command == 'rebind':
         value = rebind(args.root, args.tuple, args.approval, args.ledger, args.live)
+    elif args.command == 'rebind-gen4':
+        value = rebind_gen4(args.root, args.tuple, args.approval, args.ledger, args.live)
+    else:
+        value = rebind_gen3(args.root, args.tuple, args.approval, args.ledger, args.live)
     print(json.dumps(value, indent=2))
 
 
@@ -87522,6 +88889,458 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+```
+
+
+## FILE: tools/test_baseline_generation3.py
+
+SHA256: 801f0d7885ad41b73112c0025aee5f789d9ec3e4cbb52f650a267bca0af5a2f1 | Bytes: 11201 | Git mode: 100644
+
+```
+"""VM-free generation-3 binding tests; no proof or release credit."""
+import importlib.util
+from datetime import datetime, timedelta, timezone
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import unittest
+
+from baseline_lineage import accepted_baseline, rebind, rebind_gen3
+from validate_release_bundle import load_accepted_baseline
+from test_baseline_lineage import BaselineLineageTests, TUPLE
+
+
+class Generation3Tests(unittest.TestCase):
+    def setUp(self):
+        self.case = BaselineLineageTests(methodName='runTest')
+        self.case.setUp()
+        self.addCleanup(self.case.doCleanups)
+        self.root = self.case.root
+        first = self.case.invoke()
+        self.v2_tuple = {**TUPLE, 'repositoryHead': '7' * 40,
+                         'toolingFingerprintId': '8' * 64}
+        v2_approval = {'schemaVersion': 1, 'contract': 'devfleet-baseline-rebind-approval-v1',
+                       'decision': 'APPROVE', 'approvedBy': 'ACCOUNT_OWNER',
+                       'candidate': self.v2_tuple, 'replacement': self.case.proposal['replacement'],
+                       'previousReceiptSha256': first['receiptSha256']}
+        d1 = self.case.one_diagnostic_ledger()
+        self.v2 = rebind(self.root, self.case.write('v2-tuple.json', self.v2_tuple),
+                         self.case.write('v2-approval.json', v2_approval), d1,
+                         self.case.write('v2-live.json', self.case.live))
+        journal_path = self.root / '.agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py'
+        spec = importlib.util.spec_from_file_location('fixture_fresh_attempts', journal_path)
+        journal = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(journal)
+        self.journal = journal
+        r2 = self.root / 'r2-ledger.json'
+        snapshot = self.root / 'repair-r2-snapshot.json'
+        snapshot.write_bytes(r2.read_bytes())
+        repair_auth = self.root / 'repair-authorization.md'
+        repair_auth.write_text('separate owner-approved bounded repair successor', encoding='utf-8')
+        self.repair = self.root / 'repair-ledger.json'
+        journal.initialize(self.repair, repair_auth, [snapshot, r2], journal.REPAIR_ID)
+        self.v3_tuple = {**self.v2_tuple, 'repositoryHead': '9' * 40,
+                         'toolingFingerprintId': 'a' * 64}
+        owner = {'pid': 123, 'startUtc': datetime.now(timezone.utc).isoformat()}
+        request = {'runId': 'repair-standard-token', 'operation': 'standard-token',
+                   'owner': owner, 'tuple': self.v3_tuple, 'entrypoint': 'qualification.ps1',
+                   'entrypointSha256': 'c' * 64, 'arguments': [],
+                   'changedCondition': 'fixture qualification for exact new tuple',
+                   'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+        journal.reserve(self.repair, request)
+        qualification = self.case.write('repair-standard-token-result.json',
+                                         {'status': 'PASS_NATIVE_STANDARD_TOKEN'})
+        journal.finish(self.repair, request['runId'], owner, 0,
+                       'PASS_NATIVE_STANDARD_TOKEN', [str(qualification)])
+        self.approval = {'schemaVersion': 2, 'contract': 'devfleet-baseline-rebind-approval-v2',
+                         'decision': 'APPROVE', 'approvedBy': 'ACCOUNT_OWNER',
+                         'candidate': self.v3_tuple, 'replacement': self.case.proposal['replacement'],
+                         'previousReceiptSha256': self.v2['receiptSha256']}
+        self.tuple_path = self.case.write('v3-tuple.json', self.v3_tuple)
+        self.approval_path = self.case.write('v3-approval.json', self.approval)
+        self.live_path = self.case.write('v3-live.json', self.case.live)
+
+    def bind(self):
+        return rebind_gen3(self.root, self.tuple_path, self.approval_path,
+                           self.repair, self.live_path)
+
+    def test_exact_approved_generation3_is_independently_accepted(self):
+        before = (self.root / 'evidence/baselines/CURRENT.json').read_bytes()
+        result = self.bind()
+        self.assertEqual(result['generation'], 3)
+        self.assertEqual(result['id'], self.case.proposal['replacement']['id'])
+        self.assertNotEqual(before, (self.root / 'evidence/baselines/CURRENT.json').read_bytes())
+        self.assertEqual(accepted_baseline(self.root, self.v3_tuple)['receiptSha256'],
+                         result['receiptSha256'])
+        expected = {'repositoryHead': self.v3_tuple['repositoryHead'],
+                    'candidateCommit': self.v3_tuple['candidateBuildCommit'],
+                    'shippingInputIdentity': self.v3_tuple['shippingInputIdentity'],
+                    'releaseFingerprintId': self.v3_tuple['releaseFingerprintId'],
+                    'toolingFingerprintId': self.v3_tuple['toolingFingerprintId']}
+        self.assertEqual(load_accepted_baseline(self.root, expected,
+                                                {'exe': self.v3_tuple['candidateSha256']})['receiptSha256'],
+                         result['receiptSha256'])
+        with self.assertRaises(ValueError):
+            self.bind()
+
+    def test_wrong_approval_or_shipping_change_cannot_update_pointer(self):
+        pointer = self.root / 'evidence/baselines/CURRENT.json'
+        original = pointer.read_bytes()
+        self.approval_path.write_text(json.dumps({**self.approval, 'decision': 'PENDING'}))
+        with self.assertRaises(ValueError):
+            self.bind()
+        self.assertEqual(pointer.read_bytes(), original)
+        self.approval_path.write_text(json.dumps(self.approval))
+        self.tuple_path.write_text(json.dumps({**self.v3_tuple, 'shippingInputIdentity': 'b' * 64}))
+        with self.assertRaises(ValueError):
+            self.bind()
+        self.assertEqual(pointer.read_bytes(), original)
+
+    def test_used_successor_cannot_bind_or_rebind(self):
+        journal = self.journal
+        request = {'runId': 'repair-used', 'operation': 'diagnostic',
+                   'owner': {'pid': 123, 'startUtc': '2026-09-28T00:00:00Z'},
+                   'tuple': {'repositoryHead': 'a' * 40}, 'entrypoint': 'native-test.ps1',
+                   'entrypointSha256': 'c' * 64, 'arguments': [],
+                   'changedCondition': 'fixture', 'deadlineUtc': '2099-01-01T00:00:00Z'}
+        journal.reserve(self.repair, request)
+        with self.assertRaises(ValueError):
+            self.bind()
+
+    def test_failed_developer_qualification_cannot_bind(self):
+        ledger = json.loads(self.repair.read_text(encoding='utf-8'))
+        ledger['attempts'][0]['classification'] = 'STANDARD_TOKEN_BLOCKED'
+        ledger['attempts'][0]['exitCode'] = 2
+        self.repair.write_text(json.dumps(ledger), encoding='utf-8')
+        with self.assertRaises(ValueError):
+            self.bind()
+
+    def test_journal_writer_lock_excludes_concurrent_binding(self):
+        pointer = self.root / 'evidence/baselines/CURRENT.json'
+        before = pointer.read_bytes()
+        with self.journal.locked(self.repair):
+            with self.assertRaises(ValueError):
+                self.bind()
+        self.assertEqual(pointer.read_bytes(), before)
+
+    def test_immutable_qualification_and_inventory_sources_are_required(self):
+        self.bind()
+        pointer = json.loads((self.root / 'evidence/baselines/CURRENT.json').read_text())
+        receipt = json.loads((self.root / 'evidence/baselines/receipts' /
+                              pointer['receiptFile']).read_text())
+        expected = {'repositoryHead': self.v3_tuple['repositoryHead'],
+                    'candidateCommit': self.v3_tuple['candidateBuildCommit'],
+                    'shippingInputIdentity': self.v3_tuple['shippingInputIdentity'],
+                    'releaseFingerprintId': self.v3_tuple['releaseFingerprintId'],
+                    'toolingFingerprintId': self.v3_tuple['toolingFingerprintId']}
+        for key in ('successorLedgerSha256', 'nativeInventorySha256'):
+            source = self.root / 'evidence/baselines/sources' / (receipt[key] + '.json')
+            original = source.read_bytes()
+            source.unlink()
+            with self.assertRaises(ValueError):
+                accepted_baseline(self.root, self.v3_tuple)
+            with self.assertRaises(ValueError):
+                load_accepted_baseline(self.root, expected,
+                                       {'exe': self.v3_tuple['candidateSha256']})
+            source.write_bytes(original + b' ')
+            with self.assertRaises(ValueError):
+                load_accepted_baseline(self.root, expected,
+                                       {'exe': self.v3_tuple['candidateSha256']})
+            source.write_bytes(original)
+
+    def test_tampered_v2_chain_is_rejected(self):
+        self.bind()
+        pointer = json.loads((self.root / 'evidence/baselines/CURRENT.json').read_text())
+        predecessor = self.root / 'evidence/baselines/history' / (pointer['previousPointerSha256'] + '.json')
+        predecessor.write_bytes(predecessor.read_bytes() + b' ')
+        with self.assertRaises(ValueError):
+            accepted_baseline(self.root, self.v3_tuple)
+
+    def test_powershell_native_reader_accepts_only_exact_v3_tuple(self):
+        if not shutil.which('pwsh'):
+            self.skipTest('PowerShell 7 is unavailable')
+        self.bind()
+        tools = self.root / 'tools'
+        tools.mkdir(exist_ok=True)
+        shutil.copyfile(Path(__file__).with_name('baseline_lineage.py'),
+                        tools / 'baseline_lineage.py')
+        module = Path(__file__).resolve().parents[1] / 'automation/release-e2e/modules/BaselineLineage.psm1'
+        def quote(value):
+            return "'" + str(value).replace("'", "''") + "'"
+        script = self.root / 'probe-v3.ps1'
+        script.write_text(
+            "$ErrorActionPreference='Stop'\n"
+            f"Import-Module {quote(module)} -Force\n"
+            f"$f=Get-Content -Raw -LiteralPath {quote(self.tuple_path)}|ConvertFrom-Json\n"
+            "$fp=[pscustomobject]@{repositoryHead=$f.repositoryHead;gitCommit=$f.candidateBuildCommit;"
+            "shippingInputIdentity=$f.shippingInputIdentity;releaseFingerprintId=$f.releaseFingerprintId;"
+            "toolingFingerprintId=$f.toolingFingerprintId;candidate=[pscustomobject]@{sha256=$f.candidateSha256}}\n"
+            f"Get-DevFleetAcceptedBaseline -WorkspaceRoot {quote(self.root)} -Fingerprint $fp|ConvertTo-Json -Depth 6\n",
+            encoding='utf-8')
+        result = subprocess.run(['pwsh', '-NoProfile', '-File', str(script)],
+                                capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['generation'], 3)
+        wrong = {**self.v3_tuple, 'toolingFingerprintId': 'f' * 64}
+        self.tuple_path.write_text(json.dumps(wrong), encoding='utf-8')
+        rejected = subprocess.run(['pwsh', '-NoProfile', '-File', str(script)],
+                                  capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(rejected.returncode, 0)
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+```
+
+
+## FILE: tools/test_baseline_generation4.py
+
+SHA256: 5fda914ef2dc9fd8978149fe13b2d24d05fbe322a67e6563347908314aa4e72c | Bytes: 14749 | Git mode: 100644
+
+```
+"""VM-free generation-4 binding for a distinct signed shipping candidate."""
+from datetime import datetime, timedelta, timezone
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import unittest
+
+from baseline_lineage import accepted_baseline, rebind_gen4
+import test_baseline_generation3 as generation3
+from validate_release_bundle import load_accepted_baseline
+
+
+class Generation4Tests(unittest.TestCase):
+    def setUp(self):
+        self.case = generation3.Generation3Tests(methodName='runTest')
+        self.case.setUp()
+        self.addCleanup(self.case.doCleanups)
+        self.root = self.case.root
+        self.v3 = self.case.bind()
+        journal = self.case.journal
+        self.journal = journal
+        repair1 = self.case.repair
+        for index, (operation, classification) in enumerate(journal.REPAIR_SEQUENCE[1:], 1):
+            owner = {'pid': 123, 'startUtc': datetime.now(timezone.utc).isoformat()}
+            request = {'runId': f'repair1-{index}', 'operation': operation,
+                       'owner': owner, 'tuple': self.case.v3_tuple,
+                       'entrypoint': 'fixture.ps1', 'entrypointSha256': 'c' * 64,
+                       'arguments': [], 'changedCondition': 'fixture terminal first repair',
+                       'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+            journal.reserve(repair1, request)
+            blocked = operation == 'fullrelease'
+            journal.finish(repair1, request['runId'], owner, 2 if blocked else 0,
+                           'NATIVE_FULLRELEASE_BLOCKED' if blocked else classification, [])
+        snapshot = self.root / 'repair1-terminal-snapshot.json'
+        snapshot.write_bytes(repair1.read_bytes())
+        auth = self.root / 'repair2-authorization.md'
+        auth.write_text('owner-approved failed build-sign successor', encoding='utf-8')
+        repair2 = self.root / 'repair2-ledger.json'
+        journal.initialize(repair2, auth, [snapshot, repair1], journal.REPAIR2_ID)
+        owner = {'pid': 123, 'startUtc': datetime.now(timezone.utc).isoformat()}
+        request = {'runId': 'repair2-build-sign', 'operation': 'build-sign',
+                   'owner': owner, 'tuple': self.case.v3_tuple,
+                   'entrypoint': 'fixture.ps1', 'entrypointSha256': 'c' * 64,
+                   'arguments': [], 'changedCondition': 'fixture blocked build-sign',
+                   'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+        journal.reserve(repair2, request)
+        journal.finish(repair2, request['runId'], owner, 2, 'BUILD_SIGN_BLOCKED', [])
+        repair2_snapshot = self.root / 'repair2-terminal-snapshot.json'
+        repair2_snapshot.write_bytes(repair2.read_bytes())
+        self.repair2 = self.root / 'repair3-ledger.json'
+        auth3 = self.root / 'repair3-authorization.md'
+        auth3.write_text('owner-approved prospective repair3 successor', encoding='utf-8')
+        self.v4_tuple = {**self.case.v3_tuple,
+                         'repositoryHead': 'b' * 40,
+                         'candidateBuildCommit': journal.REPAIR3_CANDIDATE_COMMIT,
+                         'shippingInputIdentity': journal.REPAIR3_SHIPPING_SHA256,
+                         'releaseFingerprintId': 'd' * 64,
+                         'toolingFingerprintId': 'f' * 64,
+                         'candidateSha256': journal.REPAIR3_SIGNED_EXE_SHA256}
+        self.artifact_receipt = self.root / 'signed-output-inspection.json'
+        self.artifact_receipt.write_text(json.dumps({
+            'schemaVersion': 1, 'contract': 'devfleet-signed-build-output-inspection-v1',
+            'status': 'PASS_VERIFIED_SIGNED_OUTPUT_WITH_FAILED_ADMISSION',
+            'certificationCredit': False, 'repositoryHead': self.v4_tuple['candidateBuildCommit'],
+            'failedAttemptLedgerSha256': journal.digest(repair2),
+            'shippingInputIdentity': self.v4_tuple['shippingInputIdentity'],
+            'artifacts': [
+                {'name': 'exe', 'path': 'candidate.exe', 'sha256': self.v4_tuple['candidateSha256']},
+                {'name': 'tar', 'path': 'candidate.tar.gz', 'sha256': '2' * 64},
+                {'name': 'portable', 'path': 'candidate.zip', 'sha256': '3' * 64},
+                {'name': 'installerSource', 'path': 'installer.zip', 'sha256': '4' * 64}],
+            'signatureStatus': 'Valid', 'publicPromotionAllowed': False,
+            'publicPublisherTrust': False}), encoding='utf-8')
+        # The native journal pins the production receipt bytes. This isolated
+        # fixture substitutes its own deterministic receipt hash.
+        journal.REPAIR3_FAILED_LEDGER_SHA256 = journal.digest(repair2)
+        journal.REPAIR3_RECEIPT_SHA256 = journal.digest(self.artifact_receipt)
+        native_journal = self.root / '.agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py'
+        native_journal.parent.mkdir(parents=True, exist_ok=True)
+        source = Path(__file__).resolve().parents[1] / '.agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py'
+        native_text = source.read_text(encoding='utf-8')
+        native_text = native_text.replace(
+            "REPAIR3_FAILED_LEDGER_SHA256 = 'dffe7810cc2f1833ed73a9514a8a49e4d65eed67eac0bf936bf81a1c8d6521ff'",
+            f"REPAIR3_FAILED_LEDGER_SHA256 = '{journal.REPAIR3_FAILED_LEDGER_SHA256}'")
+        native_text = native_text.replace(
+            "REPAIR3_RECEIPT_SHA256 = 'b071752cc2042b3405c05856780f74bbecdc11d0c647c8b602404c73829034b6'",
+            f"REPAIR3_RECEIPT_SHA256 = '{journal.REPAIR3_RECEIPT_SHA256}'")
+        native_journal.write_text(native_text, encoding='utf-8')
+        journal.initialize(self.repair2, auth3, [repair2_snapshot, repair2], journal.REPAIR3_ID,
+                           self.artifact_receipt)
+        for index, (operation, classification) in enumerate(journal.REPAIR3_SEQUENCE[:1]):
+            owner = {'pid': 123, 'startUtc': datetime.now(timezone.utc).isoformat()}
+            request = {'runId': f'repair2-{index}', 'operation': operation,
+                       'owner': owner, 'tuple': self.v4_tuple,
+                       'entrypoint': 'fixture.ps1', 'entrypointSha256': 'c' * 64,
+                       'arguments': [], 'changedCondition': 'fixture new signed candidate',
+                       'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+            journal.reserve(self.repair2, request)
+            journal.finish(self.repair2, request['runId'], owner, 0, classification,
+                           [str(self.case.case.write(f'repair3-{index}-result.json', {'status': 'PASS'}))])
+        self.approval = {'schemaVersion': 3, 'contract': 'devfleet-baseline-rebind-approval-v3',
+                         'decision': 'APPROVE', 'approvedBy': 'ACCOUNT_OWNER',
+                         'previousCandidate': self.case.v3_tuple, 'candidate': self.v4_tuple,
+                         'shippingChangeApproved': True,
+                         'replacement': self.case.case.proposal['replacement'],
+                         'previousReceiptSha256': self.v3['receiptSha256']}
+        self.tuple_path = self.case.case.write('v4-tuple.json', self.v4_tuple)
+        self.approval_path = self.case.case.write('v4-approval.json', self.approval)
+        self.live_path = self.case.case.write(
+            'v4-live.json', {**self.case.case.live,
+                             'observedUtc': datetime.now(timezone.utc).isoformat()})
+
+    def bind(self):
+        return rebind_gen4(self.root, self.tuple_path, self.approval_path,
+                           self.repair2, self.live_path)
+
+    def validator(self):
+        expected = {'repositoryHead': self.v4_tuple['repositoryHead'],
+                    'candidateCommit': self.v4_tuple['candidateBuildCommit'],
+                    'shippingInputIdentity': self.v4_tuple['shippingInputIdentity'],
+                    'releaseFingerprintId': self.v4_tuple['releaseFingerprintId'],
+                    'toolingFingerprintId': self.v4_tuple['toolingFingerprintId']}
+        return load_accepted_baseline(self.root, expected,
+                                      {'exe': self.v4_tuple['candidateSha256']})
+
+    def test_exact_approved_shipping_transition_is_accepted(self):
+        result = self.bind()
+        self.assertEqual(result['generation'], 4)
+        self.assertEqual(result['id'], self.case.case.proposal['replacement']['id'])
+        self.assertEqual(accepted_baseline(self.root, self.v4_tuple)['receiptSha256'],
+                         result['receiptSha256'])
+        self.assertEqual(self.validator()['receiptSha256'], result['receiptSha256'])
+        with self.assertRaises(ValueError):
+            self.bind()
+
+    def test_missing_approval_and_unchanged_shipping_fail_closed(self):
+        pointer = self.root / 'evidence/baselines/CURRENT.json'
+        original = pointer.read_bytes()
+        self.approval_path.write_text(json.dumps({**self.approval, 'shippingChangeApproved': False}))
+        with self.assertRaises(ValueError):
+            self.bind()
+        self.approval_path.write_text(json.dumps(self.approval))
+        self.tuple_path.write_text(json.dumps({**self.v4_tuple,
+                                               'shippingInputIdentity': self.case.v3_tuple['shippingInputIdentity']}))
+        with self.assertRaises(ValueError):
+            self.bind()
+        self.assertEqual(pointer.read_bytes(), original)
+
+    def test_immutable_source_and_predecessor_tamper_rejected(self):
+        self.bind()
+        pointer = json.loads((self.root / 'evidence/baselines/CURRENT.json').read_text())
+        receipt = json.loads((self.root / 'evidence/baselines/receipts' / pointer['receiptFile']).read_text())
+        source = self.root / 'evidence/baselines/sources' / (receipt['successorLedgerSha256'] + '.json')
+        source.write_bytes(source.read_bytes() + b' ')
+        with self.assertRaises(ValueError):
+            accepted_baseline(self.root, self.v4_tuple)
+        with self.assertRaises(ValueError):
+            self.validator()
+
+    def test_packaged_artifact_source_missing_or_tampered_rejected(self):
+        self.bind()
+        pointer = json.loads((self.root / 'evidence/baselines/CURRENT.json').read_text())
+        receipt = json.loads((self.root / 'evidence/baselines/receipts' /
+                              pointer['receiptFile']).read_text())
+        artifact = self.root / 'evidence/baselines/sources' / (receipt['artifactReceiptSha256'] + '.json')
+        original = artifact.read_bytes()
+        artifact.unlink()
+        with self.assertRaises(ValueError):
+            accepted_baseline(self.root, self.v4_tuple)
+        artifact.write_bytes(original + b' ')
+        with self.assertRaises(ValueError):
+            accepted_baseline(self.root, self.v4_tuple)
+
+    def test_tampered_artifact_receipt_and_old_repair2_policy_rejected(self):
+        pointer = self.root / 'evidence/baselines/CURRENT.json'
+        before = pointer.read_bytes()
+        self.artifact_receipt.write_text(self.artifact_receipt.read_text(encoding='utf-8') + ' ',
+                                         encoding='utf-8')
+        with self.assertRaises(ValueError):
+            self.bind()
+        self.assertEqual(pointer.read_bytes(), before)
+        self.artifact_receipt.write_text(self.artifact_receipt.read_text(encoding='utf-8').rstrip(),
+                                         encoding='utf-8')
+        ledger = json.loads(self.repair2.read_text(encoding='utf-8'))
+        ledger['policyId'] = self.journal.REPAIR2_ID
+        self.repair2.write_text(json.dumps(ledger), encoding='utf-8')
+        with self.assertRaises(ValueError):
+            self.bind()
+        self.assertEqual(pointer.read_bytes(), before)
+
+    def test_extra_native_phase_before_rebind_is_rejected(self):
+        owner = {'pid': 321, 'startUtc': datetime.now(timezone.utc).isoformat()}
+        request = {'runId': 'repair3-diagnostic-extra', 'operation': 'diagnostic',
+                   'owner': owner, 'tuple': self.v4_tuple, 'entrypoint': 'fixture.ps1',
+                   'entrypointSha256': 'c' * 64, 'arguments': [],
+                   'changedCondition': 'fixture premature extra phase',
+                   'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+        self.journal.reserve(self.repair2, request)
+        with self.assertRaises(ValueError):
+            self.bind()
+        self.journal.finish(self.repair2, request['runId'], owner, 0,
+                            'PASS_READY_FOR_PROOF_RESERVATION',
+                            [str(self.case.case.write('repair3-extra-result.json', {'status': 'PASS'}))])
+        with self.assertRaises(ValueError):
+            self.bind()
+
+    def test_powershell_reader_requires_exact_new_candidate(self):
+        if not shutil.which('pwsh'):
+            self.skipTest('PowerShell 7 is unavailable')
+        self.bind()
+        tools = self.root / 'tools'
+        tools.mkdir(exist_ok=True)
+        shutil.copyfile(Path(__file__).with_name('baseline_lineage.py'),
+                        tools / 'baseline_lineage.py')
+        module = Path(__file__).resolve().parents[1] / 'automation/release-e2e/modules/BaselineLineage.psm1'
+        def quote(value):
+            return "'" + str(value).replace("'", "''") + "'"
+        script = self.root / 'probe-v4.ps1'
+        script.write_text(
+            "$ErrorActionPreference='Stop'\n"
+            f"Import-Module {quote(module)} -Force\n"
+            f"$f=Get-Content -Raw -LiteralPath {quote(self.tuple_path)}|ConvertFrom-Json\n"
+            "$fp=[pscustomobject]@{repositoryHead=$f.repositoryHead;gitCommit=$f.candidateBuildCommit;"
+            "shippingInputIdentity=$f.shippingInputIdentity;releaseFingerprintId=$f.releaseFingerprintId;"
+            "toolingFingerprintId=$f.toolingFingerprintId;candidate=[pscustomobject]@{sha256=$f.candidateSha256}}\n"
+            f"Get-DevFleetAcceptedBaseline -WorkspaceRoot {quote(self.root)} -Fingerprint $fp|ConvertTo-Json -Depth 6\n",
+            encoding='utf-8')
+        result = subprocess.run(['pwsh', '-NoProfile', '-File', str(script)],
+                                capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['generation'], 4)
+        self.tuple_path.write_text(json.dumps({**self.v4_tuple, 'candidateSha256': 'a' * 64}), encoding='utf-8')
+        rejected = subprocess.run(['pwsh', '-NoProfile', '-File', str(script)],
+                                  capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(rejected.returncode, 0)
+
+
+if __name__ == '__main__':
+    unittest.main()
 
 ```
 
@@ -88533,6 +90352,94 @@ def test_release_evidence_gate_requires_terminal_fullrelease_and_never_promotes_
 ```
 
 
+## FILE: tools/test_repair3_validator.py
+
+SHA256: 058ac7dac7ef6ce504a7103a110bf800d0d2aa7290b2d177ec0e9a2ae0e6148d | Bytes: 3911 | Git mode: 100644
+
+```
+import unittest
+from pathlib import Path
+import sys
+import hashlib
+import json
+import tempfile
+
+sys.path.insert(0, str(Path(__file__).parent))
+from validate_release_bundle import (_load_packaged_repair3_receipt,
+                                     _validate_repair3_attempts,
+                                     _validate_repair3_receipt_hash_binding,
+                                     _validate_repair3_signed_output_receipt)
+
+
+class Repair3ReceiptValidatorTests(unittest.TestCase):
+    def setUp(self):
+        self.candidate = {
+            'repositoryHead': 'a' * 40,
+            'candidateBuildCommit': 'b' * 40,
+            'shippingInputIdentity': 'c' * 64,
+            'candidateSha256': 'd' * 64,
+        }
+        self.receipt = {
+            'schemaVersion': 1,
+            'contract': 'devfleet-signed-build-output-inspection-v1',
+            'status': 'PASS_VERIFIED_SIGNED_OUTPUT_WITH_FAILED_ADMISSION',
+            'certificationCredit': False,
+            # The signed output is built at the frozen candidate commit;
+            # repository HEAD may advance for tooling integration.
+            'repositoryHead': self.candidate['candidateBuildCommit'],
+            'shippingInputIdentity': self.candidate['shippingInputIdentity'],
+            'signatureStatus': 'Valid',
+            'publicPromotionAllowed': False,
+            'publicPublisherTrust': False,
+            'artifacts': [
+                {'name': 'exe', 'path': 'candidate.exe', 'sha256': self.candidate['candidateSha256']},
+                {'name': 'tar', 'path': 'candidate.tar.gz', 'sha256': '1' * 64},
+                {'name': 'portable', 'path': 'candidate.zip', 'sha256': '2' * 64},
+                {'name': 'installerSource', 'path': 'installer.zip', 'sha256': '3' * 64},
+            ],
+        }
+
+    def test_changed_repository_head_same_candidate_build_is_accepted(self):
+        _validate_repair3_signed_output_receipt(self.receipt, self.candidate)
+
+    def test_missing_or_duplicate_artifact_is_rejected(self):
+        self.receipt['artifacts'][-1] = dict(self.receipt['artifacts'][0])
+        with self.assertRaisesRegex(ValueError, 'receipt contents'):
+            _validate_repair3_signed_output_receipt(self.receipt, self.candidate)
+
+    def test_packaged_receipt_required_even_when_absolute_path_is_available(self):
+        with tempfile.TemporaryDirectory() as temp:
+            sources = Path(temp) / 'sources'
+            sources.mkdir()
+            receipt_path = Path(temp) / 'host-receipt.json'
+            receipt_path.write_text(json.dumps(self.receipt), encoding='utf-8')
+            digest = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+            with self.assertRaisesRegex(ValueError, 'absent'):
+                _load_packaged_repair3_receipt(sources, digest)
+            (sources / f'{digest}.json').write_bytes(receipt_path.read_bytes())
+            self.assertEqual(_load_packaged_repair3_receipt(sources, digest), self.receipt)
+
+    def test_repair3_snapshot_has_exactly_one_terminal_standard_token(self):
+        attempt = {'operation': 'standard-token', 'state': 'TERMINAL', 'exitCode': 0,
+                   'classification': 'PASS_NATIVE_STANDARD_TOKEN', 'tuple': self.candidate,
+                   'certificationCredit': False, 'evidence': ['standard-token.json']}
+        _validate_repair3_attempts([attempt], self.candidate)
+        with self.assertRaisesRegex(ValueError, 'standard token'):
+            _validate_repair3_attempts([attempt, dict(attempt)], self.candidate)
+
+    def test_baseline_receipt_hash_must_match_ledger_receipt_hash(self):
+        digest = 'e' * 64
+        _validate_repair3_receipt_hash_binding({'artifactReceiptSha256': digest}, digest)
+        with self.assertRaisesRegex(ValueError, 'hashes differ'):
+            _validate_repair3_receipt_hash_binding({'artifactReceiptSha256': 'f' * 64}, digest)
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+```
+
+
 ## FILE: tools/test_validate_native_proof.py
 
 SHA256: a2b51951efa8b17a27486720e7ec25362b78b1dc4f2f6b1407073423ecda1b29 | Bytes: 10205 | Git mode: 100644
@@ -89422,7 +91329,7 @@ if __name__ == "__main__":
 
 ## FILE: tools/validate_release_bundle.py
 
-SHA256: 3bef9437795a08669e9fc2584f1ad1bf3d353d35b6416bd46d4a659206f7e4f7 | Bytes: 110347 | Git mode: 100644
+SHA256: 2fd84920a5fc7a6ee730c3e5629e5c56ed9c10f1e60766220b727f85939885da | Bytes: 128592 | Git mode: 100644
 
 ```
 """Strict post-cleanup release-bundle gate (release tooling only).
@@ -89582,6 +91489,61 @@ def _proof_identity(value: object, *keys: str) -> str:
     return ""
 
 
+def _validate_repair3_signed_output_receipt(receipt: dict, candidate: dict) -> None:
+    """Check the non-certifying signed-output receipt bound to REPAIR-3."""
+    rows = receipt.get('artifacts')
+    names = [row.get('name') for row in rows or [] if isinstance(row, dict)]
+    exe_rows = [row for row in rows or []
+                if isinstance(row, dict) and row.get('name') == 'exe']
+    if (receipt.get('schemaVersion') != 1
+            or receipt.get('contract') != 'devfleet-signed-build-output-inspection-v1'
+            or receipt.get('status') != 'PASS_VERIFIED_SIGNED_OUTPUT_WITH_FAILED_ADMISSION'
+            or receipt.get('certificationCredit') is not False
+            or receipt.get('repositoryHead') != candidate['candidateBuildCommit']
+            or receipt.get('shippingInputIdentity') != candidate['shippingInputIdentity']
+            or receipt.get('signatureStatus') != 'Valid'
+            or receipt.get('publicPromotionAllowed') is not False
+            or receipt.get('publicPublisherTrust') is not False
+            or len(names) != 4
+            or set(names) != {'exe', 'tar', 'portable', 'installerSource'}
+            or any(not re.fullmatch(r'[0-9a-f]{64}', str(row.get('sha256', '')).lower())
+                   for row in rows or [] if isinstance(row, dict)
+                   )
+            or len(exe_rows) != 1
+            or exe_rows[0].get('sha256') != candidate['candidateSha256']):
+        raise ValueError('generation-4 signed-output receipt contents are invalid')
+
+
+def _load_packaged_repair3_receipt(sources: Path, artifact_hash: str) -> dict:
+    """Load REPAIR-3 receipt only from the packaged hash-addressed source."""
+    if not re.fullmatch(r'[0-9a-f]{64}', artifact_hash):
+        raise ValueError('generation-4 signed-output receipt is absent or unbound')
+    path = sources / (artifact_hash + '.json')
+    if (not path.is_file() or path.is_symlink() or sha(path) != artifact_hash):
+        raise ValueError('generation-4 signed-output receipt is absent or hash-mismatched')
+    return json.loads(path.read_text(encoding='utf-8-sig'))
+
+
+def _validate_repair3_receipt_hash_binding(binding: dict, artifact_hash: str) -> None:
+    if binding.get('artifactReceiptSha256') != artifact_hash:
+        raise ValueError('generation-4 baseline and signed-output receipt hashes differ')
+
+
+def _validate_repair3_attempts(attempts: object, candidate: dict) -> None:
+    if (not isinstance(attempts, list) or len(attempts) != 1
+            or len([a for a in attempts if a.get('operation') == 'build-sign']) != 0
+            or len({a.get('operation') for a in attempts}) != len(attempts)
+            or attempts[0].get('operation') != 'standard-token'
+            or attempts[0].get('state') != 'TERMINAL'
+            or attempts[0].get('exitCode') != 0
+            or attempts[0].get('classification') != 'PASS_NATIVE_STANDARD_TOKEN'
+            or attempts[0].get('tuple') != candidate
+            or attempts[0].get('certificationCredit') is not False
+            or not isinstance(attempts[0].get('evidence'), list)
+            or not attempts[0]['evidence']):
+        raise ValueError('generation-4 qualification source lacks exact REPAIR-3 standard token')
+
+
 def load_accepted_baseline(root: Path, expected: dict[str, str], artifacts: dict[str, str],
                            _pointer: dict | None = None) -> dict[str, str | None]:
     """Resolve only the original CLEAN or a packaged, immutable adoption receipt."""
@@ -89605,6 +91567,214 @@ def load_accepted_baseline(root: Path, expected: dict[str, str], artifacts: dict
     if not pointer_path.exists():
         return {"id": old_id, "name": "DevFleet-E2E-CLEAN", "receiptSha256": None}
     pointer = _pointer if _pointer is not None else strict_baseline_json(pointer_path)
+    if pointer.get('generation') == 4:
+        if (pointer.get('schemaVersion') != 4
+                or pointer.get('contract') != 'devfleet-accepted-baseline-v4'
+                or pointer.get('status') != 'ACCEPTED'):
+            raise ValueError('generation-4 baseline pointer contract is invalid')
+        old_hash, name = pointer.get('previousPointerSha256', ''), pointer.get('receiptFile', '')
+        if not re.fullmatch(r'[0-9a-f]{64}', old_hash) or not re.fullmatch(r'[0-9a-f]{32}\.json', name):
+            raise ValueError('generation-4 baseline lineage reference is invalid')
+        history_path = root / 'evidence/baselines/history' / (old_hash + '.json')
+        receipt_path = root / 'evidence/baselines/receipts' / name
+        if (not history_path.is_file() or history_path.is_symlink() or sha(history_path) != old_hash
+                or not receipt_path.is_file() or receipt_path.is_symlink()
+                or sha(receipt_path) != pointer.get('receiptSha256')):
+            raise ValueError('generation-4 baseline chain is absent or hash mismatched')
+        previous = strict_baseline_json(history_path)
+        if previous.get('generation') != 3:
+            raise ValueError('generation-4 predecessor is not generation 3')
+        binding = strict_baseline_json(receipt_path)
+        old_tuple = binding.get('previousCandidate') or {}
+        new_tuple = binding.get('candidate') or {}
+        prior_expected = {'repositoryHead': old_tuple.get('repositoryHead'),
+                          'candidateCommit': old_tuple.get('candidateBuildCommit'),
+                          'shippingInputIdentity': old_tuple.get('shippingInputIdentity'),
+                          'releaseFingerprintId': old_tuple.get('releaseFingerprintId'),
+                          'toolingFingerprintId': old_tuple.get('toolingFingerprintId')}
+        prior = load_accepted_baseline(root, prior_expected,
+                                       {'exe': old_tuple.get('candidateSha256')}, previous)
+        actual = {'repositoryHead': expected['repositoryHead'],
+                  'candidateBuildCommit': expected['candidateCommit'],
+                  'shippingInputIdentity': expected['shippingInputIdentity'],
+                  'releaseFingerprintId': expected['releaseFingerprintId'],
+                  'toolingFingerprintId': expected['toolingFingerprintId'],
+                  'candidateSha256': artifacts['exe']}
+        tuple_keys = ('repositoryHead', 'candidateBuildCommit', 'shippingInputIdentity',
+                      'releaseFingerprintId', 'toolingFingerprintId', 'candidateSha256')
+        if (binding.get('schemaVersion') != 4
+                or binding.get('contract') != 'devfleet-baseline-rebind-receipt-v4'
+                or binding.get('status') != 'REBOUND'
+                or binding.get('certificationCredit') is not False
+                or binding.get('secretValuesRecorded') is not False
+                or not isinstance(binding.get('receiptId'), str)
+                or binding['receiptId'] + '.json' != name
+                or binding.get('previousPointerSha256') != old_hash
+                or binding.get('previousReceiptSha256') != prior['receiptSha256']
+                or binding.get('replacement') != pointer.get('checkpoint')
+                or binding.get('replacement') != previous.get('checkpoint')
+                or new_tuple != actual
+                or any(old_tuple.get(key) == new_tuple.get(key) for key in tuple_keys)):
+            raise ValueError('generation-4 receipt or signed material tuple differs')
+        approval = binding.get('approval') or {}
+        final_l1 = {'name': 'DevFleet-E2E-Win11-01',
+                    'id': '84b7d8b8-ee6c-4085-aa29-4b0adc316de2', 'state': 'Off'}
+        if (approval.get('schemaVersion') != 3
+                or approval.get('contract') != 'devfleet-baseline-rebind-approval-v3'
+                or approval.get('decision') != 'APPROVE'
+                or approval.get('approvedBy') != 'ACCOUNT_OWNER'
+                or approval.get('shippingChangeApproved') is not True
+                or approval.get('previousCandidate') != old_tuple
+                or approval.get('candidate') != new_tuple
+                or approval.get('replacement') != pointer['checkpoint']
+                or approval.get('previousReceiptSha256') != prior['receiptSha256']
+                or approval.get('sourceSha256') != binding.get('approvalSha256')
+                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('approvalSha256', '')))
+                or binding.get('finalL1') != final_l1
+                or binding.get('successorPolicyId') != 'DF-FRESH-CERTIFICATION-20260926-R2-REPAIR-3'
+                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('successorLedgerSha256', '')))
+                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('nativeInventorySha256', '')))):
+            raise ValueError('generation-4 authorization or terminal lab differs')
+        sources = root / 'evidence/baselines/sources'
+        ledger_hash, inventory_hash = binding['successorLedgerSha256'], binding['nativeInventorySha256']
+        ledger_path, inventory_path = sources / (ledger_hash + '.json'), sources / (inventory_hash + '.json')
+        if (not ledger_path.is_file() or ledger_path.is_symlink() or sha(ledger_path) != ledger_hash
+                or not inventory_path.is_file() or inventory_path.is_symlink()
+                or sha(inventory_path) != inventory_hash):
+            raise ValueError('generation-4 qualification or inventory source is absent or altered')
+        ledger, inventory = strict_baseline_json(ledger_path), strict_baseline_json(inventory_path)
+        attempts = ledger.get('attempts')
+        limits = {'standard-token': 1, 'diagnostic': 1, 'laptop-proof': 1,
+                  'desktop-proof': 1, 'fullrelease': 1, 'maintenance': 0, 'build-sign': 0}
+        artifact_binding = ledger.get('artifactReceipt') or {}
+        artifact_hash = str(artifact_binding.get('sha256', '')).lower()
+        _validate_repair3_receipt_hash_binding(binding, artifact_hash)
+        artifact_receipt = _load_packaged_repair3_receipt(sources, artifact_hash)
+        _validate_repair3_signed_output_receipt(artifact_receipt, new_tuple)
+        if (ledger.get('policyId') != binding['successorPolicyId']
+                or ledger.get('limits') != limits
+                or ledger.get('activeRunId') is not None):
+            raise ValueError('generation-4 qualification source lacks exact REPAIR-3 standard token')
+        _validate_repair3_attempts(attempts, new_tuple)
+        snapshots = inventory.get('snapshots')
+        exact = [row for row in snapshots if isinstance(row, dict)
+                 and row.get('name') == 'DevFleet-E2E-CLEAN-R2'] if isinstance(snapshots, list) else []
+        if (inventory.get('scope') != 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
+                or inventory.get('vm') != final_l1
+                or len(exact) != 1 or exact[0].get('id') != pointer['checkpoint']['id']
+                or exact[0].get('vmId') != final_l1['id']
+                or exact[0].get('parentSnapshotId') != '19865b76-4c3a-44f7-ba39-841e9d3c40c9'):
+            raise ValueError('generation-4 inventory does not prove accepted checkpoint and L1 Off')
+        return {'id': prior['id'], 'name': prior['name'],
+                'receiptSha256': pointer['receiptSha256']}
+    if pointer.get('generation') == 3:
+        if (pointer.get('schemaVersion') != 3
+                or pointer.get('contract') != 'devfleet-accepted-baseline-v3'
+                or pointer.get('status') != 'ACCEPTED'):
+            raise ValueError('generation-3 baseline pointer contract is invalid')
+        old_hash = pointer.get('previousPointerSha256', '')
+        name = pointer.get('receiptFile', '')
+        if not re.fullmatch(r'[0-9a-f]{64}', old_hash) or not re.fullmatch(r'[0-9a-f]{32}\.json', name):
+            raise ValueError('generation-3 baseline lineage reference is invalid')
+        history_path = root / 'evidence/baselines/history' / (old_hash + '.json')
+        receipt_path = root / 'evidence/baselines/receipts' / name
+        if (not history_path.is_file() or sha(history_path) != old_hash
+                or not receipt_path.is_file() or sha(receipt_path) != pointer.get('receiptSha256')):
+            raise ValueError('generation-3 baseline chain is absent or hash mismatched')
+        previous = strict_baseline_json(history_path)
+        if previous.get('generation') != 2:
+            raise ValueError('generation-3 predecessor is not generation 2')
+        binding = strict_baseline_json(receipt_path)
+        old_tuple = binding.get('previousCandidate') or {}
+        new_tuple = binding.get('candidate') or {}
+        old_expected = {'repositoryHead': old_tuple.get('repositoryHead'),
+                        'candidateCommit': old_tuple.get('candidateBuildCommit'),
+                        'shippingInputIdentity': old_tuple.get('shippingInputIdentity'),
+                        'releaseFingerprintId': old_tuple.get('releaseFingerprintId'),
+                        'toolingFingerprintId': old_tuple.get('toolingFingerprintId')}
+        prior = load_accepted_baseline(root, old_expected,
+                                       {'exe': old_tuple.get('candidateSha256')}, previous)
+        actual = {'repositoryHead': expected['repositoryHead'],
+                  'candidateBuildCommit': expected['candidateCommit'],
+                  'shippingInputIdentity': expected['shippingInputIdentity'],
+                  'releaseFingerprintId': expected['releaseFingerprintId'],
+                  'toolingFingerprintId': expected['toolingFingerprintId'],
+                  'candidateSha256': artifacts['exe']}
+        if (binding.get('schemaVersion') != 3
+                or binding.get('contract') != 'devfleet-baseline-rebind-receipt-v3'
+                or binding.get('status') != 'REBOUND'
+                or binding.get('certificationCredit') is not False
+                or binding.get('secretValuesRecorded') is not False
+                or not isinstance(binding.get('receiptId'), str)
+                or binding['receiptId'] + '.json' != name
+                or binding.get('previousPointerSha256') != old_hash
+                or binding.get('previousReceiptSha256') != prior['receiptSha256']
+                or binding.get('replacement') != pointer.get('checkpoint')
+                or binding.get('replacement') != previous.get('checkpoint')
+                or new_tuple != actual
+                or old_tuple.get('repositoryHead') == new_tuple.get('repositoryHead')
+                or old_tuple.get('toolingFingerprintId') == new_tuple.get('toolingFingerprintId')
+                or any(old_tuple.get(key) != new_tuple.get(key) for key in
+                       ('candidateBuildCommit', 'shippingInputIdentity',
+                        'releaseFingerprintId', 'candidateSha256'))):
+            raise ValueError('generation-3 receipt or material tuple differs')
+        approval = binding.get('approval') or {}
+        if (approval.get('schemaVersion') != 2
+                or approval.get('contract') != 'devfleet-baseline-rebind-approval-v2'
+                or approval.get('decision') != 'APPROVE'
+                or approval.get('approvedBy') != 'ACCOUNT_OWNER'
+                or approval.get('candidate') != new_tuple
+                or approval.get('replacement') != pointer['checkpoint']
+                or approval.get('previousReceiptSha256') != prior['receiptSha256']
+                or approval.get('sourceSha256') != binding.get('approvalSha256')
+                or not isinstance(binding.get('approvalSha256'), str)
+                or not re.fullmatch(r'[0-9a-f]{64}', binding['approvalSha256'])
+                or binding.get('finalL1') != {'name': 'DevFleet-E2E-Win11-01',
+                                             'id': '84b7d8b8-ee6c-4085-aa29-4b0adc316de2',
+                                             'state': 'Off'}
+                or binding.get('successorPolicyId') != 'DF-FRESH-CERTIFICATION-20260926-R2-REPAIR-1'
+                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('successorLedgerSha256', '')))
+                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('nativeInventorySha256', '')))):
+            raise ValueError('generation-3 authorization or terminal lab differs')
+        source_dir = root / 'evidence/baselines/sources'
+        ledger_hash = binding['successorLedgerSha256']
+        inventory_hash = binding['nativeInventorySha256']
+        ledger_path = source_dir / (ledger_hash + '.json')
+        inventory_path = source_dir / (inventory_hash + '.json')
+        if (not ledger_path.is_file() or ledger_path.is_symlink()
+                or not inventory_path.is_file() or inventory_path.is_symlink()
+                or sha(ledger_path) != ledger_hash or sha(inventory_path) != inventory_hash):
+            raise ValueError('generation-3 qualification or inventory source is absent or altered')
+        ledger = strict_baseline_json(ledger_path)
+        inventory = strict_baseline_json(inventory_path)
+        attempts = ledger.get('attempts')
+        required_remaining = {'standard-token': 1, 'diagnostic': 1,
+                              'laptop-proof': 1, 'desktop-proof': 1,
+                              'fullrelease': 1, 'maintenance': 0, 'build-sign': 0}
+        if (ledger.get('policyId') != binding['successorPolicyId']
+                or ledger.get('limits') != required_remaining
+                or ledger.get('activeRunId') is not None
+                or not isinstance(attempts, list) or len(attempts) != 1
+                or attempts[0].get('operation') != 'standard-token'
+                or attempts[0].get('state') != 'TERMINAL'
+                or attempts[0].get('exitCode') != 0
+                or attempts[0].get('classification') != 'PASS_NATIVE_STANDARD_TOKEN'
+                or attempts[0].get('tuple') != new_tuple
+                or attempts[0].get('certificationCredit') is not False
+                or not isinstance(attempts[0].get('evidence'), list)
+                or not attempts[0]['evidence']):
+            raise ValueError('generation-3 qualification source does not prove terminal standard token')
+        snapshots = inventory.get('snapshots')
+        exact = [row for row in snapshots if isinstance(row, dict)
+                 and row.get('name') == 'DevFleet-E2E-CLEAN-R2'] if isinstance(snapshots, list) else []
+        if (inventory.get('scope') != 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
+                or inventory.get('vm') != binding['finalL1']
+                or len(exact) != 1 or exact[0].get('id') != pointer['checkpoint']['id']
+                or exact[0].get('vmId') != binding['finalL1']['id']
+                or exact[0].get('parentSnapshotId') != '19865b76-4c3a-44f7-ba39-841e9d3c40c9'):
+            raise ValueError('generation-3 inventory source does not prove accepted checkpoint and L1 Off')
+        return {'id': prior['id'], 'name': prior['name'],
+                'receiptSha256': pointer['receiptSha256']}
     if pointer.get('generation') == 2:
         if (pointer.get('schemaVersion') != 2
                 or pointer.get('contract') != 'devfleet-accepted-baseline-v2'

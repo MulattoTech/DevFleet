@@ -55,8 +55,8 @@
   },
   {
     "path": ".agents/skills/devfleet-certification-orchestrator/SKILL.md",
-    "sha256": "ac4722243f4de7a5e0d6d6e513a37e7b91a55c5fc875c113a5274ef5bb2a252f",
-    "bytes": 11215,
+    "sha256": "ffda625a8d306d493dce3fdd6dbd668c4149f3e94e89a53f927331c58282b4ba",
+    "bytes": 13054,
     "kind": "text"
   },
   {
@@ -97,8 +97,8 @@
   },
   {
     "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py",
-    "sha256": "390aaf940dbce71efe84c37a4100214ee0d86e2d5f3389127f153db18f7e45a4",
-    "bytes": 14012,
+    "sha256": "ff071a21d1c16ec3edd272eb8dd4ed163c3a32b021f5d9459c12923f0842cc08",
+    "bytes": 33508,
     "kind": "text"
   },
   {
@@ -129,6 +129,30 @@
     "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_one_diagnostic_successor.py",
     "sha256": "6f4bc5f5dcbf14324c13889e4066b3b5560f9a7e86df086a7e28ec6f7bd2a777",
     "bytes": 4055,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair2_successor.py",
+    "sha256": "c6dfe26882762f28038aa79fdb05727efe86312f3d981d3ed361c96567e05b9e",
+    "bytes": 5798,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair3_successor.py",
+    "sha256": "af9eb3ad99073405be07e0c73eb9f4fe676ee0efdebd931c05b4bbc8a8f9b8e4",
+    "bytes": 7316,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair4_successor.py",
+    "sha256": "90c8d331205d7756b0d52d59df02c30767c813c897dd95422f1cce4c9191a2be",
+    "bytes": 4498,
+    "kind": "text"
+  },
+  {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair_successor.py",
+    "sha256": "e4624eddff607aadd50ce32915a0bb55387ab3b7b73b2cff2dfdaf1aff54ca49",
+    "bytes": 6408,
     "kind": "text"
   },
   {
@@ -373,8 +397,8 @@
   },
   {
     "path": "automation/release-e2e/modules/BaselineLineage.psm1",
-    "sha256": "a3b3c2d0ae7ca17a38ee7a1554a3e00bd2b0e900ab82b2971077d9a22f879a0b",
-    "bytes": 9063,
+    "sha256": "d29e14c6be17a8a8e8604cbcbfcd15d7501d81cd00cb788175d535748b20af75",
+    "bytes": 9065,
     "kind": "text"
   },
   {
@@ -511,8 +535,8 @@
   },
   {
     "path": "automation/release-e2e/modules/executors/Invoke-RealProductPhase.psm1",
-    "sha256": "75a9ae97cb6cedb6afd0f8286c08e4eb085f68b941e524f519a3f5620ef31d90",
-    "bytes": 344483,
+    "sha256": "cbfcbfcdd2322fb4dc92f49d61a49c58a98608648a213360d130b5cb4451e3ef",
+    "bytes": 347094,
     "kind": "text"
   },
   {
@@ -787,8 +811,8 @@
   },
   {
     "path": "automation/release-e2e/tests/Test-NestedPrimaryReadiness.ps1",
-    "sha256": "0a68b7434923f44cd33db97fa17ff2ff6e624cebc58d64e115046138e1e2f79b",
-    "bytes": 7138,
+    "sha256": "167cd8a464fee826bfdfb77507f54ac008d84cd964094966001a43703986f142",
+    "bytes": 9664,
     "kind": "text"
   },
   {
@@ -1147,13 +1171,13 @@
   },
   {
     "path": "installer-source/DevFleet.Setup/Payload/devfleet-v1.2.13.tar.gz",
-    "sha256": "48a41161394f5743808eec150631d87de6619ad2c3315f037a7bd23050adb29a",
-    "bytes": 529614,
+    "sha256": "e3176c500f652d6023dcb611ccd580567ed9448da343a5fd4c3649214ca0b654",
+    "bytes": 530862,
     "kind": "binary"
   },
   {
     "path": "installer-source/DevFleet.Setup/PayloadManifest.cs",
-    "sha256": "8022cd17ccf21ac2827ac93ef21fa8922f38b61b2c9d078bfb802c031357335f",
+    "sha256": "3d59d604bf39f55204d33e3135ac256b0c4322458afd2e153ad2b61308c56e1d",
     "bytes": 345,
     "kind": "text"
   },
@@ -1201,7 +1225,7 @@
   },
   {
     "path": "installer-source/INSTALLER-BUILD-MANIFEST.json",
-    "sha256": "cef183d146be489ce3b0c9f868b26c6125a5f7733b5a51271ffcadfaf0cf4dcd",
+    "sha256": "daec80a6ce234bbdf9c29b823e98b8d4878a5181203afe2a5162efbe8b126cb5",
     "bytes": 594,
     "kind": "text"
   },
@@ -1255,7 +1279,7 @@
   },
   {
     "path": "installer-source/OFFLINE-PAYLOAD-SHA256.txt",
-    "sha256": "5b09b852e593be0807c384c9375c76a3d5a9a858cb706b8fceae9d06459e4f56",
+    "sha256": "c5841878571b984f9c696efc951eecf48e7035f218771a726e29dd858cfe93d3",
     "bytes": 98,
     "kind": "text"
   },
@@ -1363,8 +1387,8 @@
   },
   {
     "path": "source/CHECKSUMS.sha256",
-    "sha256": "2d7eb896c3b391816e8d8cd892a99b54641d99918ce22cd1d393103a348abf23",
-    "bytes": 77861,
+    "sha256": "9a68f8aae772cd3e761b58075618fe35b01a76fd1668059a7a5b33c255a951c4",
+    "bytes": 77967,
     "kind": "text"
   },
   {
@@ -1549,8 +1573,8 @@
   },
   {
     "path": "source/app/devfleet/projects.py",
-    "sha256": "6ff44e69f1eb4219d8ba2f0a4bc8416c11c7378ce3cdabfcb7f8e78ee33e272b",
-    "bytes": 196892,
+    "sha256": "69e28afc1b739e74d8118ac34f4222db40f58b80a87fbef2f58c3be368bc4671",
+    "bytes": 197999,
     "kind": "text"
   },
   {
@@ -5178,6 +5202,12 @@
     "kind": "text"
   },
   {
+    "path": "source/tests/test_safety_backup_lease_drift.py",
+    "sha256": "fb7ee1c2c975d37447ddb4ef91ccb7673adfe7a84f7ba446f7ee6db9c39d2a2a",
+    "bytes": 4109,
+    "kind": "text"
+  },
+  {
     "path": "source/tests/test_security_config.py",
     "sha256": "e372fd0f3ddc6f2c90c244295828ad648abbcca689465ca29f7125d8e86ef6d5",
     "bytes": 1020,
@@ -5653,8 +5683,8 @@
   },
   {
     "path": "tools/Build-AIAuditBundle.ps1",
-    "sha256": "4befd0c71379996d857fff6abb84ca07bd4bb021851d70a1e36c72926b3f8b58",
-    "bytes": 95333,
+    "sha256": "b629ddf29c295f25cd7e4072b6d06d8a43e78270686b44309ab43d3a984c744f",
+    "bytes": 98855,
     "kind": "text"
   },
   {
@@ -5719,8 +5749,8 @@
   },
   {
     "path": "tools/baseline_lineage.py",
-    "sha256": "421e922e581def7c52827bb40e43b8e45a17669f43f8e7bba777bd924b38fe80",
-    "bytes": 32796,
+    "sha256": "52613d825b166702fa1ea1e2a61df01e5233a9ba7be36ca128a7d2adb5bbd5a7",
+    "bytes": 60663,
     "kind": "text"
   },
   {
@@ -5745,6 +5775,18 @@
     "path": "tools/run_portable_audit_tests.py",
     "sha256": "e65e234f040d84909033ce93152a27ba0ee6948c58892cf6bcf9fe6ccb0e90d9",
     "bytes": 5249,
+    "kind": "text"
+  },
+  {
+    "path": "tools/test_baseline_generation3.py",
+    "sha256": "801f0d7885ad41b73112c0025aee5f789d9ec3e4cbb52f650a267bca0af5a2f1",
+    "bytes": 11201,
+    "kind": "text"
+  },
+  {
+    "path": "tools/test_baseline_generation4.py",
+    "sha256": "5fda914ef2dc9fd8978149fe13b2d24d05fbe322a67e6563347908314aa4e72c",
+    "bytes": 14749,
     "kind": "text"
   },
   {
@@ -5784,6 +5826,12 @@
     "kind": "text"
   },
   {
+    "path": "tools/test_repair3_validator.py",
+    "sha256": "058ac7dac7ef6ce504a7103a110bf800d0d2aa7290b2d177ec0e9a2ae0e6148d",
+    "bytes": 3911,
+    "kind": "text"
+  },
+  {
     "path": "tools/test_validate_native_proof.py",
     "sha256": "a2b51951efa8b17a27486720e7ec25362b78b1dc4f2f6b1407073423ecda1b29",
     "bytes": 10205,
@@ -5803,8 +5851,8 @@
   },
   {
     "path": "tools/validate_release_bundle.py",
-    "sha256": "3bef9437795a08669e9fc2584f1ad1bf3d353d35b6416bd46d4a659206f7e4f7",
-    "bytes": 110347,
+    "sha256": "2fd84920a5fc7a6ee730c3e5629e5c56ed9c10f1e60766220b727f85939885da",
+    "bytes": 128592,
     "kind": "text"
   }
 ]

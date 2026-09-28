@@ -155,6 +155,61 @@ def _proof_identity(value: object, *keys: str) -> str:
     return ""
 
 
+def _validate_repair3_signed_output_receipt(receipt: dict, candidate: dict) -> None:
+    """Check the non-certifying signed-output receipt bound to REPAIR-3."""
+    rows = receipt.get('artifacts')
+    names = [row.get('name') for row in rows or [] if isinstance(row, dict)]
+    exe_rows = [row for row in rows or []
+                if isinstance(row, dict) and row.get('name') == 'exe']
+    if (receipt.get('schemaVersion') != 1
+            or receipt.get('contract') != 'devfleet-signed-build-output-inspection-v1'
+            or receipt.get('status') != 'PASS_VERIFIED_SIGNED_OUTPUT_WITH_FAILED_ADMISSION'
+            or receipt.get('certificationCredit') is not False
+            or receipt.get('repositoryHead') != candidate['candidateBuildCommit']
+            or receipt.get('shippingInputIdentity') != candidate['shippingInputIdentity']
+            or receipt.get('signatureStatus') != 'Valid'
+            or receipt.get('publicPromotionAllowed') is not False
+            or receipt.get('publicPublisherTrust') is not False
+            or len(names) != 4
+            or set(names) != {'exe', 'tar', 'portable', 'installerSource'}
+            or any(not re.fullmatch(r'[0-9a-f]{64}', str(row.get('sha256', '')).lower())
+                   for row in rows or [] if isinstance(row, dict)
+                   )
+            or len(exe_rows) != 1
+            or exe_rows[0].get('sha256') != candidate['candidateSha256']):
+        raise ValueError('generation-4 signed-output receipt contents are invalid')
+
+
+def _load_packaged_repair3_receipt(sources: Path, artifact_hash: str) -> dict:
+    """Load REPAIR-3 receipt only from the packaged hash-addressed source."""
+    if not re.fullmatch(r'[0-9a-f]{64}', artifact_hash):
+        raise ValueError('generation-4 signed-output receipt is absent or unbound')
+    path = sources / (artifact_hash + '.json')
+    if (not path.is_file() or path.is_symlink() or sha(path) != artifact_hash):
+        raise ValueError('generation-4 signed-output receipt is absent or hash-mismatched')
+    return json.loads(path.read_text(encoding='utf-8-sig'))
+
+
+def _validate_repair3_receipt_hash_binding(binding: dict, artifact_hash: str) -> None:
+    if binding.get('artifactReceiptSha256') != artifact_hash:
+        raise ValueError('generation-4 baseline and signed-output receipt hashes differ')
+
+
+def _validate_repair3_attempts(attempts: object, candidate: dict) -> None:
+    if (not isinstance(attempts, list) or len(attempts) != 1
+            or len([a for a in attempts if a.get('operation') == 'build-sign']) != 0
+            or len({a.get('operation') for a in attempts}) != len(attempts)
+            or attempts[0].get('operation') != 'standard-token'
+            or attempts[0].get('state') != 'TERMINAL'
+            or attempts[0].get('exitCode') != 0
+            or attempts[0].get('classification') != 'PASS_NATIVE_STANDARD_TOKEN'
+            or attempts[0].get('tuple') != candidate
+            or attempts[0].get('certificationCredit') is not False
+            or not isinstance(attempts[0].get('evidence'), list)
+            or not attempts[0]['evidence']):
+        raise ValueError('generation-4 qualification source lacks exact REPAIR-3 standard token')
+
+
 def load_accepted_baseline(root: Path, expected: dict[str, str], artifacts: dict[str, str],
                            _pointer: dict | None = None) -> dict[str, str | None]:
     """Resolve only the original CLEAN or a packaged, immutable adoption receipt."""
@@ -178,6 +233,214 @@ def load_accepted_baseline(root: Path, expected: dict[str, str], artifacts: dict
     if not pointer_path.exists():
         return {"id": old_id, "name": "DevFleet-E2E-CLEAN", "receiptSha256": None}
     pointer = _pointer if _pointer is not None else strict_baseline_json(pointer_path)
+    if pointer.get('generation') == 4:
+        if (pointer.get('schemaVersion') != 4
+                or pointer.get('contract') != 'devfleet-accepted-baseline-v4'
+                or pointer.get('status') != 'ACCEPTED'):
+            raise ValueError('generation-4 baseline pointer contract is invalid')
+        old_hash, name = pointer.get('previousPointerSha256', ''), pointer.get('receiptFile', '')
+        if not re.fullmatch(r'[0-9a-f]{64}', old_hash) or not re.fullmatch(r'[0-9a-f]{32}\.json', name):
+            raise ValueError('generation-4 baseline lineage reference is invalid')
+        history_path = root / 'evidence/baselines/history' / (old_hash + '.json')
+        receipt_path = root / 'evidence/baselines/receipts' / name
+        if (not history_path.is_file() or history_path.is_symlink() or sha(history_path) != old_hash
+                or not receipt_path.is_file() or receipt_path.is_symlink()
+                or sha(receipt_path) != pointer.get('receiptSha256')):
+            raise ValueError('generation-4 baseline chain is absent or hash mismatched')
+        previous = strict_baseline_json(history_path)
+        if previous.get('generation') != 3:
+            raise ValueError('generation-4 predecessor is not generation 3')
+        binding = strict_baseline_json(receipt_path)
+        old_tuple = binding.get('previousCandidate') or {}
+        new_tuple = binding.get('candidate') or {}
+        prior_expected = {'repositoryHead': old_tuple.get('repositoryHead'),
+                          'candidateCommit': old_tuple.get('candidateBuildCommit'),
+                          'shippingInputIdentity': old_tuple.get('shippingInputIdentity'),
+                          'releaseFingerprintId': old_tuple.get('releaseFingerprintId'),
+                          'toolingFingerprintId': old_tuple.get('toolingFingerprintId')}
+        prior = load_accepted_baseline(root, prior_expected,
+                                       {'exe': old_tuple.get('candidateSha256')}, previous)
+        actual = {'repositoryHead': expected['repositoryHead'],
+                  'candidateBuildCommit': expected['candidateCommit'],
+                  'shippingInputIdentity': expected['shippingInputIdentity'],
+                  'releaseFingerprintId': expected['releaseFingerprintId'],
+                  'toolingFingerprintId': expected['toolingFingerprintId'],
+                  'candidateSha256': artifacts['exe']}
+        tuple_keys = ('repositoryHead', 'candidateBuildCommit', 'shippingInputIdentity',
+                      'releaseFingerprintId', 'toolingFingerprintId', 'candidateSha256')
+        if (binding.get('schemaVersion') != 4
+                or binding.get('contract') != 'devfleet-baseline-rebind-receipt-v4'
+                or binding.get('status') != 'REBOUND'
+                or binding.get('certificationCredit') is not False
+                or binding.get('secretValuesRecorded') is not False
+                or not isinstance(binding.get('receiptId'), str)
+                or binding['receiptId'] + '.json' != name
+                or binding.get('previousPointerSha256') != old_hash
+                or binding.get('previousReceiptSha256') != prior['receiptSha256']
+                or binding.get('replacement') != pointer.get('checkpoint')
+                or binding.get('replacement') != previous.get('checkpoint')
+                or new_tuple != actual
+                or any(old_tuple.get(key) == new_tuple.get(key) for key in tuple_keys)):
+            raise ValueError('generation-4 receipt or signed material tuple differs')
+        approval = binding.get('approval') or {}
+        final_l1 = {'name': 'DevFleet-E2E-Win11-01',
+                    'id': '84b7d8b8-ee6c-4085-aa29-4b0adc316de2', 'state': 'Off'}
+        if (approval.get('schemaVersion') != 3
+                or approval.get('contract') != 'devfleet-baseline-rebind-approval-v3'
+                or approval.get('decision') != 'APPROVE'
+                or approval.get('approvedBy') != 'ACCOUNT_OWNER'
+                or approval.get('shippingChangeApproved') is not True
+                or approval.get('previousCandidate') != old_tuple
+                or approval.get('candidate') != new_tuple
+                or approval.get('replacement') != pointer['checkpoint']
+                or approval.get('previousReceiptSha256') != prior['receiptSha256']
+                or approval.get('sourceSha256') != binding.get('approvalSha256')
+                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('approvalSha256', '')))
+                or binding.get('finalL1') != final_l1
+                or binding.get('successorPolicyId') != 'DF-FRESH-CERTIFICATION-20260926-R2-REPAIR-3'
+                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('successorLedgerSha256', '')))
+                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('nativeInventorySha256', '')))):
+            raise ValueError('generation-4 authorization or terminal lab differs')
+        sources = root / 'evidence/baselines/sources'
+        ledger_hash, inventory_hash = binding['successorLedgerSha256'], binding['nativeInventorySha256']
+        ledger_path, inventory_path = sources / (ledger_hash + '.json'), sources / (inventory_hash + '.json')
+        if (not ledger_path.is_file() or ledger_path.is_symlink() or sha(ledger_path) != ledger_hash
+                or not inventory_path.is_file() or inventory_path.is_symlink()
+                or sha(inventory_path) != inventory_hash):
+            raise ValueError('generation-4 qualification or inventory source is absent or altered')
+        ledger, inventory = strict_baseline_json(ledger_path), strict_baseline_json(inventory_path)
+        attempts = ledger.get('attempts')
+        limits = {'standard-token': 1, 'diagnostic': 1, 'laptop-proof': 1,
+                  'desktop-proof': 1, 'fullrelease': 1, 'maintenance': 0, 'build-sign': 0}
+        artifact_binding = ledger.get('artifactReceipt') or {}
+        artifact_hash = str(artifact_binding.get('sha256', '')).lower()
+        _validate_repair3_receipt_hash_binding(binding, artifact_hash)
+        artifact_receipt = _load_packaged_repair3_receipt(sources, artifact_hash)
+        _validate_repair3_signed_output_receipt(artifact_receipt, new_tuple)
+        if (ledger.get('policyId') != binding['successorPolicyId']
+                or ledger.get('limits') != limits
+                or ledger.get('activeRunId') is not None):
+            raise ValueError('generation-4 qualification source lacks exact REPAIR-3 standard token')
+        _validate_repair3_attempts(attempts, new_tuple)
+        snapshots = inventory.get('snapshots')
+        exact = [row for row in snapshots if isinstance(row, dict)
+                 and row.get('name') == 'DevFleet-E2E-CLEAN-R2'] if isinstance(snapshots, list) else []
+        if (inventory.get('scope') != 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
+                or inventory.get('vm') != final_l1
+                or len(exact) != 1 or exact[0].get('id') != pointer['checkpoint']['id']
+                or exact[0].get('vmId') != final_l1['id']
+                or exact[0].get('parentSnapshotId') != '19865b76-4c3a-44f7-ba39-841e9d3c40c9'):
+            raise ValueError('generation-4 inventory does not prove accepted checkpoint and L1 Off')
+        return {'id': prior['id'], 'name': prior['name'],
+                'receiptSha256': pointer['receiptSha256']}
+    if pointer.get('generation') == 3:
+        if (pointer.get('schemaVersion') != 3
+                or pointer.get('contract') != 'devfleet-accepted-baseline-v3'
+                or pointer.get('status') != 'ACCEPTED'):
+            raise ValueError('generation-3 baseline pointer contract is invalid')
+        old_hash = pointer.get('previousPointerSha256', '')
+        name = pointer.get('receiptFile', '')
+        if not re.fullmatch(r'[0-9a-f]{64}', old_hash) or not re.fullmatch(r'[0-9a-f]{32}\.json', name):
+            raise ValueError('generation-3 baseline lineage reference is invalid')
+        history_path = root / 'evidence/baselines/history' / (old_hash + '.json')
+        receipt_path = root / 'evidence/baselines/receipts' / name
+        if (not history_path.is_file() or sha(history_path) != old_hash
+                or not receipt_path.is_file() or sha(receipt_path) != pointer.get('receiptSha256')):
+            raise ValueError('generation-3 baseline chain is absent or hash mismatched')
+        previous = strict_baseline_json(history_path)
+        if previous.get('generation') != 2:
+            raise ValueError('generation-3 predecessor is not generation 2')
+        binding = strict_baseline_json(receipt_path)
+        old_tuple = binding.get('previousCandidate') or {}
+        new_tuple = binding.get('candidate') or {}
+        old_expected = {'repositoryHead': old_tuple.get('repositoryHead'),
+                        'candidateCommit': old_tuple.get('candidateBuildCommit'),
+                        'shippingInputIdentity': old_tuple.get('shippingInputIdentity'),
+                        'releaseFingerprintId': old_tuple.get('releaseFingerprintId'),
+                        'toolingFingerprintId': old_tuple.get('toolingFingerprintId')}
+        prior = load_accepted_baseline(root, old_expected,
+                                       {'exe': old_tuple.get('candidateSha256')}, previous)
+        actual = {'repositoryHead': expected['repositoryHead'],
+                  'candidateBuildCommit': expected['candidateCommit'],
+                  'shippingInputIdentity': expected['shippingInputIdentity'],
+                  'releaseFingerprintId': expected['releaseFingerprintId'],
+                  'toolingFingerprintId': expected['toolingFingerprintId'],
+                  'candidateSha256': artifacts['exe']}
+        if (binding.get('schemaVersion') != 3
+                or binding.get('contract') != 'devfleet-baseline-rebind-receipt-v3'
+                or binding.get('status') != 'REBOUND'
+                or binding.get('certificationCredit') is not False
+                or binding.get('secretValuesRecorded') is not False
+                or not isinstance(binding.get('receiptId'), str)
+                or binding['receiptId'] + '.json' != name
+                or binding.get('previousPointerSha256') != old_hash
+                or binding.get('previousReceiptSha256') != prior['receiptSha256']
+                or binding.get('replacement') != pointer.get('checkpoint')
+                or binding.get('replacement') != previous.get('checkpoint')
+                or new_tuple != actual
+                or old_tuple.get('repositoryHead') == new_tuple.get('repositoryHead')
+                or old_tuple.get('toolingFingerprintId') == new_tuple.get('toolingFingerprintId')
+                or any(old_tuple.get(key) != new_tuple.get(key) for key in
+                       ('candidateBuildCommit', 'shippingInputIdentity',
+                        'releaseFingerprintId', 'candidateSha256'))):
+            raise ValueError('generation-3 receipt or material tuple differs')
+        approval = binding.get('approval') or {}
+        if (approval.get('schemaVersion') != 2
+                or approval.get('contract') != 'devfleet-baseline-rebind-approval-v2'
+                or approval.get('decision') != 'APPROVE'
+                or approval.get('approvedBy') != 'ACCOUNT_OWNER'
+                or approval.get('candidate') != new_tuple
+                or approval.get('replacement') != pointer['checkpoint']
+                or approval.get('previousReceiptSha256') != prior['receiptSha256']
+                or approval.get('sourceSha256') != binding.get('approvalSha256')
+                or not isinstance(binding.get('approvalSha256'), str)
+                or not re.fullmatch(r'[0-9a-f]{64}', binding['approvalSha256'])
+                or binding.get('finalL1') != {'name': 'DevFleet-E2E-Win11-01',
+                                             'id': '84b7d8b8-ee6c-4085-aa29-4b0adc316de2',
+                                             'state': 'Off'}
+                or binding.get('successorPolicyId') != 'DF-FRESH-CERTIFICATION-20260926-R2-REPAIR-1'
+                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('successorLedgerSha256', '')))
+                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('nativeInventorySha256', '')))):
+            raise ValueError('generation-3 authorization or terminal lab differs')
+        source_dir = root / 'evidence/baselines/sources'
+        ledger_hash = binding['successorLedgerSha256']
+        inventory_hash = binding['nativeInventorySha256']
+        ledger_path = source_dir / (ledger_hash + '.json')
+        inventory_path = source_dir / (inventory_hash + '.json')
+        if (not ledger_path.is_file() or ledger_path.is_symlink()
+                or not inventory_path.is_file() or inventory_path.is_symlink()
+                or sha(ledger_path) != ledger_hash or sha(inventory_path) != inventory_hash):
+            raise ValueError('generation-3 qualification or inventory source is absent or altered')
+        ledger = strict_baseline_json(ledger_path)
+        inventory = strict_baseline_json(inventory_path)
+        attempts = ledger.get('attempts')
+        required_remaining = {'standard-token': 1, 'diagnostic': 1,
+                              'laptop-proof': 1, 'desktop-proof': 1,
+                              'fullrelease': 1, 'maintenance': 0, 'build-sign': 0}
+        if (ledger.get('policyId') != binding['successorPolicyId']
+                or ledger.get('limits') != required_remaining
+                or ledger.get('activeRunId') is not None
+                or not isinstance(attempts, list) or len(attempts) != 1
+                or attempts[0].get('operation') != 'standard-token'
+                or attempts[0].get('state') != 'TERMINAL'
+                or attempts[0].get('exitCode') != 0
+                or attempts[0].get('classification') != 'PASS_NATIVE_STANDARD_TOKEN'
+                or attempts[0].get('tuple') != new_tuple
+                or attempts[0].get('certificationCredit') is not False
+                or not isinstance(attempts[0].get('evidence'), list)
+                or not attempts[0]['evidence']):
+            raise ValueError('generation-3 qualification source does not prove terminal standard token')
+        snapshots = inventory.get('snapshots')
+        exact = [row for row in snapshots if isinstance(row, dict)
+                 and row.get('name') == 'DevFleet-E2E-CLEAN-R2'] if isinstance(snapshots, list) else []
+        if (inventory.get('scope') != 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
+                or inventory.get('vm') != binding['finalL1']
+                or len(exact) != 1 or exact[0].get('id') != pointer['checkpoint']['id']
+                or exact[0].get('vmId') != binding['finalL1']['id']
+                or exact[0].get('parentSnapshotId') != '19865b76-4c3a-44f7-ba39-841e9d3c40c9'):
+            raise ValueError('generation-3 inventory source does not prove accepted checkpoint and L1 Off')
+        return {'id': prior['id'], 'name': prior['name'],
+                'receiptSha256': pointer['receiptSha256']}
     if pointer.get('generation') == 2:
         if (pointer.get('schemaVersion') != 2
                 or pointer.get('contract') != 'devfleet-accepted-baseline-v2'

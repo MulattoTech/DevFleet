@@ -1,707 +1,573 @@
 # DevFleet source part 109
 
 Full-source UTF-8 byte interval [5022000, 5068500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 47ccb564949636182df1ed65252f3349b908f6ade1ef24e641475d91d3dcb771
+Payload SHA-256: ad62c7188052e3389d146aeaf5cc75cc5a50dfe3a13bf91993a57222d1481aaf
 
 <!-- BEGIN SOURCE SLICE -->
-econds 'sshAndMarker')
+st.project_id;runtime_id=$latest.runtime_id;vm_name=$latest.vm_name;address=$address;state='ready';registry_address=$address;ssh_alias=$sync.ssh_alias;host_key_pinned=[bool]$sync.host_key_pinned;authenticated_connection=[bool]$sync.authenticated_connection;validated=[bool]$sync.validated;workspace_provisioned=$true;vscode_remote_platform=$sync.vscode_remote_platform;info=$info}
+}
+
+function Remove-ProjectVmSshAlias {
+    param([Parameter(Mandatory)][string]$RuntimeId,[Parameter(Mandatory)][string]$ProjectId)
+    $configPath=[string]$script:Config.SshConfigPath;$knownHostsPath=[string]$script:Config.SshKnownHostsPath;$removed=$false
+    if($configPath -and (Test-Path -LiteralPath $configPath)){$markers=Get-ProjectVmSshMarkers $RuntimeId;$before=[IO.File]::ReadAllText($configPath);Set-DevFleetManagedTextBlock $configPath $markers.Pattern|Out-Null;$removed=$removed -or ([IO.File]::ReadAllText($configPath) -ne $before)}
+    if($knownHostsPath -and (Test-Path -LiteralPath $knownHostsPath)){$knownMarkers=Get-ProjectVmKnownHostMarkers $RuntimeId;$before=[IO.File]::ReadAllText($knownHostsPath);Set-DevFleetManagedTextBlock $knownHostsPath $knownMarkers.Pattern|Out-Null;$removed=$removed -or ([IO.File]::ReadAllText($knownHostsPath) -ne $before)}
+    $vsCode=if(Get-Command Remove-DevFleetVsCodeRemotePlatform -ErrorAction SilentlyContinue){Remove-DevFleetVsCodeRemotePlatform @(Get-DevFleetVsCodeSettingsPaths) $RuntimeId}else{[ordered]@{ok=$true;status='skipped';reason='VS Code helper is not installed.';alias=$RuntimeId}}
+    if($removed){Write-AgentLog 'remove-ssh-alias' $ProjectId $RuntimeId 'removed' 'Removed only the destroyed project VM SSH alias and its managed host-key pin.'}
+}
+
+function Restore-PreviousSourceWorkspace { param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)]$Record,[Parameter(Mandatory)][string]$SourceVm,[Parameter(Mandatory)][string]$ProjectId,[Parameter(Mandatory)][string]$PreviousWorkspacePath)
+    $Slug=Assert-Slug $Slug;$ProjectId=Assert-ProjectId $ProjectId
+    if([string]$Record.project_id -ne $ProjectId){throw 'Project identifier does not match the target VM ownership registry.'}
+    if($SourceVm -notmatch '^devfleet-[a-z0-9][a-z0-9._-]{1,62}$' -or $SourceVm -eq $Record.vm_name){throw 'The export source VM is invalid.'}
+    $expected="^/home/devrunner/workspaces/$([regex]::Escape($Slug))-before-vm-export-[0-9a-f]{32}$"
+    if($PreviousWorkspacePath -notmatch $expected){throw 'The retained previous workspace path is invalid.'}
+    $sourceInventory=@(Get-MultipassVms|Where-Object{$_.name -eq $SourceVm})
+    if($sourceInventory.Count -ne 1 -or [string]$sourceInventory[0].state -ne 'RUNNING'){throw 'The DevFleet source VM must be running to restore its retained workspace.'}
+    $workspace="/home/devrunner/workspaces/$Slug";$rollbackPath="/home/devrunner/workspaces/$Slug-failed-migration-$([guid]::NewGuid().ToString('N'))";$metadataPath="$PreviousWorkspacePath/.devfleet/project.json"
+    $oldMetaText=(Invoke-Multipass @('exec',$SourceVm,'--','sudo','cat',$metadataPath) 30).Text
+    try{$oldMeta=$oldMetaText|ConvertFrom-Json -AsHashtable}catch{throw 'The retained previous workspace metadata is invalid.'}
+    if([string]$oldMeta.project_id -ne $ProjectId){throw 'The retained previous workspace belongs to a different project.'}
+    $lock=New-ProvisioningLock
+    try {
+        Invoke-Multipass @('exec',$SourceVm,'--','sudo','test','-d',$workspace) 30|Out-Null
+        Invoke-Multipass @('exec',$SourceVm,'--','sudo','test','-d',$PreviousWorkspacePath) 30|Out-Null
+        Invoke-Multipass @('exec',$SourceVm,'--','sudo','mv',$workspace,$rollbackPath) 60|Out-Null
+        try {Invoke-Multipass @('exec',$SourceVm,'--','sudo','mv',$PreviousWorkspacePath,$workspace) 60|Out-Null}
+        catch {try{Invoke-Multipass @('exec',$SourceVm,'--','sudo','mv',$rollbackPath,$workspace) 60|Out-Null}catch{};throw}
+        Invoke-Multipass @('exec',$SourceVm,'--','sudo','chown','-R','devrunner:devrunner',$workspace) 120|Out-Null
+        Write-AgentLog 'restore-previous-source' $Record.project_id $Record.runtime_id 'restored' 'Atomically reinstated the retained source workspace after migration rollback.'
+        return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$Record.runtime_id;project_id=$Record.project_id;source_vm=$SourceVm;workspace_path=$workspace;consumed_previous_workspace_path=$PreviousWorkspacePath;replaced_workspace_path=$rollbackPath;state='restored';message='Retained source workspace restored atomically.'}
+    } finally {try{$lock.ReleaseMutex()}catch{};$lock.Dispose()}
+}
+
+function Invoke-ProjectVmOperation { param([Parameter(Mandatory)][string]$Operation,[Parameter(Mandatory)]$Payload,[string]$RuntimeId='')
+    $Operation=$Operation.ToLowerInvariant();if($Operation -eq 'capacity'){return [ordered]@{ok=$true;host_name=$script:Config.HostName;capacity=Get-HostCapacity}};if($Operation -eq 'provider'){return [ordered]@{ok=$true;host_name=$script:Config.HostName;provider='multipass';provider_version=$script:Config.MultipassVersion;gpu_enabled=$false}}
+    $slug=Assert-Slug ([string]$Payload.slug);$payloadProjectId=Assert-ProjectId ([string]$Payload.project_id);$record=Assert-OwnedProjectVm $slug $RuntimeId -AllowStoppedTransition:($Operation -eq 'start');if($payloadProjectId -ne [string]$record.project_id){throw 'Project identifier does not match the ownership registry.'};$vmName=[string]$record.vm_name;if($Operation -eq 'destroy' -and [bool]$Payload.cleanup_only){if([string]$Payload.confirm_slug -ne $slug -or [string]$Payload.confirm_phrase -cne "DESTROY $slug"){throw 'Cleanup-only removal requires the exact project confirmation phrase.'};return Remove-ImportFailedProjectVm $slug $record $Payload}
+    switch($Operation){
+        'sync-ssh-alias' {return Sync-ProjectVmSshAlias $slug $record}
+        'refresh-connection-state' {return Refresh-ProjectVmConnectionState $slug $record}
+        'start' {Invoke-Multipass @('start',$vmName) 120|Out-Null;Wait-ProjectVmReady $vmName|Out-Null;return Refresh-ProjectVmConnectionState $slug $record}
+        'stop' {Invoke-Multipass @('stop',$vmName) 120|Out-Null;if([string]$record.address){$record.last_known_address=[string]$record.address};$record.address='';$record.state='stopped';$record.updated_at=(Get-Date).ToUniversalTime().ToString('o');Update-ProjectRecord $slug $record|Out-Null;Write-AgentLog 'stop' $record.project_id $record.runtime_id 'stopped' 'Project VM stopped; current address cleared and retained only as last_known_address.';return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$record.runtime_id;vm_name=$vmName;state='stopped';runtime_address='';last_known_address=$record.last_known_address;message='Dedicated project VM stopped.'}}
+        'restart' {Invoke-Multipass @('restart',$vmName) 180|Out-Null;Wait-ProjectVmReady $vmName|Out-Null;return Refresh-ProjectVmConnectionState $slug $record}
+        'inspect' {$info=Get-ProjectVmInfo $vmName;return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$record.runtime_id;record=$record;info=$info;gpu_enabled=$false}}
+        'health' {$info=Get-ProjectVmInfo $vmName;if([string]$info.state -ne 'RUNNING'){return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$record.runtime_id;state='stopped';vm_name=$vmName;project_id=$record.project_id;gpu_enabled=$false;healthy=$false;runtime_health='not-run-stopped';health_scope='runtime-only';application_healthy=$false;application_health='not-run-stopped';guest_exec_performed=$false;info=$info}};$health=Invoke-Multipass @('exec',$vmName,'--','sudo','/usr/local/sbin/devfleet-project-health') 30;return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$record.runtime_id;state='healthy';vm_name=$vmName;project_id=$record.project_id;gpu_enabled=$false;healthy=$true;runtime_health='healthy';health_scope='runtime-only';application_healthy=$false;application_health='not-run';guest_exec_performed=$true;info=$info}}
+        'backup' {return Backup-ProjectVm $record ([bool]$Payload.destructive)}
+        'list-backups' {return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$record.runtime_id;project_id=$record.project_id;backups=@(Get-ProjectVmBackups $record)}}
+        'inspect-backup' {$verified=Get-VerifiedProjectBackup $record ([string]$Payload.backup_id);return [ordered]@{ok=$true;host_name=$script:Config.HostName;host_id=$script:Config.HostId;runtime_id=$record.runtime_id;project_id=$record.project_id;backup=[ordered]@{backup_reference=$verified.backup_reference;sha_verified=$true;restore_eligible=$true}}}
+        'restore-backup' {return Restore-ProjectVmBackup $record ([string]$Payload.backup_id) ([bool]$Payload.confirm_restore)}
+        'export' {return Backup-ProjectVm $record}
+        'export-to-source' {return Export-ProjectWorkspaceToSource $slug $record ([string]$Payload.source_vm) ([string]$Payload.project_id) ([bool]$Payload.replace_source)}
+        'restore-previous-source' {return Restore-PreviousSourceWorkspace $slug $record ([string]$Payload.source_vm) ([string]$Payload.project_id) ([string]$Payload.previous_workspace_path)}
+        'project-start' {return Invoke-ProjectCommand $record 'start_command'}
+        'project-stop' {return Invoke-ProjectCommand $record 'stop_command'}
+        'project-restart' {$manifest=Get-ProjectCommandManifest $record;if($manifest.restart_command -or ($manifest.commands -and $manifest.commands.restart_command)){return Invoke-ProjectCommand $record 'restart_command'};Invoke-ProjectCommand $record 'stop_command'|Out-Null;return Invoke-ProjectCommand $record 'start_command'}
+        'project-health' {return Invoke-ProjectCommand $record 'health_command'}
+        'project-test' {return Invoke-ProjectCommand $record 'test_command'}
+        'project-bootstrap' {if([string]$Payload.command_key -eq 'codexpro'){return Invoke-ProjectCommand $record 'codexpro_command'};return Invoke-ProjectCommand $record 'bootstrap_command'}
+        'project-rebuild' {return Invoke-ProjectCommand $record 'rebuild_command'}
+        'project-logs' {return Invoke-ProjectCommand $record 'logs_command' ([int]$Payload.tail)}
+        'quarantine' {if((Get-ProjectVmInfo $vmName).state -eq 'RUNNING'){Invoke-Multipass @('stop',$vmName) 120|Out-Null};$record.state='quarantined';Update-ProjectRecord $slug $record|Out-Null;return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$record.runtime_id;state='quarantined';message='Project VM quarantined and preserved.'}}
+        'restore' {Invoke-Multipass @('start',$vmName) 120|Out-Null;Wait-ProjectVmReady $vmName|Out-Null;$record.state='ready';Update-ProjectRecord $slug $record|Out-Null;return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$record.runtime_id;state='ready';message='Project VM restored.'}}
+        'import' {return Import-ProjectWorkspace $slug $RuntimeId ([string]$Payload.source_vm) ([string]$Payload.project_id)}
+        'destroy' {$payloadProjectId=Assert-ProjectId ([string]$Payload.project_id);if($payloadProjectId -ne [string]$record.project_id){throw 'Project identifier does not match the ownership registry.'};if([string]$Payload.confirm_slug -ne $slug -or [string]$Payload.confirm_phrase -cne "DESTROY $slug"){throw 'Permanent destruction requires the exact project slug and confirmation phrase.'};if(-not [bool]$Payload.backup_verified -or -not [string]$Payload.backup_id -or -not [string]$Payload.backup_sha256){throw 'A specific verified workspace backup is required before permanent VM destruction.'};$manifestPath=Join-Path $script:BackupRoot "$(Assert-BackupId ([string]$Payload.backup_id)).json";if(-not(Test-Path -LiteralPath $manifestPath)){throw 'The requested backup manifest is not present on the host.'};$manifest=Get-Content -LiteralPath $manifestPath -Raw|ConvertFrom-Json -AsHashtable;if([string]$manifest.project_id -ne [string]$record.project_id -or [string]$manifest.slug -ne $slug -or [string]$manifest.runtime_id -ne [string]$record.runtime_id -or [string]$manifest.archive_sha256 -ne [string]$Payload.backup_sha256 -or [string]$manifest.source_archive_sha256 -ne [string]$manifest.host_archive_sha256 -or [string]$manifest.host_archive_sha256 -ne [string]$Payload.backup_sha256){throw 'Backup manifest identity or source/host hash equality does not match the project VM.'};$archiveHash=(Get-FileHash -LiteralPath ([string]$manifest.archive_path) -Algorithm SHA256).Hash.ToLowerInvariant();if($archiveHash -ne [string]$Payload.backup_sha256){throw 'Workspace backup archive hash no longer matches its verified manifest.'};$lock=New-ProvisioningLock;try{$info=Get-ProjectVmInfo $vmName;if([string]$info.state -eq 'RUNNING'){Invoke-Multipass @('stop',$vmName) 120|Out-Null};Invoke-Multipass @('delete',$vmName,'--purge') 600|Out-Null;if(@(Get-MultipassVms|Where-Object{$_.name -eq $vmName}).Count -ne 0){throw 'Multipass still reports the project VM after deletion.'};Remove-ProjectVmSshAlias $record.runtime_id $record.project_id;$record.state='destroyed';$record.destroyed_at=(Get-Date).ToUniversalTime().ToString('o');Update-ProjectRecord $slug $record|Out-Null;Write-AgentLog 'destroy' $record.project_id $record.runtime_id 'destroyed' 'Permanent project VM destruction completed after archive verification.';return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$record.runtime_id;vm_name=$vmName;state='destroyed';backup_id=$Payload.backup_id;message='Dedicated project VM destroyed after verified workspace backup.'}}finally{try{$lock.ReleaseMutex()}catch{};$lock.Dispose()}}
+        default {throw 'Unsupported host VM operation.'}
     }
-    if ($StageName -eq 'vault') {
-        return (Get-DevFleetOperationMaximumSeconds 'vaultSnapshot') + (Get-DevFleetOperationMaximumSeconds 'multipassLaunch') + (Get-DevFleetOperationMaximumSeconds 'multipassReadiness') + (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') + (Get-DevFleetOperationMaximumSeconds 'vaultBootstrap') + (Get-DevFleetOperationMaximumSeconds 'sshAndMarker')
+}
+
+function Send-JsonResponse { param([Parameter(Mandatory)]$Context,[Parameter(Mandatory)]$Body,[int]$StatusCode=200);$json=$Body|ConvertTo-Json -Depth 20 -Compress;$bytes=[Text.Encoding]::UTF8.GetBytes($json);$Context.Response.StatusCode=$StatusCode;$Context.Response.ContentType='application/json';$Context.Response.ContentEncoding=[Text.Encoding]::UTF8;$Context.Response.ContentLength64=$bytes.Length;$Context.Response.OutputStream.Write($bytes,0,$bytes.Length);$Context.Response.Close() }
+function Send-AuthenticatedJsonResponse {
+    param([Parameter(Mandatory)]$Context,[Parameter(Mandatory)]$Body,[int]$StatusCode=200,[Parameter(Mandatory)]$Auth)
+    $json=$Body|ConvertTo-Json -Depth 20 -Compress
+    $bytes=[Text.Encoding]::UTF8.GetBytes($json)
+    $material=([string]$Auth.Method.ToUpperInvariant()+"`n"+[string]$Auth.Path+"`n"+[string]$Auth.Timestamp+"`n"+[string]$Auth.Nonce+"`n"+[string]$StatusCode+"`n"+$json+"`n"+[string]$Auth.Expected)
+    $hmac=[Security.Cryptography.HMACSHA256]::new([Text.Encoding]::UTF8.GetBytes([string]$script:Token))
+    try{$signature=([BitConverter]::ToString($hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes($material)))-replace '-','').ToLowerInvariant()}finally{$hmac.Dispose()}
+    $Context.Response.Headers['X-DevFleet-Host-Response-Signature']=$signature
+    $Context.Response.StatusCode=$StatusCode;$Context.Response.ContentType='application/json';$Context.Response.ContentEncoding=[Text.Encoding]::UTF8;$Context.Response.ContentLength64=$bytes.Length;$Context.Response.OutputStream.Write($bytes,0,$bytes.Length);$Context.Response.Close()
+}
+function Read-JsonBody { param([Parameter(Mandatory)][string]$Text);if(-not $Text){return @{}};try{return $Text|ConvertFrom-Json -AsHashtable}catch{throw 'Request body is not valid JSON.'} }
+$script:NonceStatePath=Join-Path $script:Root 'seen-request-nonces.json'
+$script:SeenRequestNonces=@{}
+function Read-NonceState {
+    $script:SeenRequestNonces=@{}
+    if(-not (Test-Path -LiteralPath $script:NonceStatePath -PathType Leaf)){return}
+    try {
+        $data=Get-Content -LiteralPath $script:NonceStatePath -Raw | ConvertFrom-Json -AsHashtable
+        foreach($entry in $data.GetEnumerator()){[int64]$stamp=0;if([int64]::TryParse([string]$entry.Value,[ref]$stamp)){$script:SeenRequestNonces[[string]$entry.Key]=$stamp}}
+    } catch { Write-AgentLog 'nonce-state' '' '' 'warning' 'Persisted nonce state was unreadable; starting with an empty bounded replay set.' }
+}
+function Save-NonceState {
+    param([int64]$Now)
+    foreach($key in @($script:SeenRequestNonces.Keys)){if(($Now-[int64]$script:SeenRequestNonces[$key])-gt 120){$script:SeenRequestNonces.Remove($key)}}
+    $tmp="$script:NonceStatePath.$([guid]::NewGuid().ToString('N')).tmp"
+    try { $script:SeenRequestNonces | ConvertTo-Json -Compress | Set-Content -LiteralPath $tmp -Encoding UTF8; Move-Item -LiteralPath $tmp -Destination $script:NonceStatePath -Force }
+    finally { if(Test-Path -LiteralPath $tmp){Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue} }
+}
+Read-NonceState
+function Test-RequestToken {
+    param([Parameter(Mandatory)]$Context)
+    $reader=[IO.StreamReader]::new($Context.Request.InputStream,[Text.Encoding]::UTF8);try{$body=$reader.ReadToEnd()}finally{$reader.Dispose()}
+    $timestamp=[string]$Context.Request.Headers['X-DevFleet-Host-Timestamp'];$nonce=[string]$Context.Request.Headers['X-DevFleet-Host-Nonce'];$expected=[string]$Context.Request.Headers['X-DevFleet-Host-Expected'];$provided=[string]$Context.Request.Headers['X-DevFleet-Host-Signature'];$epoch=0L
+    if(-not [long]::TryParse($timestamp,[ref]$epoch)){return $null};$now=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    if([math]::Abs($now-$epoch)-gt 60 -or [string]::IsNullOrWhiteSpace($nonce) -or [string]::IsNullOrWhiteSpace($provided)){return $null}
+    if($expected -ne [string]$script:Config.HostName -and $expected -ne [string]$script:Config.HostId){return $null}
+    foreach($key in @($script:SeenRequestNonces.Keys)){if(($now-[int64]$script:SeenRequestNonces[$key])-gt 120){$script:SeenRequestNonces.Remove($key)}}
+    $material=([string]$Context.Request.HttpMethod.ToUpperInvariant()+"`n"+[string]$Context.Request.Url.AbsolutePath+"`n"+$timestamp+"`n"+$nonce+"`n"+$body+"`n"+$expected)
+    $hmac=[Security.Cryptography.HMACSHA256]::new([Text.Encoding]::UTF8.GetBytes([string]$script:Token));try{$actual=([BitConverter]::ToString($hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes($material)))-replace '-','').ToLowerInvariant()}finally{$hmac.Dispose()}
+    $left=[Text.Encoding]::UTF8.GetBytes($actual);$right=[Text.Encoding]::UTF8.GetBytes($provided.ToLowerInvariant())
+    if($left.Length -ne $right.Length -or -not [Security.Cryptography.CryptographicOperations]::FixedTimeEquals($left,$right)){return $null}
+    if($script:SeenRequestNonces.ContainsKey($nonce)){return $null}
+    $script:SeenRequestNonces[$nonce]=$now;Save-NonceState $now
+    return [pscustomobject]@{Body=$body}
+}
+
+if($LibraryOnly){return}
+
+# Hyper-V checkpoint restore and Windows virtual-network recreation can leave an
+# owned firewall filter pointing at an old adapter identity or subnet. Refresh
+# only rules whose immutable fields still prove exact DevFleet ownership before
+# the listener is exposed. A missing deferred interface is preserved and can be
+# reconciled on a later service restart.
+$ownershipModulePath = Join-Path $script:Root 'DevFleet-WindowsIntegrationOwnership.psm1'
+if (-not (Test-Path -LiteralPath $ownershipModulePath -PathType Leaf)) { throw 'Host-agent Windows integration ownership module is missing.' }
+Import-Module $ownershipModulePath -Force
+$firewallRefresh = Invoke-DevFleetOwnedFirewallRefresh -Path (Join-Path $script:Root 'integration-ownership.json') -WaitSeconds 30
+Write-AgentLog 'firewall-refresh' '' '' ([string]$firewallRefresh.status) ("changed={0}; skipped={1}" -f [int]$firewallRefresh.changed,[int]$firewallRefresh.skipped)
+
+$workerScript = {
+    param([string]$ScriptPath,[string]$ConfigPath,[psobject]$Request)
+    . $ScriptPath -ConfigPath $ConfigPath -LibraryOnly
+    try {
+        $path=$Request.path.TrimEnd('/');$method=$Request.method.ToUpperInvariant();$payload=if($Request.body){$Request.body|ConvertFrom-Json -AsHashtable}else{@{}}
+        $parts=$path.Trim('/').Split('/');$runtimeId=if($parts.Count -ge 3){[uri]::UnescapeDataString($parts[2])}else{''}
+        if($method -eq 'GET' -and $path -eq '/v1/host'){ $result=[ordered]@{ok=$true;host_id=$script:Config.HostId;host_name=$script:Config.HostName;agent_version=$script:AgentVersion;provider='multipass';capacity=Get-HostCapacity} }
+        elseif($method -eq 'GET' -and $path -eq '/v1/host/capacity'){ $result=[ordered]@{ok=$true;host_name=$script:Config.HostName;capacity=Get-HostCapacity} }
+        elseif($method -eq 'GET' -and $path -eq '/v1/provider'){ $result=[ordered]@{ok=$true;host_name=$script:Config.HostName;provider='multipass';provider_version=$script:Config.MultipassVersion;gpu_enabled=$false} }
+        elseif($parts.Count -lt 2 -or $parts[0] -ne 'v1' -or $parts[1] -ne 'project-vms'){ throw 'Not found.' }
+        elseif($method -eq 'POST' -and $parts.Count -eq 2){$limits=$payload.resource_limits;if(-not $limits){throw 'resource_limits is required.'};$result=Ensure-ProjectVm ([string]$payload.slug) ([string]$payload.project_id) ([double]$limits.cpus) ([double]$limits.memory_gb) ([double]$limits.disk_gb) ([string]$payload.git_url)}
+        elseif($method -eq 'GET' -and $parts.Count -eq 3){$slug=Get-ProjectSlugByRuntime $runtimeId;$record=Assert-OwnedProjectVm $slug $runtimeId;$result=[ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$record.runtime_id;record=$record;info=Get-ProjectVmInfo $record.vm_name;gpu_enabled=$false}}
+        elseif($parts.Count -ne 4){throw 'Not found.'}
+        else {$operation=$parts[3];if($method -eq 'DELETE'){$result=Invoke-ProjectVmOperation 'destroy' $payload $runtimeId}elseif($method -eq 'POST'){$result=Invoke-ProjectVmOperation $operation $payload $runtimeId}else{throw 'Method not allowed.'}}
+        [pscustomobject]@{status=200;body=$result}
+    } catch { [pscustomobject]@{status=400;body=[ordered]@{ok=$false;error=$_.Exception.Message}} }
+}
+$listener=[Net.HttpListener]::new();$listener.Prefixes.Add([string]$script:Config.ListenPrefix);$listener.Start();Write-AgentLog 'agent' '' '' 'started' "Listening on $($script:Config.ListenPrefix)"
+$pool=[System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(1,4);$pool.Open()
+$jobs=[Collections.Generic.List[object]]::new();$accept=$listener.BeginGetContext($null,$null)
+try {
+    while($listener.IsListening) {
+        if($accept.IsCompleted) {
+            $context=$null;$auth=$null;$responseAuth=$null
+            try {
+                $context=$listener.EndGetContext($accept);$accept=$listener.BeginGetContext($null,$null);$path=$context.Request.Url.AbsolutePath.TrimEnd('/');$method=$context.Request.HttpMethod.ToUpperInvariant()
+                $auth=Test-RequestToken $context
+                if(-not $auth){Send-JsonResponse $context @{ok=$false;error='Unauthorized.'} 401;continue}
+                $responseAuth=[pscustomobject]@{Timestamp=[string]$context.Request.Headers['X-DevFleet-Host-Timestamp'];Nonce=[string]$context.Request.Headers['X-DevFleet-Host-Nonce'];Expected=[string]$context.Request.Headers['X-DevFleet-Host-Expected'];Method=$method;Path=$path}
+                if($method -eq 'GET' -and $path -eq '/healthz'){Send-AuthenticatedJsonResponse $context ([ordered]@{ok=$true;service='devfleet-host-agent';agent_version=$script:AgentVersion;host_name=$script:Config.HostName;host_id=$script:Config.HostId}) 200 $responseAuth;continue}
+                if($jobs.Count -ge 4){Send-AuthenticatedJsonResponse $context ([ordered]@{ok=$false;error='Host Agent is busy; retry this request.'}) 503 $responseAuth;continue}
+                $ps=[PowerShell]::Create();$ps.RunspacePool=$pool;[void]$ps.AddScript($workerScript).AddArgument($PSCommandPath).AddArgument($ConfigPath).AddArgument([pscustomobject]@{path=$path;method=$method;body=[string]$auth.Body});$async=$ps.BeginInvoke();$jobs.Add([pscustomobject]@{PowerShell=$ps;Async=$async;Context=$context;Auth=$responseAuth})
+            } catch { try{if($auth -and $responseAuth){Send-AuthenticatedJsonResponse $context ([ordered]@{ok=$false;error=$_.Exception.Message}) 400 $responseAuth}else{Send-JsonResponse $context @{ok=$false;error=$_.Exception.Message} 400}}catch{} }
+        }
+        for($i=$jobs.Count-1;$i -ge 0;$i--) {
+            $job=$jobs[$i]
+            if(-not $job.Async.IsCompleted){continue}
+            try{$output=@($job.PowerShell.EndInvoke($job.Async));$response=if($output.Count -gt 0){$output[$output.Count-1]}else{[pscustomobject]@{status=500;body=@{ok=$false;error='Worker returned no response.'}}};Send-AuthenticatedJsonResponse $job.Context $response.body ([int]$response.status) $job.Auth}
+            catch{try{Send-AuthenticatedJsonResponse $job.Context ([ordered]@{ok=$false;error='Host Agent worker failed.'}) 500 $job.Auth}catch{}}
+            finally{$job.PowerShell.Dispose();$jobs.RemoveAt($i)}
+        }
+        $pollMilliseconds=if($jobs.Count -gt 0){20}else{200}
+        Start-Sleep -Milliseconds $pollMilliseconds
     }
-    $budgets = @{
-        bootstrap = (Get-DevFleetOperationMaximumSeconds 'bootstrap')
-        preflight = (Get-DevFleetOperationMaximumSeconds 'preflight')
-        prerequisites = (6 * ((Get-DevFleetOperationMaximumSeconds 'dependencyProbe') + (Get-DevFleetOperationMaximumSeconds 'dependencyHealth') + (Get-DevFleetOperationMaximumSeconds 'dependencyInstall') + (Get-DevFleetOperationMaximumSeconds 'dependencyVerification'))) + (Get-DevFleetOperationMaximumSeconds 'windowsCapability') + (Get-DevFleetOperationMaximumSeconds 'windowsFeature') + (4 * (Get-DevFleetOperationMaximumSeconds 'multipassConfiguration')) + (3 * (Get-DevFleetOperationMaximumSeconds 'vscodeExtension'))
-        windowsTailscale = 900
-        hostAgent = 300
-        tailscale = 900
-        vaultClient = 300
-        shortcuts = 180
-        export = 300
-        verification = 300
+} finally {
+    try{$listener.Stop();$listener.Close()}catch{}
+    foreach($job in @($jobs)){try{$job.PowerShell.Stop()}catch{};try{$job.PowerShell.Dispose()}catch{}}
+    try{$pool.Close();$pool.Dispose()}catch{}
+    Write-AgentLog 'agent' '' '' 'stopped' 'Host agent listener stopped.'
+}
+
+```
+
+
+## FILE: source/windows/DevFleet-HostAgentProtocol.psm1
+
+SHA256: 6e1b0bcea1194b7a4b5443f80b8af01e8331ed6772578cac272867de3334034f | Bytes: 4785 | Git mode: 100644
+
+```
+Set-StrictMode -Version Latest
+
+function ConvertTo-HostAgentHmac {
+    param([Parameter(Mandatory)][byte[]]$Key,[Parameter(Mandatory)][byte[]]$Material)
+    $hmac=[Security.Cryptography.HMACSHA256]::new($Key)
+    try { return (([BitConverter]::ToString($hmac.ComputeHash($Material)) -replace '-','').ToLowerInvariant()) }
+    finally { $hmac.Dispose() }
+}
+
+function New-HostAgentRequestAuthentication {
+    param(
+        [Parameter(Mandatory)][string]$Method,
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Body,
+        [Parameter(Mandatory)][string]$Key,
+        [Parameter(Mandatory)][string]$ExpectedHost
+    )
+    if([string]::IsNullOrWhiteSpace($Key) -or [string]::IsNullOrWhiteSpace($ExpectedHost)){throw 'Host Agent authentication configuration is incomplete.'}
+    $timestamp=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString([Globalization.CultureInfo]::InvariantCulture)
+    $nonceBytes=New-Object byte[] 18;$rng=[Security.Cryptography.RandomNumberGenerator]::Create();try{$rng.GetBytes($nonceBytes)}finally{$rng.Dispose()}
+    $nonce=[Convert]::ToBase64String($nonceBytes).TrimEnd('=').Replace('+','-').Replace('/','_')
+    $material=[Text.Encoding]::UTF8.GetBytes(([string]$Method.ToUpperInvariant()+"`n"+$Path+"`n"+$timestamp+"`n"+$nonce+"`n"+[Text.Encoding]::UTF8.GetString($Body)+"`n"+$ExpectedHost))
+    return [ordered]@{Timestamp=$timestamp;Nonce=$nonce;Expected=$ExpectedHost;Signature=(ConvertTo-HostAgentHmac ([Text.Encoding]::UTF8.GetBytes($Key)) $material)}
+}
+
+function Test-HostAgentResponseAuthentication {
+    param(
+        [Parameter(Mandatory)][string]$Method,[Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][int]$StatusCode,
+        [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Body,[Parameter(Mandatory)][string]$Key,[Parameter(Mandatory)][string]$ExpectedHost,
+        [Parameter(Mandatory)][string]$Timestamp,[Parameter(Mandatory)][string]$Nonce,[Parameter(Mandatory)][string]$Provided
+    )
+    $material=[Text.Encoding]::UTF8.GetBytes(([string]$Method.ToUpperInvariant()+"`n"+$Path+"`n"+$Timestamp+"`n"+$Nonce+"`n"+$StatusCode.ToString([Globalization.CultureInfo]::InvariantCulture)+"`n"+[Text.Encoding]::UTF8.GetString($Body)+"`n"+$ExpectedHost))
+    $actual=ConvertTo-HostAgentHmac ([Text.Encoding]::UTF8.GetBytes($Key)) $material
+    $left=[Text.Encoding]::ASCII.GetBytes($actual);$right=[Text.Encoding]::ASCII.GetBytes(([string]$Provided).ToLowerInvariant())
+    if($left.Length -ne $right.Length -or -not [Security.Cryptography.CryptographicOperations]::FixedTimeEquals($left,$right)){throw 'Host Agent response authentication failed.'}
+    return $true
+}
+
+function Invoke-HostAgentAuthenticatedJson {
+    param([Parameter(Mandatory)][string]$Uri,[Parameter(Mandatory)][string]$Method,[Parameter(Mandatory)][string]$Key,[Parameter(Mandatory)][string]$ExpectedHost,[hashtable]$Body=@{})
+    $parsed=[Uri]$Uri;$path=$parsed.AbsolutePath;$bodyBytes=[Text.Encoding]::UTF8.GetBytes(($Body|ConvertTo-Json -Depth 20 -Compress));if($Method.ToUpperInvariant() -eq 'GET'){$bodyBytes=[byte[]]@()}
+    $auth=New-HostAgentRequestAuthentication $Method $path $bodyBytes $Key $ExpectedHost
+    $request=[Net.HttpWebRequest]::Create($Uri);$request.Method=$Method.ToUpperInvariant();$request.Timeout=3000;$request.ReadWriteTimeout=3000;$request.Headers['X-DevFleet-Host-Timestamp']=$auth.Timestamp;$request.Headers['X-DevFleet-Host-Nonce']=$auth.Nonce;$request.Headers['X-DevFleet-Host-Expected']=$auth.Expected;$request.Headers['X-DevFleet-Host-Signature']=$auth.Signature
+    if($bodyBytes.Length -gt 0){$request.ContentType='application/json';$request.ContentLength=$bodyBytes.Length;$stream=$request.GetRequestStream();try{$stream.Write($bodyBytes,0,$bodyBytes.Length)}finally{$stream.Dispose()}}
+    $response=$null;$responseBody=[byte[]]@()
+    try{$response=$request.GetResponse()}catch [Net.WebException]{if(-not $_.Exception.Response){throw};$response=$_.Exception.Response}
+    try{$stream=$response.GetResponseStream();$memory=[IO.MemoryStream]::new();try{$stream.CopyTo($memory);$responseBody=$memory.ToArray()}finally{$memory.Dispose();$stream.Dispose()};$status=[int]$response.StatusCode;$signature=[string]$response.Headers['X-DevFleet-Host-Response-Signature'];Test-HostAgentResponseAuthentication $Method $path $status $responseBody $Key $ExpectedHost $auth.Timestamp $auth.Nonce $signature|Out-Null;if($status -lt 200 -or $status -ge 300){throw "Host Agent rejected authenticated request ($status)."};return ([Text.Encoding]::UTF8.GetString($responseBody)|ConvertFrom-Json)}finally{if($response){$response.Dispose()}}
+}
+
+Export-ModuleMember -Function New-HostAgentRequestAuthentication,Test-HostAgentResponseAuthentication,Invoke-HostAgentAuthenticatedJson
+
+```
+
+
+## FILE: source/windows/DevFleet-VSCode.ps1
+
+SHA256: 6e7ab0758d482f69112085ce84d153b9d5a7ab645d70da1a92963d24e38f7248 | Bytes: 5596 | Git mode: 100644
+
+```
+function ConvertFrom-DevFleetJsonc {
+    param([Parameter(Mandatory)][string]$Text)
+    $out = New-Object Text.StringBuilder
+    $inString = $false; $escape = $false; $lineComment = $false; $blockComment = $false
+    for ($i = 0; $i -lt $Text.Length; $i++) {
+        $c = $Text[$i]; $next = if ($i + 1 -lt $Text.Length) { $Text[$i + 1] } else { [char]0 }
+        if ($lineComment) { if ($c -eq "`r" -or $c -eq "`n") { $lineComment = $false; [void]$out.Append($c) }; continue }
+        if ($blockComment) { if ($c -eq '*' -and $next -eq '/') { $blockComment = $false; $i++ }; continue }
+        if ($inString) {
+            [void]$out.Append($c)
+            if ($escape) { $escape = $false } elseif ($c -eq '\') { $escape = $true } elseif ($c -eq '"') { $inString = $false }
+            continue
+        }
+        if ($c -eq '"') { $inString = $true; [void]$out.Append($c); continue }
+        if ($c -eq '/' -and $next -eq '/') { $lineComment = $true; $i++; continue }
+        if ($c -eq '/' -and $next -eq '*') { $blockComment = $true; $i++; continue }
+        [void]$out.Append($c)
     }
-    if (-not $budgets.ContainsKey($StageName)) { throw "No finite deadline policy exists for stage '$StageName'." }
-    return [int]$budgets[$StageName]
+    return [regex]::Replace($out.ToString(), ',\s*([}\]])', '$1')
 }
 
-function Get-DevFleetOperationMaximumSeconds {
-    param([Parameter(Mandatory)][ValidateSet('bootstrap','preflight','prerequisites','dependencyProbe','dependencyHealth','dependencyInstall','dependencyVerification','windowsCapability','windowsFeature','multipassConfiguration','vscodeExtension','windowsTailscale','hostAgent','multipassLaunch','multipassReadiness','payloadTransfer','guestBootstrap','vaultBootstrap','sshAndMarker','vaultSnapshot','tailscale','vaultClient','shortcuts','export','verification')][string]$OperationName)
-    $operation = [ordered]@{
-        bootstrap = 240; preflight = 120; prerequisites = 0; dependencyProbe = 60; dependencyHealth = 180; dependencyInstall = 1800; dependencyVerification = 60; windowsCapability = 900; windowsFeature = 900; multipassConfiguration = 600; vscodeExtension = 300; windowsTailscale = 900; hostAgent = 300
-        multipassLaunch = 900; multipassReadiness = 1200; payloadTransfer = 900
-        guestBootstrap = (900 + 1200 + 1200 + 600 + 600 + 1200 + 600) + 300
-        vaultBootstrap = 3900
-        sshAndMarker = 300; vaultSnapshot = 300; tailscale = 900; vaultClient = 300
-        shortcuts = 180; export = 300; verification = 300
-    }
-    $operation.prerequisites = 6 * ($operation.dependencyProbe + $operation.dependencyHealth + $operation.dependencyInstall + $operation.dependencyVerification) + $operation.windowsCapability + $operation.windowsFeature + (4 * $operation.multipassConfiguration) + (3 * $operation.vscodeExtension)
-    return [int]$operation[$OperationName]
-}
-
-function Get-DevFleetTransactionBudgetSeconds {
-    param([Parameter(Mandatory)][ValidateSet('Laptop','Desktop')][string]$Role)
-    $stageNames = if ($Role -eq 'Laptop') {
-        @('bootstrap','preflight','prerequisites','windowsTailscale','hostAgent','compute','vault','tailscale','tailscale','vaultClient','shortcuts','export','verification')
-    } else {
-        @('bootstrap','preflight','prerequisites','windowsTailscale','hostAgent','compute','tailscale','shortcuts','export','verification')
-    }
-    $total = 0
-    foreach ($stage in $stageNames) { $total += Get-DevFleetStageBudgetSeconds $stage }
-    return $total + 600
-}
-
-function Assert-PowerShell7 {
-    if ($PSVersionTable.PSVersion.Major -lt 7) {
-        throw 'PowerShell 7 or newer is required. Re-run Bootstrap-Install.ps1 so the verified local PowerShell payload can be installed.'
+function Read-DevFleetVsCodeSettings {
+    param([Parameter(Mandatory)][string]$Path)
+    $raw = [IO.File]::ReadAllText($Path)
+    try { return [pscustomobject]@{Raw=$raw;Data=(ConvertFrom-DevFleetJsonc $raw | ConvertFrom-Json -AsHashtable)} }
+    catch {
+        # Preserve the evidence before reporting malformed user settings. No
+        # replacement is written when parsing fails.
+        $backup = "$Path.devfleet-backup-$([guid]::NewGuid().ToString('N')).jsonc"
+        [IO.File]::Copy($Path, $backup, $false)
+        throw "VS Code settings are not valid JSONC; preserved backup $backup"
     }
 }
 
-function Test-Administrator {
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
-    $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+function Write-DevFleetVsCodeSettings {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)]$Data)
+    $json = $Data | ConvertTo-Json -Depth 50
+    $backup = "$Path.devfleet-backup-$([guid]::NewGuid().ToString('N')).jsonc"
+    [IO.File]::Copy($Path, $backup, $false)
+    $tmp = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
+    try { [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false))); Move-Item -LiteralPath $tmp -Destination $Path -Force }
+    finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+    return $backup
 }
 
-function Assert-Administrator {
-    if (-not (Test-Administrator)) { throw 'Run PowerShell 7 as Administrator.' }
-}
-
-function Initialize-DevFleetState {
-    param([Parameter(Mandatory)][string]$PackageRoot)
-    $root = Get-DevFleetStateRoot
-    foreach ($dir in @($root, "$root\exports", "$root\logs", "$root\secrets", "$root\tmp")) {
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+function Set-DevFleetVsCodeRemotePlatform {
+    param([Parameter(Mandatory)][string[]]$Paths,[Parameter(Mandatory)][string]$Alias)
+    $updated = @(); $skipped = @()
+    foreach ($path in $Paths) {
+        if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { $skipped += $path; continue }
+        $settings = Read-DevFleetVsCodeSettings $path
+        $data = $settings.Data
+        if ($null -eq $data) { $data = @{} }
+        if (-not ($data -is [hashtable])) { throw "VS Code settings root must be an object: $path" }
+        $mapping = if ($data.ContainsKey('remote.SSH.remotePlatform') -and $data['remote.SSH.remotePlatform'] -is [hashtable]) { $data['remote.SSH.remotePlatform'] } else { @{} }
+        if ([string]$mapping[$Alias] -eq 'linux') { $skipped += $path; continue }
+        $mapping[$Alias] = 'linux'; $data['remote.SSH.remotePlatform'] = $mapping
+        $backup = Write-DevFleetVsCodeSettings $path $data
+        $updated += [ordered]@{path=$path;backup=$backup;alias=$Alias;platform='linux'}
     }
-    $configPath = Join-Path $root 'devfleet.config.json'
-    if (-not (Test-Path $configPath)) {
-        Copy-Item (Join-Path $PackageRoot 'config\devfleet.config.json') $configPath
+    return [ordered]@{ok=$true;status='updated';updated_paths=@($updated);skipped_paths=@($skipped);alias=$Alias;platform='linux'}
+}
+
+function Remove-DevFleetVsCodeRemotePlatform {
+    param([Parameter(Mandatory)][string[]]$Paths,[Parameter(Mandatory)][string]$Alias)
+    $removed = @(); $skipped = @()
+    foreach ($path in $Paths) {
+        if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { $skipped += $path; continue }
+        $settings = Read-DevFleetVsCodeSettings $path; $data = $settings.Data
+        if ($null -eq $data -or -not ($data -is [hashtable])) { throw "VS Code settings root must be an object: $path" }
+        $mapping = $data['remote.SSH.remotePlatform']
+        if ($mapping -isnot [hashtable] -or -not $mapping.ContainsKey($Alias)) { $skipped += $path; continue }
+        $mapping.Remove($Alias)
+        if ($mapping.Count -eq 0) { $data.Remove('remote.SSH.remotePlatform') }
+        $backup = Write-DevFleetVsCodeSettings $path $data
+        $removed += [ordered]@{path=$path;backup=$backup;alias=$Alias}
     }
-    Set-Content -Path (Join-Path $root 'package-root.txt') -Value $PackageRoot -Encoding utf8
-    Protect-DevFleetStateAcl
+    return [ordered]@{ok=$true;status='updated';removed_paths=@($removed);skipped_paths=@($skipped);alias=$Alias}
 }
 
-function Get-OrCreateNodeIdentity {
-    param([Parameter(Mandatory)][ValidateSet('Laptop','Desktop')][string]$Role)
-    $path = Join-Path (Get-DevFleetStateRoot) 'node-identity.json'
-    if (Test-Path -LiteralPath $path) { return Get-Content -LiteralPath $path -Raw | ConvertFrom-Json }
-    $isPrimary = $Role -eq 'Desktop'
-    $identity = [ordered]@{
-        schema_version = 1
-        deployment_id = if ($isPrimary) { [guid]::NewGuid().ToString() } else { '' }
-        node_id = [guid]::NewGuid().ToString()
-        node_name = $env:COMPUTERNAME
-        node_role = if ($isPrimary) { 'primary' } else { 'surrogate' }
-        coordinator_node_id = $null
-        protocol_version = 1
-        registration_state = if ($isPrimary) { 'coordinator' } else { 'awaiting-primary-join' }
-        created_at = (Get-Date).ToUniversalTime().ToString('o')
+function Get-DevFleetVsCodeSettingsPaths {
+    $values = @($script:Config.VsCodeSettingsPaths)
+    return @($values | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+}
+
+function Sync-DevFleetVsCodeRemotePlatform {
+    param([Parameter(Mandatory)][string]$Alias)
+    $paths = @(Get-DevFleetVsCodeSettingsPaths)
+    $knownExecutables = @(
+        (Join-Path ${env:ProgramFiles} 'Microsoft VS Code\Code.exe'),
+        (Join-Path ${env:LOCALAPPDATA} 'Programs\Microsoft VS Code\Code.exe'),
+        (Join-Path ${env:ProgramFiles} 'Microsoft VS Code Insiders\Code - Insiders.exe'),
+        (Join-Path ${env:LOCALAPPDATA} 'Programs\Microsoft VS Code Insiders\Code - Insiders.exe')
+    )
+    if (-not ($knownExecutables | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })) { return [ordered]@{ok=$true;status='skipped';reason='VS Code is not installed.';updated_paths=@();alias=$Alias;platform='linux'} }
+    return Set-DevFleetVsCodeRemotePlatform $paths $Alias
+}
+
+```
+
+
+## FILE: source/windows/DevFleet-WindowsIntegrationOwnership.psm1
+
+SHA256: a05f3e85b4033d59e61d4ccdaa06bc8051befb711ae2b6fb26880f1ae89f1b0e | Bytes: 16444 | Git mode: 100644
+
+```
+Set-StrictMode -Version Latest
+
+function ConvertTo-DevFleetCanonicalPath {
+    param([Parameter(Mandatory)][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { throw 'Windows integration executable path is empty.' }
+    return [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($Path)).TrimEnd('\')
+}
+
+function ConvertTo-DevFleetCanonicalFirewallRemoteAddress {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+    $text = $Value.Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) { return $text }
+    $parts = $text -split '/', 2
+    if ($parts.Count -ne 2) { return $text }
+
+    $address = $null
+    if (-not [Net.IPAddress]::TryParse($parts[0].Trim(), [ref]$address) -or
+        $address.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { return $text }
+
+    $maskText = $parts[1].Trim()
+    $prefix = -1
+    if (-not [int]::TryParse($maskText, [ref]$prefix)) {
+        $maskAddress = $null
+        if (-not [Net.IPAddress]::TryParse($maskText, [ref]$maskAddress) -or
+            $maskAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { return $text }
+        $maskBytes = $maskAddress.GetAddressBytes()
+        $zeroSeen = $false
+        $prefix = 0
+        foreach ($maskByte in $maskBytes) {
+            for ($bit = 7; $bit -ge 0; $bit--) {
+                $set = (($maskByte -band (1 -shl $bit)) -ne 0)
+                if ($set) {
+                    if ($zeroSeen) { return $text }
+                    $prefix++
+                } else {
+                    $zeroSeen = $true
+                }
+            }
+        }
     }
-    $identity | ConvertTo-Json | Set-Content -LiteralPath $path -Encoding utf8
-    Protect-DevFleetStateAcl
-    return $identity | ConvertTo-Json | ConvertFrom-Json
-}
+    if ($prefix -lt 0 -or $prefix -gt 32) { return $text }
 
-function Get-OrCreateVaultIdentity {
-    $path = Join-Path (Get-DevFleetStateRoot) 'vault-node-identity.json'
-    if (Test-Path -LiteralPath $path) {
-        $identity = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-        if ([string]$identity.node_role -ne 'vault' -or [string]$identity.node_id -notmatch '^[0-9a-fA-F-]{36}$' -or ([string]$identity.deployment_id -and [string]$identity.deployment_id -notmatch '^[0-9a-fA-F-]{36}$')) { throw 'Vault identity is invalid; explicit recovery is required.' }
-        return $identity
+    $addressBytes = $address.GetAddressBytes()
+    $canonicalMaskBytes = New-Object byte[] 4
+    $remaining = $prefix
+    for ($index = 0; $index -lt 4; $index++) {
+        if ($remaining -ge 8) {
+            $canonicalMaskBytes[$index] = 255
+            $remaining -= 8
+        } elseif ($remaining -le 0) {
+            $canonicalMaskBytes[$index] = 0
+        } else {
+            $canonicalMaskBytes[$index] = [byte](256 - (1 -shl (8 - $remaining)))
+            $remaining = 0
+        }
     }
-    $hostIdentity = Get-OrCreateNodeIdentity -Role Laptop
-    $identity = [ordered]@{schema_version=1;deployment_id=[string]$hostIdentity.deployment_id;node_id=[guid]::NewGuid().ToString('D');node_name=(Get-DevFleetConfig).Vault.InstanceName;node_role='vault';created_at=(Get-Date).ToUniversalTime().ToString('o')}
-    $identity | ConvertTo-Json | Set-Content -LiteralPath $path -Encoding utf8
-    Protect-DevFleetStateAcl
-    return $identity | ConvertTo-Json | ConvertFrom-Json
-}
 
-function Protect-DevFleetStateAcl {
-    $root = Get-DevFleetStateRoot
-    if (-not (Test-Path $root)) { return }
-    $acl = Get-Acl $root
-    $acl.SetAccessRuleProtection($true, $false)
-    foreach ($existing in @($acl.Access)) { $acl.RemoveAccessRuleAll($existing) }
-    foreach ($rule in @(
-        [Security.AccessControl.FileSystemAccessRule]::new('BUILTIN\Administrators','FullControl','ContainerInherit,ObjectInherit','None','Allow'),
-        [Security.AccessControl.FileSystemAccessRule]::new('NT AUTHORITY\SYSTEM','FullControl','ContainerInherit,ObjectInherit','None','Allow'),
-        [Security.AccessControl.FileSystemAccessRule]::new("$env:USERDOMAIN\$env:USERNAME",'FullControl','ContainerInherit,ObjectInherit','None','Allow')
-    )) { $acl.AddAccessRule($rule) | Out-Null }
-    Set-Acl -Path $root -AclObject $acl
-}
-
-function Get-DevFleetConfig {
-    $path = Join-Path (Get-DevFleetStateRoot) 'devfleet.config.json'
-    if (-not (Test-Path $path)) { throw "Missing config: $path" }
-    Get-Content $path -Raw | ConvertFrom-Json
-}
-
-function Save-DevFleetConfig {
-    param([Parameter(Mandatory)]$Config)
-    $path = Join-Path (Get-DevFleetStateRoot) 'devfleet.config.json'
-    $Config | ConvertTo-Json -Depth 20 | Set-Content $path -Encoding utf8
-}
-
-function Get-PackageRootFromState {
-    $p = Join-Path (Get-DevFleetStateRoot) 'package-root.txt'
-    if (Test-Path $p) { return (Get-Content $p -Raw).Trim() }
-    Get-DevFleetPackageRoot
-}
-
-function New-RandomSecret {
-    param([int]$Bytes = 32)
-    $data = New-Object byte[] $Bytes
-    [Security.Cryptography.RandomNumberGenerator]::Fill($data)
-    [Convert]::ToBase64String($data).TrimEnd('=').Replace('+','-').Replace('/','_')
-}
-
-function ConvertTo-YamlSingleQuotedScalar {
-    param([AllowNull()][string]$Value)
-    $text = if ($null -eq $Value) { '' } else { $Value }
-    if ($text.IndexOfAny([char[]]"`0`r`n") -ge 0) { throw 'YAML scalar contains a forbidden control or newline character.' }
-    return "'" + $text.Replace("'", "''") + "'"
-}
-
-function ConvertTo-ShellSingleQuotedScalar {
-    param([AllowNull()][string]$Value)
-    $text = if ($null -eq $Value) { '' } else { $Value }
-    if ($text.IndexOfAny([char[]]"`0`r`n") -ge 0) { throw 'Shell scalar contains a forbidden control or newline character.' }
-    return "'" + $text.Replace("'", "'\''") + "'"
-}
-
-function Test-ExistingDeploymentState {
-    $root = Get-DevFleetStateRoot
-    foreach ($name in @('node-identity.json','deployment.json','host-agent-registry.json','projects.json')) {
-        $candidate = Join-Path $root $name
-        if ((Test-Path -LiteralPath $candidate -PathType Leaf) -and (Get-Item -LiteralPath $candidate).Length -gt 2) { return $true }
+    $networkBytes = New-Object byte[] 4
+    for ($index = 0; $index -lt 4; $index++) {
+        $networkBytes[$index] = [byte]($addressBytes[$index] -band $canonicalMaskBytes[$index])
     }
-    return $false
+    $network = ([Net.IPAddress]::new($networkBytes)).ToString()
+    $canonicalMask = ([Net.IPAddress]::new($canonicalMaskBytes)).ToString()
+    return "$network/$canonicalMask"
 }
 
-function Test-DevFleetSecretRecord {
-    param([Parameter(Mandatory)]$Secrets)
-    foreach ($field in @('PortalAdminUser','PortalAdminPassword','NodeApiToken','ResticPassword','VaultRestUser','VaultRestPassword')) {
-        if (-not $Secrets.PSObject.Properties[$field] -or [string]::IsNullOrWhiteSpace([string]$Secrets.$field)) { return $false }
-    }
-    if ([string]$Secrets.PortalAdminPassword -match '[\r\n]' -or [string]$Secrets.NodeApiToken -match '[\r\n]' -or [string]$Secrets.ResticPassword -match '[\r\n]' -or [string]$Secrets.VaultRestPassword -match '[\r\n]') { return $false }
-    if ([string]$Secrets.NodeApiToken -notmatch '^[A-Za-z0-9_-]{40,}$' -or [string]$Secrets.ResticPassword -notmatch '^[A-Za-z0-9_-]{40,}$') { return $false }
-    if ($Secrets.PSObject.Properties['SecretGeneration'] -and $Secrets.SecretGeneration) {
-        $generation = [guid]::Empty
-        if (-not [guid]::TryParse([string]$Secrets.SecretGeneration,[ref]$generation) -or $generation -eq [guid]::Empty) { return $false }
+function Assert-DevFleetExactFields {
+    param(
+        [Parameter(Mandatory)][string]$Kind,
+        [Parameter(Mandatory)][hashtable]$Expected,
+        [Parameter(Mandatory)][hashtable]$Actual,
+        [Parameter(Mandatory)][string[]]$Fields
+    )
+    foreach ($field in $Fields) {
+        $expectedValue = [string]$Expected[$field]
+        $actualValue = [string]$Actual[$field]
+        if ($field -eq 'RemoteAddress') {
+            $expectedValue = ConvertTo-DevFleetCanonicalFirewallRemoteAddress $expectedValue
+            $actualValue = ConvertTo-DevFleetCanonicalFirewallRemoteAddress $actualValue
+        }
+        $comparison = if ($field -in @('Arguments','Description')) { [StringComparison]::Ordinal } else { [StringComparison]::OrdinalIgnoreCase }
+        if (-not [string]::Equals($expectedValue,$actualValue,$comparison)) {
+            throw "WINDOWS INTEGRATION OWNERSHIP CONFLICT: $Kind field '$field' does not match the installation ownership ledger. Foreign resource preserved."
+        }
     }
     return $true
 }
 
-function New-DevFleetSecretRecord {
-    param([string]$Generation = ([guid]::NewGuid().ToString('D')))
-    $parsed = [guid]::Empty
-    if (-not [guid]::TryParse($Generation,[ref]$parsed) -or $parsed -eq [guid]::Empty) { throw 'Secret generation must be a non-empty UUID.' }
-    [ordered]@{
-        SchemaVersion = 2
-        SecretGeneration = $Generation
-        PortalAdminUser = 'dylan'
-        PortalAdminPassword = New-RandomSecret 24
-        NodeApiToken = New-RandomSecret 32
-        ResticPassword = New-RandomSecret 40
-        VaultRestUser = "devfleet-client-$($Generation.Substring(0,8))"
-        VaultRestPassword = New-RandomSecret 32
-        Created = (Get-Date).ToUniversalTime().ToString('o')
+function Assert-DevFleetTaskBinding {
+    param([Parameter(Mandatory)][hashtable]$Expected,[Parameter(Mandatory)][hashtable]$Actual)
+    $Expected.Executable = ConvertTo-DevFleetCanonicalPath ([string]$Expected.Executable)
+    $Actual.Executable = ConvertTo-DevFleetCanonicalPath ([string]$Actual.Executable)
+    Assert-DevFleetExactFields 'scheduled task' $Expected $Actual @('Name','Executable','Arguments','Principal','LogonType','RunLevel','Description','Generation')
+}
+
+function Assert-DevFleetFirewallBinding {
+    param([Parameter(Mandatory)][hashtable]$Expected,[Parameter(Mandatory)][hashtable]$Actual)
+    Assert-DevFleetExactFields 'firewall rule' $Expected $Actual @('Name','DisplayName','Group','Description','Direction','Action','Protocol','LocalPort','InterfaceAlias','RemoteAddress','Profile','Generation')
+}
+
+function Assert-DevFleetFirewallRefreshIdentity {
+    param([Parameter(Mandatory)][hashtable]$Expected,[Parameter(Mandatory)][hashtable]$Actual)
+    # InterfaceAlias and RemoteAddress are provider-backed network state. They
+    # can legitimately change when a virtual adapter is recreated or its
+    # subnet is renumbered. Every other rule field remains an immutable
+    # ownership proof before a refresh is permitted.
+    Assert-DevFleetExactFields 'firewall refresh' $Expected $Actual @('Name','DisplayName','Group','Description','Direction','Action','Protocol','LocalPort','Profile','Generation')
+}
+
+function Get-DevFleetLiveFirewallBinding {
+    param([Parameter(Mandatory)]$Rule,[Parameter(Mandatory)][string]$Generation)
+    $portFilters = @($Rule | Get-NetFirewallPortFilter -ErrorAction Stop)
+    $addressFilters = @($Rule | Get-NetFirewallAddressFilter -ErrorAction Stop)
+    $interfaceFilters = @($Rule | Get-NetFirewallInterfaceFilter -ErrorAction Stop)
+    if ($portFilters.Count -ne 1 -or $addressFilters.Count -ne 1 -or $interfaceFilters.Count -ne 1) {
+        throw 'WINDOWS INTEGRATION OWNERSHIP CONFLICT: firewall rule filter identity is ambiguous. Foreign resource preserved.'
+    }
+    $port = $portFilters[0]
+    $address = $addressFilters[0]
+    $interface = $interfaceFilters[0]
+    return @{
+        Name = [string]$Rule.Name
+        DisplayName = [string]$Rule.DisplayName
+        Group = [string]$Rule.Group
+        Description = [string]$Rule.Description
+        Direction = [string]$Rule.Direction
+        Action = [string]$Rule.Action
+        Protocol = [string]$port.Protocol
+        LocalPort = [string]$port.LocalPort
+        InterfaceAlias = [string]$interface.InterfaceAlias
+        RemoteAddress = [string]$address.RemoteAddress
+        Profile = [string]$Rule.Profile
+        Generation = $Generation
     }
 }
 
-function Get-OrCreateSecrets {
-    $path = Join-Path (Get-DevFleetStateRoot) 'secrets\host-secrets.json'
-    if (-not (Test-Path $path)) {
-        if (Test-ExistingDeploymentState) { throw 'SECRET RECOVERY REQUIRED: host secrets are missing while existing DevFleet deployment state is present. Use the explicit re-key/repair workflow.' }
-        $obj = New-DevFleetSecretRecord
-        $obj | ConvertTo-Json | Set-Content $path -Encoding utf8
-        Protect-DevFleetStateAcl
-    }
-    try {
-        $secrets = Get-Content $path -Raw | ConvertFrom-Json
-        if (-not (Test-DevFleetSecretRecord -Secrets $secrets)) { throw 'Host secret record is incomplete or invalid.' }
-        return $secrets
-    }
-    catch {
-        if (Test-ExistingDeploymentState) { throw 'SECRET RECOVERY REQUIRED: host secrets are corrupt while existing DevFleet deployment state is present. Use the explicit re-key/repair workflow.' }
-        throw 'Host secrets are corrupt; remove the incomplete fresh-install state and restart setup.'
-    }
-}
-
-function Invoke-External {
-    param(
-        [Parameter(Mandatory)][string]$FilePath,
-        [Parameter()][string[]]$ArgumentList = @(),
-        [Parameter()][int[]]$RedactArgumentIndexes = @(),
-        [Parameter()][int]$TimeoutSeconds = 900,
-        [Parameter()][int]$MaxDiagnosticChars = 12000,
-        [Parameter()][string]$EvidenceLogPath = '',
-        [Parameter()][string]$StandardInputText = '',
-        [Parameter()][datetime]$DeadlineUtc = [datetime]::MinValue,
-        [Parameter()][int[]]$AllowedExitCodes = @(0),
-        [switch]$IgnoreExitCode,
-        [switch]$Capture
-    )
-    # Parameter binding may receive a scalar or null when a caller supplies a
-    # single/empty argument set. Normalize before indexing or reading Count.
-    $ArgumentList = @($ArgumentList)
-    $deadlineContext=Get-DevFleetDeadlineContext
-    # An explicit child deadline is subordinate to the active owning stage.
-    # Taking the minimum here prevents a nested helper (for example readiness
-    # or a bounded retry loop) from accidentally escaping its stage merely by
-    # supplying its own finite deadline.
-    $deadlines = @()
-    if ($DeadlineUtc -gt [datetime]::MinValue) { $deadlines += $DeadlineUtc.ToUniversalTime() }
-    if ($deadlineContext) { $deadlines += ([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime() }
-    $deadline = if ($deadlines.Count -gt 0) { ($deadlines | Measure-Object -Minimum).Minimum } else { [datetime]::MinValue }
-    if ($deadline -gt [datetime]::MinValue) {
-        $remaining = [int][math]::Floor(($deadline - [datetime]::UtcNow).TotalSeconds)
-        if ($remaining -le 0) { throw "Owning deadline expired before starting external command: $FilePath" }
-        $TimeoutSeconds = [math]::Min($TimeoutSeconds, $remaining)
-    }
-    if ($TimeoutSeconds -le 0) { throw 'External command timeout must remain positive after deadline propagation.' }
-    # One immutable operation deadline owns process start, stdin delivery and
-    # execution.  Do not grant WaitForExit a fresh full timeout after a slow or
-    # blocked input write has already consumed owner time.
-    $operationDeadlineUtc = [datetime]::UtcNow.AddSeconds($TimeoutSeconds)
-    if ($deadline -gt [datetime]::MinValue -and $deadline -lt $operationDeadlineUtc) { $operationDeadlineUtc = $deadline }
-    $remainingMilliseconds = {
-        $milliseconds = [math]::Ceiling(($operationDeadlineUtc - [datetime]::UtcNow).TotalMilliseconds)
-        if ($milliseconds -le 0) { return 0 }
-        return [int][math]::Min([int]::MaxValue, $milliseconds)
-    }
-    $safeArguments = for($i=0;$i -lt $ArgumentList.Count;$i++){ if($RedactArgumentIndexes -contains $i){ '<redacted-secret>' } else { [string]$ArgumentList[$i] } }
-    Write-Verbose ("Executing: {0} {1}" -f $FilePath, ($safeArguments -join ' '))
-    $psi=[Diagnostics.ProcessStartInfo]::new();$psi.FileName=$FilePath;$psi.UseShellExecute=$false;$psi.CreateNoWindow=$true;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true;$psi.RedirectStandardInput=($null -ne $StandardInputText -and $StandardInputText.Length -gt 0)
-    if($psi.RedirectStandardInput){$psi.StandardInputEncoding=[Text.UTF8Encoding]::new($false)}
-    foreach($argument in $ArgumentList){[void]$psi.ArgumentList.Add([string]$argument)}
-    $process=[Diagnostics.Process]::new();$process.StartInfo=$psi;$stdoutTail=[Text.StringBuilder]::new();$stderrTail=[Text.StringBuilder]::new();$logWriter=$null;$inputError=''
-    try {
-        if($EvidenceLogPath){$parent=Split-Path -Parent $EvidenceLogPath;if($parent){New-Item -ItemType Directory -Force -Path $parent|Out-Null};$logWriter=[IO.StreamWriter]::new($EvidenceLogPath,$false,[Text.Encoding]::UTF8)}
-        if(-not $process.Start()){throw "Unable to start external command: $FilePath"}
-        # Drain both output streams before delivering input.  A child is
-        # allowed to write output before reading stdin; reversing this order
-        # can deadlock both sides on finite OS pipe buffers.
-        $stdoutTask=$process.StandardOutput.ReadToEndAsync();$stderrTask=$process.StandardError.ReadToEndAsync()
-        if($psi.RedirectStandardInput){
-            $inputTask=$null
-            try {$inputTask=$process.StandardInput.WriteAsync($StandardInputText)} catch {$inputError=$_.Exception.GetBaseException().Message}
-            if($inputTask){
-                $inputCompleted=$false
-                try {$inputCompleted=$inputTask.Wait((&$remainingMilliseconds))} catch {$inputCompleted=$true;$inputError=$_.Exception.GetBaseException().Message}
-                if(-not $inputCompleted){
-                    try{$process.Kill($true)}catch{}
-                    try{[void]([Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdoutTask,$stderrTask)).Wait([TimeSpan]::FromSeconds(5)))}catch{}
-                    throw "External command input delivery timed out before the owning deadline: $FilePath $($safeArguments -join ' ')"
-                }
-                if(-not $inputError){
-                    try {[void]$inputTask.GetAwaiter().GetResult();$flushTask=$process.StandardInput.FlushAsync();$flushCompleted=$flushTask.Wait((&$remainingMilliseconds));if(-not $flushCompleted){try{$process.Kill($true)}catch{};throw "External command input flush timed out before the owning deadline: $FilePath $($safeArguments -join ' ')"};[void]$flushTask.GetAwaiter().GetResult()} catch {$inputError=$_.Exception.GetBaseException().Message}
-                }
-            }
-            try {$process.StandardInput.Close()} catch {if(-not $inputError){$inputError=$_.Exception.GetBaseException().Message}}
-            if($inputError -and -not $process.HasExited){
-                # Give an exiting child a short slice of the existing owner
-                # budget so its direct exit code remains the primary result.
-                # A child that stays alive after breaking its input pipe is
-                # terminated exactly and reported as an input transport fault,
-                # not allowed to consume the rest of the deadline and obscure it.
-                $exitObservationMilliseconds=[math]::Min(500,(&$remainingMilliseconds))
-                if($exitObservationMilliseconds -gt 0){try{[void]$process.WaitForExit($exitObservationMilliseconds)}catch{}}
-                if(-not $process.HasExited){
-                    try{$process.Kill($true)}catch{}
-                    try{[void]([Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdoutTask,$stderrTask)).Wait([TimeSpan]::FromSeconds(5)))}catch{}
-                    throw "External command input delivery failed: $FilePath $($safeArguments -join ' ')`n$inputError"
-                }
-            }
-        }
-        $executionRemainingMilliseconds=&$remainingMilliseconds
-        if($executionRemainingMilliseconds -le 0 -or -not $process.WaitForExit($executionRemainingMilliseconds)){
-            try{$process.Kill($true)}catch{}
-            try{[void]([Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdoutTask,$stderrTask)).Wait([TimeSpan]::FromSeconds(5)))}catch{}
-            throw "External command timed out after $TimeoutSeconds seconds: $FilePath $($safeArguments -join ' ')"
-        }
-        $exitCode=$process.ExitCode
-        $outputComplete=$false
-        try{$outputComplete=[Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdoutTask,$stderrTask)).Wait([TimeSpan]::FromSeconds(5))}catch{$outputComplete=$false}
-        $stdout=if($stdoutTask.Status -eq [Threading.Tasks.TaskStatus]::RanToCompletion){$stdoutTask.GetAwaiter().GetResult()}else{''}
-        $stderr=if($stderrTask.Status -eq [Threading.Tasks.TaskStatus]::RanToCompletion){$stderrTask.GetAwaiter().GetResult()}else{''}
-        $combined=($stdout+"`n"+$stderr).Trim()
-        if($logWriter){$logWriter.Write($combined);if(-not $outputComplete){$logWriter.Write("`n[DEVFLEET_OUTPUT_INCOMPLETE_AFTER_PROCESS_EXIT]")};$logWriter.Flush()}
-        $diagnostic=if($combined.Length -gt $MaxDiagnosticChars){$combined.Substring($combined.Length-$MaxDiagnosticChars)}else{$combined}
-        if(-not $outputComplete){
-            $message="External command exited with code $exitCode, but redirected output was incomplete after the bounded post-exit drain: $FilePath $($safeArguments -join ' ')"
-            if($Capture){throw $message}
-            if($exitCode -notin $AllowedExitCodes -and -not $IgnoreExitCode){throw "$message`n$diagnostic"}
-            Write-Warning $message
-            return
-        }
-        if($exitCode -notin $AllowedExitCodes -and -not $IgnoreExitCode){throw "$FilePath failed with exit code $exitCode`n$diagnostic"}
-        if($inputError){throw "External command input delivery failed: $FilePath $($safeArguments -join ' ')`n$inputError"}
-        if($Capture){return $combined}
-    } finally {if($logWriter){$logWriter.Dispose()};$process.Dispose()}
-}
-
-function Invoke-MultipassWithStandardInput {
+function Invoke-DevFleetOwnedFirewallRefresh {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$FilePath,
-        [Parameter(Mandatory)][string]$InstanceName,
-        [Parameter(Mandatory)][string[]]$CommandArgumentList,
-        [Parameter(Mandatory)][AllowEmptyString()][string]$StandardInputText,
-        [int]$TimeoutSeconds=900,
-        [datetime]$DeadlineUtc=[datetime]::MinValue,
-        [switch]$Capture,
-        [string]$ExpectedCompletionMarkerPattern=''
+        [Parameter(Mandatory)][string]$Path,
+        [ValidateRange(0,120)][int]$WaitSeconds = 0
     )
-    if($InstanceName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' -or -not $CommandArgumentList.Count){throw 'Multipass input command identity is malformed.'}
-    if([string]::IsNullOrEmpty($StandardInputText)){throw 'Multipass input delivery requires a nonempty byte stream.'}
-    $remoteCommand=(@($CommandArgumentList|ForEach-Object{ConvertTo-ShellSingleQuotedScalar $_}) -join ' ')
-    $ownerDeadline=[datetime]::UtcNow.AddSeconds($TimeoutSeconds)
-    if($DeadlineUtc -gt [datetime]::MinValue -and $DeadlineUtc.ToUniversalTime() -lt $ownerDeadline){$ownerDeadline=$DeadlineUtc.ToUniversalTime()}
-    $context=Get-DevFleetDeadlineContext
-    if($context -and ([datetime]$context.StageDeadlineUtc).ToUniversalTime() -lt $ownerDeadline){$ownerDeadline=([datetime]$context.StageDeadlineUtc).ToUniversalTime()}
-    # Reserve cleanup inside the existing owner; no command receives a fresh
-    # full timeout after staging or a slow transfer.
-    $workDeadline=$ownerDeadline.AddSeconds(-15)
-    $cleanupDeadline=$ownerDeadline.AddSeconds(-5)
-    if($workDeadline -le [datetime]::UtcNow){throw 'Insufficient owning deadline for Multipass input delivery and cleanup.'}
-    $directory='/run/devfleet-input-'+[guid]::NewGuid().ToString('N')
-    $inputPath="$directory/input"
-    $quotedDirectory=ConvertTo-ShellSingleQuotedScalar $directory
-    $quotedInput=ConvertTo-ShellSingleQuotedScalar $inputPath
-    # Windows Multipass exec reads console events, not redirected stdin.
-    # SFTP transfer '-' supports a byte stream. Create its destination first
-    # in a fresh private tmpfs directory, so no host plaintext file or secret
-    # argument is needed and SFTP cannot create a publicly reachable file.
-    $prepare=@'
-set -Eeuo pipefail; d=__DIRECTORY__; f=__INPUT__; created=0; trap 'rc=$?; if (( created )); then sudo rm -f -- "$f" || true; sudo rmdir -- "$d" || true; fi; exit "$rc"' EXIT; sudo mkdir -m 0700 -- "$d"; created=1; sudo chown "$(id -u):$(id -g)" -- "$d"; umask 077; : > "$f"; chmod 0600 -- "$f"; test ! -L "$d"; test "$(stat -c '%a:%u' -- "$d")" = "700:$(id -u)"; test ! -L "$f"; test "$(stat -c '%a:%u' -- "$f")" = "600:$(id -u)"; trap - EXIT
-'@
-    $consume=@'
-set -Eeuo pipefail; d=__DIRECTORY__; f=__INPUT__; test ! -L "$d"; test -d "$d"; test "$(stat -c '%a:%u' -- "$d")" = "700:$(id -u)"; test ! -L "$f"; test -f "$f"; test -s "$f"; test "$(stat -c '%a:%u' -- "$f")" = "600:$(id -u)"; exec 3< "$f"; rm -f -- "$f"; sudo rmdir -- "$d"; exec 0<&3; exec 3<&-; exec __COMMAND__
-'@
-    $cleanup=@'
-set -Eeuo pipefail; d=__DIRECTORY__; f=__INPUT__; if test -e "$d" || test -L "$d"; then test ! -L "$d"; test -d "$d"; test "$(stat -c '%a:%u' -- "$d")" = "700:$(id -u)"; if test -e "$f" || test -L "$f"; then test ! -L "$f"; test -f "$f"; test "$(stat -c '%u' -- "$f")" = "$(id -u)"; rm -f -- "$f"; fi; sudo rmdir -- "$d"; fi
-'@
-    $prepare=$prepare.Replace('__DIRECTORY__',$quotedDirectory).Replace('__INPUT__',$quotedInput)
-    $consume=$consume.Replace('__DIRECTORY__',$quotedDirectory).Replace('__INPUT__',$quotedInput).Replace('__COMMAND__',$remoteCommand)
-    $cleanup=$cleanup.Replace('__DIRECTORY__',$quotedDirectory).Replace('__INPUT__',$quotedInput)
-    $acquired=$false;$primaryError=$null;$cleanupError=$null;$output=$null
-    try {
-        Invoke-External $FilePath @('exec',$InstanceName,'--','bash','-lc',$prepare) -TimeoutSeconds 60 -DeadlineUtc $workDeadline
-        $acquired=$true
-        Invoke-External $FilePath @('transfer','-',"${InstanceName}:$inputPath") -TimeoutSeconds 60 -DeadlineUtc $workDeadline -StandardInputText $StandardInputText
-        if($ExpectedCompletionMarkerPattern){
-            if(-not $Capture){throw 'Expected Multipass completion-marker handling requires captured output.'}
-            # A guest command that changes its own network can finish the
-            # authenticated operation and emit its sentinel while the outer
-            # Multipass transport reports a nonzero status as its connection
-            # is torn down. Accept that status only for this explicit marker
-            # contract; preparation, transfer, cleanup, and all generic
-            # callers remain strict about external exit codes.
-            $output=Invoke-External $FilePath @('exec',$InstanceName,'--','bash','-lc',$consume) -TimeoutSeconds $TimeoutSeconds -DeadlineUtc $workDeadline -Capture -IgnoreExitCode
-            if(-not [regex]::IsMatch([string]$output,$ExpectedCompletionMarkerPattern,[Text.RegularExpressions.RegexOptions]::Multiline)){
-                throw 'Multipass input command returned without its expected completion marker.'
+    $ledger = Read-DevFleetIntegrationOwnership -Path $Path -AllowMissing
+    if (-not $ledger) {
+        return [pscustomobject]@{ status = 'NO_LEDGER'; changed = 0; skipped = 0 }
+    }
+
+    $deadline = (Get-Date).AddSeconds($WaitSeconds)
+    $newBindings = @()
+    $changed = 0
+    $skipped = 0
+    foreach ($binding in @($ledger.FirewallRules)) {
+        $bindingName = [string]$binding.Name
+        $scope = if ($bindingName -match '-Multipass$') { 'Multipass' } elseif ($bindingName -match '-Tailscale$') { 'Tailscale' } else { $null }
+        if (-not $scope) {
+            throw "WINDOWS INTEGRATION OWNERSHIP CONFLICT: firewall binding '$bindingName' has no supported DevFleet interface scope. Foreign resource preserved."
+        }
+
+        $adapterName = if ($scope -eq 'Multipass') { 'vEthernet (Default Switch)' } else { 'Tailscale' }
+        $adapter = $null
+        $multipassAddress = $null
+        do {
+            $adapter = @(Get-NetAdapter -Name $adapterName -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $adapterName -and [string]$_.Status -eq 'Up' } | Select-Object -First 1)
+            if ($adapter.Count -eq 0) { $adapter = $null }
+            if ($adapter -and $scope -eq 'Multipass') {
+                $multipassAddress = @(Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1)
+                if ($multipassAddress.Count -eq 0) { $multipassAddress = $null }
             }
-        }else{
-            $output=Invoke-External $FilePath @('exec',$InstanceName,'--','bash','-lc',$consume) -TimeoutSeconds $TimeoutSeconds -DeadlineUtc $workDeadline -Capture:$Capture
-        }
-    } catch {$primaryError=$_}
-    finally {
-        # No secret is sent until preparation acknowledges a fresh private
-        # directory. Once acknowledged, cleanup is exact and non-recursive.
-        if($acquired){
-            try {Invoke-External $FilePath @('exec',$InstanceName,'--','bash','-lc',$cleanup) -TimeoutSeconds 10 -DeadlineUtc $cleanupDeadline}
-            catch {$cleanupError=$_}
-        }
-        $StandardInputText=$null
-    }
-    if($primaryError){
-        if($cleanupError){throw "Multipass input command failed: $($primaryError.Exception.Message)`nGuest input cleanup failed: $($cleanupError.Exception.Message)"}
-        $PSCmdlet.ThrowTerminatingError($primaryError)
-    }
-    if($cleanupError){$PSCmdlet.ThrowTerminatingError($cleanupError)}
-    if($Capture){return $output}
-}
+            if ($adapter -and ($scope -eq 'Tailscale' -or $multipassAddress)) { break }
+            if ((Get-Date) -ge $deadline) { break }
+            Start-Sleep -Seconds 1
+        } while ($true)
 
-function New-DevFleetBootstrapBoundary {
-    param(
-        [Parameter(Mandatory)][ValidateSet('compute','vault')][string]$Kind,
-        [Parameter(Mandatory)][string]$InstanceName,
-        [Parameter(Mandatory)][string]$TransactionId,
-        [Parameter(Mandatory)][string]$PayloadSha256,
-        [Parameter(Mandatory)][int]$BootstrapMaxSeconds,
-        [Parameter(Mandatory)][string]$PackageVersion,
-        [Parameter(Mandatory)][string]$NodeRole
-    )
-    if($InstanceName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'){throw 'Bootstrap instance identity is malformed.'}
-    if($TransactionId -notmatch '^[0-9a-fA-F]{32}$' -or $PayloadSha256 -notmatch '^[0-9a-fA-F]{64}$'){throw 'Bootstrap transaction or payload identity is malformed.'}
-    if($BootstrapMaxSeconds -le 0){throw 'Bootstrap maximum must be a positive finite duration.'}
-    if($Kind -eq 'compute'){
-        if($PackageVersion -notmatch '^\d+\.\d+\.\d+$' -or $NodeRole -notin @('primary','surrogate')){throw 'Compute bootstrap version or role identity is malformed.'}
-        $extraction="set -Eeuo pipefail; sudo rm -rf /tmp/devfleet-payload; mkdir /tmp/devfleet-payload; if ! unzip -q /tmp/devfleet-payload.zip -d /tmp/devfleet-payload; then sudo rm -rf /tmp/devfleet-payload /tmp/devfleet-payload.zip; exit 70; fi; test -f /tmp/devfleet-payload/linux/bootstrap-compute.sh"
-        $bootstrap="set -Eeuo pipefail; trap 'sudo rm -rf /tmp/devfleet-payload /tmp/devfleet-payload.zip' EXIT; sudo bash /tmp/devfleet-payload/linux/bootstrap-compute.sh /tmp/devfleet-payload --secrets-stdin --transaction-id '$TransactionId' --payload-sha256 '$PayloadSha256' --bootstrap-max-seconds '$BootstrapMaxSeconds' --package-version '$PackageVersion' --node-role '$NodeRole'"
-        $prefix="compute-$InstanceName"
-    }else{
-        if($PackageVersion -cne 'vault' -or $NodeRole -cne 'vault'){throw 'Vault bootstrap version or role identity is malformed.'}
-        $extraction="set -Eeuo pipefail; sudo rm -rf /tmp/devfleet-vault-payload; mkdir /tmp/devfleet-vault-payload; if ! unzip -q /tmp/devfleet-vault-payload.zip -d /tmp/devfleet-vault-payload; then sudo rm -rf /tmp/devfleet-vault-payload /tmp/devfleet-vault-payload.zip; exit 70; fi; test -f /tmp/devfleet-vault-payload/linux/bootstrap-vault.sh"
-        $bootstrap="set -Eeuo pipefail; trap 'sudo rm -rf /tmp/devfleet-vault-payload /tmp/devfleet-vault-payload.zip' EXIT; sudo bash /tmp/devfleet-vault-payload/linux/bootstrap-vault.sh /tmp/devfleet-vault-payload --secrets-stdin --transaction-id '$TransactionId' --payload-sha256 '$PayloadSha256' --bootstrap-max-seconds '$BootstrapMaxSeconds' --package-version 'vault' --node-role 'vault'"
-        $prefix='vault'
-    }
-    [pscustomobject]@{
-        kind=$Kind
-        instanceName=$InstanceName
-        multipassResolvedStageName="$prefix-multipass-resolved"
-        isolationVerifiedStageName="$prefix-isolation-verified"
-        instancePresentStageName="$prefix-instance-present"
-        instanceAbsentStageName="$prefix-instance-absent"
-        instanceStartedStageName="$prefix-instance-started"
-        instanceLaunchedStageName="$prefix-instance-launched"
-        instanceReadyStageName="$prefix-instance-ready"
-        payloadTransferredStageName="$prefix-payload-transferred"
-        payloadExtractedStageName="$prefix-payload-extracted"
-        completionStageName=$prefix
-        extractionCommand=$extraction
-        bootstrapCommand=$bootstrap
-        remoteCommand="$extraction; $bootstrap"
-        bootstrapMaxSeconds=$BootstrapMaxSeconds
-    }
-}
-
-function Test-CommandExists { param([string]$Name) [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
-
-function Get-DevFleetPowerShell {
-    foreach($candidate in @(
-        (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'),
-        (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe')
-    )) { if($candidate -and (Test-TrustedExecutableCandidate $candidate)){return $candidate} }
-    throw 'No trusted machine PowerShell executable was found.'
-}
-
-function Get-CanonicalDependencyManifest {
-    param([Parameter(Mandatory)][string]$PackageRoot)
-    $path = Join-Path $PackageRoot 'dependencies.json'
-    if (-not (Test-Path -LiteralPath $path)) { throw "Canonical dependency manifest is missing: $path" }
-    $manifest = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-    if ($manifest.schemaVersion -ne 1 -or $manifest.manifestVersion -ne (Get-Content (Join-Path $PackageRoot 'VERSION') -Raw).Trim()) { throw 'Canonical dependency manifest schema/version mismatch.' }
-    if (-not $manifest.dependencies -or @($manifest.dependencies).Count -lt 1) { throw 'Canonical dependency manifest contains no dependency records.' }
-    return $manifest
-}
-
-function Expand-DependencyLocation {
-    param([Parameter(Mandatory)][string]$Path)
-    return [Environment]::ExpandEnvironmentVariables($Path)
-}
-
-function Resolve-DependencyExecutable {
-    param([Parameter(Mandatory)]$Dependency)
-    foreach ($candidate in (Get-TrustedDependencyCandidates $Dependency)) { return $candidate }
-    return $null
-}
-
-function Test-PrimitiveMutationRights {
-    param([Parameter(Mandatory)][Security.AccessControl.FileSystemRights]$Rights)
-    # Keep this mask primitive-only.  Modify and FullControl are composites;
-    # their primitive mutation bits still intersect the mask naturally.
-    $mutationMask = [Security.AccessControl.FileSystemRights]::WriteData -bor
-        [Security.AccessControl.FileSystemRights]::AppendData -bor
-        [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
-        [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
-        [Security.AccessControl.FileSystemRights]::Delete -bor
-        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
-        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
-        [Security.AccessControl.FileSystemRights]::TakeOwnership
-    return (($Rights -band $mutationMask) -ne 0)
-}
-
-function Test-BroadUntrustedPrincipal {
-    param([Parameter(Mandatory)][string]$Identity)
-    return $Identity.Equals('Everyone',[StringComparison]::OrdinalIgnoreCase) -or
-        $Identity.EndsWith('\Users',[StringComparison]::OrdinalIgnoreCase) -or
-        $Identity.Equals('NT AUTHORITY\Authenticated Users',[StringComparison]::OrdinalIgnoreCase)
-}
-
-function Get-TrustedSystemRootForExecutable {
-    param([Parameter(Mandatory)][string]$FullPath)
-    try {
-        $candidate = [IO.Path]::GetFullPath($FullPath).TrimEnd('\')
-        $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:WINDIR) |
-            Where-Object { $_ } |
-            ForEach-Object { [IO.Path]::GetFullPath([string]$_).TrimEnd('\') } |
-            Select-Object -Unique |
-            Where-Object { $candidate.StartsWith($_ + '\',[StringComparison]::OrdinalIgnoreCase) }
-        if (@($roots).Count -ne 1) { return $null }
-        return [string]@($roots)[0]
-    } catch { return $null }
-}
-
-function Get-TrustedWingetPackageCandidates {
-    $result = [Collections.Generic.List[object]]::new()
-    try {
-        $windowsApps = [IO.Path]::GetFullPath((Join-Path $env:ProgramFiles 'WindowsApps')).TrimEnd('\')
-        $windowsAppsInfo = Get-Item -LiteralPath $windowsApps -Force -ErrorAction Stop
-        if (($windowsAppsInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return @() }
-        foreach ($package in @(Get-AppxPackage -AllUsers -Name 'Microsoft.DesktopAppInstaller' -ErrorAction Stop)) {
-            $installLocation = [string]$package.InstallLocation
-            if ([string]::IsNullOrWhiteSpace($installLocation)) { continue }
-            $root = [IO.Path]::GetFullPath($installLocation).TrimEnd('\')
-            $rootInfo = Get-Item -LiteralPath $root -Force -ErrorAction Stop
-            $basename = [IO.Path]::GetFileName($root)
-            if (-not $package.Name.Equals('Microsoft.DesktopAppInstaller',[StringComparison]::OrdinalIgnoreCase) -or
-                -not ([string]$package.PublisherId).Equals('8wekyb3d8bbwe',[StringComparison]::OrdinalIgnoreCase) -or
-                -not ([IO.Path]::GetDirectoryName($root)).Equals($windowsApps,[StringComparison]::OrdinalIgnoreCase) -or
-                -not $basename.StartsWith('Microsoft.DesktopAppInstaller_',[StringComparison]::OrdinalIgnoreCase) -or
-                -not $basename.EndsWith('_x64__8wekyb3d8bbwe',[StringComparison]::OrdinalIgnoreCase) -or
-                ($rootInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
-            $version = $basename.Substring('Microsoft.DesktopAppInstaller_'.Length, $basename.Length - 'Microsoft.DesktopAppInstaller_'.Length - '_x64__8wekyb3d8bbwe'.Length)
-            if ([string]::IsNullOrWhiteSpace($version) -or @($version.Split('.') | Where-Object { $_ -notmatch '^\d+$' }).Count -gt 0) { continue }
-            $candidate = Join-Path $root 'winget.exe'
-            if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
-            $candidateInfo = Get-Item -LiteralPath $candidate -Force -ErrorAction Stop
-            if (($candidateInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
-            $result.Add([pscustomobject]@{ Path = [IO.Path]::GetFullPath($candidate); Root = $root })
-        }
-        return @($result | Sort-Object Path -Unique)
-    } catch { return @() }
-}
-
-function Test-TrustedExecutableCandidate {
-    param([Parameter(Mandatory)][string]$Path,[Parameter()][object]$Dependency)
-    try {
-        if ([string]$Path -match '(?i)(^|[\\/])\.\.?([\\/]|$)') { return $false }
-        $full = [IO.Path]::GetFullPath($Path)
-        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { return $false }
-        if ([IO.Path]::GetExtension($full).ToLowerInvariant() -in @('.cmd','.bat') -and $Dependency) { return $false }
-        $trustedRoot = $null
-        if ([IO.Path]::GetFileName($full).Equals('winget.exe',[StringComparison]::OrdinalIgnoreCase)) {
-            $wingetCandidates = @(Get-TrustedWingetPackageCandidates | Where-Object { $_.Path.Equals($full,[StringComparison]::OrdinalIgnoreCase) })
-            if ($wingetCandidates.Count -ne 1) { return $false }
-            $trustedRoot = [string]$wingetCandidates[0].Root
-        } else { $trustedRoot = Get-TrustedSystemRootForExecutable $full }
-        if ([string]::IsNullOrWhiteSpace($trustedRoot)) { return $false }
-        $rootInfo = Get-Item -LiteralPath $trustedRoot -Force -ErrorAction Stop
-        if (($rootInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
-        $fileInfo = Get-Item -LiteralPath $full -Force -ErrorAction Stop
-        if (($fileInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
-        foreach($entry in @((Get-Acl -LiteralPath $full -ErrorAction Stop).Access)) {
-            if($entry.AccessControlType -eq 'Allow' -and (Test-BroadUntrustedPrincipal ([string]$entry.IdentityReference.Value)) -and (Test-PrimitiveMutationRights ([Security.AccessControl.FileSystemRights]$entry.FileSystemRights))){return $false}
-        }
-        $cursor = [IO.DirectoryInfo]::new([IO.Path]::GetDirectoryName($full))
-        $reachedRoot = $false
-        while($cursor){
-            if(($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){return $false}
-            foreach($entry in @((Get-Acl -LiteralPath $cursor.FullName -ErrorAction Stop).Access)) {
-                if($entry.AccessControlType -eq 'Allow' -and (Test-BroadUntrustedPrincipal ([string]$entry.IdentityReference.Value)) -and (Test-PrimitiveMutationRights ([Security.AccessControl.FileSystemRights]$entry.FileSystemRights))){return $false}
-            }
-            if($cursor.FullName.TrimEnd('\').Equals($trustedRoot.TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)){ $reachedRoot = $true; break }
-            $cursor=$cursor.Parent
-        }
-        if (-not $reachedRoot) { return $false }
-        $policy=if($null -ne $Dependency){$Dependency.installerAuthenticityPolicy}else{$null}
-        $exact=@(if($null -ne $policy){$policy.allowedSignerSubjectsExact})
-        $signature=Get-AuthenticodeSignature -LiteralPath $full
-        $installedTrust = if($null -ne $policy -and $null -ne $policy.PSObject.Properties['installedExecutableTrust']){[string]$policy.installedExecutableTrust}else{''}
-        $allowUnsignedInstalled = $installedTrust -eq 'signed-installer-locked-path' -and $signature.Status -eq 'NotSigned'
-        if($signature.Status -ne 'Valid' -and -not $allowUnsignedInstalled){return $false}
-        if($signature.Status -eq 'Valid' -and @($exact).Count -gt 0 -and -not (Test-ExactSignerIdentity ([string]$signature.SignerCertificate.Subject) $exact)){return $false}
-        if(@($exact).Count -eq 0 -and $null -ne $policy -and @($policy.allowedSignerPatterns).Count -gt 0){return $false}
-        return $true
-    } catch { return $false }
-}
-
-function Normalize-SignerIdentity {
-    param([Parameter(Mandatory)][string]$Subject)
-    try { return (([Security.Cryptography.X509Certificates.X500DistinguishedName]::new($Subject)).Format($false) -replace '\s','').ToUpperInvariant() }
-    catch { return ($Subject -replace '\s','').ToUpperInvariant() }
-}
-function Test-ExactSignerIdentity {
-    param([Parameter(Mandatory)][string]$Subject,[Parameter(Mandatory)][string[]]$Expected)
-    $actual=Normalize-SignerIdentity $Subject
-    return @($Expected | Where-Object { (Normalize-SignerIdentity ([string]$_)) -ceq $actual }).Count -gt 0
-}
-
-function Get-TrustedDependencyCandidates {
-    param([Parameter(Mandatory)]$Dependency)
-    $paths = [Collections.Generic.List[string]]::new()
-    foreach ($probe in @($Dependency.executableProbes)) {
-        $pathEntries = ([Environment]::GetEnvironmentVariable('PATH') -split [IO.Path]::PathSeparator) | Where-Object { $_ }
-        foreach ($entry in $pathEntries) {
-            $candidate = Join-Path $entry.Trim('"') $probe
-            if ((Test-Path -LiteralPath $candidate) -and (Test-TrustedExecutableCandidate $candidate -Dependency $Dependency)) { $paths.Add([IO.Path]::GetFullPath($candidate)) }
-        }
-        foreach ($hive in @('HKLM:')) {
-            foreach ($subkey in @("SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\$probe", "SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\$probe")) {
-                $key = Get-Item -LiteralPath (Join-Path $hive $subkey) -ErrorAction SilentlyContinue
-                $value = if ($key) { $key.GetValue('') } else { $null }
-                $candidate = if ($value) { ([string]$value).Trim('"') } else { $null }
-                if ($candidate -and (Test-TrustedExecutableCandidate $candidate -Dependency $Dependency)) { $paths.Add([IO.Path]::GetFullPath($candidate)) }
-            }
-        }
-    }
-    foreach ($location in @($Dependency.knownVendorInstallLocations)) {
-        $expanded = Expand-DependencyLocation $location
-        if ((Test-Path -LiteralPath $expanded) -and (Test-TrustedExecutableCandidate $expanded -Dependency $Dependency)) { $paths.Add([IO.Path]::GetFullPath($expanded)) }
-    }
-    return $paths | Select-Object -Unique
-}
-
-function Get-DependencyStatus {
-    param(
-        [Parameter(Mandatory)]$Dependency,
-        [int]$ProbeTimeoutSeconds = (Get-DevFleetOperationMaximumSeconds 'dependencyProbe'),
-        [datetime]$DeadlineUtc = [datetime]::MinValue
-    )
-    if($ProbeTimeoutSeconds -le 0){throw 'Dependency probe timeout must be positive.'}
-    $probeDeadline=[datetime]::UtcNow.AddSeconds($ProbeTimeoutSeconds)
-    if($DeadlineUtc -gt [datetime]::MinValue -and $DeadlineUtc.ToUniversalTime() -lt $probeDeadline){$probeDeadline=$DeadlineUtc.ToUniversalTime()}
-    $deadlineContext=Get-DevFleetDeadlineContext
-    if($deadlineContext -and ([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime() -lt $probeDeadline){$probeDeadline=([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime()}
-    $args = @($Dependency.versionProbe.arguments)
-    $first = $null
-    foreach ($path in (Get-TrustedDependencyCandidates $Dependency)) {
-        $remaining=[int][math]::Floor(($probeDeadline-[datetime]::UtcNow).TotalSeconds)
-        if($remaining -le 0){
-            if($null -eq $first){$first=[pscustomobject]@{Status='Broken';Path=$path;Version=$null;Detail='Trusted executable was found but its bounded version probe deadline expired.'}}
-            break
-        }
-        try {
-            $output=Invoke-External -FilePath $path -ArgumentList $args -Capture -TimeoutSeconds ([math]::Min($ProbeTimeoutSeconds,$remaining)) -DeadlineUtc $probeDeadline
-            $exit=0
-        } catch {
-            if($null -eq $first){$first=[pscustomobject]@{Status='Broken';Path=$path;Version=$null;Detail='Trusted executable was found but its bounded version probe failed.'}}
+        if (-not $adapter -or ($scope -eq 'Multipass' -and -not $multipassAddress)) {
+            # A deferred Tailscale installation legitimately has no Tailscale
+            # adapter yet. Preserve the ledger and rule until a later startup
+            # or explicit host-agent restart can reconcile it.
+            $skipped++
+            $newBindings += @{} + $binding
             continue
         }
-        $match = if ($Dependency.versionProbe.regex) { [regex]::Match($output, [string]$Dependency.versionProbe.regex) } else { $null }
-        if ($exit -ne 0 -or -not $match -or -not $match.Success) {
-            if ($null -eq $first) { $first = [pscustomobject]@{ Status='Broken'; Path=$path; Version=$null; Detail='Trusted executable was found but version probe failed.' } }
+
+        $desired = @{}
+        foreach ($key in $binding.Keys) { $desired[$key] = $binding[$key] }
+        $desired.InterfaceAlias = [string]$adapter.Name
+        $desired.RemoteAddress = if ($scope -eq 'Multipass') {
+            ConvertTo-DevFleetCanonicalFirewallRemoteAddress "$($multipassAddress.IPAddress)/$($multipassAddress.PrefixLength)"
+        } else {
+            ConvertTo-DevFleetCanonicalFirewallRemoteAddress '100.64.0.0/10'
+        }
+
+        $liveRules = @(Get-NetFirewallRule -Name $bindingName -ErrorAction SilentlyContinue)
+        if ($liveRules.Count -eq 0) {
+            $newBindings += $desired
             continue
         }
-        $version = [Version]$match.Groups[1].Value
-        $minimum = [Version]$Dependency.minimumSupportedVersion
-        $status = if ($version -lt $minimum) { 'Outdated' } elseif ($null -ne $Dependency.maximumMajor -and $version.Major -gt [int]$Dependency.maximumMajor) { 'Unsupported-Major' } else { 'Compatible' }
-        $result = [pscustomobject]@{ Status=$status; Path=$path; Version=$version; Detail="Resolved trusted executable $path; version $version" }
-        if ($status -eq 'Compatible') { return $result }
-        if ($null -eq $first) { $first = $result }
-    }
-    if ($null -ne $first) { return $first }
-    return [pscustomobject]@{ Status='Missing'; Path=''; Version=$null; Detail='No trusted machine executable, HKLM App Path, or vendor location matched.' }
-}
+        if ($liveRules.Count -ne 1) {
+            throw "WINDOWS INTEGRATION OWNERSHIP CONFLICT: firewall identity '$bindingName' is ambiguous. Foreign resources preserved."
+        }
 
-function Wait-DevFleetDependencyStatus {
-    param(
-        [Parameter(Mandatory)]$Dependency,
-        [datetime]$DeadlineUtc = [datetime]::MinValue,
-        [ValidateRange(1,10)][int]$MaximumAttempts = 3,
-        [scriptblock]$StatusProvider,
-        [scriptblock]$ClockProvider,
-        [scriptblock]$SleepProvider
-    )
-    $now={if($ClockProvider){[datetime](& $ClockProvider)}else{[datetime]::UtcNow}}
-    $sleep={param([double]$Seconds)if($SleepProvider){& $SleepProvider $Seconds}else{Start-Sleep -Milliseconds ([int][math]::Ceiling($Seconds*1000))}}
-    $start=(& $now).ToUniversalTime()
-    $deadline=if($DeadlineUtc -gt [datetime]::MinValue){$DeadlineUtc.ToUniversalTime()}else{$start.AddSeconds((Get-DevFleetOperationMaximumSeconds 'dependencyProbe'))}
-    $deadlineContext=Get-DevFleetDeadlineContext
-    if($deadlineContext -and ([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime() -lt $deadline){$deadline=([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime()}
-    $last=$null
-    for($attempt=1;$attempt -le $MaximumAttempts;$attempt++){
-        $remainingSeconds=[int][math]::Floor(($deadline-(& $now).ToUniversalTime()).TotalSeconds)
-        if($remainingSeconds -le 0)
+        $live = $liveRules[0]
+        $actual = Get-DevFleetLiveFirewallBinding -Rule $live -Generation ([string]$binding.Generation)
+        Assert-DevFleetFirewallRefreshIdentity -Expected $binding -Actual $actual | Out-Null
+
+        $actualRemote = ConvertTo-DevFleetCanonicalFirewallRemoteAddress ([string]$actual.RemoteAddress)
+        $desiredRemote = ConvertTo-DevFleetCanonicalFirewallRemoteAddress ([string]$desired.RemoteAddress)
+        $interfaceChanged = -not [string]::Equals([string]$actual.InterfaceAlias,[string]$desired.InterfaceAlias,[StringComparison]::OrdinalIgnoreCase)
+        $addressChanged = -not [string]::Equals($actualRemote,$desiredRemote,[StringComparison]::OrdinalIgnoreCase)
+        if ($interfaceChanged) {
+            $interfaceFilter = @($live | Get-NetFirewallInterfaceFilter -ErrorAction Stop)
+            if ($interfaceFilter.Count -ne 1) { throw "WINDOWS INTEGRATION OWNERSHIP CONFLICT: firewall interface filter '$bindingName' is ambiguous. Foreign resource preserved." }
+            $i

@@ -1,534 +1,661 @@
 # DevFleet source part 114
 
 Full-source UTF-8 byte interval [5254500, 5301000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 023488ccd43f68cb791f705f7f949dc7a3e2f94c4ec9bc6b5838cf441853a10b
+Payload SHA-256: 1e3c1c8de4443b8d0b91c3a43cec273dc9ff7f3ff26a49d201d6897cfb5d81ad
 
 <!-- BEGIN SOURCE SLICE -->
+ required.
+$userMultipassCertRoot = Join-Path $env:LOCALAPPDATA 'multipass-client-certificate'
+$systemMultipassCertRoot = Join-Path $env:SystemRoot 'System32\config\systemprofile\AppData\Local\multipass-client-certificate'
+if (-not (Test-Path -LiteralPath $userMultipassCertRoot)) {
+    if (-not (Test-Path -LiteralPath $systemMultipassCertRoot)) { throw "Authenticated Multipass client certificate directory was not found: $userMultipassCertRoot" }
+} else {
+    New-Item -ItemType Directory -Path $systemMultipassCertRoot -Force | Out-Null
+    Get-ChildItem -LiteralPath $userMultipassCertRoot -File -Filter '*.pem' -ErrorAction Stop | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $systemMultipassCertRoot $_.Name) -Force
+    }
+}
+$certAcl = New-Object System.Security.AccessControl.DirectorySecurity
+$certAcl.SetAccessRuleProtection($true, $false)
+$certAcl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('SYSTEM','FullControl','ContainerInherit,ObjectInherit','None','Allow')))
+$certAcl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('Administrators','FullControl','ContainerInherit,ObjectInherit','None','Allow')))
+Set-Acl -LiteralPath $systemMultipassCertRoot -AclObject $certAcl
+Get-ChildItem -LiteralPath $systemMultipassCertRoot -File -Filter '*.pem' | ForEach-Object { Set-Acl -LiteralPath $_.FullName -AclObject $certAcl }
 
+New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+$initialAcl = Get-Acl -LiteralPath $InstallRoot
+$initialAcl.SetAccessRuleProtection($true, $false)
+foreach ($existingRule in @($initialAcl.Access)) { $initialAcl.RemoveAccessRuleAll($existingRule) }
+$initialAcl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('SYSTEM','FullControl','ContainerInherit,ObjectInherit','None','Allow')))
+$initialAcl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('Administrators','FullControl','ContainerInherit,ObjectInherit','None','Allow')))
+Set-Acl -LiteralPath $InstallRoot -AclObject $initialAcl
+$tokenPath = Join-Path $InstallRoot 'token.txt'
+if (-not (Test-Path -LiteralPath $tokenPath)) {
+    $bytes = New-Object byte[] 32
+    [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    Write-AtomicText $tokenPath ([Convert]::ToBase64String($bytes)) ([Text.ASCIIEncoding]::new())
+}
+$token = (Get-Content -LiteralPath $tokenPath -Raw).Trim()
+if ($token.Length -lt 40) { throw 'Host-agent token is unexpectedly short.' }
 
-SHA256: 5c8c3ebb294bb267995747ebbe96d17a03f433d3882b1d8573352fe497b9312d | Bytes: 238 | Git mode: 100644
+$agentPath = Join-Path $InstallRoot 'DevFleet-HostAgent.ps1'
+$vscodeHelperPath = Join-Path $InstallRoot 'DevFleet-VSCode.ps1'
+$configPath = Join-Path $InstallRoot 'config.json'
+$ownershipPath = Join-Path $InstallRoot 'integration-ownership.json'
+$taskName = 'DevFleet Host Agent'
+$powerShellPath = ConvertTo-DevFleetCanonicalPath (Get-DevFleetPowerShell)
+$taskArguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$agentPath`" -ConfigPath `"$configPath`""
+$existingOwnership = Read-DevFleetIntegrationOwnership -Path $ownershipPath -AllowMissing
+if ($existingOwnership) {
+    # A virtual adapter can be recreated across reboot/checkpoint restore. Reconcile
+    # only an exact ledger-owned rule before the normal remove/recreate path; any
+    # immutable identity mismatch remains a fail-closed ownership conflict.
+    Invoke-DevFleetOwnedFirewallRefresh -Path $ownershipPath -WaitSeconds 30 | Out-Null
+    $existingOwnership = Read-DevFleetIntegrationOwnership -Path $ownershipPath -AllowMissing
+}
+function Remove-PriorOwnedFirewallRules {
+    param($Ownership)
+    if (-not $Ownership) { return }
+    foreach ($ownedRule in @($Ownership.FirewallRules)) {
+        $liveRules = @(Get-NetFirewallRule -Name ([string]$ownedRule.Name) -ErrorAction SilentlyContinue)
+        if ($liveRules.Count -eq 0) { continue }
+        if ($liveRules.Count -ne 1) { throw "WINDOWS INTEGRATION OWNERSHIP CONFLICT: prior firewall identity '$($ownedRule.Name)' is ambiguous. All rules preserved." }
+        $live = $liveRules[0]
+        $portFilter = $live | Get-NetFirewallPortFilter
+        $addressFilter = $live | Get-NetFirewallAddressFilter
+        $interfaceFilter = $live | Get-NetFirewallInterfaceFilter
+        $actual = @{Name=[string]$live.Name;DisplayName=[string]$live.DisplayName;Group=[string]$live.Group;Description=[string]$live.Description;Direction=[string]$live.Direction;Action=[string]$live.Action;Protocol=[string]$portFilter.Protocol;LocalPort=[string]$portFilter.LocalPort;InterfaceAlias=[string]$interfaceFilter.InterfaceAlias;RemoteAddress=[string]$addressFilter.RemoteAddress;Profile=[string]$live.Profile;Generation=[string]$ownedRule.Generation}
+        Assert-DevFleetFirewallBinding -Expected $ownedRule -Actual $actual | Out-Null
+        $live | Remove-NetFirewallRule -Confirm:$false
+    }
+}
+$existingTask = Get-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue
+if ($existingTask) {
+    if (@($existingTask.Actions).Count -ne 1) { throw 'WINDOWS INTEGRATION OWNERSHIP CONFLICT: scheduled task has an ambiguous action set. Foreign task preserved.' }
+    $ownedTask = @()
+    if ($existingOwnership) { $ownedTask = @($existingOwnership.ScheduledTasks | Where-Object { [string]$_.Name -eq $taskName }) }
+    if ($ownedTask.Count -eq 1) {
+        $actualTask = @{Name=[string]$existingTask.TaskName;Executable=[string]$existingTask.Actions[0].Execute;Arguments=[string]$existingTask.Actions[0].Arguments;Principal=[string]$existingTask.Principal.UserId;LogonType=[string]$existingTask.Principal.LogonType;RunLevel=[string]$existingTask.Principal.RunLevel;Description=[string]$existingTask.Description;Generation=[string]$ownedTask[0].Generation}
+        Assert-DevFleetTaskBinding -Expected $ownedTask[0] -Actual $actualTask | Out-Null
+    } elseif ($AdoptLegacyDevFleetIntegrations) {
+        $legacyExpected = @{Name=$taskName;Executable=$powerShellPath;Arguments=$taskArguments;Principal='SYSTEM';LogonType='ServiceAccount';RunLevel='Highest';Description=[string]$existingTask.Description;Generation='legacy-explicit-adoption'}
+        $legacyActual = @{Name=[string]$existingTask.TaskName;Executable=[string]$existingTask.Actions[0].Execute;Arguments=[string]$existingTask.Actions[0].Arguments;Principal=[string]$existingTask.Principal.UserId;LogonType=[string]$existingTask.Principal.LogonType;RunLevel=[string]$existingTask.Principal.RunLevel;Description=[string]$existingTask.Description;Generation='legacy-explicit-adoption'}
+        Assert-DevFleetTaskBinding -Expected $legacyExpected -Actual $legacyActual | Out-Null
+    } else {
+        throw 'WINDOWS INTEGRATION OWNERSHIP CONFLICT: same-name scheduled task has no owned binding. Foreign task preserved. Use -AdoptLegacyDevFleetIntegrations only after explicit legacy review.'
+    }
+    Stop-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+}
+Copy-Item -LiteralPath $agentSource -Destination $agentPath -Force
+Copy-Item -LiteralPath $protocolSource -Destination (Join-Path $InstallRoot 'DevFleet-HostAgentProtocol.psm1') -Force
+Copy-Item -LiteralPath $vscodeHelperSource -Destination $vscodeHelperPath -Force
+Copy-Item -LiteralPath $ownershipModuleSource -Destination (Join-Path $InstallRoot 'DevFleet-WindowsIntegrationOwnership.psm1') -Force
+Copy-Item -LiteralPath $removalHelperSource -Destination (Join-Path $InstallRoot 'Remove-DevFleet-OwnedIntegrations.ps1') -Force
+$multipassVersion = (& $multipass version 2>$null | Select-Object -First 1).ToString().Trim()
+$config = [ordered]@{
+    SchemaVersion = 1
+    HostId = $env:COMPUTERNAME.ToLowerInvariant()
+    HostName = $env:COMPUTERNAME
+    ListenPrefix = "http://+:$Port/"
+    TokenPath = $tokenPath
+    MultipassPath = $multipass
+    MultipassVersion = $multipassVersion
+    MultipassClientCertificateRoot = $systemMultipassCertRoot
+    UbuntuImage = '24.04'
+    BootTimeoutSeconds = 900
+    ResourcePolicy = [ordered]@{
+        PolicyVersion = '1.0.0'
+        PhysicalFloorMinGb = 8
+        PhysicalFloorPercent = 0.10
+        CommitHeadroomFloorMinGb = 16
+        CommitHeadroomPercent = 0.20
+        CommitUsageLimitPercent = 80
+        ReservedLogicalProcessors = 2
+        ReservedHostDiskGb = 50
+        MaximumVmCount = 4
+        MaximumParallelProvisioning = 1
+        MaxProjectCpus = 6
+        MaxProjectMemoryGb = 12
+        MaxProjectDiskGb = 120
+    }
+    SshPublicKeyPath = Join-Path $env:USERPROFILE '.ssh\devfleet_ed25519.pub'
+    # Project aliases are deliberately scoped to this installing user's SSH
+    # config. The SYSTEM host agent receives only this fixed path and key path,
+    # never browser-provided SSH configuration text.
+    SshConfigPath = Join-Path $env:USERPROFILE '.ssh\config'
+    SshKnownHostsPath = Join-Path $env:USERPROFILE '.ssh\devfleet_known_hosts'
+    SshPrivateKeyPath = Join-Path $env:USERPROFILE '.ssh\devfleet_ed25519'
+    VsCodeSettingsPaths = @(
+        (Join-Path $env:APPDATA 'Code\User\settings.json'),
+        (Join-Path $env:APPDATA 'Code\User\settings.jsonc'),
+        (Join-Path $env:APPDATA 'Code - Insiders\User\settings.json'),
+        (Join-Path $env:APPDATA 'Code - Insiders\User\settings.jsonc')
+    )
+}
+Write-AtomicText $configPath ($config | ConvertTo-Json -Depth 8)
+
+$acl = Get-Acl -LiteralPath $InstallRoot
+$acl.SetAccessRuleProtection($true, $false)
+$acl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('SYSTEM','FullControl','ContainerInherit,ObjectInherit','None','Allow')))
+$acl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('Administrators','FullControl','ContainerInherit,ObjectInherit','None','Allow')))
+Set-Acl -LiteralPath $InstallRoot -AclObject $acl
+Set-Acl -LiteralPath $tokenPath -AclObject $acl
+Set-Acl -LiteralPath $configPath -AclObject $acl
+
+$generation = [guid]::NewGuid().ToString('D')
+$version = (Get-Content -LiteralPath (Join-Path $packageRoot 'VERSION') -Raw).Trim()
+$taskDescription = "M-TechLabs DevFleet Host Agent v$version; generation=$generation"
+$action = New-ScheduledTaskAction -Execute $powerShellPath -Argument $taskArguments
+$trigger = New-ScheduledTaskTrigger -AtStartup
+$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description $taskDescription -Force | Out-Null
+$taskBinding = [ordered]@{Name=$taskName;Executable=$powerShellPath;Arguments=$taskArguments;Principal='SYSTEM';LogonType='ServiceAccount';RunLevel='Highest';Description=$taskDescription;Generation=$generation;Marker='M-TechLabs DevFleet Host Agent';Version=$version}
+$firewallBindings = @()
+Remove-PriorOwnedFirewallRules -Ownership $existingOwnership
+if (-not $SkipFirewall) {
+    $multipassAdapter = Get-NetAdapter -Name 'vEthernet (Default Switch)' -ErrorAction SilentlyContinue
+    $tailscaleAdapter = Get-NetAdapter -Name 'Tailscale' -ErrorAction SilentlyContinue
+    if ($multipassAdapter) {
+        $multipassAddress = Get-NetIPAddress -InterfaceIndex $multipassAdapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1
+        if (-not $multipassAddress) { throw 'Multipass adapter has no usable IPv4 subnet; refusing a broad host-agent firewall rule.' }
+        $multipassSubnet = ConvertTo-DevFleetCanonicalFirewallRemoteAddress "$($multipassAddress.IPAddress)/$($multipassAddress.PrefixLength)"
+        $firewallBindings += [ordered]@{Name="DevFleetHostAgent-$Port-Multipass";DisplayName="DevFleet Host Agent $Port - Multipass";Group='M-TechLabs DevFleet Host Agent';Description="M-TechLabs DevFleet Host Agent v$version; generation=$generation; scope=Multipass";Direction='Inbound';Action='Allow';Protocol='TCP';LocalPort=[string]$Port;InterfaceAlias=[string]$multipassAdapter.Name;RemoteAddress=$multipassSubnet;Profile='Any';Generation=$generation;Marker='M-TechLabs DevFleet Host Agent';Version=$version}
+    }
+    if ($tailscaleAdapter) {
+        $firewallBindings += [ordered]@{Name="DevFleetHostAgent-$Port-Tailscale";DisplayName="DevFleet Host Agent $Port - Tailscale";Group='M-TechLabs DevFleet Host Agent';Description="M-TechLabs DevFleet Host Agent v$version; generation=$generation; scope=Tailscale";Direction='Inbound';Action='Allow';Protocol='TCP';LocalPort=[string]$Port;InterfaceAlias=[string]$tailscaleAdapter.Name;RemoteAddress=(ConvertTo-DevFleetCanonicalFirewallRemoteAddress '100.64.0.0/10');Profile='Any';Generation=$generation;Marker='M-TechLabs DevFleet Host Agent';Version=$version}
+    }
+    if (-not $multipassAdapter -and -not $tailscaleAdapter) { throw 'No supported narrow host-agent interface was found; refusing a broad firewall rule.' }
+
+    foreach ($desired in $firewallBindings) {
+        $sameDisplay = @(Get-NetFirewallRule -DisplayName ([string]$desired.DisplayName) -ErrorAction SilentlyContinue)
+        foreach ($live in $sameDisplay) {
+            $owned = @()
+            if ($existingOwnership) { $owned = @($existingOwnership.FirewallRules | Where-Object { [string]$_.Name -eq [string]$live.Name }) }
+            $portFilter = $live | Get-NetFirewallPortFilter; $addressFilter = $live | Get-NetFirewallAddressFilter; $interfaceFilter = $live | Get-NetFirewallInterfaceFilter
+            $actual = @{Name=[string]$live.Name;DisplayName=[string]$live.DisplayName;Group=[string]$live.Group;Description=[string]$live.Description;Direction=[string]$live.Direction;Action=[string]$live.Action;Protocol=[string]$portFilter.Protocol;LocalPort=[string]$portFilter.LocalPort;InterfaceAlias=[string]$interfaceFilter.InterfaceAlias;RemoteAddress=[string]$addressFilter.RemoteAddress;Profile=[string]$live.Profile;Generation=if($owned.Count -eq 1){[string]$owned[0].Generation}else{'legacy-explicit-adoption'}}
+            if ($owned.Count -eq 1) { Assert-DevFleetFirewallBinding -Expected $owned[0] -Actual $actual | Out-Null }
+            elseif ($AdoptLegacyDevFleetIntegrations) {
+                $legacyExpected = @{}
+                foreach ($key in $desired.Keys) { $legacyExpected[$key] = $desired[$key] }
+                $legacyExpected.Name=[string]$live.Name;$legacyExpected.Group=[string]$live.Group;$legacyExpected.Description=[string]$live.Description;$legacyExpected.Generation='legacy-explicit-adoption'
+                Assert-DevFleetFirewallBinding -Expected $legacyExpected -Actual $actual | Out-Null
+            } else { throw "WINDOWS INTEGRATION OWNERSHIP CONFLICT: same-name firewall rule '$($desired.DisplayName)' has no owned binding. Foreign rule preserved." }
+            $live | Remove-NetFirewallRule -Confirm:$false
+        }
+        New-NetFirewallRule -Name ([string]$desired.Name) -DisplayName ([string]$desired.DisplayName) -Group ([string]$desired.Group) -Description ([string]$desired.Description) -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -RemoteAddress ([string]$desired.RemoteAddress) -InterfaceAlias ([string]$desired.InterfaceAlias) -Profile Any | Out-Null
+    }
+}
+$integrationLedger = [ordered]@{SchemaVersion=1;InstallationGeneration=$generation;DevFleetVersion=$version;Marker='M-TechLabs DevFleet Host Agent';ScheduledTasks=@($taskBinding);FirewallRules=@($firewallBindings);Services=@();UpdatedUtc=(Get-Date).ToUniversalTime().ToString('o')}
+Write-DevFleetIntegrationOwnership -Path $ownershipPath -Ledger $integrationLedger
+Start-ScheduledTask -TaskName $taskName
+$healthExpectedHost = if($expectedHost){$expectedHost}else{$env:COMPUTERNAME}
+for ($i = 0; $i -lt 30; $i++) {
+    try { $health = Invoke-HostAgentAuthenticatedJson -Uri "http://127.0.0.1:$Port/healthz" -Method GET -Key $token -ExpectedHost $healthExpectedHost; if ($health.ok) { $health | ConvertTo-Json -Compress; exit 0 } } catch {}
+    Start-Sleep -Seconds 1
+}
+throw 'DevFleet host agent did not pass its local health check.'
 
 ```
-[CmdletBinding()]
-param([string]$Workspace = (Split-Path -Parent $PSScriptRoot))
 
-$ErrorActionPreference = 'Stop'
-& (Join-Path $PSScriptRoot 'Build-AIAuditBundle.ps1') -Workspace $Workspace
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+## FILE: source/windows/Invoke-Quarantine-Maintenance.ps1
+
+SHA256: 6770649aab6111d099e0ef4652238910cbfc61a69b4815686fadf052068e6eb8 | Bytes: 865 | Git mode: 100644
+
+```
+[CmdletBinding(SupportsShouldProcess,ConfirmImpact='High')]
+param([int]$OlderThanDays=30,[string]$InstanceName)
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+$config=Get-DevFleetConfig;$mp=Get-MultipassExe
+if(-not $InstanceName){$InstanceName=$config.Failover.InstanceName}
+Write-Warning 'This is the only included permanent project-file deletion path. Verify GitHub and vault backups first.'
+$phrase=Read-Host "Type PURGE QUARANTINE $InstanceName to continue"
+if($phrase -ne "PURGE QUARANTINE $InstanceName"){throw 'Confirmation phrase did not match.'}
+if($PSCmdlet.ShouldProcess($InstanceName,"Permanently delete quarantine entries older than $OlderThanDays days")){
+ Invoke-External $mp @('exec',$InstanceName,'--','sudo','-u','devrunner','/usr/local/bin/devfleet-purge-quarantine',[string]$OlderThanDays)
+}
 
 ```
 
 
-## FILE: tools/Build-AIAuditBundle.ps1
+## FILE: source/windows/Invoke-Vault-Maintenance.ps1
 
-SHA256: 4befd0c71379996d857fff6abb84ca07bd4bb021851d70a1e36c72926b3f8b58 | Bytes: 95333 | Git mode: 100644
+SHA256: ebf2557670dfd98191f8918699b08ef6607f166429943034fb96f2d4473944dd | Bytes: 611 | Git mode: 100644
+
+```
+[CmdletBinding(SupportsShouldProcess)]
+param()
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+$config=Get-DevFleetConfig;$mp=Get-MultipassExe;$name=$config.Vault.InstanceName
+if($PSCmdlet.ShouldProcess($name,'Stop append-only server temporarily, apply retention locally, prune and check repository')){
+ Invoke-External $mp @('snapshot',$name,'--name',"pre-maintenance-$((Get-Date).ToString('yyyyMMdd-HHmmss'))") -IgnoreExitCode
+ Invoke-External $mp @('exec',$name,'--','sudo','/usr/local/sbin/devfleet-vault-maintenance',[string]$config.Backup.KeepWithin)
+}
+
+```
+
+
+## FILE: source/windows/Migrate-Config.ps1
+
+SHA256: 05506c1475b1562de935be365873970bb297f6f5adff8d281d7b82db9e20ec7f | Bytes: 2289 | Git mode: 100644
+
+```
+[CmdletBinding(SupportsShouldProcess)]
+param([string]$ConfigPath=(Join-Path $env:ProgramData 'DevFleet\devfleet.config.json'),[string]$OutputPath=$ConfigPath,[switch]$PreviewOnly)
+$ErrorActionPreference='Stop';$package=Split-Path -Parent $PSScriptRoot;$defaults=Get-Content (Join-Path $package 'config\devfleet.config.json') -Raw|ConvertFrom-Json -AsHashtable;$existing=Get-Content $ConfigPath -Raw|ConvertFrom-Json -AsHashtable
+if([int]$existing.SchemaVersion -gt 2){throw "Configuration schema $($existing.SchemaVersion) is newer than supported."}
+function Merge-Map([System.Collections.IDictionary]$Base,[System.Collections.IDictionary]$Overlay){$r=[ordered]@{};foreach($k in $Base.Keys){$v=$Base[$k];$r[$k]=if($v -is [System.Collections.IDictionary]){Merge-Map $v @{}}else{$v}};foreach($k in $Overlay.Keys){$v=$Overlay[$k];if($v -is [System.Collections.IDictionary] -and $r.Contains($k) -and $r[$k] -is [System.Collections.IDictionary]){$r[$k]=Merge-Map $r[$k] $v}else{$r[$k]=$v}};return $r}
+$m=Merge-Map $defaults $existing
+if([int]$existing.SchemaVersion -eq 1){$m.Development.Profile='strict';$m.Docker.PrimaryMode='rootless';$m.Docker.FailoverMode='rootless'}
+$m.SchemaVersion=2;$m.PackageVersion='1.1.0';$m.Primary.InstanceName=[string]$existing.Primary.InstanceName;$m.Failover.InstanceName=[string]$existing.Failover.InstanceName;$m.Vault.InstanceName=[string]$existing.Vault.InstanceName
+$preview=[ordered]@{Source=$ConfigPath;Output=$OutputPath;PreviousSchema=[int]$existing.SchemaVersion;NewSchema=2;PreservedInstanceNames=@($m.Primary.InstanceName,$m.Failover.InstanceName,$m.Vault.InstanceName);DevelopmentProfile=$m.Development.Profile;PrimaryDockerMode=$m.Docker.PrimaryMode;FailoverDockerMode=$m.Docker.FailoverMode;MigrationSafety='Existing values, instance names, Docker stores, credentials and data are preserved';Generated=(Get-Date).ToString('o')}
+$previewPath=Join-Path (Split-Path $OutputPath) "devfleet-v1.1.0-migration-preview-$((Get-Date).ToString('yyyyMMdd-HHmmss')).json";$preview|ConvertTo-Json -Depth 20|Set-Content $previewPath -Encoding utf8;Write-Host ($preview|ConvertTo-Json -Depth 20)
+if($PreviewOnly){return};if($PSCmdlet.ShouldProcess($OutputPath,'Write schema-2 configuration')){$m|ConvertTo-Json -Depth 40|Set-Content $OutputPath -Encoding utf8}
+
+```
+
+
+## FILE: source/windows/Remove-DevFleet-OwnedIntegrations.ps1
+
+SHA256: a3fa2f7e42741649e8c5098b24574a4d2dd49b0c6f1815f5df25e096e64e1d80 | Bytes: 4357 | Git mode: 100644
 
 ```
 [CmdletBinding()]
 param(
-    [string]$Workspace = (Split-Path -Parent $PSScriptRoot),
-    [ValidateSet('Auto','PreAcceptanceReleaseAudit')]
-    [string]$Operation = 'Auto',
-    [string]$ReleaseAuditRunId
+    [string]$OwnershipPath = 'C:\ProgramData\DevFleetHostAgent\integration-ownership.json',
+    [Parameter(Mandatory)][string]$ExpectedGeneration
+)
+$ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet-WindowsIntegrationOwnership.psm1') -Force
+$canonicalOwnershipPath = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'DevFleetHostAgent\integration-ownership.json'))
+if (-not [IO.Path]::GetFullPath($OwnershipPath).Equals($canonicalOwnershipPath,[StringComparison]::OrdinalIgnoreCase)) { throw 'Windows integration ownership ledger path is not canonical; all resources preserved.' }
+$ledger = Read-DevFleetIntegrationOwnership -Path $OwnershipPath
+if ([string]$ledger.InstallationGeneration -ne $ExpectedGeneration) { throw 'Windows integration ownership generation changed; foreign resources preserved.' }
+
+foreach ($binding in @($ledger.ScheduledTasks)) {
+    $task = Get-ScheduledTask -TaskName ([string]$binding.Name) -ErrorAction SilentlyContinue
+    if (-not $task) { continue }
+    if (@($task.Actions).Count -ne 1) { throw 'WINDOWS INTEGRATION OWNERSHIP CONFLICT: scheduled task action count changed. Foreign resource preserved.' }
+    $actual = @{
+        Name=[string]$task.TaskName; Executable=[string]$task.Actions[0].Execute; Arguments=[string]$task.Actions[0].Arguments
+        Principal=[string]$task.Principal.UserId; LogonType=[string]$task.Principal.LogonType; RunLevel=[string]$task.Principal.RunLevel
+        Description=[string]$task.Description; Generation=[string]$binding.Generation
+    }
+    Assert-DevFleetTaskBinding -Expected $binding -Actual $actual | Out-Null
+    Stop-ScheduledTask -TaskName ([string]$binding.Name) -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName ([string]$binding.Name) -Confirm:$false
+}
+
+foreach ($binding in @($ledger.FirewallRules)) {
+    $rules = @(Get-NetFirewallRule -Name ([string]$binding.Name) -ErrorAction SilentlyContinue)
+    if ($rules.Count -eq 0) { continue }
+    if ($rules.Count -ne 1) { throw 'WINDOWS INTEGRATION OWNERSHIP CONFLICT: firewall identity is ambiguous. Foreign resources preserved.' }
+    $rule = $rules[0]; $port = $rule | Get-NetFirewallPortFilter; $address = $rule | Get-NetFirewallAddressFilter; $interface = $rule | Get-NetFirewallInterfaceFilter
+    $actual = @{
+        Name=[string]$rule.Name; DisplayName=[string]$rule.DisplayName; Group=[string]$rule.Group; Description=[string]$rule.Description
+        Direction=[string]$rule.Direction; Action=[string]$rule.Action; Protocol=[string]$port.Protocol; LocalPort=[string]$port.LocalPort; Profile=[string]$rule.Profile
+        InterfaceAlias=[string]$interface.InterfaceAlias; RemoteAddress=[string]$address.RemoteAddress; Generation=[string]$binding.Generation
+    }
+    Assert-DevFleetFirewallBinding -Expected $binding -Actual $actual | Out-Null
+    $rule | Remove-NetFirewallRule -Confirm:$false
+}
+
+foreach ($binding in @($ledger.Services)) {
+    $escapedServiceName = ([string]$binding.Name).Replace('"','""')
+    $serviceFilter = "Name=`"$escapedServiceName`""
+    $service = Get-CimInstance Win32_Service -Filter $serviceFilter -ErrorAction SilentlyContinue
+    if (-not $service) { continue }
+    $actual = @{Name=[string]$service.Name;ImagePath=[string]$service.PathName;Account=[string]$service.StartName;StartMode=[string]$service.StartMode;Generation=[string]$binding.Generation}
+    Assert-DevFleetServiceBinding -Expected $binding -Actual $actual | Out-Null
+    Stop-Service -Name ([string]$binding.Name) -ErrorAction SilentlyContinue
+    & (Join-Path $env:SystemRoot 'System32\sc.exe') delete ([string]$binding.Name) | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Owned service deletion failed: $($binding.Name)" }
+}
+
+foreach ($binding in @($ledger.ScheduledTasks)) { if (Get-ScheduledTask -TaskName ([string]$binding.Name) -ErrorAction SilentlyContinue) { throw "Owned scheduled task remains after cleanup: $($binding.Name)" } }
+foreach ($binding in @($ledger.FirewallRules)) { if (Get-NetFirewallRule -Name ([string]$binding.Name) -ErrorAction SilentlyContinue) { throw "Owned firewall rule remains after cleanup: $($binding.Name)" } }
+foreach ($binding in @($ledger.Services)) { if (Get-Service -Name ([string]$binding.Name) -ErrorAction SilentlyContinue) { throw "Owned service remains after cleanup: $($binding.Name)" } }
+
+```
+
+
+## FILE: source/windows/Repair-DevFleet.ps1
+
+SHA256: a0c494824681657502694ef8cdd9622a247a9401d549fefb17fdbf37632e9ad5 | Bytes: 728 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([Parameter(Mandatory)][string]$InstanceName)
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+$mp=Get-MultipassExe
+Invoke-External $mp @('set','local.privileged-mounts=false')
+Assert-MultipassIsolation -InstanceNames @($InstanceName)
+# Snapshot before repair. No deletions or pruning.
+$snap="pre-repair-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
+New-DevFleetSnapshotSafe -InstanceName $InstanceName -SnapshotName $snap|Out-Null
+Invoke-External $mp @('start',$InstanceName) -IgnoreExitCode
+Invoke-External $mp @('exec',$InstanceName,'--','sudo','/usr/local/sbin/devfleet-repair')
+Write-Host "Safe repair complete. Snapshot: $snap" -ForegroundColor Green
+
+```
+
+
+## FILE: source/windows/Repair-DevFleetHostSecrets.ps1
+
+SHA256: 6c3233e1643fa8a5e317ee04a98da27b40c297ad15f961a68c5d5ccfd0ceba4b | Bytes: 14840 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)][ValidateSet('REKEY DEVFLEET HOST SECRETS')][string]$ConfirmReKey
 )
 
 $ErrorActionPreference = 'Stop'
-$env:PYTHONDONTWRITEBYTECODE = '1'
-$Workspace = (Resolve-Path -LiteralPath $Workspace).Path
-Import-Module (Join-Path $Workspace 'tools\PythonRuntime.psm1') -Force
-$python = Resolve-DevFleetPython -Workspace $Workspace
-$Outputs = Join-Path $Workspace 'outputs'
-$Audit = Join-Path $Workspace 'audit'
-$releaseVersion = (Get-Content -LiteralPath (Join-Path $Workspace 'source\VERSION') -Raw).Trim()
-$installerVersion = (Get-Content -LiteralPath (Join-Path $Workspace 'installer-source\INSTALLER_VERSION') -Raw).Trim()
-$zipPath = Join-Path $Outputs ("DevFleet-v{0}-AI-Audit-LATEST.zip" -f $releaseVersion)
-$sidecarPath = "$zipPath.sha256.txt"
-$manifestPath = "$zipPath.manifest.json"
-$stage = Join-Path ([IO.Path]::GetTempPath()) ("DevFleet AI Audit bundle {0}" -f [guid]::NewGuid().ToString('N'))
-$sourceStage = Join-Path $stage 'source'
-$installerStage = Join-Path $stage 'installer-source'
-$automationStage = Join-Path $stage 'automation'
-$toolingStage = Join-Path $stage 'release-tooling'
-$evidenceStage = Join-Path $stage 'evidence'
-$auditStage = Join-Path $stage 'audit'
-$outputMetadataStage = Join-Path $stage 'outputs'
+$common = Join-Path $PSScriptRoot 'DevFleet.Common.psm1'
+$protocol = Join-Path $PSScriptRoot 'DevFleet-HostAgentProtocol.psm1'
+$ownership = Join-Path $PSScriptRoot 'DevFleet-WindowsIntegrationOwnership.psm1'
+Import-Module $common -Force
+Import-Module $protocol -Force
+Import-Module $ownership -Force
+Assert-PowerShell7
+Assert-Administrator
+if (-not (Test-ExistingDeploymentState)) { throw 'SECRET RECOVERY REQUIRED applies only to an existing deployment; use normal fresh installation for a new host.' }
 
-function Rel([string]$Path) { return ([IO.Path]::GetFullPath($Path)).Substring($Workspace.Length).TrimStart('\','/').Replace('\','/') }
-function Read-Json([string]$Path) { return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json }
-function Write-Json([string]$Path,$Value) { $Value | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $Path -Encoding UTF8 }
-function Write-AtomicJson([string]$Path,$Value) {
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+function Write-AtomicUtf8 {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Text)
     $temporary = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
     try {
-        [IO.File]::WriteAllText($temporary,(($Value | ConvertTo-Json -Depth 40) + [Environment]::NewLine),[Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText($temporary,$Text,[Text.UTF8Encoding]::new($false))
         Move-Item -LiteralPath $temporary -Destination $Path -Force
     } finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
 }
-function Get-Hash([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
-function Get-StringHash([string]$Value) { $sha=[Security.Cryptography.SHA256]::Create(); try { return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value)) | ForEach-Object { $_.ToString('x2') }) -join '') } finally { $sha.Dispose() } }
-function Is-Excluded([IO.FileInfo]$File,[string]$Relative) {
-    $parts = $Relative.Split('/')
-    $blocked = @('.git','.venv','node_modules','bin','obj','__pycache__','.pytest_cache','.test-runtime','build','dist','outputs','audit-extract','transient-source-quarantine','stale-portable-metadata-quarantine','VHDX','snapshots','browser-profiles')
-    foreach ($part in $parts) { if ($blocked -contains $part -or $part -like '.venv-*') { return $true } }
-    if ($File.Name -match '(?i)\.(pyc|pyo|exe|dll|pdb|msi|iso|img|vhd|vhdx|avhdx|zip|7z|cab|tar|gz|tgz|png|jpg|jpeg|gif|bmp|ico|webp|woff|woff2|ttf)$') { return $true }
-    return $false
-}
-function Add-Tree {
-    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][string]$DestinationRoot,[Parameter(Mandatory)][string]$BundlePrefix)
-    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { throw "Required audit source root is missing: $Root" }
-    foreach ($file in Get-ChildItem -LiteralPath $Root -File -Recurse -Force) {
-        $relative = ([IO.Path]::GetFullPath($file.FullName)).Substring(([IO.Path]::GetFullPath($Root)).Length).TrimStart('\','/').Replace('\','/')
-        $bundlePath = "$BundlePrefix/$relative"
-        if (Is-Excluded $file $bundlePath) { continue }
-        $destination = Join-Path $DestinationRoot ($relative -replace '/','\')
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
-        Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
-    }
-}
-function Add-CompactFile([string]$Source,[string]$Destination) {
-    if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) { return $false }
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Destination) | Out-Null
-    Copy-Item -LiteralPath $Source -Destination $Destination -Force
-    return $true
-}
-function Add-AuthorizationLedgerClosure([string]$Repository,[string]$EvidenceRoot) {
-    $selected=@(
-        [ordered]@{name='df-audit-convergence-20260924-a-ledger.json';policyId='DF-AUDIT-CONVERGENCE-20260924-A'},
-        [ordered]@{name='df-rdc-certification-continuation-20260924-b-ledger.json';policyId='DF-RDC-CERTIFICATION-CONTINUATION-20260924-B'}
-    )
-    $rows=[Collections.Generic.List[object]]::new();$sources=@{}
-    foreach($entry in $selected){
-        $relative='evidence/campaigns/'+[string]$entry.name
-        if($relative -notmatch '^evidence/campaigns/[A-Za-z0-9-]+-ledger\.json$'){throw 'Authorization ledger path is outside the fixed safe allowlist.'}
-        $source=Join-Path $Repository ('evidence\campaigns\'+[string]$entry.name);$checked=$Repository
-        foreach($component in $relative.Split('/')){$checked=Join-Path $checked $component;$componentItem=Get-Item -LiteralPath $checked -Force -ErrorAction Stop;if(($componentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Authorization ledger path rejects reparse-point components.'}}
-        if(-not(Test-Path -LiteralPath $source -PathType Leaf)){throw "Required adopted authorization ledger is missing: $relative"}
-        $item=Get-Item -LiteralPath $source -Force
-        if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Authorization ledger staging rejects reparse-point inputs.'}
-        $sourceHash=Get-Hash $source;$sourceBytes=[int64]$item.Length;$row=Read-Json $source
-        if([string]$row.policyId -cne [string]$entry.policyId){throw "Authorization ledger policy substitution rejected: $relative"}
-        $sources[[string]$entry.policyId]=[pscustomobject]@{row=$row;path=$relative;sha256=$sourceHash;bytes=$sourceBytes}
-    }
-    $b=$sources['DF-RDC-CERTIFICATION-CONTINUATION-20260924-B'];$a=$sources['DF-AUDIT-CONVERGENCE-20260924-A']
-    if([string]$b.row.continuation.predecessor.path -cne [string]$a.path -or [string]$b.row.continuation.predecessor.sha256 -cne [string]$a.sha256){throw 'Adopted authorization ledger predecessor/hash closure is inconsistent.'}
-    foreach($entry in $selected){
-        $relative='evidence/campaigns/'+[string]$entry.name;$source=Join-Path $Repository ('evidence\campaigns\'+[string]$entry.name);$destination=Join-Path $EvidenceRoot ('campaigns\'+[string]$entry.name)
-        if(-not(Add-CompactFile $source $destination)){throw "Authorization ledger disappeared during staging: $relative"}
-        if((Get-Hash $source) -cne $sources[[string]$entry.policyId].sha256 -or (Get-Hash $destination) -cne $sources[[string]$entry.policyId].sha256 -or [int64](Get-Item -LiteralPath $destination).Length -ne $sources[[string]$entry.policyId].bytes){throw "Authorization ledger hash/length changed during staging: $relative"}
-        $row=$sources[[string]$entry.policyId].row
-        $adoptedAt=$row.authorization.adoptedAtUtc;if($adoptedAt -is [datetime]){$adoptedAt=$adoptedAt.ToUniversalTime().ToString('o',[Globalization.CultureInfo]::InvariantCulture)}
-        $rows.Add([ordered]@{policyId=[string]$entry.policyId;sourcePath=$relative;sourceBytes=$sources[[string]$entry.policyId].bytes;sourceSha256=$sources[[string]$entry.policyId].sha256;stagedPath='evidence/campaigns/'+[string]$entry.name;stagedBytes=[int64](Get-Item -LiteralPath $destination).Length;stagedSha256=(Get-Hash $destination);status=[string]$row.status;adoptedAtUtc=[string]$adoptedAt;counters=$row.counters;baseline=$row.baseline;maximumTopLevelInvocations=$row.maximumTopLevelInvocations;sharedCorrectivePool=$row.sharedCorrectivePool;activeReservationPresent=($null -ne $row.activeReservation)})
-    }
-    $malformedPath='evidence/campaigns/df-tailscale-peer-convergence-20260921-a-ledger.json';$malformed=$null
-    $historical=$a.row.continuation.preservedLedgerFiles|Where-Object{[string]$_.path -ceq $malformedPath}|Select-Object -First 1
-    if($historical){$malformedSource=Join-Path $Repository ($malformedPath.Replace('/','\'));$actualHash=if(Test-Path -LiteralPath $malformedSource -PathType Leaf){Get-Hash $malformedSource}else{''};$matches=($actualHash -ceq [string]$historical.sha256);$malformed=[ordered]@{path=$malformedPath;recordedSourceSha256=[string]$historical.sha256;observedSourceSha256=$actualHash;sourceHashMatchesRecorded=$matches;parseStatus=if($matches){[string]$historical.observedParseStatus}else{'SOURCE_HASH_MISMATCH'};authorizationInterpretation='UNKNOWN'}}
-    $projection=[ordered]@{schemaVersion=1;kind='SANITIZED_REVIEW_PROJECTION';authority=$false;runtimeAuthorizationGranted=$false;ledgers=@($rows);malformedHistoricalLedger=$malformed}
-    $projectionPath=Join-Path $EvidenceRoot 'campaigns\authorization-ledger-closure.json';Write-Json $projectionPath $projection
-    $projectionText=Get-Content -LiteralPath $projectionPath -Raw
-    if($projectionText -match '(?i)"(password|secret|hmac|dpapi|privateKey)"\s*:'){throw 'Authorization review projection contains a prohibited secret-bearing field.'}
-    return $projection
-}
-function Add-AstraCausalEvidence([string]$Repository,[string]$EvidenceRoot) {
-    # This frozen allowlist retains historical causal bytes, never proof credit.
-    # Do not discover runs by timestamps or recursively adopt diagnostic folders.
-    $manifestPath=Join-Path $Repository 'tools/astra-causal-evidence.json'
-    $manifest=Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop|ConvertFrom-Json
-    if($manifest.schemaVersion -ne 1 -or -not @($manifest.records).Count){throw 'Astra causal evidence allowlist is empty or unsupported.'}
-    $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach($record in $manifest.records){
-        $relative=[string]$record.source;$destination=[string]$record.destination
-        if($relative -notmatch '^audit/automation-harness/[A-Za-z0-9._/-]+$' -or $relative.Split('/') -contains '..' -or $relative.Split('/') -contains '.' -or $relative.Contains('//')){throw 'Astra causal source escapes its allowlisted namespace.'}
-        if($destination -notmatch '^[A-Za-z0-9_-]+/[A-Za-z0-9._/-]+$' -or $destination.Split('/') -contains '..' -or $destination.Split('/') -contains '.' -or $destination.Contains('//')){throw 'Astra causal destination is malformed.'}
-        if(@($destination.Split('/')|Where-Object{$_ -in @('snapshots','outputs','build','dist','.git')}).Count -or -not $seen.Add($destination)){throw 'Astra causal destination is excluded or duplicated.'}
-        if([string]$record.sha256 -cnotmatch '^[0-9a-f]{64}$'){throw 'Astra causal evidence hash is malformed.'}
-        $source=Join-Path $Repository $relative
-        if(-not(Test-Path -LiteralPath $source -PathType Leaf) -or (Get-Hash $source) -cne [string]$record.sha256){throw "Astra causal evidence is missing or changed: $relative"}
-        $target=Join-Path $EvidenceRoot ('astra-causal/'+$destination)
-        if(-not(Add-CompactFile $source $target) -or (Get-Hash $target) -cne [string]$record.sha256){throw "Astra causal evidence copy did not verify: $relative"}
-    }
-    if(-not(Add-CompactFile $manifestPath (Join-Path $EvidenceRoot 'astra-causal/allowlist.json'))){throw 'Astra causal allowlist was not retained.'}
-    return $seen.Count
-}
-function Add-GitBlob([string]$Commit,[string]$RepositoryPath,[string]$Destination) {
-    $code='import pathlib,subprocess,sys; data=subprocess.check_output(["git","-C",sys.argv[1],"show",sys.argv[2]]); pathlib.Path(sys.argv[3]).write_bytes(data)'
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Destination) | Out-Null
-    & $python -c $code $Workspace ("$Commit`:$RepositoryPath") $Destination
-    if($LASTEXITCODE -ne 0 -or -not(Test-Path -LiteralPath $Destination -PathType Leaf)){throw "Could not recover exact historical Git blob $Commit`:$RepositoryPath."}
-    return $true
-}
-function Find-Artifact([object[]]$Rows,[string]$Leaf) { return @($Rows | Where-Object { [IO.Path]::GetFileName([string]$_.path) -eq $Leaf } | Select-Object -First 1)[0] }
 
-New-Item -ItemType Directory -Force -Path $Outputs,$Audit,$stage,$sourceStage,$installerStage,$automationStage,$toolingStage,$evidenceStage,$auditStage,$outputMetadataStage | Out-Null
+function Get-ExactGuestIdentity {
+    param([Parameter(Mandatory)][string]$Multipass,[Parameter(Mandatory)][string]$Name,[Parameter(Mandatory)][string]$Path)
+    $raw = Invoke-External $Multipass @('exec',$Name,'--','sudo','cat',$Path) -Capture
+    try { return $raw | ConvertFrom-Json }
+    catch { throw "SECRET RECOVERY REQUIRED: $Name returned invalid immutable identity evidence." }
+}
+
+$stateRoot = Get-DevFleetStateRoot
+$config = Get-DevFleetConfig
+$hostIdentityPath = Join-Path $stateRoot 'node-identity.json'
+$hostIdentity = Get-Content -LiteralPath $hostIdentityPath -Raw | ConvertFrom-Json
+if ([string]$hostIdentity.node_id -notmatch '^[0-9a-fA-F-]{36}$' -or [string]$hostIdentity.deployment_id -notmatch '^[0-9a-fA-F-]{36}$') {
+    throw 'SECRET RECOVERY REQUIRED: deployment/node inventory is incomplete; no credentials were changed.'
+}
+$generation = [guid]::NewGuid().ToString('D')
+$newSecrets = New-DevFleetSecretRecord -Generation $generation
+$newHostToken = New-RandomSecret 40
+$multipass = Get-MultipassExe
+$instances = @(Get-MultipassInstances)
+$computeName = if ([string]$hostIdentity.node_role -eq 'primary') { [string]$config.Primary.InstanceName } elseif ([string]$hostIdentity.node_role -eq 'surrogate') { [string]$config.Failover.InstanceName } else { throw 'SECRET RECOVERY REQUIRED: unsupported host node role.' }
+if (@($instances | Where-Object name -eq $computeName).Count -ne 1) { throw "SECRET RECOVERY REQUIRED: exact compute instance inventory is ambiguous or missing: $computeName" }
+Assert-MultipassIsolation -InstanceNames @($computeName)
+Invoke-External $multipass @('start',$computeName) -IgnoreExitCode
+$computeIdentity = Get-ExactGuestIdentity -Multipass $multipass -Name $computeName -Path '/etc/devfleet/node-identity.json'
+if ([string]$computeIdentity.node_id -ne [string]$hostIdentity.node_id -or [string]$computeIdentity.deployment_id -ne [string]$hostIdentity.deployment_id -or [string]$computeIdentity.node_name -ne $computeName) {
+    throw 'SECRET RECOVERY REQUIRED: compute identity does not match the exact deployment inventory; no credentials were changed.'
+}
+
+$vaultName = $null
+$vaultIdentity = $null
+if ([string]$hostIdentity.node_role -eq 'surrogate') {
+    $vaultName = [string]$config.Vault.InstanceName
+    if (@($instances | Where-Object name -eq $vaultName).Count -ne 1) { throw "SECRET RECOVERY REQUIRED: exact vault instance inventory is ambiguous or missing: $vaultName" }
+    $vaultIdentityPath = Join-Path $stateRoot 'vault-node-identity.json'
+    if (-not (Test-Path -LiteralPath $vaultIdentityPath -PathType Leaf)) { throw 'SECRET RECOVERY REQUIRED: vault identity metadata is missing; use the explicit legacy vault-adoption procedure before re-keying.' }
+    $vaultIdentity = Get-Content -LiteralPath $vaultIdentityPath -Raw | ConvertFrom-Json
+    Assert-MultipassIsolation -InstanceNames @($vaultName)
+    Invoke-External $multipass @('start',$vaultName) -IgnoreExitCode
+    $liveVaultIdentity = Get-ExactGuestIdentity -Multipass $multipass -Name $vaultName -Path '/etc/devfleet-vault-identity.json'
+    if ([string]$vaultIdentity.deployment_id -ne [string]$hostIdentity.deployment_id -or [string]$liveVaultIdentity.deployment_id -ne [string]$hostIdentity.deployment_id -or [string]$liveVaultIdentity.node_id -ne [string]$vaultIdentity.node_id -or [string]$liveVaultIdentity.node_name -ne $vaultName) {
+        throw 'SECRET RECOVERY REQUIRED: vault identity does not match the exact deployment inventory; no credentials were changed.'
+    }
+} elseif (Test-Path -LiteralPath (Join-Path $stateRoot 'secrets\vault-client.json') -PathType Leaf) {
+    throw 'SECRET RECOVERY REQUIRED: this primary is bound to an external vault. Run a coordinated all-node recovery from the surrogate/vault host; no credentials were changed.'
+}
+
+$hostAgentRoot = Join-Path $env:ProgramData 'DevFleetHostAgent'
+$hostTokenPath = Join-Path $hostAgentRoot 'token.txt'
+$hostOwnershipPath = Join-Path $hostAgentRoot 'integration-ownership.json'
+$hostOwnership = Read-DevFleetIntegrationOwnership -Path $hostOwnershipPath
+$taskBinding = @($hostOwnership.ScheduledTasks | Where-Object { [string]$_.Name -eq 'DevFleet Host Agent' })
+$task = Get-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue
+if ($taskBinding.Count -ne 1 -or -not $task -or @($task.Actions).Count -ne 1) { throw 'SECRET RECOVERY REQUIRED: Host Agent task ownership is incomplete; no credentials were changed.' }
+$taskActual = @{Name=[string]$task.TaskName;Executable=[string]$task.Actions[0].Execute;Arguments=[string]$task.Actions[0].Arguments;Principal=[string]$task.Principal.UserId;LogonType=[string]$task.Principal.LogonType;RunLevel=[string]$task.Principal.RunLevel;Description=[string]$task.Description;Generation=[string]$taskBinding[0].Generation}
+Assert-DevFleetTaskBinding -Expected $taskBinding[0] -Actual $taskActual | Out-Null
+
+$recoveryRoot = Join-Path $stateRoot "secret-recovery\$generation"
+New-Item -ItemType Directory -Path $recoveryRoot -Force | Out-Null
+Protect-DevFleetStateAcl
+$secretPath = Join-Path $stateRoot 'secrets\host-secrets.json'
+if (Test-Path -LiteralPath $secretPath -PathType Leaf) { Copy-Item -LiteralPath $secretPath -Destination (Join-Path $recoveryRoot 'host-secrets.before.json') -Force }
+if (Test-Path -LiteralPath $hostTokenPath -PathType Leaf) { Copy-Item -LiteralPath $hostTokenPath -Destination (Join-Path $recoveryRoot 'host-agent-token.before.txt') -Force }
+$pendingSecretsPath = Join-Path $recoveryRoot 'host-secrets.pending.json'
+Write-AtomicUtf8 -Path $pendingSecretsPath -Text (($newSecrets | ConvertTo-Json -Depth 5) + [Environment]::NewLine)
+
+$computeHelper = Join-Path (Get-PackageRootFromState) 'linux\devfleet-rotate-compute-secrets'
+$vaultHelper = Join-Path (Get-PackageRootFromState) 'linux\devfleet-rotate-vault-secrets'
+if (-not (Test-Path -LiteralPath $computeHelper -PathType Leaf) -or ($vaultName -and -not (Test-Path -LiteralPath $vaultHelper -PathType Leaf))) { throw 'Secret recovery helpers are missing from the exact package.' }
+$remoteComputeHelper = "/tmp/devfleet-rotate-compute-$generation"
+$remoteVaultHelper = "/tmp/devfleet-rotate-vault-$generation"
+$computeApplied = $false
+$vaultApplied = $false
+$hostTokenApplied = $false
+$committed = $false
+$evidence = [ordered]@{schemaVersion=1;secretGeneration=$generation;deploymentId=[string]$hostIdentity.deployment_id;hostNodeId=[string]$hostIdentity.node_id;compute=[ordered]@{name=$computeName;nodeId=[string]$computeIdentity.node_id;verified=$false};vault=if($vaultName){[ordered]@{name=$vaultName;nodeId=[string]$vaultIdentity.node_id;verified=$false}}else{$null};hostAgent=[ordered]@{task='DevFleet Host Agent';ownershipGeneration=[string]$hostOwnership.InstallationGeneration;verified=$false};plaintextSecretsLogged=$false;status='IN_PROGRESS';startedAt=(Get-Date).ToUniversalTime().ToString('o')}
 try {
-    $statePath = Join-Path $Workspace 'finalization-state.json'
-    $artifactPath = Join-Path $Outputs 'final-artifact-hashes.json'
-    if (-not (Test-Path -LiteralPath $statePath) -or -not (Test-Path -LiteralPath $artifactPath)) { throw 'Current candidate state or artifact manifest is missing.' }
-    $state = Read-Json $statePath
-    $artifactManifest = Read-Json $artifactPath
-    $preAcceptanceAudit = $Operation -eq 'PreAcceptanceReleaseAudit'
-    $releaseValidator = Join-Path $Workspace 'tools\validate_release_bundle.py'
-    $workspaceValidation = $null
-    if ($preAcceptanceAudit) {
-        $workspaceValidationOutput = @(& $python $releaseValidator --workspace-root $Workspace --check release-evidence 2>&1)
-        if ($LASTEXITCODE -ne 0) { throw "Pre-acceptance RELEASE audit refused current evidence: $($workspaceValidationOutput -join "`n")" }
-        try { $workspaceValidation = ($workspaceValidationOutput -join "`n") | ConvertFrom-Json } catch { throw 'Pre-acceptance workspace validator did not return JSON.' }
-        if ([string]$workspaceValidation.status -ne 'PASS' -or [bool]$workspaceValidation.releaseEligible) { throw 'Pre-acceptance workspace validation was not a non-promoting PASS.' }
-    } else {
-        $finalValidationOutput = @(& $python $releaseValidator --workspace-root $Workspace --check final-acceptance 2>&1)
-        $finalAcceptanceValid = $LASTEXITCODE -eq 0
-        if ($finalAcceptanceValid) {
-            try { $workspaceValidation = ($finalValidationOutput -join "`n") | ConvertFrom-Json } catch { $finalAcceptanceValid = $false }
-        }
-        if ($finalAcceptanceValid -and ([string]$workspaceValidation.status -ne 'PASS' -or -not [bool]$workspaceValidation.internalPromotionAllowed)) { $finalAcceptanceValid = $false }
+    New-DevFleetSnapshotSafe -InstanceName $computeName -SnapshotName "pre-secret-rekey-$($generation.Substring(0,8))" | Out-Null
+    Wait-MultipassReady -Name $computeName -TimeoutSeconds 600
+    Invoke-External $multipass @('transfer',$computeHelper,"${computeName}:$remoteComputeHelper")
+    if ($vaultName) {
+        New-DevFleetSnapshotSafe -InstanceName $vaultName -SnapshotName "pre-secret-rekey-$($generation.Substring(0,8))" | Out-Null
+        Wait-MultipassReady -Name $vaultName -TimeoutSeconds 600
+        Invoke-External $multipass @('transfer',$vaultHelper,"${vaultName}:$remoteVaultHelper")
+        $vaultPayload = [ordered]@{schema_version=1;secret_generation=$generation;deployment_id=[string]$hostIdentity.deployment_id;node_id=[string]$vaultIdentity.node_id;cluster=[string]$config.ClusterName;rest_user=[string]$newSecrets.VaultRestUser;rest_password=[string]$newSecrets.VaultRestPassword;restic_password=[string]$newSecrets.ResticPassword}
+        Invoke-MultipassWithStandardInput -FilePath $multipass -InstanceName $vaultName -CommandArgumentList @('sudo','bash',$remoteVaultHelper,'apply',$generation) -StandardInputText ($vaultPayload | ConvertTo-Json -Compress)
+        $vaultApplied = $true; $evidence.vault.verified = $true
     }
-    $releaseFingerprintPath = Join-Path $Outputs 'release-fingerprint.json'
-    $toolingCurrentPath = Join-Path $Outputs 'tooling-fingerprint-current.json'
-    $advisoryPath = Join-Path $Outputs 'dependency-advisory-gate.json'
-    $osvReconciliationPath = Join-Path $Outputs 'independent-osv-reconciliation.json'
-    $signingProviderPath = Join-Path $Outputs 'signing-provider.json'
-    if (-not (Test-Path -LiteralPath $releaseFingerprintPath -PathType Leaf) -or -not (Test-Path -LiteralPath $toolingCurrentPath -PathType Leaf) -or -not (Test-Path -LiteralPath $advisoryPath -PathType Leaf) -or -not (Test-Path -LiteralPath $osvReconciliationPath -PathType Leaf) -or -not (Test-Path -LiteralPath $signingProviderPath -PathType Leaf)) { throw 'Current release identity, signing provider, or dependency advisory evidence is missing.' }
-    $releaseFingerprint = Read-Json $releaseFingerprintPath
-    $toolingCurrent = Read-Json $toolingCurrentPath
-    $signingProvider = Read-Json $signingProviderPath
-    if ([int]$releaseFingerprint.schemaVersion -ne 2 -or [int]$toolingCurrent.schemaVersion -ne 2 -or [int]$toolingCurrent.releaseFingerprintSchemaVersion -ne 2) { throw 'Current audit identity must use release fingerprint schema v2.' }
-    if ([int]$signingProvider.schemaVersion -ne 1 -or [bool]$signingProvider.privateKeyExported -or [bool]$signingProvider.privateKeyExportable -or [bool]$signingProvider.publicPublisherTrust -or [bool]$signingProvider.publicPromotionAllowed) { throw 'Signing provider metadata is missing or violates the private-signing release contract.' }
-    $artifactRows = @($artifactManifest.artifacts)
-    $branch = (& git -C $Workspace branch --show-current).Trim()
-    $head = (& git -C $Workspace rev-parse HEAD).Trim()
-    # Candidate currency is bound to deterministic shipping-input identity;
-    # repository/tooling HEAD may advance without changing shipping bytes.
-    $gitClean = (@(& git -C $Workspace status --porcelain) | Measure-Object).Count -eq 0
+    $computePayload = [ordered]@{schema_version=1;secret_generation=$generation;deployment_id=[string]$hostIdentity.deployment_id;node_id=[string]$hostIdentity.node_id;admin_user=[string]$newSecrets.PortalAdminUser;admin_password=[string]$newSecrets.PortalAdminPassword;api_token=[string]$newSecrets.NodeApiToken;host_control_token=$newHostToken}
+    Invoke-MultipassWithStandardInput -FilePath $multipass -InstanceName $computeName -CommandArgumentList @('sudo','bash',$remoteComputeHelper,'apply',$generation) -StandardInputText ($computePayload | ConvertTo-Json -Compress)
+    $computeApplied = $true; $evidence.compute.verified = $true
 
-    $artifactNames = [ordered]@{
-        exe = "DevFleet-Setup-v$releaseVersion-win-x64.exe"
-        tar = "devfleet-v$releaseVersion.tar.gz"
-        portable = "DevFleet-v$releaseVersion-Portable-Codebase-Verified-r1.zip"
-        installerSource = "DevFleet-v$releaseVersion-Installer-Source.zip"
+    if ($vaultName) {
+        $vaultIp = Get-InstanceIPv4 -Name $vaultName -PreferTailscale
+        if (-not $vaultIp) { throw 'Rotated vault endpoint has no verified reachable address.' }
+        $vaultClient = [ordered]@{Repository="rest:http://${vaultIp}:$($config.Network.VaultPort)/$($newSecrets.VaultRestUser)/$($config.ClusterName)";RestUser=[string]$newSecrets.VaultRestUser;RestPassword=[string]$newSecrets.VaultRestPassword;ResticPassword=[string]$newSecrets.ResticPassword;VaultIp=$vaultIp;VaultPort=[int]$config.Network.VaultPort;SecretGeneration=$generation}
+        $pendingVaultClient = Join-Path $recoveryRoot 'vault-client.pending.json'
+        Write-AtomicUtf8 -Path $pendingVaultClient -Text (($vaultClient | ConvertTo-Json -Depth 5) + [Environment]::NewLine)
+        Invoke-External $multipass @('transfer',$pendingVaultClient,"${computeName}:/tmp/devfleet-vault-client-$generation.json")
+        $remoteVaultClient = "/tmp/devfleet-vault-client-$generation.json"
+        $configureBackup = 'set -Eeuo pipefail; trap ''rm -f -- "$1"'' EXIT; /usr/local/sbin/devfleet-configure-backup "$1"'
+        Invoke-External $multipass @('exec',$computeName,'--','sudo','bash','-c',$configureBackup,'--',$remoteVaultClient)
     }
-    $candidateArtifacts = [ordered]@{}
-    foreach ($key in $artifactNames.Keys) {
-        $row = Find-Artifact $artifactRows $artifactNames[$key]
-        $path = if ($row) { [string]$row.path } else { Join-Path $Outputs $artifactNames[$key] }
-        if (-not [IO.Path]::IsPathRooted($path)) { $path = Join-Path $Workspace $path }
-        $exists = Test-Path -LiteralPath $path -PathType Leaf
-        $candidateArtifacts[$key] = [ordered]@{
-            name = $artifactNames[$key]; path = (Rel $path); bytes = if ($exists) { [int64](Get-Item -LiteralPath $path).Length } else { 0 }
-            sha256 = if ($exists) { Get-Hash $path } else { '' }
-            manifestSha256 = if ($row) { [string]$row.sha256 } else { '' }
-            exists = $exists
-        }
-    }
-    $releaseId = [string]$state.releaseFingerprintId
-    $toolingId = [string]$state.toolingFingerprintId
-    $sourceChanged = [bool]$state.source_changed_since_candidate
-    $rebuildRequired = [bool]$state.rebuild_required
-    $workingToolingId = [string]$state.working_tree_tooling_fingerprint_id
-    if (-not $releaseId -or -not $toolingId) { throw 'Current state has no release/tooling fingerprint tuple.' }
-    if ($artifactManifest.releaseFingerprintId -ne $releaseId -or $artifactManifest.toolingFingerprintId -ne $toolingId) { throw 'Artifact manifest disagrees with finalization state fingerprints.' }
-    if ($releaseFingerprint.releaseFingerprintId -ne $releaseId -or $releaseFingerprint.toolingFingerprint.toolingFingerprintId -ne $toolingId -or $toolingCurrent.releaseFingerprintId -ne $releaseId -or $toolingCurrent.toolingFingerprintId -ne $toolingId) { throw 'Current release/tooling fingerprint files disagree with finalization state.' }
-    foreach ($item in $candidateArtifacts.Values) {
-        if (-not $item.exists -or $item.sha256 -ne $item.manifestSha256) { $artifactMismatch = $true }
-    }
-    $candidateCommit = [string]$state.candidateGitCommit
-    if (-not $candidateCommit) { $candidateCommit = [string]$state.candidate_git_commit }
-    if (-not $candidateCommit) { $candidateCommit = [string]$state.candidateCommit }
-    if (-not $candidateCommit) { $candidateCommit = $head }
-    if ($candidateCommit -notmatch '^[0-9a-fA-F]{40}$') { throw 'Candidate commit is missing or malformed.' }
-    $failedAttemptSnapshotRelative = 'audit/luna-high-failed-attempt-freeze-20260831T002237512571Z.json'
-    $failedAttemptSnapshotPath = Join-Path $Workspace ($failedAttemptSnapshotRelative -replace '/','\')
-    $failedAttemptContract = (Test-Path -LiteralPath $failedAttemptSnapshotPath -PathType Leaf) -and
-        $candidateCommit -eq '21752fc0e50978183322204c523b40947d073aa0' -and
-        [string]$state.blocker_code -eq 'REPLACEMENT_CANDIDATE_BINDING_MISMATCH'
-    # Compute both sides from the live filesystem and the exact candidate commit
-    # using source/tools/release_fingerprint.py.  Never treat the current
-    # release-fingerprint.json rows as a live identity: they are candidate
-    # metadata and may be stale after tooling-only commits.
-    $identityArguments = @('--workspace',$Workspace,'--candidate-commit',$candidateCommit)
-    foreach ($artifactName in $candidateArtifacts.Keys) {
-        $artifactFullPath = Join-Path $Workspace ([string]$candidateArtifacts[$artifactName].path)
-        $identityArguments += @('--artifact',"$artifactName=$artifactFullPath")
-    }
-    $identityRaw = @(& $python (Join-Path $Workspace 'tools\compute_shipping_input_identity.py') @identityArguments)
-    if ($LASTEXITCODE -ne 0 -or $identityRaw.Count -eq 0) { throw 'Live/candidate shipping-input identity computation failed.' }
-    try { $identity = ($identityRaw -join "`n") | ConvertFrom-Json } catch { throw "Shipping-input identity output was not valid JSON: $($_.Exception.Message)" }
-    function Normalize-ShippingRows([object[]]$Rows) {
-        return @($Rows | Sort-Object root,path | ForEach-Object {
-            [ordered]@{root=[string]$_.root;path=[string]$_.path;bytes=[int64]$_.bytes;sha256=[string]$_.sha256;mode=[string]$_.mode}
-        })
-    }
-    $liveRows = Normalize-ShippingRows @($identity.liveShippingInputs)
-    $candidateRows = Normalize-ShippingRows @($identity.candidateShippingInputs)
-    if ($liveRows.Count -eq 0 -or $candidateRows.Count -eq 0) { throw 'Shipping-input identity computation returned no inputs.' }
-    $liveMode = ($identity.liveShippingModeContract | ConvertTo-Json -Compress -Depth 10)
-    $candidateMode = ($identity.candidateShippingModeContract | ConvertTo-Json -Compress -Depth 10)
-    # The Python identity tool is the authoritative canonical algorithm.  Do
-    # not hash a PowerShell serialization of rows here; that would omit the
-    # version and mode contract and could silently disagree with validators.
-    $rawLiveShippingInputIdentity = [string]$identity.liveShippingInputIdentity
-    $currentShippingInputIdentity = $rawLiveShippingInputIdentity
-    $candidateComputedIdentity = [string]$identity.candidateShippingInputIdentity
-    $candidateShippingInputIdentity = [string]$state.shipping_input_identity
-    if (-not $candidateShippingInputIdentity) { $candidateShippingInputIdentity = [string]$state.shippingInputIdentity }
-    if (-not $candidateShippingInputIdentity) { $candidateShippingInputIdentity = [string]$artifactManifest.shippingInputIdentity }
-    if ($failedAttemptContract) { $currentShippingInputIdentity = [string]$state.failed_replacement_attempt.buildTimeShippingInputIdentity }
-    $historicalDiagnosticTuple = $candidateCommit -eq '2739e0366d070285e44b4fc764ef9247d40b2f94' -and
-        $candidateShippingInputIdentity -eq 'daa30ef9f521a47fedb4bacce91e3440c20e1a8f05543b4d5e823e5c3541e64e' -and
-        [string]$state.releaseFingerprintId -eq '80c8b88c2f2ec828f5ab0f9713d63fa3f4cc4cbad7c382aa2f154f3196c3de84' -and
-        [bool]$state.source_changed_since_candidate -and [bool]$state.rebuild_required -and -not [bool]$state.candidate_is_current
-    if (-not $currentShippingInputIdentity -or -not $candidateShippingInputIdentity -or ($candidateComputedIdentity -ne $candidateShippingInputIdentity -and -not $historicalDiagnosticTuple -and -not $failedAttemptContract)) { throw 'Candidate-bound shipping-input identity does not match the exact candidate commit rows.' }
-    $embeddedFingerprintRows = Normalize-ShippingRows @($releaseFingerprint.shippingInputs)
-    if (($embeddedFingerprintRows | ConvertTo-Json -Compress -Depth 12) -cne ($candidateRows | ConvertTo-Json -Compress -Depth 12)) { throw 'release-fingerprint.json shipping rows are not the exact candidate Git-object rows.' }
-    if ([string]$identity.candidateReleaseFingerprintId -cne $releaseId -or [string]$releaseFingerprint.releaseFingerprintId -cne $releaseId) { throw 'Declared release fingerprint does not recompute from the candidate Git-object rows and exact artifact tuple.' }
-    $liveToolingId = [string]$identity.liveToolingFingerprint.toolingFingerprintId
-    if ($liveToolingId -cne $toolingId) {
-        if (-not $sourceChanged -or -not $rebuildRequired -or $workingToolingId -notmatch '^[0-9a-f]{64}$' -or $liveToolingId -cne $workingToolingId) {
-            throw 'Live release tooling differs from the candidate tuple without an exact fail-closed working-tree tooling fingerprint.'
-        }
-    }
-    if (($releaseFingerprint.shippingModeContract | ConvertTo-Json -Compress -Depth 10) -cne ($identity.candidateShippingModeContract | ConvertTo-Json -Compress -Depth 10)) { throw 'release-fingerprint.json mode contract is not candidate-bound.' }
-    $rawAuthorizedShippingPaths = @($state.authorized_correction.shipping_paths | ForEach-Object { ([string]$_).Trim().Replace('\\','/').TrimStart('/') } | Where-Object { $_ })
-    $authorizedShippingPaths = @($rawAuthorizedShippingPaths | Sort-Object -Unique)
-    if ($authorizedShippingPaths.Count -ne $rawAuthorizedShippingPaths.Count -or @($authorizedShippingPaths | Where-Object { $_ -notmatch '^(source|installer-source)/[^/].*$' -or $_ -match '(^|/)\.\.(/|$)' }).Count -gt 0) {
-        throw 'Authorized shipping correction paths are duplicated, malformed, or outside the shipping roots.'
-    }
-    $liveByPath = @{}; foreach ($row in $liveRows) { $liveByPath[(([string]$row.root).TrimEnd('/') + '/' + [string]$row.path)] = ($row | ConvertTo-Json -Compress -Depth 10) }
-    $candidateByPath = @{}; foreach ($row in $candidateRows) { $candidateByPath[(([string]$row.root).TrimEnd('/') + '/' + [string]$row.path)] = ($row | ConvertTo-Json -Compress -Depth 10) }
-    $shippingChangedPaths = @((@($liveByPath.Keys) + @($candidateByPath.Keys)) | Sort-Object -Unique | Where-Object { $liveByPath[$_] -cne $candidateByPath[$_] })
-    # A Windows checkout may materialize committed LF blobs as CRLF without
-    # changing the canonical Git-object candidate.  Prove this narrowly with
-    # Git's EOL-only diff mode before accepting the candidate as unchanged.
-    $crlfOnlyPaths = [Collections.Generic.List[string]]::new()
-    $substantiveShippingChangedPaths = [Collections.Generic.List[string]]::new()
-    foreach ($changedPath in $shippingChangedPaths) {
-        if (-not $liveByPath.ContainsKey($changedPath) -or -not $candidateByPath.ContainsKey($changedPath)) {
-            $substantiveShippingChangedPaths.Add($changedPath)
-            continue
-        }
-        & git -C $Workspace diff --quiet --ignore-space-at-eol $candidateCommit -- $changedPath
-        if ($LASTEXITCODE -eq 0) { $crlfOnlyPaths.Add($changedPath); continue }
-        if ($LASTEXITCODE -eq 1) { $substantiveShippingChangedPaths.Add($changedPath); continue }
-        throw "Git could not classify the candidate/live line-ending delta for $changedPath."
-    }
-    $crlfOnlyPaths = @($crlfOnlyPaths | Sort-Object -Unique)
-    $substantiveShippingChangedPaths = @($substantiveShippingChangedPaths | Sort-Object -Unique)
-    $crlfOnlyMaterialization = $shippingChangedPaths.Count -gt 0 -and $substantiveShippingChangedPaths.Count -eq 0
-    if ($crlfOnlyMaterialization) { $currentShippingInputIdentity = $candidateComputedIdentity }
-    $postFailurePaths = @($state.failed_replacement_attempt.postFailureEvidenceTooling.paths | ForEach-Object { ([string]$_.path).Trim().Replace('\','/') } | Where-Object { $_ })
-    $attemptedChangedPaths = @($shippingChangedPaths | Where-Object { $postFailurePaths -notcontains $_ })
-    $historicalCrlfPaths = @($attemptedChangedPaths | Where-Object { $authorizedShippingPaths -notcontains $_ })
-    $unknownHistoricalPaths = @($historicalCrlfPaths | Where-Object { $_ -notmatch '^(source|installer-source)/' })
-    if (($historicalDiagnosticTuple -or $failedAttemptContract) -and ($historicalCrlfPaths.Count -ne 28 -or $unknownHistoricalPaths.Count -ne 0)) { throw "Historical CRLF/current-change partition is not exactly 28 classified shipping rows (rows=$($historicalCrlfPaths.Count), unknown=$($unknownHistoricalPaths.Count))." }
-    $splitIdentityCorrectionAllowed = $sourceChanged -and $rebuildRequired -and $substantiveShippingChangedPaths.Count -gt 0 -and
-        ((@($substantiveShippingChangedPaths) -join "`n") -ceq (@($authorizedShippingPaths) -join "`n"))
-    if ($rawLiveShippingInputIdentity -cne $candidateComputedIdentity -or $liveMode -cne $candidateMode -or [string]$identity.liveVersion -cne [string]$identity.candidateVersion -or [string]$identity.liveInstallerVersion -cne [string]$identity.candidateInstallerVersion) {
-        if (-not $splitIdentityCorrectionAllowed -and -not $historicalDiagnosticTuple -and -not $failedAttemptContract -and -not $crlfOnlyMaterialization) { throw 'Live shipping inputs differ from the candidate-bound source/installer identity without an authorized, fail-closed replacement correction.' }
-    }
-    $allChanges = @(& git -C $Workspace diff --name-only $candidateCommit --; & git -C $Workspace ls-files --others --exclude-standard)
-    $allowedToolingOnly = $true
-    foreach ($change in $allChanges) {
-        $normalized = ([string]$change).Trim().Replace('\','/')
-        if (-not $normalized) { continue }
-        # Shipping classification is defined by the canonical candidate/live
-        # inventory, not by a folder allowlist. Release-control documentation
-        # and installed skill files can legitimately live outside tools/ while
-        # remaining non-shipping; a newly added shipping file appears in the
-        # live inventory and is rejected here.
-        $isShippingPath = $liveByPath.ContainsKey($normalized) -or $candidateByPath.ContainsKey($normalized)
-        if (-not $isShippingPath -or $crlfOnlyPaths -contains $normalized) { continue }
-        $allowedToolingOnly = $false
-        break
-    }
-    if ($candidateShippingInputIdentity -ne $currentShippingInputIdentity -or -not $allowedToolingOnly -or $failedAttemptContract) { $sourceChanged = $true; $rebuildRequired = $true }
-    if ($artifactMismatch) { $sourceChanged = $true; $rebuildRequired = $true }
-    $candidateIsCurrent = [bool]$state.candidate_is_current -and -not $sourceChanged -and -not $rebuildRequired -and -not $failedAttemptContract
-    $status = if ($preAcceptanceAudit) { 'PRE_ACCEPTANCE_RELEASE_AUDIT' } elseif ($finalAcceptanceValid) { 'PASS' } elseif ($failedAttemptContract) { 'BLOCKED — USER ACTION REQUIRED' } elseif (-not $candidateIsCurrent -or [string]$state.status -match '(?i)blocked') { 'BLOCKED' } elseif ([string]$state.status -match '(?i)awaiting|progress') { 'READY_FOR_FULLRELEASE' } else { 'IN_PROGRESS' }
-    $bundleMode = if ($preAcceptanceAudit -or $finalAcceptanceValid) { 'release' } else { 'diagnostic' }
-    $releaseValidationMode = if ($preAcceptanceAudit) { 'pre-acceptance' } else { $bundleMode }
 
-    Add-Tree (Join-Path $Workspace 'source') $sourceStage 'source'
-    Add-Tree (Join-Path $Workspace 'installer-source') $installerStage 'installer-source'
-    if ($crlfOnlyPaths.Count -gt 0) {
-        # Normalize only independently proven EOL-only rows to their canonical
-        # Git-object bytes.  Mixed substantive changes remain live in the
-        # diagnostic bundle and are bound by authorized_correction below.
-        foreach ($crlfPath in $crlfOnlyPaths) {
-            $parts = $crlfPath -split '/', 2
-            $destinationRoot = if ($parts[0] -eq 'source') { $sourceStage } else { $installerStage }
-            Add-GitBlob $candidateCommit $crlfPath (Join-Path $destinationRoot ($parts[1] -replace '/','\\')) | Out-Null
-        }
+    Write-AtomicUtf8 -Path $hostTokenPath -Text ($newHostToken + [Environment]::NewLine)
+    $hostTokenApplied = $true
+    Stop-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue
+    Start-ScheduledTask -TaskName 'DevFleet Host Agent'
+    $hostHealth = $null
+    $hostAgentConfig = Get-Content -LiteralPath (Join-Path $hostAgentRoot 'config.json') -Raw | ConvertFrom-Json
+    if ([string]$hostAgentConfig.ListenPrefix -notmatch ':(\d{2,5})/$') { throw 'Host Agent listen prefix is invalid during secret verification.' }
+    $hostAgentPort = [int]$Matches[1]
+    for ($attempt = 0; $attempt -lt 20 -and -not $hostHealth; $attempt++) {
+        try { $hostHealth = Invoke-HostAgentAuthenticatedJson -Uri "http://127.0.0.1:$hostAgentPort/healthz" -Method GET -Key $newHostToken -ExpectedHost $env:COMPUTERNAME }
+        catch { Start-Sleep -Milliseconds 500 }
     }
-    $stagedIdentityArguments = @('--source-root',$sourceStage,'--installer-root',$installerStage)
-    foreach ($artifactName in $candidateArtifacts.Keys) {
-        $artifactFullPath = Join-Path $Workspace ([string]$candidateArtifacts[$artifactName].path)
-        $stagedIdentityArguments += @('--artifact',"$artifactName=$artifactFullPath")
-    }
-    $stagedIdentityRaw = @(& $python (Join-Path $Workspace 'tools\compute_shipping_input_identity.py') @stagedIdentityArguments)
-    if ($LASTEXITCODE -ne 0 -or $stagedIdentityRaw.Count -eq 0) { throw 'Canonicalized diagnostic shipping-input identity computation failed.' }
-    try { $stagedIdentity = ($stagedIdentityRaw -join "`n") | ConvertFrom-Json } catch { throw "Canonicalized diagnostic shipping-input identity output was not valid JSON: $($_.Exception.Message)" }
-    $currentShippingInputIdentity = [string]$stagedIdentity.shippingInputIdentity
-    if ($currentShippingInputIdentity -notmatch '^[0-9a-f]{64}$') { throw 'Canonicalized diagnostic shipping-input identity is malformed.' }
-    if ($crlfOnlyMaterialization -and $currentShippingInputIdentity -cne $candidateComputedIdentity) { throw 'EOL-only normalization did not reproduce the candidate Git-object shipping identity.' }
-    Add-Tree (Join-Path $Workspace 'automation\release-e2e') (Join-Path $automationStage 'release-e2e') 'automation/release-e2e'
-    Add-Tree (Join-Path $Workspace 'tools') $toolingStage 'release-tooling'
-    # Carry the installed release-control contract and its durable Markdown
-    # memory as review context. These files are not promotion authority and do
-    # not enter the shipping-source inventory below.
-    $releaseControlStage = Join-Path $stage 'release-control'
-    Add-Tree (Join-Path $Workspace 'docs\ai\devfleet-release') (Join-Path $releaseControlStage 'workflow') 'release-control/workflow'
-    Add-CompactFile (Join-Path $Workspace '.agents\skills\devfleet-release-control\SKILL.md') (Join-Path $releaseControlStage 'installed-skill\SKILL.md') | Out-Null
-    # Include only the reviewed audit-convergence skill closure. It is advisory
-    # review evidence, not a second release authority or a source of runtime grants.
-    $auditSkillRoot = Join-Path $Workspace '.agents/skills/devfleet-audit-convergence'
-    if (Test-Path -LiteralPath $auditSkillRoot -PathType Container) {
-        $auditSkillFiles = @(
-            'SKILL.md', 'agents/openai.yaml', 'scripts/audit_io.py',
-            'scripts/audit_convergence.py', 'scripts/native_runner.py',
-            'references/completion-contract.md', 'tests/test_audit_convergence.py',
-            'tests/Test-AuditSkillPackaging.ps1'
-        )
-        foreach ($skillRelative in $auditSkillFiles) {
-            $inputRelative = '.agents/skills/devfleet-audit-convergence/' + $skillRelative
-            $checkedPath = $Workspace
-            foreach ($component in $inputRelative.Split('/')) {
-                $checkedPath = Join-Path $checkedPath $component
-                $item = Get-Item -LiteralPath $checkedPath -Force -ErrorAction Stop
-                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-                    throw 'Audit skill packaging rejects reparse-point inputs.'
-                }
-            }
-            if (-not (Test-Path -LiteralPath $checkedPath -PathType Leaf)) {
-                throw "Required audit skill file is missing: $skillRelative"
-            }
-            $beforeHash = Get-Hash $checkedPath
-            $destination = Join-Path $releaseControlStage ('audit-convergence-skill/' + $skillRelative)
-            if (-not (Add-CompactFile $checkedPath $destination)) {
-                throw "Audit skill staging failed: $skillRelative"
-            }
-            if ((Get-Hash $destination) -cne $beforeHash -or (Get-Hash $checkedPath) -cne $beforeHash) {
-                throw "Audit skill changed during staging: $skillRelative"
-            }
-        }
-    }
-    $agentMemoryRoot = Join-Path $Workspace 'audit\agent-memory'
-    if (Test-Path -LiteralPath $agentMemoryRoot -PathType Container) {
-        foreach ($memoryFile in @(Get-ChildItem -LiteralPath $agentMemoryRoot -Recurse -File -Filter '*.md')) {
-            $relativeMemory = $memoryFile.FullName.Substring($agentMemoryRoot.Length).TrimStart('\','/')
-            Add-CompactFile $memoryFile.FullName (Join-Path $auditStage (Join-Path 'agent-memory' $relativeMemory)) | Out-Null
-        }
-    }
-    if ($historicalDiagnosticTuple) {
-        # Include exact old-candidate bytes for every independently recomputed
-        # CRLF-only path. Row hashes alone cannot prove normalized-content
-        # equality, so diagnostic validation consumes this materialization.
-        foreach ($historicalPath in $historicalCrlfPaths) {
-            $historicalDestination = Join-Path $stage ('release-tooling\historical-candidate-2739\' + ($historicalPath -replace '/','\'))
-            Add-GitBlob $candidateCommit $historicalPath $historicalDestination | Out-Null
-        }
-    }
-    if ($failedAttemptContract) {
-        Add-CompactFile $failedAttemptSnapshotPath (Join-Path $auditStage ($failedAttemptSnapshotRelative -replace '^audit/','')) | Out-Null
-    }
-    # Preserve distinct repository/tooling HEAD and candidate commit fields;
-    # staging must never rewrite current HEAD to the signed candidate.
-    $proofRunner = Join-Path $Workspace 'audit\run-exact-candidate-proof.ps1'
-    if (Test-Path -LiteralPath $proofRunner -PathType Leaf) {
-        Add-CompactFile $proofRunner (Join-Path $toolingStage 'proof-entrypoints\run-exact-candidate-proof.ps1') | Out-Null
-    }
-    # Every source hash recorded by proof-start is independently verifiable
-    # under the non-shipping release-tooling namespace.
-    Add-CompactFile (Join-Path $Workspace 'automation\release-e2e\modules\executors\Invoke-RealProductPhase.psm1') (Join-Path $toolingStage 'proof-entrypoints\Invoke-RealProductPhase.psm1') | Out-Null
-    Add-CompactFile (Join-Path $Workspace 'automation\release-e2e\modules\executors\Invoke-WpfUiAutomation.ps1') (Join-Path $toolingStage 'proof-entrypoints\Invoke-WpfUiAutomation.ps1') | Out-Null
-    Add-CompactFile (Join-Path $Workspace 'automation\release-e2e\modules\executors\WpfLaunchContract.psm1') (Join-Path $toolingStage 'proof-entrypoints\WpfLaunchContract.psm1') | Out-Null
-    $stagedState = Read-Json $statePath
-    if ($stagedState.PSObject.Properties.Name -contains 'repository_head') { $stagedState.repository_head = $head }
-    else { $stagedState | Add-Member -NotePropertyName repository_head -NotePropertyValue $head }
-    # Regenerated/staged authority must carry the same exact reviewed path set
-    # consumed by the live partition and candidate-bound validators.
-    if ($null -eq $stagedState.authorized_correction) {
-        $stagedState | Add-Member -NotePropertyName authorized_correction -NotePropertyValue ([pscustomobject]@{ shipping_paths=@() }) -Force
-    } elseif ($null -eq $stagedState.authorized_correction.shipping_paths) {
-        $stagedState.authorized_correction | Add-Member -NotePropertyName shipping_paths -NotePropertyValue @() -Force
-    }
-    $stagedState.authorized_correction.shipping_paths = @($authorizedShippingPaths)
-    Write-Json (Join-Path $stage 'finalization-state.json') $stagedState
-    $stagedArtifactManifest = Read-Json $artifactPath
-    if ($stagedArtifactManifest.PSObject.Properties.Name -contains 'repositoryHead') { $stagedArtifactManifest.repositoryHead = $head }
-    else { $stagedArtifactManifest | Add-Member -NotePropertyName repositoryHead -NotePropertyValue $head }
-    Write-Json (Join-Path $outputMetadataStage 'final-artifact-hashes.json') $stagedArtifactManifest
-    Copy-Item -LiteralPath $releaseFingerprintPath -Destination (Join-Path $outputMetadataStage 'release-fingerprint.json') -Force
-    Copy-Item -LiteralPath $toolingCurrentPath -Destination (Join-Path $outputMetadataStage 'tooling-fingerprint-current.json') -Force
-    Copy-Item -LiteralPath $advisoryPath -Destination (Join-Path $outputMetadataStage 'dependency-advisory-gate.json') -Force
-    Copy-Item -LiteralPath $osvReconciliationPath -Destination (Join-Path $outputMetadataStage 'independent-osv-reconciliation.json') -Force
-    Copy-Item -LiteralPath $signingProviderPath -Destination (Join-Path $stage 'SIGNING-PROVIDER.json') -Force
-    $hookData = $null
-    $hookManifest = & $python (Join-Path $Workspace 'source\tools\hook_modes.py') (Join-Path $Workspace 'source') 2>$null
-    if ($LASTEXITCODE -eq 0) { $hookData = $hookManifest | ConvertFrom-Json }
+    if (-not $hostHealth.ok) { throw 'Rotated Host Agent credential did not verify.' }
+    $evidence.hostAgent.verified = $true
 
-    $inventory = [Collections.Generic.List[object]]::new()
-    $modeInventory = [Collections.Generic.List[object]]::new()
-    foreach ($file in Get-ChildItem -LiteralPath $stage -File -Recurse -Force) {
-        $bundleRelative = ([IO.Path]::GetFullPath($file.FullName)).Substring($stage.Length).TrimStart('\','/').Replace('\','/')
-        if ($bundleRelative -notmatch '^(source|installer-source|automation/release-e2e|release-tooling)/') { continue }
-        $mode = 420
-        if ($bundleRelative -match '^source/') {
-            if ($hookData) {
-                $hookRelative = $bundleRelative.Substring(7)
-                if (@($hookData.executable_by_contract) -contains $hookRelative) { $mode = 493 }
-            }
-        }
-        $canonicalMode = if ($mode -eq 493) { '0755' } else { '0644' }
-        $inventory.Add([ordered]@{path=$bundleRelative;bytes=[int64]$file.Length;sha256=(Get-Hash $file.FullName);mode=$canonicalMode})
-        $modeInventory.Add([ordered]@{path=$bundleRelative;posixMode=$mode;executable=($mode -eq 493)})
+    if ($vaultName) {
+        $pendingVaultClient = Join-Path $recoveryRoot 'vault-client.pending.json'
+        $vaultClientPath = Join-Path $stateRoot 'secrets\vault-client.json'
+        Write-AtomicUtf8 -Path $vaultClientPath -Text (Get-Content -LiteralPath $pendingVaultClient -Raw)
     }
-    if ($inventory.Count -eq 0) { throw 'No shipping source was collected for the universal audit bundle.' }
-    $inventory = @($inventory | Sort-Object path)
-    $modeInventory = @($modeInventory | Sort-Object path)
-    $hashLines = @($inventory | ForEach-Object { '{0}  {1}' -f $_.sha256,$_.path })
-    Set-Content -LiteralPath (Join-Path $stage 'SHA256SUMS.txt') -Value $hashLines -Encoding UTF8
-    Set-Content -LiteralPath (Join-Path $stage 'AUDIT-TREE.txt') -Value (@('DevFleet universal AI audit source tree','') + @($inventory | ForEach-Object path)) -Encoding UTF8
-    Write-Json (Join-Path $stage 'SOURCE-MODES.json') $modeInventory
+    Write-AtomicUtf8 -Path $secretPath -Text (($newSecrets | ConvertTo-Json -Depth 5) + [Environment]::NewLine)
+    Protect-DevFleetStateAcl
+    $committed = $true
+    $evidence.status='COMMITTED';$evidence.completedAt=(Get-Date).ToUniversalTime().ToString('o')
+} catch {
+    $evidence.status='ROLLED_BACK';$evidence.error=$_.Exception.Message;$evidence.failedAt=(Get-Date).ToUniversalTime().ToString('o')
+    if ($hostTokenApplied -and (Test-Path -LiteralPath (Join-Path $recoveryRoot 'host-agent-token.before.txt'))) {
+        Copy-Item -LiteralPath (Join-Path $recoveryRoot 'host-agent-token.before.txt') -Destination $hostTokenPath -Force
+        Stop-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue; Start-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue
+    } elseif ($hostTokenApplied) {
+        Remove-Item -LiteralPath $hostTokenPath -Force -ErrorAction SilentlyContinue
+        Stop-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue
+    }
+    if ($computeApplied) { try { Invoke-External $multipass @('exec',$computeName,'--','sudo','bash',$remoteComputeHelper,'rollback',$generation) } catch { $evidence.compute.rollbackError=$_.Exception.Message } }
+    if ($vaultApplied) { try { Invoke-External $multipass @('exec',$vaultName,'--','sudo','bash',$remoteVaultHelper,'rollback',$generation) } catch { $evidence.vault.rollbackError=$_.Exception.Message } }
+    throw
+} finally {
+    foreach ($target in @(@($computeName,$remoteComputeHelper),@($vaultName,$remoteVaultHelper))) {
+        if ($target[0]) { try { Invoke-External $multipass @('exec',[string]$target[0],'--','sudo','rm','-f','--',[string]$target[1]) -IgnoreExitCode } catch {} }
+    }
+    Remove-Item -LiteralPath $pendingSecretsPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $recoveryRoot 'vault-client.pending.json') -Force -ErrorAction SilentlyContinue
+    Write-AtomicUtf8 -Path (Join-Path $recoveryRoot 'recovery-evidence.json') -Text (($evidence | ConvertTo-Json -Depth 8) + [Environment]::NewLine)
+}
+if (-not $committed) { throw 'Secret recovery did not commit.' }
+[ordered]@{ok=$true;status='COMMITTED';secretGeneration=$generation;deploymentId=[string]$hostIdentity.deployment_id;compute=$computeName;vault=$vaultName;plaintextSecretsLogged=$false;recoveryEvidence=(Join-Path $recoveryRoot 'recovery-evidence.json')} | ConvertTo-Json -Compress
 
-    # A blocked pre-rebuild workspace can still produce a diagnostic bundle,
-    # but only with an explicit, immutable historical-provenance contract.
-    # This record is evidence metadata; it never changes the preserved old
-    # artifact hashes or promotes the candidate.
-    $historicalProvenance = $null
-    if (-not $candidateIsCurrent -and $candidateCommit -eq '2739e0366d070285e44b4fc764ef9247d40b2f94') {
-        $historicalProvenance = [ordered]@{
-            schemaVersion = 1
-            candidateCommit = '2739e0366d070285e44b4fc764ef9247d40b2f94'
-            provenanceCommit = 'f334a6eff999287b170fdbd9b6a31c3ef24a6119'
-            materialization = 'git-archive'
-            coreAutocrlf = $false
-            lineEndingComparison = 'CRLF_ONLY'
-            historicalShippingInputIdentity = 'daa30ef9f521a47fedb4bacce91e3440c20e1a8f05543b4d5e823e5c3541e64e'
-            historicalReleaseFingerprintId = '80c8b88c2f2ec828f5ab0f9713d63fa3f4cc4cbad7c382aa2f154f3196c3de84'
-            identityLabels = [ordered]@{legacyShippingInputIdentity='daa30ef9f521a47fedb4bacce91e3440c20e1a8f05543b4d5e823e5c3541e64e';preservedCanonicalShippingInputIdentity='454edc...';rawGitShippingInputIdentity='cdab...';historicalReleaseFingerprintId='80c8b88c2f2ec828f5ab0f9713d63fa3f4cc4cbad7c382aa2f154f3196c3de84';rawGitReleaseFingerprintId='eba40...'}
-            recomputedCandidateShippingInputIdentity = $candidateComputedIdentity
-            recomputedHistoricalReleaseFingerprintId = '80c8b88c2f2ec828f5ab0f9713d63fa3f4cc4cbad7c382aa2f154f3196c3de84'
-            authorizedCurrentShippingPaths = @($authorizedShippingPaths)
-            crlfOnlyHistoricalPaths = @($historicalCrlfPaths)
-            crlfOnlyHistoricalPathCount = [int]$historicalCrlfPaths.Count
-             unknownHistoricalPaths = @($unknownHistoricalPaths)
-             currentAuthorizedChangePaths = @($shippingChangedPaths | Where-Object { $authorizedShippingPaths -contains $_ })
-             historicalMaterializationRoot = 'release-tooling/historical-candidate-2739'
-             releaseEligible = $false
-            promotionAllowed = $false
-        }
-    }
-    $candidate = [ordered]@{
-        schemaVersion = 2; devfleetVersion = $releaseVersion; installerVersion = $installerVersion; branch = $branch; repositoryHead = $head; gitCommit = $candidateCommit; gitClean = $gitClean
-        releaseFingerprintId = $releaseId; toolingFingerprintId = $toolingId; shippingInputIdentity = $currentShippingInputIdentity; liveMaterializedShippingInputIdentity = $rawLiveShippingInputIdentity; lineEndingComparison = if($substantiveShippingChangedPaths.Count -gt 0){'MIXED_OR_SUBSTANTIVE'}elseif($crlfOnlyPaths.Count -gt 0){'CRLF_ONLY'}else{'BYTE_EXACT'}; candidateShippingInputIdentity = $candidateShippingInputIdentity; candidateCommit = $candidateCommit
-        candidateTuple = [ordered]@{candidateCommit=$candidateCommit;shippingInputIdentity=$candidateShippingInputIdentity;releaseFingerprintId=$releaseId;toolingFingerprintId=$toolingId}
-        # Authority stores the canonical candidate shipping identity for a
-        # CRLF-only checkout; the raw materialized identity is retained in the
-        # explicit live-materialization field for independent reconciliation.
-        workingTreeTuple = [ordered]@{repositoryHead=$head;shippingInputIdentity=$candidateShippingInputIdentity;canonicalizedShippingInputIdentity=$currentShippingInputIdentity;releaseFingerprintWithHistoricalArtifacts=[string]$state.working_tree_release_fingerprint_with_historical_artifacts;toolingFingerprintId=$workingToolingId;crlfOnlyPaths=@($crlfOnlyPaths);substantivePaths=@($substantiveShippingChangedPaths)}
-        candidateShippingInputs = @($identity.candidateShippingInputs); candidateShippingModeContract = $identity.candidateShippingModeContract; shippingModeContract = $identity.candidateShippingModeContract
-        historicalProvenance = $historicalProvenance
-        exeSha256 = $candidateArtifacts.exe.sha256; exeBytes = $candidateArtifacts.exe.bytes
-        tarSha256 = $candidateArtifacts.tar.sha256; tarBytes = $candidateArtifacts.tar.bytes
-        portableSha256 = $candidateArtifacts.portable.sha256; portableBytes = $candidateArtifacts.portable.bytes
-        installerSourceSha256 = $candidateArtifacts.installerSource.sha256; installerSourceBytes = $candidateArtifacts.installerSource.bytes
-        sourceIdentityMatchesCandidate = [bool]$state.source_identity_matches_candidate; artifactTupleMatchesCandidate = [bool]$state.artifact_tuple_matches_candidate; candidateBuildCurrent = [bool]$state.candidate_build_current
-        candidateIsCurrent = $candidateIsCurrent; sourceChangedSinceCandidate = $sourceChanged; rebuildReq
+```
+
+
+## FILE: source/windows/Set-DevFleetDockerMode.ps1
+
+SHA256: f76be7c8d6fc8364fba6b7a142efe687351355681473e56cc30b51e021377f95 | Bytes: 2185 | Git mode: 100644
+
+```
+[CmdletBinding(SupportsShouldProcess)]
+param(
+    [Parameter(Mandatory)][ValidateSet('Primary','Failover')][string]$NodeRole,
+    [Parameter(Mandatory)][ValidateSet('rootless','rootful')][string]$Mode,
+    [switch]$AcknowledgeRootful
+)
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+Assert-PowerShell7
+Assert-Administrator
+$config=Get-DevFleetConfig
+$node=if($NodeRole -eq 'Primary'){$config.Primary}else{$config.Failover}
+$instance=[string]$node.InstanceName
+if($Mode -eq 'rootful' -and -not $AcknowledgeRootful){
+    throw 'Rootful Docker requires -AcknowledgeRootful. It has broader authority inside the disposable VM, but still receives no Windows mounts or Docker TCP exposure.'
+}
+if(-not(Test-MultipassInstance $instance)){throw "Multipass instance is not installed locally: $instance"}
+Assert-MultipassIsolation -InstanceNames @($instance)
+$stamp=(Get-Date).ToString('yyyyMMdd-HHmmss')
+$logDir=Join-Path (Get-DevFleetStateRoot) 'logs'
+New-Item -ItemType Directory $logDir -Force|Out-Null
+if($PSCmdlet.ShouldProcess($instance,"Switch Docker mode to $Mode without migrating or deleting either store")){
+    New-DevFleetSnapshotSafe -InstanceName $instance -SnapshotName "pre-docker-mode-$Mode-$stamp"|Out-Null
+    $mp=Get-MultipassExe
+    Invoke-External $mp @('start',$instance) -IgnoreExitCode
+    $report=Invoke-External $mp @('exec',$instance,'--','sudo','/usr/local/bin/devfleet-docker-mode-report') -Capture
+    Set-Content (Join-Path $logDir "docker-mode-before-$instance-$stamp.txt") $report -Encoding utf8
+    $args=@('exec',$instance,'--','sudo','/usr/local/bin/devfleet-switch-docker-mode',$Mode)
+    if($Mode -eq 'rootful'){$args+='--acknowledge-rootful'}
+    Invoke-External $mp $args
+    if($NodeRole -eq 'Primary'){$config.Docker.PrimaryMode=$Mode}else{$config.Docker.FailoverMode=$Mode}
+    if($Mode -eq 'rootful'){$config.Docker.RootfulModeAcknowledged=$true}
+    Save-DevFleetConfig -Config $config
+    & (Join-Path $PSScriptRoot 'Test-DevFleet.ps1') -InstanceName $instance
+    Write-Host "Docker mode for $instance is now $Mode. The other Docker store was not migrated or deleted." -ForegroundColor Green
+}
+
+```
+
+
+## FILE: source/windows/Set-DevFleetTailscaleOAuthCredential.ps1
+
+SHA256: 0105c2847c27380d28d1dc28f2866309f107ced8dd750589b42185bd39bc27f3 | Bytes: 917 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Tailscale.psm1') -Force
+Assert-PowerShell7
+Assert-Administrator
+
+Write-Host 'DevFleet Tailscale OAuth setup' -ForegroundColor Cyan
+Write-Host 'Paste the OAuth client secret only into the local secure prompt. It is never sent to Codex, printed, or placed in a command argument.' -ForegroundColor DarkGray
+$secret = Read-Host 'Tailscale OAuth client secret' -AsSecureString
+try {
+    $path = Set-DevFleetTailscaleOAuthClientSecret -Secret $secret
+    [pscustomobject]@{
+        status = 'PASS'
+        provider = 'OAuthClientSecret'
+        storage = 'DevFleet protected local state ACL'
+        path = $path
+        secretPrinted = $false
+        secretInEvidence = $false
+    } | ConvertTo-Json -Compress
+} finally {
+    $secret = $null
+}
+
+```
+
+
+## FILE: source/windows/Show-DevFleet-Credentials.ps1
+
+SHA256: 71a2690913ce61e9a48b24bcf7bcf6a6933c41b46b432375a212ebc3a2b159aa | Bytes: 647 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([switch]$CopyPassword)
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+$secrets=Get-OrCreateSecrets
+Write-Host "`nDevFleet dashboard credentials for this Windows host" -ForegroundColor Cyan
+Write-Host "Username: $($secrets.PortalAdminUser)"
+Write-Host "Password: $($secrets.PortalAdminPassword)"
+if($CopyPassword){Set-Clipboard -Value $secrets.PortalAdminPassword;Write-Host 'Password copied to clipboard.' -ForegroundColor Yellow}
+Write-Host "Stored with restricted ACLs under C:\ProgramData\DevFleet\secrets." -ForegroundColor DarkGray
+Read-Host 'Press Enter to close'
+
+```
+
+
+## FILE: source/windows/Start-DevFleet.ps1
+
+SHA256: 111e3e8828b164feae5ec9bc7a0000683bbb8bbb77c4921aab5b28713447f404 | Bytes: 1989 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([Parameter(Mandatory)][string]$InstanceName,[ValidateSet('Dashboard','VSCode')][string]$Mode='Dashboard')
+$ErrorActionPreference='Stop'
+$InstanceName = $InstanceName.Trim() -replace '^(?i:devfleet-)+',''
+$InstanceName = "devfleet-$InstanceName"
+try {
+ Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+ $config=Get-DevFleetConfig;$mp=Get-MultipassExe
+ Assert-MultipassIsolation -InstanceNames @($InstanceName)
+ Invoke-External $mp @('start',$InstanceName) -IgnoreExitCode
+ Wait-MultipassReady $InstanceName 300
+ $ip=Get-InstanceIPv4 $InstanceName -PreferTailscale
+ if(-not $ip){throw 'Could not determine the DevFleet VM IP address.'}
+ if($Mode -eq 'Dashboard'){
+  $port=[int]$config.Network.PortalPort
+  if(-not (Test-NetConnection -ComputerName $ip -Port $port -InformationLevel Quiet -WarningAction SilentlyContinue)){
+   throw "The DevFleet VM is running, but its dashboard is not reachable at http://${ip}:$port/. The DevFleet service may still be starting; wait one minute and try again."
+  }
+  Start-Process "http://${ip}:$port/"
+ }else{
+  $sshDir=Join-Path $env:USERPROFILE '.ssh';New-Item -ItemType Directory $sshDir -Force|Out-Null
+  $cfg=Join-Path $sshDir 'config';$alias=$InstanceName
+  $block=@"
+Host $alias
+    HostName $ip
+    User devrunner
+    IdentityFile $(Get-O

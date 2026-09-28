@@ -1,213 +1,436 @@
 # DevFleet source part 079
 
 Full-source UTF-8 byte interval [3627000, 3673500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: b127cee3089f2ae77fd99c172d3cd84a0be1b8847a718c755b13cfd882aead5e
+Payload SHA-256: 4bae6cc4082a906481da970253811bde936abcd34264d943d94ae948b4e0652f
 
 <!-- BEGIN SOURCE SLICE -->
-c=60s
-TriggerLimitBurst=20
-RemoveOnStop=true
+ {
+    let slugLocked = Boolean(slug.value);
+    let lastGenerated = slug.value;
+    slug.addEventListener('input', () => { slugLocked = slug.value !== lastGenerated; });
+    name.addEventListener('input', () => {
+      if (slugLocked) return;
+      const generated = name.value.normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9._\s-]/g, '')
+        .trim().toLowerCase().replace(/[\s_]+/g, '-')
+        .replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 63);
+      slug.value = generated; lastGenerated = generated;
+    });
+  }
 
-[Install]
-WantedBy=sockets.target
+  const advancedToggle = document.getElementById('advanced-mode-toggle');
+  const advancedEnabled = localStorage.getItem('devfleet.advanced') === '1' || document.body.classList.contains('advanced-mode');
+  document.body.classList.toggle('advanced-mode', advancedEnabled);
+  if (advancedToggle) {
+    advancedToggle.checked = advancedEnabled;
+    advancedToggle.addEventListener('change', () => {
+      const enabled = advancedToggle.checked;
+      localStorage.setItem('devfleet.advanced', enabled ? '1' : '0');
+      document.cookie = `devfleet_advanced=${enabled ? '1' : '0'}; Path=/; SameSite=Lax`;
+      document.body.classList.toggle('advanced-mode', enabled);
+    });
+  }
+
+  function initEnvironmentWizard() {
+    const form = document.querySelector('[data-environment-wizard]');
+    if (!form || form.dataset.enhanced === '1') return;
+    form.dataset.enhanced = '1';
+    const summary = form.querySelector('[data-review-summary]');
+    const status = form.querySelector('[data-review-status]');
+    const values = (name) => form.elements[name]?.value?.trim() || '';
+    const render = () => {
+      const profile = values('resource_profile');
+      const cpu = values('custom_cpus') || 'auto';
+      const ram = values('custom_ram_gb') || 'auto';
+      const disk = values('custom_disk_gb') || 'auto';
+      const pid = values('pid_limit') || '4096';
+      const mode = values('pid_mode') || 'private';
+      const runtime = values('runtime_isolation') || 'recommended runtime';
+      const selected = profile ? `${profile} profile` : 'automatic recommendation';
+      if (summary) summary.textContent = `${selected} · ${runtime} · ${cpu} CPU · ${ram} GB RAM · ${disk} GB disk · ${mode} PID · limit ${pid}`;
+      if (status) { status.textContent = 'Review before provisioning'; status.className = 'status-badge neutral'; }
+    };
+    form.addEventListener('input', render); form.addEventListener('change', render); render();
+  }
+
+  function initExistingEnvironmentWizard() {
+    const shell = document.querySelector('[data-existing-environment-wizard]');
+    if (!shell || shell.dataset.enhanced === '1') return;
+    const form = shell.parentElement.querySelector('form.environment-form');
+    if (!form) return;
+    shell.dataset.enhanced = '1';
+    const slug = shell.dataset.projectSlug;
+    const review = shell.querySelector('[data-environment-review]');
+    const preflight = shell.querySelector('[data-environment-preflight]');
+    const customNames = ['custom_cpus','custom_ram_gb','custom_disk_gb','pid_mode','pid_limit'];
+    const profile = () => form.elements.resource_profile?.value || '';
+    const confirmButton = form.querySelector('[data-environment-confirm]') || form.querySelector('button[type="submit"]');
+    let lastPreflight = null;
+    let stage = 'environment';
+    const setStage = (next) => {
+      stage = next; form.dataset.wizardStage = next;
+      shell.querySelectorAll('[data-wizard-stage]').forEach((button) => {
+        const active = button.dataset.wizardStage === next;
+        button.classList.toggle('active', active); button.setAttribute('aria-current', active ? 'step' : 'false');
+      });
+      if (preflight && next === 'review') preflight.textContent = 'Running read-only workspace and capacity preflight…';
+      if (confirmButton) confirmButton.textContent = next === 'confirm' ? 'Confirm environment assignment' : `Continue to ${next === 'environment' ? 'Resources' : next === 'resources' ? 'Review' : 'Confirm'}`;
+      if (review && next !== 'review') review.textContent = `Stage ${next}: select the requested environment and resources.`;
+    };
+    const copyCustomValues = () => customNames.forEach((name) => {
+      const source = shell.querySelector(`[name="${name}"]`); if (!source) return;
+      let target = form.elements[name];
+      if (!target) { target = document.createElement('input'); target.type = 'hidden'; target.name = name; form.append(target); }
+      target.value = profile() === 'custom' ? (source.value || '') : '';
+    });
+    const toggleCustom = () => {
+      const enabled = profile() === 'custom';
+      shell.querySelectorAll('[data-custom-resources] input, [data-custom-resources] select').forEach((control) => { control.disabled = !enabled; });
+      shell.querySelector('[data-custom-resources]')?.classList.toggle('disabled', !enabled);
+      copyCustomValues();
+    };
+    const loadPreflight = async () => {
+      try {
+        copyCustomValues(); const query = new URLSearchParams(new FormData(form));
+        const response = await fetch(`/ui/projects/${encodeURIComponent(slug)}/preflight?${query}`, { cache: 'no-store', credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json(); lastPreflight = data; const limits = data.selected_limits || {};
+        const current = data.current_runtime || {};
+        if (review) review.textContent = `CURRENT → NEW\nProvider/runtime: ${current.runtime_provider || current.runtime_type || 'detected'} → ${data.selected_environment}\nWorkspace owner: ${current.workspace_user || 'devrunner'} → devrunner\nCPU/RAM/disk/PID: ${limits.cpus || '—'} / ${limits.memory || limits.memory_gb || '—'} / ${limits.disk_gb || '—'} / ${limits.pids || '—'}\nLifecycle/health: ${current.lifecycle_status || 'unknown'} / ${current.health_status || 'unknown'}\nActions: verified backup, source-runtime handling, provisioning/export, workspace and health verification, lifecycle restoration. Fallback: rollback retains the verified source/backup.`;
+        const ready = Boolean(data.migration_ready);
+        if (preflight) preflight.textContent = ready ? `Preflight ready: inspection, capacity, archive, compose, and worktree checks passed.` : `Preflight not ready: ${(data.blockers || ['unknown blocker']).join(' ')}`;
+        if (confirmButton && stage === 'confirm') confirmButton.disabled = !ready;
+      } catch (error) { lastPreflight = null; if (preflight) preflight.textContent = `Preflight unavailable: ${error.message}. Confirmation is disabled.`; if (confirmButton && stage === 'confirm') confirmButton.disabled = true; }
+    };
+    shell.querySelectorAll('[data-wizard-stage]').forEach((button) => button.addEventListener('click', async () => { setStage(button.dataset.wizardStage); if (stage === 'review' || stage === 'confirm') await loadPreflight(); }));
+    form.addEventListener('change', toggleCustom); toggleCustom();
+    form.addEventListener('submit', async (event) => {
+      copyCustomValues();
+      if (stage !== 'confirm') { event.preventDefault(); setStage(stage === 'environment' ? 'resources' : stage === 'resources' ? 'review' : 'confirm'); if (stage === 'review' || stage === 'confirm') await loadPreflight(); return; }
+      if (!lastPreflight || !lastPreflight.migration_ready) { event.preventDefault(); await loadPreflight(); return; }
+      if (!form.elements.wizard_confirmed) { const confirmed = document.createElement('input'); confirmed.type = 'hidden'; confirmed.name = 'wizard_confirmed'; confirmed.value = 'true'; form.append(confirmed); }
+      const token = form.elements.csrf_token; if (token) token.value = currentCsrf();
+      event.preventDefault();
+      if (confirmButton) confirmButton.disabled = true;
+      try {
+        const response = await fetch(form.action, { method: 'POST', body: new URLSearchParams(new FormData(form)), credentials: 'same-origin', headers: { Accept: 'application/json', 'X-DevFleet-UI': '1' } });
+        const data = await response.json().catch(() => ({})); if (!response.ok || !data.operation_id) throw new Error(data.detail || `HTTP ${response.status}`);
+        if (preflight) preflight.textContent = 'Environment assignment queued. Tracking backup, runtime handling, provisioning, verification, health, lifecycle restoration, and rollback progress…';
+        let pollDelay = 750; let failures = 0;
+        const poll = async () => {
+          try {
+            const response = await fetch(`/ui/operations/${encodeURIComponent(data.operation_id)}`, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const operation = await response.json();
+            const state = operation.state || operation.status || 'unknown';
+            failures = 0;
+            if (preflight) preflight.textContent = operation.message || state || 'Operation running';
+            if (!['completed', 'failed', 'cancelled', 'interrupted'].includes(state)) {
+              pollDelay = 750;
+              setTimeout(poll, pollDelay);
+            }
+          } catch (error) {
+            failures += 1;
+            if (preflight) preflight.textContent = `Operation status temporarily unavailable: ${error.message}`;
+            if (failures <= 5) { pollDelay = Math.min(8000, pollDelay * 2); setTimeout(poll, pollDelay); }
+          }
+        };
+        poll();
+      } catch (error) { if (preflight) preflight.textContent = `Environment assignment was not queued: ${error.message}`; if (confirmButton) confirmButton.disabled = false; }
+    });
+    setStage(stage);
+  }
+
+  function initProjectActions() {
+    if (window.__devfleetProjectActionsBound) return;
+    window.__devfleetProjectActionsBound = true;
+    document.addEventListener('submit', async (event) => {
+      const form = event.target.closest('form.project-action-form');
+      if (!form) return;
+      // One document-level listener covers SPA replacement and dynamic backup forms.
+      event.preventDefault();
+      if (form.dataset.pending === '1') return;
+      form.dataset.pending = '1';
+      const button = form.querySelector('button[type="submit"]') || form.querySelector('button');
+      const action = form.dataset.projectAction || new URL(form.action, location.href).pathname.split('/').pop() || 'action';
+      const slug = new URL(form.action, location.href).pathname.split('/')[2] || '';
+      const originalLabel = button?.textContent || '';
+      const status = form.querySelector('[data-project-action-status]') || document.createElement('span');
+      status.dataset.projectActionStatus = '1'; status.className = 'project-action-status'; status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+      if (!status.parentElement) form.append(status);
+      if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); button.textContent = `${action.charAt(0).toUpperCase()}${action.slice(1)}…`; }
+      status.textContent = `${action.charAt(0).toUpperCase()}${action.slice(1)} queued…`;
+      try {
+        const body = new URLSearchParams(new FormData(form)); body.set('csrf_token', currentCsrf());
+        const response = await fetch(form.action, { method: 'POST', body, credentials: 'same-origin', headers: { Accept: 'application/json', 'X-DevFleet-UI': '1', 'Idempotency-Key': `project-action:${slug}:${action}` } });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.operation_id) throw new Error(data.detail || `HTTP ${response.status}`);
+        status.textContent = 'Operation queued. Tracking progress…';
+        const target = `/projects/${encodeURIComponent(slug)}?tab=${encodeURIComponent(new URL(location.href).searchParams.get('tab') || 'overview')}&operation=${encodeURIComponent(data.operation_id)}`;
+        navigate(target);
+      } catch (error) {
+        form.dataset.pending = '0'; status.textContent = `${action.charAt(0).toUpperCase()}${action.slice(1)} failed. ${error.message}`; status.classList.add('error');
+        if (button) { button.disabled = false; button.removeAttribute('aria-busy'); button.textContent = originalLabel; }
+        const detail = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Technical detail'; const pre = document.createElement('pre'); pre.textContent = String(error.stack || error.message || error); detail.append(summary, pre); form.append(detail);
+      }
+    });
+  }
+
+  function initializeView() {
+    syncNavigation();
+    initProjectActions();
+    initEnvironmentWizard();
+    initExistingEnvironmentWizard();
+    initBackupHistory();
+    initOperationProgress();
+    initProjectLogs();
+    initInfrastructure();
+    requestAnimationFrame(() => { if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView(); });
+  }
+
+  function initBackupHistory() {
+    const panel = document.querySelector('[data-backup-history]');
+    if (!panel || panel.dataset.enhanced === '1') return;
+    panel.dataset.enhanced = '1'; const list = panel.querySelector('[data-backup-list]'); const slug = panel.dataset.projectSlug;
+    fetch(`/ui/projects/${encodeURIComponent(slug)}/backups`, { cache: 'no-store', credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); })
+      .then((data) => {
+        list.replaceChildren(); const backups = data.backups || [];
+        if (!backups.length) { list.textContent = 'No local verified restore points are recorded yet.'; return; }
+        backups.forEach((backup) => {
+          const row = document.createElement('div'); row.className = 'backup-history-row';
+          const details = document.createElement('span'); details.textContent = `${backup.backup_id} · ${backup.status} · ${backup.archive_sha256 || 'no hash'}`;
+          row.append(details);
+          if (backup.status === 'eligible') {
+            const form = document.createElement('form'); form.method = 'post'; form.action = `/projects/${encodeURIComponent(slug)}/restore-backup`; form.className = 'project-action-form';
+            const csrf = document.createElement('input'); csrf.type = 'hidden'; csrf.name = 'csrf_token'; form.append(csrf);
+            [['backup_id', backup.backup_id], ['confirm_restore', 'true']].forEach(([name, value]) => { const input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = value; form.append(input); });
+            const overwrite = document.createElement('label'); overwrite.className = 'checkbox-label'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.name = 'allow_overwrite'; checkbox.value = 'true'; overwrite.append(checkbox, document.createTextNode(' Allow overwrite')); form.append(overwrite);
+            const button = document.createElement('button'); button.type = 'submit'; button.className = 'button ghost'; button.textContent = 'Restore'; form.append(button); row.append(form);
+          }
+          list.append(row);
+        });
+        initProjectActions();
+      }).catch((error) => { list.textContent = `Backup history unavailable: ${error.message}`; });
+  }
+
+  function initOperationProgress() {
+    const banner = document.querySelector('.operation-banner[data-operation-id]');
+    if (!banner || banner.dataset.enhanced === '1') return;
+    banner.dataset.enhanced = '1';
+    const id = banner.dataset.operationId;
+    const message = banner.querySelector('[data-operation-message]');
+    const progress = banner.querySelector('[data-operation-progress]');
+    const meta = banner.querySelector('[data-operation-meta]');
+    let timer = null;
+    let retry = 0;
+    const load = async () => {
+      try {
+        const response = await fetch(`/operations/${encodeURIComponent(id)}`, { cache: 'no-store', credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const op = await response.json();
+        if (message) message.textContent = op.message || '';
+        if (progress) { progress.style.width = `${Number(op.progress || 0)}%`; }
+         if (meta) meta.textContent = `${op.progress || 0}% · ${op.state || 'unknown'}`;
+         retry = 0;
+         if (!['completed', 'failed', 'cancelled', 'interrupted'].includes(op.state)) timer = setTimeout(load, 1500);
+         else if (banner.dataset.refreshed !== '1') { banner.dataset.refreshed = '1'; timer = setTimeout(() => { const refreshed = new URL(location.href); refreshed.searchParams.delete('operation'); navigate(refreshed.toString(), true); }, 500); }
+       } catch (_) {
+         retry = Math.min(retry + 1, 5); timer = setTimeout(load, Math.min(10000, 500 * (2 ** retry)));
+       }
+    };
+    load();
+    banner._devfleetOperationCleanup = () => { if (timer) clearTimeout(timer); };
+  }
+
+  function initProjectLogs() {
+    const output = document.querySelector('.log-output[data-project-logs]');
+    if (!output || output.dataset.enhanced === '1') return;
+    output.dataset.enhanced = '1';
+    const slug = output.dataset.projectLogs;
+    const controls = document.createElement('div'); controls.className = 'log-controls';
+    const tail = document.createElement('select'); tail.setAttribute('aria-label', 'Log lines');
+    [50, 150, 300, 500].forEach((value) => { const option = new Option(`Last ${value} lines`, value); tail.add(option); });
+    tail.value = localStorage.getItem('devfleet.project-log-tail') || '150';
+    const refresh = document.createElement('button'); refresh.type = 'button'; refresh.className = 'button ghost'; refresh.textContent = 'Refresh';
+    const pause = document.createElement('button'); pause.type = 'button'; pause.className = 'button ghost'; pause.textContent = 'Pause';
+    const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'button ghost'; copy.textContent = 'Copy';
+    controls.append(tail, refresh, pause, copy); output.before(controls);
+    let paused = false; let request = null; let activeController = null;
+    const load = async () => {
+      if (paused || request) return;
+      // Human UI logs use the session-authenticated endpoint.  The machine API
+      // intentionally remains token-protected and must never receive its token
+      // through browser JavaScript.
+      activeController = new AbortController();
+      request = fetchWithTimeout(`/ui/projects/${encodeURIComponent(slug)}/logs?tail=${encodeURIComponent(tail.value)}`, { cache: 'no-store', credentials: 'same-origin', headers: { Accept: 'application/json' }, controller: activeController }, 10000)
+        .then(async (response) => { const data = await response.json().catch(() => ({})); if (response.status === 409) { paused = true; return data; } if (!response.ok) throw new Error(`HTTP ${response.status}`); return data; })
+        .then((data) => { output.textContent = data.logs || 'No logs.'; })
+        .catch((error) => { output.textContent = error.name === 'AbortError' ? 'Log request ended — the runtime changed state or the 10-second timeout was reached.' : `Logs failed: ${error.message}`; })
+        .finally(() => { request = null; });
+      await request;
+    };
+    tail.addEventListener('change', () => { localStorage.setItem('devfleet.project-log-tail', tail.value); load(); });
+    refresh.addEventListener('click', load);
+    pause.addEventListener('click', () => { paused = !paused; pause.textContent = paused ? 'Resume' : 'Pause'; if (!paused) load(); });
+    copy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(output.textContent); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy'; }, 1200); } catch (_) { copy.textContent = 'Copy unavailable'; } });
+    load();
+    output._devfleetLogCleanup = () => { paused = true; activeController?.abort('navigation-or-state-change'); };
+  }
+
+  function initInfrastructure() {
+  const nodesHost = document.getElementById('cluster-nodes');
+  const table = document.querySelector('#container-table tbody');
+  const nodeFilter = document.getElementById('container-node-filter');
+  const refreshSelect = document.getElementById('refresh-interval');
+  const refreshButton = document.getElementById('refresh-cluster');
+  const updated = document.getElementById('cluster-updated');
+  const details = document.getElementById('container-details');
+  const detailsTitle = document.getElementById('container-details-title');
+  const inspect = document.getElementById('container-inspect');
+  const logs = document.getElementById('container-logs');
+  const closeDetails = document.getElementById('close-container-details');
+  if (!nodesHost && !table) return;
+  window.__devfleetStopInfrastructure?.();
+
+  const savedInterval = localStorage.getItem('devfleet.refresh.interval');
+  if (refreshSelect && savedInterval && [...refreshSelect.options].some((o) => o.value === savedInterval)) refreshSelect.value = savedInterval;
+  let timer = null;
+  let cluster = { nodes: [], containers: [] };
+  try { const seed = JSON.parse(document.getElementById('devfleet-cluster-data')?.textContent || '{}'); if (seed && typeof seed === 'object') cluster = seed; } catch (_) { /* retain empty snapshot */ }
+
+  const text = (value) => document.createTextNode(String(value ?? ''));
+  const cell = (value, className) => { const el = document.createElement('td'); if (className) el.className = className; el.append(text(value)); return el; };
+  const metric = (label, value) => {
+    const el = document.createElement('div'); el.className = 'metric';
+    const nameEl = document.createElement('span'); nameEl.className = 'metric-label'; nameEl.append(text(label));
+    const valueEl = document.createElement('strong'); valueEl.append(text(value));
+    el.append(nameEl, valueEl); return el;
+  };
+
+  function renderNodes() {
+    if (!nodesHost) return;
+    nodesHost.replaceChildren();
+    (cluster.nodes || []).forEach((node) => {
+      const card = document.createElement('article'); card.className = 'node-card';
+      const heading = document.createElement('div'); heading.className = 'node-heading';
+      const title = document.createElement('h3'); title.append(text(node.friendly_name || node.id));
+      const online = node.status === 'online' && node.reachable !== false;
+      const badge = document.createElement('span'); badge.className = `status-badge ${online ? 'ok' : 'bad'}`; badge.append(text(online ? 'Available' : 'Offline — unavailable'));
+      heading.append(title, badge); card.append(heading);
+      const sub = document.createElement('p'); sub.className = 'muted'; sub.append(text(`${node.node || node.id} · ${node.role || 'node'}`)); card.append(sub);
+      const metrics = document.createElement('div'); metrics.className = 'metrics';
+      const system = node.system || {}; const docker = node.docker || {};
+      metrics.append(metric('CPU', `${system.cpu_percent ?? '—'}%`), metric('Memory', `${system.memory_percent ?? '—'}%`), metric('Disk free', `${system.disk_free_gb ?? '—'} GB`), metric('Containers', String((node.containers || []).length)));
+      card.append(metrics);
+      const runtime = document.createElement('p'); runtime.className = 'node-runtime';
+      runtime.append(text(node.role === 'vault' ? `Vault listener: ${(node.vault || {}).status || 'unknown'}` : `Docker: ${docker.ok ? (docker.mode || 'ready') : 'unavailable'}`)); card.append(runtime);
+      if (node.error) { const error = document.createElement('p'); error.className = 'error'; error.append(text(node.error)); card.append(error); }
+      if (node.role !== 'vault' && !online) { const note = document.createElement('p'); note.className = 'muted'; note.append(text('Destination selection disabled until this node is reachable.')); card.append(note); }
+      nodesHost.append(card);
+    });
+    if (!cluster.nodes?.length) { const empty = document.createElement('p'); empty.className = 'muted'; empty.append(text('No cluster data returned.')); nodesHost.append(empty); }
+  }
+
+  function renderNodeFilter() {
+    if (!nodeFilter) return;
+    const current = nodeFilter.value || 'all';
+    const options = [{ id: 'all', label: 'All nodes' }, ...(cluster.nodes || []).filter((n) => n.role !== 'vault').map((n) => ({ id: n.id, label: n.friendly_name || n.id }))];
+    nodeFilter.replaceChildren();
+    options.forEach((item) => { const option = document.createElement('option'); option.value = item.id; option.append(text(item.label)); nodeFilter.append(option); });
+    nodeFilter.value = options.some((o) => o.id === current) ? current : 'all';
+  }
+
+  function renderContainers() {
+    if (!table || !nodeFilter) return;
+    table.replaceChildren();
+    const filter = nodeFilter.value || 'all';
+    const rows = (cluster.containers || []).filter((item) => filter === 'all' || item.node_id === filter);
+    if (!rows.length) { const row = document.createElement('tr'); const empty = cell('No containers are registered on this node. A healthy empty node is different from an unavailable node.', 'muted'); empty.colSpan = 8; row.append(empty); table.append(row); return; }
+    rows.forEach((item) => {
+      const row = document.createElement('tr');
+      row.append(cell(item.node_name || item.node_id), cell(item.name), cell(item.image), cell(`${item.state} · ${item.status}`), cell(item.cpu_percent), cell(`${item.memory_usage} (${item.memory_percent})`), cell(item.network_io));
+      const actions = document.createElement('td'); actions.className = 'container-actions';
+      ['start','stop','restart','pause','unpause'].forEach((action) => {
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'container-action'; button.dataset.action = action; button.dataset.ref = item.id; button.dataset.scope = item.control_scope; button.append(text(action)); actions.append(button);
+      });
+      const inspectButton = document.createElement('button'); inspectButton.type = 'button'; inspectButton.className = 'container-inspect'; inspectButton.dataset.ref = item.id; inspectButton.dataset.name = item.name; inspectButton.dataset.scope = item.control_scope; inspectButton.append(text('details')); actions.append(inspectButton);
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'container-action danger'; remove.dataset.action = 'remove'; remove.dataset.ref = item.id; remove.dataset.scope = item.control_scope; remove.append(text('remove')); actions.append(remove);
+      row.append(actions); table.append(row);
+    });
+  }
+
+  async function refreshCluster() {
+    if (refreshButton) refreshButton.disabled = true;
+    try {
+      const response = await fetch('/cluster/status', { cache: 'no-store', credentials: 'same-origin' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      cluster = await response.json(); renderNodes(); renderNodeFilter(); renderContainers();
+      if (updated) updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    } catch (error) {
+      if (updated) updated.textContent = `Refresh failed: ${error.message}`;
+    } finally { if (refreshButton) refreshButton.disabled = false; }
+  }
+
+  function scheduleRefresh() {
+    if (!refreshSelect) return;
+    if (timer) clearInterval(timer); timer = null;
+    localStorage.setItem('devfleet.refresh.interval', refreshSelect.value);
+    const seconds = Number(refreshSelect.value);
+    if (seconds > 0) timer = setInterval(refreshCluster, seconds * 1000);
+  }
+
+  async function showDetails(ref, name, scope) {
+    details.hidden = false; detailsTitle.textContent = `${name || ref} · details`; inspect.textContent = 'Loading inspect…'; logs.textContent = 'Loading logs…';
+    const prefix = scope === 'peer' ? '/peer' : '';
+    try { const r = await fetch(`${prefix}/containers/${encodeURIComponent(ref)}/inspect`, { cache: 'no-store' }); if (!r.ok) throw new Error(`HTTP ${r.status}`); inspect.textContent = JSON.stringify(await r.json(), null, 2); } catch (e) { inspect.textContent = `Inspect failed: ${e.message}`; }
+    try { const r = await fetch(`${prefix}/containers/${encodeURIComponent(ref)}/logs?tail=200`, { cache: 'no-store' }); if (!r.ok) throw new Error(`HTTP ${r.status}`); logs.textContent = (await r.json()).logs || 'No logs.'; } catch (e) { logs.textContent = `Logs failed: ${e.message}`; }
+  }
+
+  document.addEventListener('click', async (event) => {
+    const inspectButton = event.target.closest('.container-inspect');
+    if (inspectButton) return showDetails(inspectButton.dataset.ref, inspectButton.dataset.name, inspectButton.dataset.scope);
+    const actionButton = event.target.closest('.container-action');
+    if (!actionButton) return;
+    const action = actionButton.dataset.action; const ref = actionButton.dataset.ref; const scope = actionButton.dataset.scope;
+    if (action === 'remove' && !window.confirm('Remove this container? This cannot be undone.')) return;
+    actionButton.disabled = true;
+    try {
+      const prefix = scope === 'peer' ? '/peer' : '';
+       const body = new URLSearchParams({ csrf_token: currentCsrf() }); if (action === 'remove') body.set('confirm_remove', 'true');
+      const response = await fetch(`${prefix}/containers/${encodeURIComponent(ref)}/${action}`, { method: 'POST', body, credentials: 'same-origin' });
+      if (!response.ok) throw new Error((await response.text()).slice(-500));
+      await refreshCluster();
+    } catch (error) { window.alert(`Container action failed: ${error.message}`); }
+    finally { actionButton.disabled = false; }
+  });
+
+  nodeFilter?.addEventListener('change', renderContainers);
+  refreshButton?.addEventListener('click', refreshCluster);
+  refreshSelect?.addEventListener('change', scheduleRefresh);
+  closeDetails?.addEventListener('click', () => { details.hidden = true; });
+  renderNodes(); renderNodeFilter(); renderContainers();
+  const shouldRefresh = new URL(location.href).searchParams.get('view') === 'infrastructure';
+  if (shouldRefresh) refreshCluster();
+  scheduleRefresh();
+  window.__devfleetStopInfrastructure = () => { if (timer) clearInterval(timer); timer = null; };
+  }
+
+  initializeView();
+})();
 
 ```
 
 
-## FILE: source/app/systemd/devfleet-vault-broker@.service
+## FILE: source/app/static/style.css
 
-SHA256: 4431ccb294f011419df43b9475954cfed6ff3f570d600074b4b5bda5037ef1da | Bytes: 866 | Git mode: 100644
-
-```
-[Unit]
-Description=DevFleet bounded Vault operation broker
-After=network-online.target tailscaled.service
-
-[Service]
-Type=exec
-User=devfleet-backup
-Group=devfleet-backup
-ExecStart=/usr/local/bin/devfleet-vault-broker
-StandardInput=socket
-StandardOutput=socket
-StandardError=journal
-NoNewPrivileges=true
-PrivateTmp=true
-PrivateDevices=true
-ProtectSystem=strict
-ProtectHome=read-only
-ProtectControlGroups=true
-ProtectKernelModules=true
-ProtectKernelTunables=true
-LockPersonality=true
-RestrictRealtime=true
-RestrictSUIDSGID=true
-# Backup configuration creates this directory. Before configuration the broker
-# must start to return its authenticated refusal; the absent path stays read-only.
-ReadWritePaths=/run/lock -/var/lib/devfleet/backup-status __WORKSPACES__ __QUARANTINE__
-UMask=0077
-TimeoutStartSec=30
-RuntimeMaxSec=3660
-TimeoutStopSec=10
-KillMode=control-group
+SHA256: 9e95e0103e58d5d59f47b099381beb3f0e9af60b34a9a30fe00c121c04833128 | Bytes: 20663 | Git mode: 100644
 
 ```
-
-
-## FILE: source/app/systemd/devfleet.service
-
-SHA256: f33f84cc58fc18f2217a064cc40d9a55bbb14a008a664609b29d0518183a5cca | Bytes: 897 | Git mode: 100644
-
-```
-[Unit]
-Description=DevFleet remote development control plane
-After=network-online.target tailscaled.service
-Wants=network-online.target
-[Service]
-User=devfleet-control
-Group=devfleet-control
-SupplementaryGroups=devrunner
-WorkingDirectory=/opt/devfleet
-Environment=PYTHONUNBUFFERED=1
-Environment=DOCKER_HOST=unix:///run/user/__DEVRUNNER_UID__/docker.sock
-EnvironmentFile=/etc/devfleet/secrets.env
-# The application enforces loopback plus the configured Tailscale CIDR at the
-# TCP peer boundary.  Do not trust forwarded headers from arbitrary interfaces.
-ExecStart=/opt/devfleet/venv/bin/uvicorn devfleet.main:app --host 0.0.0.0 --port __PORT__
-Restart=on-failure
-RestartSec=3
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=__WORKSPACES__ __QUARANTINE__ __TRANSACTION_ROOT__ /var/lib/devfleet /var/cache/devfleet
-[Install]
-WantedBy=multi-user.target
-
-```
-
-
-## FILE: source/app/systemd/mutable-paths.json
-
-SHA256: 00862e8161b5dbe817a5e4a4e2ce662c67b43fa45c160a9070b5b624db1f8069 | Bytes: 202 | Git mode: 100644
-
-```
-{
-  "schema_version": 1,
-  "workspace": "/home/devrunner/workspaces",
-  "quarantine": "/home/devrunner/.devfleet-quarantine",
-  "transaction_root": "/home/devrunner/workspaces/.devfleet-transactions"
-}
-
-```
-
-
-## FILE: source/app/templates/index.html
-
-SHA256: 0fdd41703ebacd3f0231d7f18a74d908dbdc19f629f120d6af65c49b3707e559 | Bytes: 46645 | Git mode: 100644
-
-```
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>DevFleet · {{ status.friendly_name }}</title>
-<link rel="stylesheet" href="/static/style.css?v={{ version|default(status.version|default('unknown', true), true) }}-r5">
-<script src="/static/app.js?v={{ version|default(status.version|default('unknown', true), true) }}-r5" defer></script>
-</head>
-<body class="{{ 'advanced-mode' if request.cookies.get('devfleet_advanced') == '1' else '' }}">
-{% macro csrf() %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endmacro %}
-{% macro status_badge(value) %}{% set state=value|default('unknown', true)|lower %}<span class="status-badge {{ 'ok' if state in ['online','running','healthy','ready','completed','verified'] else 'neutral' if state in ['stopped','unknown','not-checked','not-verified','offline'] else 'warn' if state in ['starting','provisioning','restart-required','queued','degraded','unavailable'] else 'bad' }}" role="status">{{ state|replace('-', ' ') }}</span>{% endmacro %}
-{% macro runtime_label(p) %}{% if p.runtime_isolation|default('container', true) == 'vm' %}Dedicated VM{% else %}Project-isolated containers{% endif %}{% endmacro %}
-{% macro provider_label(p) %}{{ p.runtime_provider|default(p.provider|default('unassigned', true), true)|replace('-', ' ')|title }}{% endmacro %}
-{% macro workspace_target(p) %}{% if p.runtime_isolation|default(p.runtime_type|default('container', true), true) == 'vm' and p.lifecycle_status|default('') == 'stopped' %}stopped — address refreshes on start{% else %}{{ p.workspace_host|default(p.runtime_address|default(p.host_id|default(provider_label(p), true), true), true) }}{% endif %}{% endmacro %}
-{% macro open_workspace(p) %}{% set ssh_alias=p.ssh_alias|default(p.runtime_id if p.runtime_isolation|default('container', true) == 'vm' and p.runtime_id else 'devfleet-primary', true) %}{% set remote_path=p.workspace_path|default('/home/devrunner/workspaces/' ~ p.slug, true) %}{% set readiness=p.workspace_readiness|default({}, true) %}{% if readiness.ready %}<a class="button ghost workspace-link" href="/projects/{{ p.slug|urlencode }}/workspace" data-provider="{{ provider_label(p) }}" data-ssh-alias="{{ ssh_alias }}" data-workspace-target="{{ workspace_target(p) }}" title="Open {{ ssh_alias }}:{{ remote_path }} in VS Code">Open workspace</a>{% else %}<button class="button ghost disabled workspace-link" type="button" disabled data-provider="{{ provider_label(p) }}" data-ssh-alias="{{ ssh_alias }}" data-workspace-target="{{ workspace_target(p) }}" title="{{ readiness.reason|default('Workspace readiness has not been verified.', true) }}">Open workspace</button><small class="workspace-readiness-note">{{ readiness.reason|default('Workspace readiness has not been verified.', true) }}</small>{% endif %}{% endmacro %}
-{% macro resource_allocation(p) %}{% set limits=p.resource_limits|default({}, true) %}<div class="resource-allocation" data-resource-profile="{{ p.resource_profile|default('standard', true) }}"><div><small>Environment</small><strong>{{ runtime_label(p) }}</strong></div><div><small>Allocation</small><strong>{{ p.resource_profile_label|default(p.resource_profile|default('standard', true)|title, true) }}</strong></div><div><small>CPU</small><strong>{{ limits.cpus|default(limits.vcpus|default('—', true), true) }}</strong></div><div><small>RAM</small><strong>{{ limits.memory|default(limits.memory_gb ~ ' GB' if limits.memory_gb else '—', true) }}</strong></div><div><small>Disk</small><strong>{{ limits.disk_gb|default('—', true) }} GB</strong></div><div><small>PID limit</small><strong>{{ 'Not applicable — VM isolation' if p.runtime_isolation|default(p.runtime_type|default('container', true), true) == 'vm' else limits.pids|default('—', true) }}</strong></div></div><p class="muted resource-telemetry"><strong>Runtime telemetry:</strong> {{ 'Unavailable while stopped' if p.lifecycle_status|default('') == 'stopped' else p.health_scope|default('Not checked', true)|replace('-', ' ')|title }}</p>{% endmacro %}
-{% macro project_action(slug, action, label, style='') %}<form method="post" action="/projects/{{ slug }}/{{ action }}" class="project-action-form" data-project-action="{{ action }}">{{ csrf() }}<button class="{{ style }}" type="submit">{{ label }}</button></form>{% endmacro %}
-  <div id="devfleet-csrf" data-token="{{ csrf_token }}" hidden></div>
-  <script id="devfleet-cluster-data" type="application/json">{{ cluster|tojson }}</script>
-  <svg class="icon-sprite" aria-hidden="true" focusable="false"><symbol id="icon-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 21v-6h6v6" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol><symbol id="icon-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="14" y="3" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3" y="14" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="14" y="14" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol><symbol id="icon-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3" y="14" width="18" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 7h.01M7 17h.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></symbol><symbol id="icon-activity" viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol><symbol id="icon-settings" viewBox="0 0 24 24"><path d="M9.5 3h5l.7 2.2 2 .9 2.1-1 2.2 3.8-1.6 1.7v2.3l1.6 1.7-2.2 3.8-2.1-1-2 .9-.7 2.2h-5l-.7-2.2-2-.9-2.1 1-2.2-3.8 1.6-1.7v-2.3L2.5 8.9l2.2-3.8 2.1 1 2-.9z" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="12" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol></svg>
-<div class="app-shell" id="devfleet-app" data-view="{{ view }}">
-  <aside class="sidebar">
-    <a class="brand" href="/?view=overview"><span class="brand-mark">DF</span><span><strong>DevFleet</strong><small>Safe remote development</small></span></a>
-    <nav class="primary-nav" aria-label="Primary navigation">
-      <a class="{{ 'active' if view == 'overview' else '' }}" href="/?view=overview"><svg aria-hidden="true"><use href="#icon-home"></use></svg> Overview</a>
-      <a class="{{ 'active' if view in ['projects','project'] else '' }}" href="/?view=projects"><svg aria-hidden="true"><use href="#icon-grid"></use></svg> Projects</a>
-      <a class="{{ 'active' if view == 'infrastructure' else '' }}" href="/?view=infrastructure"><svg aria-hidden="true"><use href="#icon-server"></use></svg> Infrastructure</a>
-      <a class="{{ 'active' if view == 'activity' else '' }}" href="/?view=activity"><svg aria-hidden="true"><use href="#icon-activity"></use></svg> Activity</a>
-      <a class="{{ 'active' if view == 'settings' else '' }}" href="/?view=settings"><svg aria-hidden="true"><use href="#icon-settings"></use></svg> Settings</a>
-    </nav>
-    <div class="sidebar-footer">
-      <div class="node-presence"><span class="presence-dot"></span><span><strong>{{ status.friendly_name }}</strong><small>{{ status.node }} · {{ status.role }}</small></span></div>
-<span class="version-label">DevFleet v{{ status.version|default('unknown', true) }}</span>
-    </div>
-  </aside>
-  <main class="app-main">
-    <header class="topbar">
-      <div><p class="eyebrow">{{ 'PROJECT WORKSPACE' if view == 'project' else view|upper }}</p><h1>{% if view == 'project' and selected_project %}{{ selected_project.display_name }}{% elif view == 'overview' %}{{ status.greeting|default('DevFleet overview', true) }}{% else %}{{ view|capitalize }}{% endif %}</h1></div>
-      <div class="topbar-actions"><span class="connection-pill"><span class="presence-dot"></span> {{ status.friendly_name }} online</span><a class="button primary" href="/?view=projects#create-project">New project</a><form method="post" action="/logout" class="inline-form">{{ csrf() }}<button class="button ghost" type="submit">Sign out</button></form></div>
-    </header>
-    {% if operation %}
-    <section class="operation-banner {{ 'failed' if operation.state == 'failed' else 'complete' if operation.state == 'completed' else '' }}" aria-live="polite" data-operation-id="{{ operation.id }}">
-      <div class="operation-icon">{{ '!' if operation.state == 'failed' else '✓' if operation.state == 'completed' else '…' }}</div>
-      <div class="operation-copy"><strong>{{ operation.kind|replace('-', ' ')|title }}</strong><span data-operation-message>{{ operation.message }}</span><div class="progress-track"><span data-operation-progress style="width:{{ operation.progress }}%"></span></div></div>
-      <div class="operation-meta" data-operation-meta>{{ operation.progress }}% · {{ operation.state }}<br><small>Updated {{ operation.updated_at }}</small></div>
-      <details class="advanced operation-details"><summary>Details</summary><pre>{% for line in operation.log %}{{ line.time }}  {{ line.message }}&#10;{% endfor %}{{ operation.result or operation.error or '' }}</pre></details>
-    </section>
-    {% endif %}
-
-    {% if view == 'overview' %}
-    <section class="hero-grid">
-      <article class="hero-card"><div class="eyebrow">DEVFLEET OVERVIEW</div><h2>Your environments at a glance.</h2><p>Manage projects, runtime isolation, and infrastructure from one safe control plane. GPU passthrough remains disabled.</p><div class="hero-actions"><a class="button primary" href="/?view=projects">Open projects</a><a class="button ghost" href="/?view=infrastructure">View infrastructure</a></div></article>
-      <article class="health-card"><div class="card-heading"><span class="icon-tile green">✓</span><div><h3>Node health</h3><p class="muted">{{ status.friendly_name }}</p></div></div><div class="health-score">{{ status.host_agent.status|default('ready', true)|replace('-', ' ')|title }}</div><p class="muted">Docker {{ status.docker.mode|default('ready', true) }} · {{ status.system.disk_free_gb }} GB free</p><a href="/?view=infrastructure">Inspect infrastructure →</a></article>
-    </section>
-    <section class="stats-grid">
-      <article class="stat-card"><span class="stat-label">Projects</span><strong>{{ status.projects|length }}</strong><small>managed workspaces</small></article>
-      <article class="stat-card"><span class="stat-label">Dedicated VMs</span><strong>{{ status.projects|selectattr('runtime_isolation','equalto','vm')|list|length }}</strong><small>project environments</small></article>
-      <article class="stat-card"><span class="stat-label">Memory</span><strong>{{ status.system.memory_percent }}%</strong><small>host utilization</small></article>
-      <article class="stat-card"><span class="stat-label">Disk free</span><strong>{{ status.system.disk_free_gb }}</strong><small>GB on the DevFleet host</small></article>
-    </section>
-    <section class="content-grid two-thirds">
-      <article class="panel"><div class="section-heading"><div><p class="eyebrow">YOUR WORK</p><h2>Projects</h2></div><a href="/?view=projects">View all →</a></div><div class="project-list">{% for p in status.projects[:4] %}<a class="project-row" href="/projects/{{ p.slug }}"><span class="project-avatar">{{ (p.display_name|default(p.slug, true))[0]|upper }}</span><span class="project-row-copy"><strong>{{ p.display_name|default(p.slug, true) }}</strong><small>{{ runtime_label(p) }} · {{ p.resource_profile|default('standard', true)|title }}</small></span>{{ status_badge('running' if p.running else p.runtime_status|default('ready', true)) }}<span class="chevron">›</span></a>{% else %}<p class="muted">No projects yet.</p>{% endfor %}</div></article>
-      <article class="panel"><div class="section-heading"><div><p class="eyebrow">RECENT</p><h2>Activity</h2></div><a href="/?view=activity">View all →</a></div>{% for op in status.operations[:5] %}<a class="activity-row" href="/?view=activity#{{ op.id }}"><span class="activity-dot {{ 'bad' if op.state == 'failed' else 'ok' if op.state == 'completed' else 'warn' }}"></span><span><strong>{{ op.kind|replace('-', ' ')|title }}</strong><small>{{ op.project }} · {{ op.message }}</small></span><time>{{ op.updated_at }}</time></a>{% else %}<p class="muted">No recent operations.</p>{% endfor %}</article>
-    </section>
-    <section class="panel"><div class="section-heading"><div><p class="eyebrow">CONNECTED INFRASTRUCTURE</p><h2>DevFleet nodes</h2></div><a href="/?view=infrastructure">Manage infrastructure →</a></div><div id="cluster-nodes" class="node-grid" data-endpoint="/cluster/status"><p class="muted">Loading node health…</p></div><span id="cluster-updated" class="muted"></span></section>
-
-    {% elif view == 'projects' %}
-    <section class="page-intro"><div><p class="eyebrow">WORKSPACES</p><h2>Projects</h2><p class="muted">Every project keeps its workspace and gets an explicit, reviewable environment assignment.</p></div><a class="button primary" href="#create-project">New project</a></section>
-    <section class="project-card-grid">{% for p in status.projects %}<article class="project-card"><div class="project-card-top"><span class="project-avatar large">{{ (p.display_name|default(p.slug, true))[0]|upper }}</span><div><h3>{{ p.display_name|default(p.slug, true) }}</h3><p class="muted">{{ p.slug }}</p></div>{{ status_badge('running' if p.running else p.runtime_status|default('ready', true)) }}</div><div class="project-facts"><div><small>Environment</small><strong>{{ runtime_label(p) }}</strong></div><div><small>Provider</small><strong>{{ provider_label(p) }}</strong></div><div><small>Workspace</small><strong class="truncate">{{ workspace_target(p) }}</strong></div><div><small>Resources</small><strong>{{ p.resource_profile_label|default(p.resource_profile|default('standard', true)|title, true) }} · {{ p.resource_limits.cpus|default('—', true) }} CPU · {{ p.resource_limits.memory|default('—', true) }}</strong></div></div><p class="muted project-summary">{{ p.language|default('Existing', true)|title }}{% if p.framework %} · {{ p.framework }}{% endif %} · {{ 'Workspace ready' if p.workspace_readiness.ready else 'Workspace readiness pending' }}</p>{% if p.recovery_only %}<div class="runtime-unavailable" data-recovery-only="{{ p.slug }}"><strong>Recovery artifact only</strong><p>This restored copy is inert. Its files are available for inspection, but runtime actions require a separate explicit adoption.</p></div>{% else %}<div class="card-actions">{{ open_workspace(p) }}{% if p.running %}{{ project_action(p.slug,'stop','Stop','ghost') }}{% else %}{{ project_action(p.slug,'start','Start') }}{% endif %}<a class="icon-button" href="/projects/{{ p.slug }}?tab=settings" title="Project settings">•••</a></div>{% endif %}<details class="advanced"><summary>Advanced details</summary><pre>{{ {'provider':p.runtime_provider|default('docker-compose',true),'runtime_id':p.runtime_id|default('',true),'host_id':p.host_id|default('',true),'limits':p.resource_limits|default({},true),'workspace_readiness':p.workspace_readiness|default({},true),'backup':p.backup_status|default('not-verified',true)}|tojson(indent=2) }}</pre></details></article>{% else %}<article class="empty-state"><h3>No projects yet</h3><p>Create a project to get started.</p></article>{% endfor %}</section>
-    <section id="create-project" class="panel wizard-panel"><div class="section-heading"><div><p class="eyebrow">PROJECT SETUP</p><h2>Create a project</h2><p class="muted">The wizard recommends resources from project complexity and keeps GPU access disabled.</p></div></div><form method="post" action="/projects/create" class="wizard-form" data-environment-wizard>{{ csrf() }}<div class="form-step"><span class="step-number">1</span><div><h3>Project identity</h3><div class="form-grid"><label>Name<input name="display_name" required autocomplete="off" placeholder="M0TechLabs Job Finder"></label><label>Slug<input name="slug" required pattern="[a-z0-9][a-z0-9._-]{1,62}" autocomplete="off" placeholder="m-techlabs-job-finder"></label><label>Project kind<select name="project_kind"><option value="">General</option><option>automation</option><option>rapid-api</option><option>cross-platform-cli</option><option>web-frontend</option><option>full-stack-web</option><option>infrastructure-service</option></select></label></div></div></div><div class="form-step"><span class="step-number">2</span><div><h3>Environment</h3><div class="form-grid"><label>Environment type<select name="runtime_isolation"><option value="">Recommend automatically</option><option value="container">Project-isolated containers on shared host</option><option value="vm">Dedicated project VM</option></select></label><label>Resources<select name="resource_profile"><option value="">Recommend automatically</option><option value="small">Small · 1 CPU · 2 GB · 20 GB</option><option value="standard">Standard · 2 CPU · 4 GB · 40 GB</option><option value="large">Large · 4 CPU · 8 GB · 80 GB</option><option value="xlarge">Extra large · 6 CPU · 12 GB · 120 GB</option></select></label><label>Scale<select name="scale"><option>small</option><option>medium</option><option>large</option></select></label><label>Intent<select name="intent"><option>prototype</option><option>production</option></select></label></div></div></div><details class="advanced form-advanced"><summary>Advanced project inputs</summary><div class="form-grid"><label>Template<select name="template"><option value="auto">Recommend automatically</option>{% for name in templates_catalog %}<option>{{ name }}</option>{% endfor %}</select></label><label>Language<input name="language" placeholder="python, typescript, go..."></label><label>Framework<input name="framework" placeholder="FastAPI, Next.js, Spring..."></label><label>GitHub URL<input name="git_url"></label><label>Worktree source<input name="worktree_source"></label><label>Worktree branch<input name="worktree_branch"></label><label>Security profile<select name="profile"><option>balanced</option><option>strict</option></select></label><label>Testing<select name="testing_level"><option>standard</option><option>minimal</option><option>comprehensive</option></select></label><label class="checkbox-label"><input type="checkbox" name="use_ollama"> Use Ollama</label></div></details><fieldset class="custom-resource-controls"><legend>Custom resource controls</legend><div class="form-grid"><label>CPU cores<input name="custom_cpus" type="number" min="1" max="32" step="1" placeholder="Auto"></label><label>RAM (GB)<input name="custom_ram_gb" type="number" min="1" max="256" step="1" placeholder="Auto"></label><label>Disk (GB)<input name="custom_disk_gb" type="number" min="20" max="2048" step="1" placeholder="Auto"></label><label>PID mode<select name="pid_mode"><option value="private">Private PID namespace</option><option value="host">Host PID namespace (review required)</option></select></label><label>PID limit<input name="pid_limit" type="number" min="64" max="65536" step="1" value="4096"></label></div><p class="muted help-text">These values are captured for review. Backend support may apply them during a later environment assignment.</p></fieldset><section class="wizard-review" aria-live="polite"><div><strong>Review environment</strong><span data-review-summary>Automatic recommendation · PID limit 4096</span></div><span class="status-badge neutral" data-review-status>Review before provisioning</span></section><div class="review-note"><strong>Before provisioning</strong><span>DevFleet checks host CPU, RAM, disk, VM count, and reserved headroom. Dedicated VMs are host-assisted, GPU-free, and rollback-aware.</span></div><button class="button primary" type="submit">Create project</button></form></section>
-
-    {% elif view == 'project' and selected_project %}
-    {% set p = selected_project %}{% set caps = p.capabilities|default({}, true) %}{% set lifecycle = caps.lifecycle_state|default(p.lifecycle_status|default('unknown', true), true) %}{% if p.recovery_only %}<section class="panel recovery-only-panel" data-recovery-only="{{ p.slug }}"><a class="back-link" href="/?view=projects">← All projects</a><div class="eyebrow">RECOVERY ARTIFACT</div><h2>{{ p.display_name|default(p.slug, true) }}</h2><p>This restored copy is intentionally inert. DevFleet will not inspect, start, modify, back up, restore, quarantine, or delete it as a managed project.</p><p class="muted">Workspace path: <code>{{ p.path }}</code></p><div class="runtime-unavailable"><strong>Separate adoption required</strong><p>Review the recovered files, then use a future explicit ownership-adoption workflow before enabling any runtime action. The original managed project remains unchanged.</p></div></section>{% else %}<section class="project-hero" data-project-state="{{ lifecycle }}"><a class="back-link" href="/?view=projects">← All projects</a>{% if lifecycle == 'stopped' %}<div class="project-state-banner stopped" role="status"><div><strong>Project is stopped</strong><p>{{ p.display_name|default(p.slug, true) }} is not currently running. Live metrics, application health, logs, and runtime actions are unavailable until the environment starts.</p></div>{{ project_action(p.slug,'start','Start Project','primary') }}</div>{% elif caps.runtime_transitioning %}<div class="project-state-banner transitioning" role="status"><div><strong>{{ lifecycle|replace('-', ' ')|title }}…</strong><p>Live tabs remain gated until the environment is running and ready.</p></div></div>{% elif lifecycle in ['unreachable','error'] %}<div class="project-state-banner error" role="alert"><div><strong>Runtime {{ lifecycle }}</strong><p>Live information is unavailable. Static configuration, backups, safety, activity, and settings remain usable.</p></div></div>{% endif %}<div class="project-hero-row"><span class="project-avatar huge">{{ (p.display_name|default(p.slug, true))[0]|upper }}</span><div><p class="eyebrow">PROJECT WORKSPACE</p><h2>{{ p.display_name|default(p.slug, true) }}</h2><p class="muted">{{ p.slug }} · {{ p.language|default('Existing project', true)|title }}{% if p.framework %} · {{ p.framework }}{% endif %}</p></div><div class="hero-status strong-state state-{{ lifecycle }}">{{ status_badge(lifecycle) }}<small>{{ caps.status_reason|default('Environment state is current.', true) }}</small></div></div><div class="quick-actions">{% if caps.can_stop %}{{ project_action(p.slug,'stop','Stop','ghost') }}{% elif caps.can_start %}{{ project_action(p.slug,'start','Start','primary') }}{% endif %}{% if caps.can_restart %}{{ project_action(p.slug,'restart','Restart','ghost') }}{% else %}<button class="button ghost disabled" type="button" disabled title="Start the project and wait for runtime readiness before restarting.">Restart unavailable</button>{% endif %}<a class="button ghost" href="/projects/{{ p.slug }}?tab=environment">Change environment</a><a class="button ghost" href="/projects/{{ p.slug }}?tab=settings">Project settings</a></div></section>
-    <nav class="tabs" aria-label="Project sections"><a class="{{ 'active' if request.query_params.get('tab','overview') == 'overview' else '' }}" href="/projects/{{ p.slug }}?tab=overview">Overview</a><a class="{{ 'active' if request.query_params.get('tab') == 'environment' else '' }}" href="/projects/{{ p.slug }}?tab=environment">Environment</a><a class="{{ 'active' if request.query_params.get('tab') == 'logs' else '' }}" href="/projects/{{ p.slug }}?tab=logs">Logs</a><a class="{{ 'active' if request.query_params.get('tab') == 'backups' else '' }}" href="/projects/{{ p.slug }}?tab=backups">Backups</a><a class="{{ 'active' if request.query_params.get('tab') == 'safety' else '' }}" href="/projects/{{ p.slug }}?tab=safety">Safety</a><a class="{{ 'active' if request.query_params.get('tab') == 'isolate' else '' }}" href="/projects/{{ p.slug }}?tab=isolate">Isolate</a><a class="{{ 'active' if request.query_params.get('tab') == 'activity' else '' }}" href="/projects/{{ p.slug }}?tab=activity">Activity</a><a class="{{ 'active' if request.query_params.get('tab') == 'settings' else '' }}" href="/projects/{{ p.slug }}?tab=settings#advanced-controls">Advanced</a></nav>
-    {% set project_tab = request.query_params.get('tab','overview') %}
-    {% if project_tab == 'environment' %}
-    <section class="panel environment-wizard-shell" data-existing-environment-wizard data-project-slug="{{ p.slug }}"><nav class="wizard-stage-nav" aria-label="Environment assignment stages"><button type="button" data-wizard-stage="environment">1. Environment</button><button type="button" data-wizard-stage="resources">2. Resources</button><button type="button" data-wizard-stage="review">3. Review</button><button type="button" data-wizard-stage="confirm">4. Confirm</button></nav><p class="muted" data-environment-preflight>Read-only preflight runs against the selected environment and resources.</p><fieldset class="custom-resource-controls" data-custom-resources><legend>Custom resources</legend><label>CPU<input type="number" name="custom_cpus" min="1" max="6" step="1" placeholder="CPU cores"></label><label>RAM GB<input type="number" name="custom_ram_gb" min="2" max="12" step="1" placeholder="RAM GB"></label><label>Disk GB<input type="number" name="custom_disk_gb" min="20" max="120" step="1" placeholder="Disk GB"></label><label>PID mode<select name="pid_mode"><option value="private">Private PID namespace</option></select></label><label>PID limit<input type="number" name="pid_limit" min="0" max="4096" value="4096"></label></fieldset><output data-environment-review aria-live="polite">CURRENT → NEW details will appear during Review.</output><div class="review-note"><strong>Confirm is deliberate</strong><span>Only a ready preflight enables the final assignment; a verified backup and fallback are retained if the operation rolls back.</span></div></section>
-    <section class="content-grid two-thirds"><article class="panel"><div class="eyebrow">CURRENT DETECTION</div><h2>Environment</h2><p class="muted">DevFleet detected this workspace as {{ runtime_label(p)|lower }}. Review the runtime assignment, exact actions, and fallback behavior before confirming.</p><div class="environment-summary"><div><small>Environment type</small><strong>{{ runtime_label(p) }}</strong></div><div><small>Resources</small><strong>{{ p.resource_profile|default('standard', true)|title }}</strong></div><div><small>Health</small><strong>{{ p.health_status|default('unknown', true)|replace('-', ' ')|title }}</strong></div></div><form method="post" action="/projects/{{ p.slug }}/environment" class="environment-form">{{ csrf() }}<label>Environment type<select name="runtime_isolation"><option value="container" {{ 'selected' if p.runtime_isolation|default('container', true) == 'container' else '' }}>Project-isolated containers on shared host</option><option value="vm" {{ 'selected' if p.runtime_isolation|default('container', true) == 'vm' else '' }}>Dedicated project VM</option></select></label><label>Resources<select name="resource_profile">{% for name, profile in resource_profiles.items() %}<option value="{{ name }}" {{ 'selected' if p.resource_profile|default('standard', true) == name else '' }}>{{ profile.label }} · {{ profile.cpus }} CPU · {{ profile.memory }} · {{ profile.disk_gb }} GB</option>{% endfor %}<option value="custom" {{ 'selected' if p.resource_profile|default('', true) == 'custom' else '' }}>Custom</option></select></label><div class="review-note"><strong>Migration safety</strong><span>DevFleet creates a verified backup, validates capacity, verifies the workspace, and rolls metadata back if provisioning or import fails. Existing projects are never migrated automatically.</span></div><button class="button primary" type="submit" data-environment-confirm>Continue to Resources</button></form></article><article class="panel"><div class="eyebrow">DESTINATION</div><h3>Move to another node</h3><p class="muted">Ownership transfer is separate from runtime type. Offline destinations cannot be selected.</p>{% if peer.ok %}<form method="post" action="/projects/{{ p.slug }}/transfer-to-peer">{{ csrf() }}<button class="button ghost" type="submit">Move to DevFleetFailover</button></form>{% else %}<button class="button disabled" disabled title="Destination is offline">DevFleetFailover offline</button><p class="error">The failover node is unavailable, so transfer is disabled.</p>{% endif %}<details class="advanced"><summary>Advanced runtime record</summary><pre>{{ {'provider':p.runtime_provider|default('docker-compose',true),'runtime_id':p.runtime_id|default('',true),'runtime_address':p.runtime_address|default('',true),'host_id':p.host_id|default('',true),'limits':p.resource_limits|default({},true),'migration_snapshot':p.runtime_migration_snapshot|default('',true)}|tojson(indent=2) }}</pre></details></article></section>
-    {{ resource_allocation(p) }}
-    {% elif project_tab == 'logs' %}
-     <section class="panel logs-panel"><div class="section-heading"><div><div class="eyebrow">RUNTIME LOGS</div><h2>Project logs</h2><p class="muted">Logs are fetched through the selected runtime provider; no host shell or machine API token is exposed.</p></div><span class="status-badge neutral">Session protected</span></div>{% if caps.can_query_logs %}<pre class="log-output" data-project-logs="{{ p.slug }}">Loading the latest bounded log tail…</pre>{% else %}<div class="runtime-unavailable" data-terminal-state="{{ lifecycle }}"><strong>Logs unavailable while {{ lifecycle }}</strong><p>{{ 'Start the project to view live logs.' if lifecycle == 'stopped' else 'Logs become available after the runtime reaches the ready state.' }}</p></div>{% endif %}<p class="muted">Stopped, transitioning, or unreachable runtimes use a terminal state instead of an indefinite spinner.</p></section>
-    {% elif project_tab == 'backups' %}
-    <section class="panel" data-backup-history data-project-slug="{{ p.slug }}"><div class="eyebrow">BACKUP HISTORY</div><h2>Verified restore points</h2><p class="muted">Each entry is identity-bound and re-hashed before restore. History loads through the session-authenticated endpoint.</p><div data-backup-list aria-live="polite">Loading backup history…</div></section>
-    <section class="content-grid two-thirds"><article class="panel"><div class="eyebrow">RECOVERY ARTIFACTS</div><h2>Backups</h2><p class="muted">A backup is verified only when a recoverable workspace archive exists outside the runtime and its SHA-256 matches.</p><div class="environment-summary"><div><small>Status</small><strong>{{ p.backup_status|default('not-verified', true)|replace('-', ' ')|title }}</strong></div><div><small>Backup ID</small><strong>{{ p.backup_id|default('None', true) }}</strong></div><div><small>SHA-256</small><strong class="truncate">{{ p.backup_sha256|default('Not available', true) }}</strong></div></div>{{ project_action(p.slug,'backup','Create verified backup','primary') }}{% if p.backup_status == 'verified' %}<p class="success">Verified artifact: <code>{{ p.backup_path|default('recorded') }}</code></p>{% else %}<p class="warning">No verified workspace archive is recorded yet.</p>{% endif %}</article><article class="panel"><div class="eyebrow">RECOVERY POLICY</div><h3>Safe restore and deletion</h3><p class="muted">Restore is identity-bound and refuses to overwrite a non-empty workspace. Permanent deletion is blocked unless this project has a specific verified backup artifact.</p>{{ project_action(p.slug,'restore-vault','Restore copy from vault','ghost') }}<p class="muted">A Vault recovery creates a new recovered copy and preserves the original workspace.</p><details class="advanced"><summary>Backup manifest details</summary><pre>{{ {'manifest':p.backup_manifest|default('',true),'path':p.backup_path|default('',true),'sha256':p.backup_sha256|default('',true)}|tojson(indent=2) }}</pre></details></article></section>
-    {% elif project_tab == 'safety' %}
-    <section class="content-grid two-thirds"><article class="panel"><div class="eyebrow">SAFETY PROFILE</div><h2>Safety controls</h2><p class="muted">Choose the narrowest profile that supports the project. GPU passthrough, firewall changes, and host driver changes remain outside DevFleet.</p><form method="post" action="/projects/{{ p.slug }}/profile" class="form-grid">{{ csrf() }}<label>Profile<select name="profile"><option value="strict" {{ 'selected' if p.profile|default('balanced', true) == 'strict' else '' }}>Strict</option><option value="balanced" {{ 'selected' if p.profile|default('balanced', true) == 'balanced' else '' }}>Balanced</option><option value="fast" {{ 'selected' if p.profile|default('balanced', true) == 'fast' else '' }}>Fast Trusted</option></select></label><label class="checkbox-label"><input type="checkbox" name="confirm_fast"> Acknowledge Fast Trusted only if required</label><button class="button primary" type="submit">Save safety profile</button></form><div class="safety-list"><p><strong>Workspace boundary</strong> · {{ 'Protected' if not p.blockers else 'Review required' }}</p><p><strong>Runtime health</strong> · {{ p.health_scope|default('not-checked', true)|replace('-', ' ') }}</p><p><strong>Backup gate</strong> · {{ p.backup_status|default('not-verified', true)|replace('-', ' ') }}</p></div></article><article class="panel"><div class="eyebrow">ANALYZER</div><h3>Findings</h3>{% for finding in p.findings|default([], true) %}<p class="{{ finding.severity|default('info') }}"><strong>{{ finding.severity|default('info')|title }}</strong> · {{ finding.message }}</p>{% else %}<p class="success">No analyzer findings were recorded.</p>{% endfor %}<details class="advanced"><summary>Raw analyzer details</summary><pre>{{ p.findings|default([], true)|tojson(indent=2) }}</pre></details></article></section>
-    <section class="panel advanced-permissions" data-fast-permissions><div class="eyebrow">FAST TRUSTED ADVANCED PERMISSIONS</div><h3>Explicit device and privileged access</h3><p class="muted">These permissions are inactive unless Fast Trusted is explicitly acknowledged. They remain disabled for Strict and Balanced profiles.</p><form method="post" action="/projects/{{ p.slug }}/profile" class="form-grid">{{ csrf() }}<input type="hidden" name="profile" value="fast"><label class="checkbox-label"><input type="checkbox" name="confirm_fast" required> I acknowledge Fast Trusted</label><label class="checkbox-label"><input type="checkbox" name="allow_devices" {{ 'checked' if p.allow_devices else '' }}> Allow devices</label><label class="checkbox-label"><input type="checkbox" name="allow_privileged" {{ 'checked' if p.allow_privileged else '' }}> Allow privileged runtime</label><button class="button ghost" type="submit">Save advanced permissions</button></form></section>
-    {% elif project_tab == 'activity' %}
-    <section class="panel"><div class="section-heading"><div><div class="eyebrow">PROJECT ACTIVITY</div><h2>Operations</h2></div><a href="/?view=activity">All activity →</a></div>{% for op in status.operations if op.project == p.slug %}<article class="operation-row" id="{{ op.id }}"><span class="activity-dot {{ 'bad' if op.state == 'failed' else 'ok' if op.state == 'completed' else 'warn' }}"></span><div><strong>{{ op.kind|replace('-', ' ')|title }}</strong><p class="muted">{{ op.message }} · {{ op.progress }}%</p></div><details class="advanced"><summary>Details</summary><pre>{{ op.log|tojson(indent=2) }}{{ op.result or op.error or '' }}</pre></details></article>{% else %}<p class="muted">No operations recorded for this project.</p>{% endfor %}</section>
-    {% elif project_tab == 'settings' %}
-     <section class="content-grid two-thirds"><article class="panel"><div class="eyebrow">SAFETY & SETUP</div><h2>Project settings</h2><div class="action-stack">{% if caps.can_run_runtime_action %}{{ project_action(p.slug,'runtime-health','Environment health','ghost') }}{{ project_action(p.slug,'bootstrap','Set up environment','ghost') }}{{ project_action(p.slug,'codexpro','Set up Codex','ghost') }}{% else %}<button class="button ghost disabled" type="button" disabled title="Runtime actions require a running, ready environment.">Runtime actions unavailable — {{ lifecycle }}</button>{% endif %}{{ project_action(p.slug,'analyze-force','Run safety scan','ghost') }}{{ project_action(p.slug,'backup','Create backup','ghost') }}</div><details class="advanced"><summary>Analyzer and runtime details</summary><pre>{{ {'capabilities':caps,'findings':p.findings|default([],true),'profile':p.profile|default('balanced',true),'analyzer_cache':p.analyzer_cache|default({},true),'backup_status':p.backup_status|default('not-verified',true),'lease':p.lease|default({},true)}|tojson(indent=2) }}</pre></details></article><article class="panel danger-panel"><div class="eyebrow danger-text">DANGER ZONE</div><h2>Delete project</h2><p class="muted">DevFleet will create and verify a backup before permanently deleting the project runtime and workspace.</p><form method="post" action="/projects/{{ p.slug }}/destroy" class="danger-form">{{ csrf() }}<label>Type the project slug<input name="confirm_slug" required placeholder="{{ p.slug }}"></label><label>Type the confirmation phrase<input name="confirm_phrase" required placeholder="DESTROY {{ p.slug }}"></label><button class="button danger" type="submit">Delete project permanently</button></form></article></section>
-     {% elif project_tab == 'isolate' %}<section class="panel danger-panel"><div class="eyebrow danger-text">ISOLATE PROJECT</div><h2>Quarantine this workspace</h2><p class="muted">Creates and verifies a backup, then stops the project before isolating it. This control stays reviewable and requires explicit acknowledgement.</p><form method="post" action="/projects/{{ p.slug }}/quarantine" class="danger-form">{{ csrf() }}<label class="checkbox-label"><input type="checkbox" name="confirm_quarantine" required> I understand this will make the project unavailable until restored.</label><button class="button danger" type="submit">Create backup &amp; isolate</button></form></section>
-     {% else %}
-    <div class="panel preference-panel"><label class="checkbox-label preference-toggle"><input id="advanced-mode-toggle" type="checkbox"> Show advanced diagnostics and raw internal data</label><p class="muted help-text">Keep this off for normal operation. It is stored on this browser only.</p></div>
-    <section class="content-grid two-thirds"><article class="panel"><div class="eyebrow">WORKSPACE</div><h2>Project overview</h2><div class="environment-summary"><div><small>Environment</small><strong>{{ runtime_label(p) }}</strong></div><div><small>Provider</small><strong>{{ provider_label(p) }}</strong></div><div><small>Last backup</small><strong>{{ p.lease.last_backup|default('Not verified', true) }}</strong></div></div><p class="muted">Workspace path: <code>{{ p.path }}</code> · Target: <code>{{ workspace_target(p) }}</code></p><div class="quick-links">{{ open_workspace(p) }}<a class="button ghost" href="/projects/{{ p.slug }}?tab=environment">Change environment</a><a class="button ghost" href="/projects/{{ p.slug }}?tab=logs">Open logs</a></div></article><article class="panel"><div class="eyebrow">LIVE RUNTIME</div><h2>Current availability</h2><div class="environment-summary"><div><small>Live CPU</small><strong>{{ 'Available' if caps.can_query_live_metrics else 'Unavailable while ' ~ lifecycle }}</strong></div><div><small>Live memory</small><strong>{{ 'Available' if caps.can_query_live_metrics else 'Unavailable while ' ~ lifecycle }}</strong></div><div><small>Application health</small><strong>{{ p.health_status|default('unknown', true)|title if caps.can_query_application_health else 'Not checked — environment ' ~ lifecycle }}</strong></div></div>{% if caps.can_run_runtime_tests %}<div class="action-stack">{{ project_action(p.slug,'health','Check project health','ghost') }}{{ project_action(p.slug,'test','Run project tests','ghost') }}{{ project_action(p.slug,'codexpro','Set up Codex','ghost') }}</div>{% else %}<div class="runtime-unavailable"><strong>Runtime actions unavailable</strong><p>Start the project and wait for readiness to run health checks or tests.</p></div>{% endif %}<details id="advanced-controls" class="advanced"><summary>Advanced action references</summary><pre>Provider: {{ provider_label(p) }}&#10;Workspace target: {{ workspace_target(p) }}&#10;docker context: {{ p.docker_context|default(provider_label(p), true) }}</pre></details></article></section>{{ resource_allocation(p) }}
-     {% endif %}
-    {% endif %}
-
-    {% elif view == 'infrastructure' %}
-    <section class="page-intro"><div><p class="eyebrow">OPERATIONS</p><h2>Infrastructure</h2><p class="muted">Machines, containers, and VM capacity with safe, scoped controls.</p></div><div class="monitor-controls"><label>Auto-refresh<select id="refresh-interval" aria-label="Automatic refresh interval"><option value="0">Off</option><option value="5" selected>5 seconds</option><option value="10">10 seconds</option><option value="15">15 seconds</option><option value="30">30 seconds</option></select></label><button type="button" id="refresh-cluster" class="button ghost">Refresh now</button></div></section>
-    <section class="panel"><div class="section-heading"><div><p class="eyebrow">MACHINES / DEVFLEET NODES</p><h2>Node health</h2></div><span id="cluster-updated" class="muted">Loading…</span></div><div id="cluster-nodes" class="node-grid" data-endpoint="/cluster/status"><p class="muted">Loading node health…</p></div></section>
-    <section class="panel"><div class="section-heading"><div><p class="eyebrow">INFRASTRUCTURE / VM HOST</p><h2>VM Host</h2><p class="muted">{{ status.host_agent.status|default('ready', true)|replace('-', ' ')|title }} · {{ status.host_capacity.allocatable_memory_gb|default('—', true) }} GB safe memory available</p></div><span class="status-badge ok">GPU-free</span></div><div class="summary-grid"><div><small>Host identity</small><strong>{{ status.host_agent.host_name|default(status.friendly_name, true) }}</strong></div><div><small>Provider</small><strong>{{ status.vm_provider.provider|default('Multipass', true)|title }}</strong></div><div><small>Agent</small><strong>{{ status.host_agent.agent_version|default('Connected', true) }}</strong></div><div><small>Managed VMs</small><strong>{{ status.host_capacity.managed_vm_count|default('—', true) }}</strong></div></div><details class="advanced"><summary>Advanced Details</summary><div class="details-grid"><pre>{{ status.host_agent|tojson(indent=2) }}</pre><pre>{{ status.host_capacity|tojson(indent=2) }}</pre><pre>{{ status.vm_provider|tojson(indent=2) }}</pre></div></details></section>
-    <section class="panel container-panel"><div class="section-heading"><div><p class="eyebrow">INFRASTRUCTURE / CONTAINERS</p><h2>Containers</h2><p class="muted">Portainer-style visibility without exposing Docker TCP or docker.sock.</p></div><label>Node<select id="container-node-filter" aria-label="Filter containers by node"><option value="all">All nodes</option></select></label></div><div class="table-wrap"><table id="container-table"><thead><tr><th>Node</th><th>Name</th><th>Image</th><th>State</th><th>CPU</th><th>Memory</th><th>Network I/O</th><th>Actions</th></tr></thead><tbody><tr><td colspan="8" class="muted">Loading container inventory…</td></tr></tbody></t
+:root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0b1020;color:#f3f6ff;--bg:#0b1020;--surface:#131a2c;--surface-2:#18233a;--line:#2a3857;--muted:#8e9bb7;--text:#f3f6ff;--blue:#5b8cff;--blue-2:#2e63d2;--green:#35d49a;--yellow:#f0c96a;--red:#ed6b7a;--shadow:0 18px 50px rgba(0,0,0,.22)}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% -10%,#1c2b55 0,#0b1020 42%);color:var(--text)}a{color:#a9c5ff;text-decoration:none}a:hover{color:#d6e3ff}button,.button,input,select{font:inherit}button,.button{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid transparent;border-radius:9px;padding:10px 14px;background:var(--blue-2);color:#fff;cursor:pointer;font-weight:650;text-decoration:none;transition:.18s ease}button:hover,.button:hover{filter:brightness(1.12);transform:translateY(-1px)}button:disabled,.button.disabled{opacity:.45;cursor:not-allowed;transform:none;filter:none}.button.ghost,button.ghost{background:#172542;border-color:#3a4d74;color:#d9e5ff}.button.danger,button.danger{background:#8f3046;border-color:#c2576a}.icon-button{padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#172542;color:#a9c5ff}.app-shell{display:flex;min-height:100vh}.sidebar{position:sticky;top:0;width:248px;height:100vh;display:flex;flex-direction:column;padding:26px 16px;border-right:1px solid rgba(89,111,160,.24);background:rgba(10,16,32,.82);backdrop-filter:blur(16px)}.brand{display:flex;align-items:center;gap:11px;padding:0 10px 34px;color:var(--text)}.brand-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#709bff,#385fd0);font-weight:800;font-size:.8rem;box-shadow:0 8px 24px rgba(58,102,220,.35)}.brand strong,.brand small{display:block}.brand small{margin-top:3px;color:var(--muted);font-size:.68rem}.primary-nav{display:grid;gap:5px}.primary-nav a{display:flex;align-items:center;gap:12px;padding:12px 13px;border-radius:9px;color:#aebbd5;font-size:.91rem}.primary-nav a span{width:18px;text-align:center;color:#8295bc}.primary-nav a:hover,.primary-nav a.active{background:#1a2948;color:#fff}.primary-nav a.active span{color:#78a1ff}.sidebar-footer{margin-top:auto;display:grid;gap:16px;padding:15px 10px 0;border-top:1px solid rgba(89,111,160,.22)}.node-presence{display:flex;align-items:center;gap:8px}.node-presence strong,.node-presence small{display:block}.node-presence small{margin-top:3px;color:var(--muted);font-size:.68rem}.presence-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(53,212,154,.13)}.version-label{color:#63708b;font-size:.68rem}.app-main{width:min(100%,1460px);margin:0 auto;padding:0 42px 70px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:22px;padding:34px 0 30px}.topbar h1{margin:4px 0 0;font-size:1.85rem;letter-spacing:-.03em}.topbar-actions{display:flex;align-items:center;gap:12px}.connection-pill{display:flex;align-items:center;gap:8px;padding:9px 13px;border:1px solid #2b4866;border-radius:999px;background:rgba(24,40,68,.55);color:#c4d4f1;font-size:.78rem}.eyebrow{margin:0;color:#7296ed;font-size:.68rem;font-weight:800;letter-spacing:.13em}.muted{color:var(--muted)}.error{color:#ff9daa}.danger-text{color:#ff8796}.hero-grid,.content-grid,.stats-grid,.node-grid,.project-card-grid,.summary-grid,.details-grid{display:grid;gap:16px}.hero-grid{grid-template-columns:minmax(0,1.6fr) minmax(280px,.8fr)}.content-grid.two-thirds{grid-template-columns:minmax(0,1.35fr) minmax(280px,.8fr)}.stats-grid{grid-template-columns:repeat(4,minmax(0,1fr));margin:18px 0}.panel,.hero-card,.health-card,.project-card,.stat-card,.empty-state{border:1px solid var(--line);border-radius:15px;background:linear-gradient(145deg,rgba(22,31,53,.96),rgba(15,23,40,.96));box-shadow:var(--shadow)}.panel{padding:22px;margin:16px 0}.hero-card{min-height:250px;padding:34px;background:linear-gradient(130deg,#203c7a,#17294e 57%,#111b31)}.hero-card h2{max-width:580px;margin:12px 0 10px;font-size:2.25rem;line-height:1.08;letter-spacing:-.04em}.hero-card p{max-width:610px;color:#b8c9e8;line-height:1.6}.hero-actions,.quick-actions,.card-actions,.quick-links,.action-stack,.actions{display:flex;align-items:center;flex-wrap:wrap;gap:9px}.hero-actions{margin-top:28px}.health-card{padding:24px}.card-heading,.section-heading,.project-card-top,.project-hero-row{display:flex;align-items:center;justify-content:space-between;gap:14px}.icon-tile{display:grid;place-items:center;width:38px;height:38px;border-radius:11px;font-weight:800}.icon-tile.green{background:rgba(53,212,154,.14);color:var(--green)}.health-card .card-heading{justify-content:flex-start}.health-card h3{margin:0}.health-score{margin:34px 0 7px;color:var(--green);font-size:1.65rem;font-weight:750}.health-card a{display:block;margin-top:21px;font-weight:650}.stat-card{display:grid;gap:5px;padding:18px 20px}.stat-card strong{font-size:1.75rem;letter-spacing:-.03em}.stat-card small,.stat-label{color:var(--muted);font-size:.75rem}.stat-label{color:#9eb2d9;text-transform:uppercase;letter-spacing:.08em;font-weight:700}.section-heading{margin-bottom:18px}.section-heading h2,.page-intro h2,.panel h2{margin:4px 0 0;font-size:1.28rem;letter-spacing:-.025em}.project-list{display:grid}.project-row{display:flex;align-items:center;gap:12px;padding:13px 5px;border-bottom:1px solid rgba(67,87,127,.35)}.project-row:last-child{border-bottom:0}.project-avatar{display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:10px;background:#263a68;color:#bcd0ff;font-weight:800}.project-avatar.large{width:44px;height:44px;font-size:1.1rem}.project-avatar.huge{width:64px;height:64px;font-size:1.45rem}.project-row-copy{display:grid;gap:4px;min-width:0;flex:1}.project-row-copy strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.project-row-copy small{color:var(--muted);font-size:.76rem}.chevron{color:#8094be;font-size:1.35rem}.status-badge{display:inline-flex;align-items:center;width:max-content;border-radius:999px;padding:4px 9px;font-size:.68rem;font-weight:750;text-transform:capitalize;white-space:nowrap}.status-badge.ok{background:rgba(53,212,154,.14);color:#66e2b2}.status-badge.warn{background:rgba(240,201,106,.14);color:#f3d47e}.status-badge.bad{background:rgba(237,107,122,.14);color:#ff9aa6}.activity-row{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid rgba(67,87,127,.35)}.activity-row:last-child{border-bottom:0}.activity-row span:nth-child(2){display:grid;gap:3px;min-width:0;flex:1}.activity-row small,.activity-row time{color:var(--muted);font-size:.73rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.activity-row time{max-width:125px}.activity-dot{display:inline-block;width:8px;height:8px;flex:none;border-radius:50%}.activity-dot.ok{background:var(--green)}.activity-dot.warn{background:var(--yellow)}.activity-dot.bad{background:var(--red)}.page-intro{display:flex;align-items:end;justify-content:space-between;gap:20px;margin:8px 0 25px}.page-intro h2{font-size:2rem}.page-intro p{margin:9px 0 0}.project-card-grid{grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}.project-card{padding:20px}.project-card-top{align-items:flex-start}.project-card-top h3{margin:2px 0 4px}.project-card-top>div{flex:1}.project-facts,.environment-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:22px 0;padding:13px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.project-facts div,.environment-summary div,.summary-grid div{display:grid;gap:5px}.project-facts small,.environment-summary small,.summary-grid small{color:var(--muted);font-size:.7rem}.project-facts strong,.environment-summary strong,.summary-grid strong{font-size:.82rem}.project-summary{min-height:22px;font-size:.8rem}.wizard-panel{scroll-margin-top:20px}.wizard-form{display:grid;gap:23px}.form-step{display:grid;grid-template-columns:32px 1fr;gap:14px;padding-bottom:21px;border-bottom:1px solid var(--line)}.step-number{display:grid;place-items:center;width:27px;height:27px;border-radius:50%;background:#263e78;color:#c9d9ff;font-size:.76rem;font-weight:800}.form-step h3{margin:2px 0 13px;font-size:.96rem}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:13px}.form-grid label,.environment-form label,.danger-form label{display:grid;gap:6px;color:#b8c8e3;font-size:.78rem}.checkbox-label{display:flex!important;align-items:center;grid-template-columns:none!important}.checkbox-label input{width:auto}input,select{width:100%;padding:10px 11px;border:1px solid #3d4e73;border-radius:8px;background:#0e172a;color:#f4f7ff;outline:none}input:focus,select:focus{border-color:#70a0ff;box-shadow:0 0 0 3px rgba(91,140,255,.15)}.review-note{display:grid;gap:5px;padding:13px 15px;border:1px solid #3a4e78;border-radius:10px;background:rgba(28,48,88,.45);color:#c8d5ed;font-size:.78rem}.review-note span{color:var(--muted);line-height:1.5}.form-advanced{margin:0}.project-hero{margin:0 0 18px;padding:10px 0}.back-link{display:inline-block;margin-bottom:22px;color:#9bb8f7;font-size:.82rem}.project-hero-row{justify-content:flex-start}.project-hero-row>div:nth-child(2){flex:1}.project-hero h2{margin:4px 0;font-size:2rem;letter-spacing:-.04em}.hero-status{display:grid;justify-items:end;gap:8px}.hero-status small{color:var(--muted);font-size:.74rem}.quick-actions{margin-top:23px}.tabs{display:flex;gap:22px;margin:0 -2px 19px;border-bottom:1px solid var(--line)}.tabs a{padding:11px 3px;color:var(--muted);font-size:.82rem;font-weight:700;border-bottom:2px solid transparent}.tabs a.active,.tabs a:hover{color:#dce7ff;border-color:#6f9bff}.environment-form{display:grid;gap:15px;max-width:520px}.action-stack{display:grid;justify-items:start;align-items:start}.action-stack form{width:100%}.action-stack button{width:100%;justify-content:flex-start}.danger-panel{border-color:#6c3348;background:linear-gradient(145deg,rgba(56,27,47,.75),rgba(25,20,38,.95))}.danger-form{display:grid;gap:13px}.advanced{margin-top:14px;color:#a9bce0}.advanced summary{cursor:pointer;color:#8fa8d7;font-size:.76rem;font-weight:700}.advanced pre,pre{white-space:pre-wrap;word-break:break-word;max-height:430px;overflow:auto}.advanced pre{margin:10px 0 0;padding:13px;border:1px solid rgba(67,87,127,.5);border-radius:8px;background:#0a1222;color:#aebed9;font-size:.7rem}.summary-grid{grid-template-columns:repeat(4,1fr);margin:4px 0 2px}.node-grid{grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}.node-card{margin:0;padding:17px;border:1px solid var(--line);border-radius:12px;background:#111b30}.node-heading{display:flex;align-items:center;justify-content:space-between;gap:9px}.node-heading h3{margin:0;font-size:.96rem}.node-card .metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:15px 0}.metric{padding:9px;border-radius:7px;background:#0d1629}.metric-label{display:block;color:var(--muted);font-size:.68rem}.metric strong{font-size:.88rem}.node-runtime{margin:0;padding-top:10px;border-top:1px solid var(--line);color:#b7c8e7;font-size:.76rem}.container-panel{overflow:hidden}.monitor-controls{display:flex;align-items:end;gap:9px}.monitor-controls label{display:grid;gap:5px;color:var(--muted);font-size:.72rem}.monitor-controls select{padding:9px}.table-wrap{overflow:auto}.container-panel table{width:100%;min-width:950px;border-collapse:collapse}.container-panel th,.container-panel td{padding:11px 9px;border-bottom:1px solid rgba(67,87,127,.4);text-align:left;vertical-align:top;font-size:.75rem}.container-panel th{color:#96acd5;font-size:.67rem;letter-spacing:.08em;text-transform:uppercase}.container-actions{display:flex;flex-wrap:wrap;gap:5px}.container-actions button{padding:6px 8px;font-size:.68rem}.container-details{margin-top:18px}.details-grid{grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}.operation-banner{display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:13px;margin:0 0 18px;padding:14px 16px;border:1px solid #385da1;border-radius:12px;background:#15284d}.operation-banner.failed{border-color:#8d4054;background:#3a1e32}.operation-banner.complete{border-color:#2d8b6b;background:#163d39}.operation-icon{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#2d5ab0;font-weight:800}.operation-banner.failed .operation-icon{background:#9c3d55}.operation-banner.complete .operation-icon{background:#238568}.operation-copy{display:grid;gap:6px}.operation-copy span{color:#b8c9e8;font-size:.78rem}.operation-meta{text-align:right;color:#adbfdf;font-size:.72rem}.progress-track{height:5px;overflow:hidden;border-radius:99px;background:#0d172a}.progress-track span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#5688ff,#65d4bb)}.operation-details{margin:0}.operation-row{display:flex;align-items:flex-start;gap:13px;padding:16px 0;border-bottom:1px solid var(--line)}.operation-row:last-child{border-bottom:0}.operation-main{flex:1}.operation-main p{margin:5px 0 10px;color:var(--muted);font-size:.78rem}.operation-row .advanced{margin:0}.activity-panel{padding:22px}.empty-state{text-align:center;padding:45px 20px;color:var(--muted)}.empty-state h3{color:var(--text)}.code,code{padding:3px 6px;border-radius:5px;background:#0d1628;color:#b9d0ff;font-size:.78rem}
+@media(max-width:980px){.sidebar{width:205px}.app-main{padding:0 24px 60px}.hero-grid,.content-grid.two-thirds{grid-template-columns:1fr}.stats-grid{grid-template-columns:repeat(2,1fr)}.summary-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:680px){.app-shell{display:block}.sidebar{position:relative;width:auto;height:auto;padding:15px 16px;border-right:0;border-bottom:1px solid rgba(89,111,160,.24)}.brand{padding:0 0 15px}.primary-nav{display:flex;overflow:auto}.primary-nav a{padding:9px 11px;white-space:nowrap}.sidebar-footer{display:none}.app-main{padding:0 15px 45px}.topbar{align-items:flex-start;flex-direction:column;padding:23px 0}.topbar-actions{width:100%;justify-content:space-between}.topbar h1{font-size:1.55rem}.hero-card{padding:25px 21px}.hero-card h2{font-size:1.8rem}.stats-grid{gap:9px}.stat-card{padding:14px}.stat-card strong{font-size:1.35rem}.project-card-grid{grid-template-columns:1fr}.project-facts,.environment-summary{grid-template-columns:1fr 1fr}.project-hero-row{align-items:flex-start;flex-wrap:wrap}.hero-status{margin-left:78px;justify-items:start}.quick-actions .button,.quick-actions form{flex:1 1 auto}.operation-banner{grid-template-columns:auto 1fr}.operation-meta{grid-column:2;text-align:left}.operation-details{grid-column:2}.page-intro{align-items:flex-start;flex-direction:column}.page-intro h2{font-size:1.65rem}.section-heading{align-items:flex-start;flex-direction:column}.monitor-controls{width:100%;align-items:stretch}.monitor-controls label{flex:1}.monitor-controls button{align-self:end}.form-step{grid-template-columns:25px 1fr}.summary-grid{grid-template-columns:1fr 1fr}.tabs{gap:14px;overflow:auto}.tabs a{white-space:nowrap}}
+/* 1.2.0 accessibility, advanced-mode, and runtime-state additions */
+.icon-sprite{position:absolute;width:0;height:0;overflow:hidden}.primary-nav a svg{width:18px;height:18px;flex:none;color:#8295bc}.primary-nav a:hover svg,.primary-nav a.active svg{color:#78a1ff}.status-badge.neutral{background:rgba(142,155,183,.16);color:#b6c1d6}.advanced{display:none}.advanced-mode .advanced{display:block}.preference-panel{display:flex;align-items:center;justify-content:space-between;gap:14px}.preference-toggle{color:#c8d5ed!important}.help-text{font-size:.72rem;margin:.35rem 0 0}.logs-panel .log-output{min-height:280px;margin:0;padding:16px;border:1px solid var(--line);border-radius:10px;background:#091120;color:#c7d7f3;font:12px/1.55 ui-monospace,SFMono-Regu

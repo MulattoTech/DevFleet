@@ -1,966 +1,965 @@
 # DevFleet source part 102
 
 Full-source UTF-8 byte interval [4696500, 4743000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 66cebbeae2462db896e51b24eff438a2394038a118d20212fcb0157c50f4de49
+Payload SHA-256: a61513c1c105ef8785bada7b833575c1df1fcc7eac6af6b5cfa6a246f269f4e7
 
 <!-- BEGIN SOURCE SLICE -->
-nce is not a local .devfleet script in {origin}: {relative}")
-    package_relative = candidate.relative_to(root.resolve()).as_posix()
-    return package_relative, candidate
+_project_runtime(slug, "vm", "small")
+
+    assert (project / ".devfleet" / "project.json").read_bytes() == original
 
 
-def executable_template_hook_closure(root: Path) -> dict[str, HookClosure]:
-    """Discover and validate metadata plus transitive local-script references."""
-    result: dict[str, HookClosure] = {}
-    for metadata in sorted((root / "templates").glob("*/.devfleet/template.json")):
-        data = json.loads(metadata.read_text(encoding="utf-8"))
-        template_dir = metadata.parent.parent
-        direct: set[str] = set()
-        pending: list[tuple[str, Path]] = []
-        for field in COMMAND_FIELDS:
-            command = data.get(field)
-            if not isinstance(command, str):
-                continue
-            for reference in _local_references(command, origin=metadata):
-                package_relative, candidate = _resolve_local(root, template_dir, reference, origin=metadata)
-                direct.add(package_relative)
-                pending.append((package_relative, candidate))
+@pytest.mark.parametrize("cleanup_fails,expected_state", [(False, "rolled-back"), (True, "rollback-incomplete")])
+def test_post_import_failure_uses_identity_evidence_and_records_cleanup_state(monkeypatch, tmp_path, cleanup_fails, expected_state):
+    slug = f"v125-post-import-{'bad' if cleanup_fails else 'good'}"
+    project = _legacy_project(slug, tmp_path / "templates")
+    monkeypatch.setattr(projects, "TEMPLATE_ROOT", tmp_path / "templates")
+    calls = _migration_mocks(monkeypatch, slug, source_running=True)
+    monkeypatch.setattr(projects, "stop_project", lambda value: calls.append(f"source-stop:{value}") or "stopped")
+    starts = {"count": 0}
 
-        all_hooks = set(direct)
-        while pending:
-            package_relative, script = pending.pop()
-            if not script.is_file() or script.is_symlink():
-                raise ValueError(f"referenced hook is not a regular file: {package_relative}")
-            for reference in _local_references(script.read_text(encoding="utf-8"), origin=script):
-                child_relative, child = _resolve_local(root, template_dir, reference, origin=script)
-                if child_relative not in all_hooks:
-                    all_hooks.add(child_relative)
-                    pending.append((child_relative, child))
-        missing = [rel for rel in sorted(all_hooks) if not (root / rel).is_file()]
-        if missing:
-            raise ValueError(f"referenced hook does not exist: {missing[0]}")
-        direct_set = frozenset(direct)
-        result[template_dir.name] = HookClosure(direct_set, frozenset(all_hooks - direct_set))
-    return result
+    def start(value):
+        starts["count"] += 1
+        meta = projects.load_meta(project);meta["lifecycle_status"] = "running";projects.atomic_json(projects.metadata_path(project), meta)
+        return "started"
 
+    monkeypatch.setattr(projects, "start_project", start)
+    monkeypatch.setattr(projects, "runtime_health", lambda *_: {"ok": False, "healthy": False})
+    captured = {}
 
-def executable_template_hooks(root: Path) -> set[str]:
-    """Return package-relative paths in the complete executable hook closure."""
-    return set().union(*(closure.executable for closure in executable_template_hook_closure(root).values()))
+    def cleanup(*args, **kwargs):
+        captured.update(kwargs)
+        if cleanup_fails:
+            raise RuntimeError("injected cleanup refusal")
+        return {"ok": True, "allocation_released": True}
+
+    monkeypatch.setattr(projects, "destroy_project_vm", cleanup)
+
+    with pytest.raises(RuntimeError, match="Destination runtime health check failed"):
+        projects.assign_project_runtime(slug, "vm", "small")
+
+    snapshots = sorted((SETTINGS.runtime_root / "runtime-migrations").glob(f"{slug}-*.json"))
+    state = json.loads(snapshots[-1].read_text())
+    assert state["state"] == expected_state
+    assert captured["cleanup_only"] is True and captured["cleanup_stage"] == "post-import"
+    assert captured["backup_sha256"] == "a" * 64
+    assert captured["local_archive_sha256"]
+    assert captured["import_archive_sha256"] == "b" * 64
 
 
-def hook_mode_manifest(root: Path) -> dict[str, object]:
-    closures = executable_template_hook_closure(root)
-    hooks = sorted(set().union(*(closure.executable for closure in closures.values())))
-    all_scripts = sorted(
-        p.relative_to(root).as_posix()
-        for p in (root / "templates").glob("*/.devfleet/*.sh")
-        if p.is_file()
-    )
-    return {
-        "executable_by_contract": hooks,
-        "count": len(hooks),
-        "classification": {
-            rel: "executable-by-contract" if rel in hooks else "non-executable-source/helper"
-            for rel in all_scripts
-        },
-        "templates": {
-            name: {"direct": sorted(c.direct), "transitive": sorted(c.transitive)}
-            for name, c in sorted(closures.items())
-        },
+def test_cleanup_client_requires_strong_evidence_and_passes_fixed_fields(monkeypatch):
+    with pytest.raises(ValueError, match="provider-aware"):
+        host_control.destroy_project_vm("demo-project", "demo-project", "DESTROY demo-project", cleanup_only=True, runtime_id="devfleet-project-demo-project", project_id=PROJECT_ID)
+    captured = {}
+    monkeypatch.setattr(host_control, "host_control_request", lambda operation, payload, *, runtime_id="": captured.update(operation=operation, payload=payload, runtime_id=runtime_id) or {"ok": True})
+    host_control.destroy_project_vm("demo-project", "demo-project", "DESTROY demo-project", backup_verified=True, backup_id="backup", backup_sha256="a" * 64, local_archive_sha256="b" * 64, import_archive_sha256="c" * 64, cleanup_only=True, cleanup_stage="post-import", runtime_id="devfleet-project-demo-project", project_id=PROJECT_ID)
+    assert captured["payload"]["cleanup_stage"] == "post-import"
+    assert captured["payload"]["local_archive_sha256"] == "b" * 64
+
+
+def test_host_agent_contract_covers_identity_safe_cleanup_ssh_pinning_and_cloud_init():
+    script = (Path(__file__).resolve().parents[1] / "windows" / "DevFleet-HostAgent.ps1").read_text(encoding="utf-8")
+    assert "permissions: !!str 0644" in script and "permissions: !!str 0755" in script
+    assert "/etc/devfleet/project-runtime.json" in script and "runtime_identity_verified=$true" in script
+    assert "cleanup_stage" in script and "import_archive_sha256" in script and "allocation_released=$true" in script
+    assert "HostKeyAlias $runtimeId" in script and "StrictHostKeyChecking yes" in script
+    assert "StrictHostKeyChecking no" not in script
+    assert "ssh_host_ed25519_key.pub" in script and "'id -un'" in script
+    assert "SshKnownHostsPath" in script and "Remove-ProjectVmSshAlias" in script
+
+```
+
+
+## FILE: source/tests/test_v126_dynamic_vm_hotfix.py
+
+SHA256: 3c793e1ea5beffe6b9bc87abd2de1f9ebd06abe38cb6b496fb66237e0551afe2 | Bytes: 5765 | Git mode: 100644
+
+```
+import json
+from dataclasses import replace
+from pathlib import Path
+
+import devfleet.host_control as host_control
+import devfleet.projects as projects
+from devfleet.core import SETTINGS
+
+
+PROJECT_ID = "12345678-1234-1234-1234-123456789abc"
+
+
+def _vm_project(tmp_path: Path, slug: str = "dynamic-address") -> Path:
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+    project = workspaces / slug
+    (project / ".devfleet").mkdir(parents=True)
+    (project / ".devfleet" / "project.json").write_text(json.dumps({
+        "schema_version": 3,
+        "managed_by": "devfleet",
+        "slug": slug,
+        "identity": slug,
+        "project_id": PROJECT_ID,
+        "runtime_isolation": "vm",
+        "runtime_type": "vm",
+        "runtime_provider": "multipass-host-agent",
+        "runtime_id": f"devfleet-project-{slug}",
+        "host_id": "MULATTOTECHBOX",
+        "runtime_address": "172.30.14.36",
+        "ssh_alias": f"devfleet-project-{slug}",
+        "lifecycle_status": "running",
+    }), encoding="utf-8")
+    return project
+
+
+def test_host_agent_dynamic_address_contract_and_bridge_filter():
+    script = (Path(__file__).resolve().parents[1] / "windows" / "DevFleet-HostAgent.ps1").read_text(encoding="utf-8")
+    assert "$script:AgentVersion = '2.5.0'" in script
+    assert "function Get-PrimaryProjectVmIpv4" in script
+    assert "function Refresh-ProjectVmConnectionState" in script
+    assert "172\\.(17|18|19)\\." in script
+    assert "'start' {Invoke-Multipass @('start',$vmName) 120|Out-Null;Wait-ProjectVmReady $vmName|Out-Null;return Refresh-ProjectVmConnectionState" in script
+    assert "'restart' {Invoke-Multipass @('restart',$vmName) 180|Out-Null;Wait-ProjectVmReady $vmName|Out-Null;return Refresh-ProjectVmConnectionState" in script
+
+
+def test_refresh_operation_uses_fixed_host_agent_route(monkeypatch):
+    captured = {}
+
+    def fake_request(operation, payload, *, runtime_id=""):
+        captured.update(operation=operation, payload=payload, runtime_id=runtime_id)
+        return {"ok": True, "address": "172.30.13.23"}
+
+    monkeypatch.setattr(host_control, "host_control_request", fake_request)
+    result = host_control.refresh_project_vm_connection_state("dynamic-address", "devfleet-project-dynamic-address", project_id=PROJECT_ID)
+    assert result["address"] == "172.30.13.23"
+    assert captured == {
+        "operation": "refresh-connection-state",
+        "payload": {"slug": "dynamic-address", "project_id": PROJECT_ID},
+        "runtime_id": "devfleet-project-dynamic-address",
     }
 
 
-def is_executable_template_hook(root: Path, path: Path) -> bool:
-    return path.relative_to(root).as_posix() in executable_template_hooks(root)
+def test_stopped_vm_runtime_health_is_read_only(monkeypatch, tmp_path):
+    project = _vm_project(tmp_path, "stopped-health")
+    monkeypatch.setattr(projects, "SETTINGS", replace(SETTINGS, workspaces=project.parent))
+    calls = []
+    monkeypatch.setattr(projects.VmRuntimeOperations, "inspect", staticmethod(lambda *_: calls.append("inspect") or {"ok": True, "info": {"state": "Stopped"}}))
+    monkeypatch.setattr(projects.VmRuntimeOperations, "health", staticmethod(lambda *_: (_ for _ in ()).throw(AssertionError("guest health must not run"))))
+
+    result = projects.runtime_health("stopped-health")
+
+    assert result["state"] == "stopped"
+    assert result["runtime_health"] == "not-run-stopped"
+    assert result["application_health"] == "not-run-stopped"
+    assert result["guest_exec_performed"] is False
+    assert calls == ["inspect"]
 
 
-if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: python hook_modes.py <source-root>")
-    print(json.dumps(hook_mode_manifest(Path(sys.argv[1]).resolve()), sort_keys=True))
+def test_running_vm_health_uses_guest_health_after_inspect(monkeypatch, tmp_path):
+    project = _vm_project(tmp_path, "running-health")
+    monkeypatch.setattr(projects, "SETTINGS", replace(SETTINGS, workspaces=project.parent))
+    calls = []
+    monkeypatch.setattr(projects.VmRuntimeOperations, "inspect", staticmethod(lambda *_: calls.append("inspect") or {"ok": True, "info": {"state": "Running"}}))
+    monkeypatch.setattr(projects.VmRuntimeOperations, "health", staticmethod(lambda *_: calls.append("health") or {"ok": True, "healthy": True, "state": "healthy"}))
+
+    result = projects.runtime_health("running-health")
+
+    assert result["healthy"] is True
+    assert calls == ["inspect", "health"]
+
+
+def test_open_workspace_blocks_address_only_legacy_refresh(monkeypatch, tmp_path):
+    project = _vm_project(tmp_path, "open-workspace")
+    monkeypatch.setattr(projects, "SETTINGS", replace(SETTINGS, workspaces=project.parent))
+    monkeypatch.setattr(projects.VmRuntimeOperations, "inspect", staticmethod(lambda *_: {"ok": True, "info": {"state": "Running"}}))
+    monkeypatch.setattr(projects.VmRuntimeOperations, "refresh", staticmethod(lambda *_: {"ok": True, "address": "172.30.13.23"}))
+
+    result = projects.open_workspace("open-workspace")
+    saved = json.loads((project / ".devfleet" / "project.json").read_text(encoding="utf-8"))
+
+    assert result["ok"] is False
+    assert result["launcher_uri"] == ""
+    assert result["readiness"]["ready"] is False
+    assert "ready" in result["error"].lower() or "proof" in result["error"].lower()
+    assert saved["runtime_address"] == "172.30.13.23"
+    assert saved["workspace_host"] == "172.30.13.23"
+
+
+def test_open_workspace_does_not_start_stopped_vm(monkeypatch, tmp_path):
+    project = _vm_project(tmp_path, "open-stopped")
+    monkeypatch.setattr(projects, "SETTINGS", replace(SETTINGS, workspaces=project.parent))
+    monkeypatch.setattr(projects.VmRuntimeOperations, "inspect", staticmethod(lambda *_: {"ok": True, "info": {"state": "Stopped"}}))
+    monkeypatch.setattr(projects.VmRuntimeOperations, "refresh", staticmethod(lambda *_: (_ for _ in ()).throw(AssertionError("refresh must not run for stopped VM"))))
+
+    result = projects.open_workspace("open-stopped")
+
+    assert result["ok"] is False
+    assert result["state"] == "stopped"
+    assert "Start it explicitly" in result["error"]
 
 ```
 
 
-## FILE: source/tools/migrate_config.py
+## FILE: source/tests/test_v127_project_ux.py
 
-SHA256: 38e5b6be41be5d9a22039b047a5489ab476dce3ea02d9217e3737d3f07e4bdaa | Bytes: 763 | Git mode: 100644
+SHA256: 20e0a996802df6a6af676e448ea497d6d032063de574581f705071330c2e2a62 | Bytes: 5661 | Git mode: 100644
 
 ```
-#!/usr/bin/env python3
-from __future__ import annotations
-import argparse,json
+"""Focused v1.2.7 project UX, readiness, and host-helper contracts."""
+
+import json
+import re
+from dataclasses import replace
 from pathlib import Path
+
+from devfleet import main
+from devfleet.projects import workspace_readiness
+
+
+def _no_redirect(client, method, url, **kwargs):
+    try:
+        return getattr(client, method)(url, follow_redirects=False, **kwargs)
+    except TypeError:
+        return getattr(client, method)(url, allow_redirects=False, **kwargs)
+
+
+def _signed_in():
+    from fastapi.testclient import TestClient
+
+    client = TestClient(main.app)
+    login = client.get('/login')
+    login_csrf = re.search(r'name="csrf_token" value="([^"]+)"', login.text).group(1)
+    assert _no_redirect(client, 'post', '/login', data={
+        'username': 'test', 'password': 'test-password', 'next': '/', 'csrf_token': login_csrf,
+    }).status_code == 303
+    index = client.get('/')
+    return client, re.search(r'name="csrf_token" value="([^"]+)"', index.text).group(1)
+
+
+def test_vm_readiness_requires_running_and_all_connection_proofs():
+    meta = {
+        'slug': 'demo', 'runtime_isolation': 'vm', 'runtime_provider': 'multipass-host-agent',
+        'lifecycle_status': 'stopped', 'runtime_address': '172.30.9.35', 'ssh_alias': 'devfleet-project-demo',
+        'ssh_host_key_pinned': True, 'ssh_authenticated': True, 'ssh_validation_passed': True,
+        'workspace_provisioned': True,
+    }
+    stopped = workspace_readiness('demo', meta)
+    assert stopped['ready'] is False and 'stopped' in stopped['reason']
+    meta['lifecycle_status'] = 'running'
+    running = workspace_readiness('demo', meta)
+    assert running['ready'] is True and running['status'] == 'ready'
+    meta['ssh_authenticated'] = False
+    assert workspace_readiness('demo', meta)['ready'] is False
+
+
+def test_project_action_requires_exact_origin_port_and_uses_lifecycle_idempotency(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, 'SETTINGS', replace(main.SETTINGS, workspaces=tmp_path))
+    project = tmp_path / 'demo'
+    (project / '.devfleet').mkdir(parents=True)
+    (project / '.devfleet' / 'project.json').write_text(json.dumps({
+        'schema_version': 3, 'managed_by': 'devfleet', 'project_id': '12345678-1234-1234-1234-123456789abc',
+        'slug': 'demo', 'identity': 'demo', 'runtime_provider': 'multipass-host-agent',
+        'runtime_id': 'devfleet-project-demo', 'host_id': 'devfleet-primary',
+    }), encoding='utf-8')
+    client, csrf = _signed_in()
+    calls = []
+    monkeypatch.setattr(main, 'submit_operation', lambda *args, **kwargs: calls.append(kwargs) or 'start-test-op')
+    response = _no_redirect(client, 'post', '/projects/demo/start', headers={
+        'Host': 'testserver:8787', 'Origin': 'http://testserver:80', 'Sec-Fetch-Site': 'same-origin',
+    }, data={'csrf_token': csrf})
+    assert response.status_code == 403
+    response = _no_redirect(client, 'post', '/projects/demo/start', headers={
+        'Host': 'testserver:8787', 'Origin': 'http://testserver:8787', 'Accept': 'application/json',
+    }, data={'csrf_token': csrf})
+    assert response.status_code == 202
+    assert calls[-1]['idempotency_key'] == 'project-action:demo:start'
+
+
+def test_migrated_vm_host_identity_is_local_without_disabling_failover_guard(tmp_path, monkeypatch):
+    project = tmp_path / 'demo'
+    (project / '.devfleet').mkdir(parents=True)
+    (project / '.devfleet' / 'project.json').write_text(json.dumps({
+        'schema_version': 3, 'managed_by': 'devfleet', 'project_id': '12345678-1234-1234-1234-123456789abc',
+        'slug': 'demo', 'identity': 'demo', 'runtime_provider': 'multipass-host-agent',
+        'runtime_id': 'devfleet-project-demo', 'host_id': 'MULATTOTECHBOX',
+    }), encoding='utf-8')
+    monkeypatch.setattr(main, 'SETTINGS', replace(
+        main.SETTINGS, workspaces=tmp_path, node_name='devfleet-primary',
+        expected_host_name='MULATTOTECHBOX',
+    ))
+    monkeypatch.setattr(main, 'safe_child', lambda _root, _slug: project)
+    monkeypatch.setattr(main, 'peer_status', lambda: (_ for _ in ()).throw(
+        AssertionError('local migrated VM must not require peer reachability'),
+    ))
+    main.require_safe_start('demo', False)
+
+
+def test_spa_action_delegation_and_resource_contracts():
+    root = Path(__file__).resolve().parents[1]
+    js = (root / 'app/static/app.js').read_text(encoding='utf-8')
+    html = (root / 'app/templates/index.html').read_text(encoding='utf-8')
+    assert 'window.__devfleetProjectActionsBound' in js
+    assert 'event.preventDefault();' in js and "'Idempotency-Key'" in js
+    assert 'initializeView();' in js and 'nodeFilter?.addEventListener' in js
+    assert 'resource_allocation(p)' in html and 'Not applicable — VM isolation' in html
+    assert 'Workspace readiness has not been verified' in html
+
+
+def test_vscode_helper_is_scoped_atomic_and_malformed_safe():
+    root = Path(__file__).resolve().parents[1]
+    helper = (root / 'windows/DevFleet-VSCode.ps1').read_text(encoding='utf-8')
+    agent = (root / 'windows/DevFleet-HostAgent.ps1').read_text(encoding='utf-8')
+    installer = (root / 'windows/Install-DevFleet-HostAgent.ps1').read_text(encoding='utf-8')
+    assert 'remote.SSH.remotePlatform' in helper
+    assert 'Copy($Path, $backup, $false)' in helper
+    assert 'Move-Item -LiteralPath $tmp -Destination $Path -Force' in helper
+    assert 'ConvertFrom-DevFleetJsonc' in helper and 'malformed user settings' in helper.lower() and 'replacement is written' in helper.lower()
+    assert 'Sync-DevFleetVsCodeRemotePlatform' in agent and 'VsCodeSettingsPaths' in installer
+    assert '[switch]$SkipFirewall' in installer and 'if (-not $SkipFirewall)' in installer
+
+```
+
+
+## FILE: source/tests/test_v128_container_workspace.py
+
+SHA256: f947532feee6305c049ffa245545e60dc389ae6507b44552914471ebabbf4ae9 | Bytes: 4527 | Git mode: 100644
+
+```
+import json
+from dataclasses import replace
+from pathlib import Path
+
+import devfleet.projects as projects
+from devfleet.core import SETTINGS
+
+
+def _project(tmp_path: Path, slug: str, metadata: dict) -> Path:
+    project = tmp_path / slug
+    (project / '.devfleet').mkdir(parents=True)
+    persisted = {
+        'schema_version': 3,
+        'managed_by': 'devfleet',
+        'project_id': '12345678-1234-1234-1234-123456789abc',
+        'slug': slug,
+        'identity': slug,
+        'runtime_provider': 'docker-compose',
+        'runtime_id': 'df_' + slug.replace('-', '_'),
+        'host_id': 'devfleet-primary',
+        **metadata,
+    }
+    (project / '.devfleet' / 'project.json').write_text(json.dumps(persisted), encoding='utf-8')
+    return project
+
+
+def test_container_workspace_opens_when_application_containers_are_stopped(monkeypatch, tmp_path):
+    _project(tmp_path, 'container-stopped', {
+        'slug': 'container-stopped',
+        'runtime_isolation': 'container',
+        'runtime_type': 'container',
+        'runtime_provider': 'docker-compose',
+        'lifecycle_status': 'stopped',
+        'runtime_status': 'stopped',
+        'workspace_host': 'devfleet-primary',
+        'ssh_alias': 'devfleet-primary',
+        'workspace_path': '/home/devrunner/workspaces/container-stopped',
+        'workspace_provisioned': True,
+        'workspace_accessible': True,
+    })
+    monkeypatch.setattr(projects, 'SETTINGS', replace(SETTINGS, workspaces=tmp_path, node_name='devfleet-primary'))
+    monkeypatch.setattr(projects, 'running', lambda *_: False)
+
+    result = projects.open_workspace('container-stopped')
+
+    assert result['ok'] is True
+    assert result['readiness']['ready'] is True
+    assert result['readiness']['application_running'] is False
+    assert result['ssh_alias'] == 'devfleet-primary'
+    assert 'ssh-remote+devfleet-primary' in result['launcher_uri']
+
+
+def test_container_workspace_blocks_when_primary_workspace_is_unavailable(monkeypatch, tmp_path):
+    _project(tmp_path, 'container-unavailable', {
+        'slug': 'container-unavailable',
+        'runtime_isolation': 'container',
+        'runtime_type': 'container',
+        'lifecycle_status': 'stopped',
+        'workspace_accessible': False,
+    })
+    monkeypatch.setattr(projects, 'SETTINGS', replace(SETTINGS, workspaces=tmp_path, node_name='devfleet-primary'))
+
+    result = projects.open_workspace('container-unavailable')
+
+    assert result['ok'] is False
+    assert 'not accessible' in result['error']
+
+
+def test_starting_dedicated_vm_cannot_open(monkeypatch, tmp_path):
+    _project(tmp_path, 'vm-starting', {
+        'slug': 'vm-starting',
+        'runtime_isolation': 'vm',
+        'runtime_type': 'vm',
+        'runtime_provider': 'multipass-host-agent',
+        'lifecycle_status': 'starting',
+        'runtime_id': 'devfleet-project-vm-starting',
+        'ssh_alias': 'devfleet-project-vm-starting',
+    })
+    monkeypatch.setattr(projects, 'SETTINGS', replace(SETTINGS, workspaces=tmp_path))
+    monkeypatch.setattr(projects.VmRuntimeOperations, 'inspect', staticmethod(lambda *_: {'info': {'state': 'Starting'}}))
+    monkeypatch.setattr(projects.VmRuntimeOperations, 'refresh', staticmethod(lambda *_: (_ for _ in ()).throw(AssertionError('refresh must wait for running state'))))
+
+    result = projects.open_workspace('vm-starting')
+
+    assert result['ok'] is False
+    assert result['state'] == 'starting'
+    assert 'starting' in result['error'].lower()
+
+
+def test_running_ssh_ready_dedicated_vm_opens(monkeypatch, tmp_path):
+    _project(tmp_path, 'vm-ready', {
+        'slug': 'vm-ready',
+        'runtime_isolation': 'vm',
+        'runtime_type': 'vm',
+        'runtime_provider': 'multipass-host-agent',
+        'lifecycle_status': 'running',
+        'runtime_id': 'devfleet-project-vm-ready',
+        'runtime_address': '172.30.9.35',
+        'ssh_alias': 'devfleet-project-vm-ready',
+        'ssh_host_key_pinned': True,
+        'ssh_authenticated': True,
+        'ssh_validation_passed': True,
+        'workspace_provisioned': True,
+    })
+    monkeypatch.setattr(projects, 'SETTINGS', replace(SETTINGS, workspaces=tmp_path))
+    monkeypatch.setattr(projects.VmRuntimeOperations, 'inspect', staticmethod(lambda *_: {'info': {'state': 'Running'}}))
+    monkeypatch.setattr(projects, 'running', lambda *_: True)
+
+    result = projects.open_workspace('vm-ready')
+
+    assert result['ok'] is True
+    assert result['readiness']['ready'] is True
+    assert result['ssh_alias'] == 'devfleet-project-vm-ready'
+
+```
+
+
+## FILE: source/tests/test_vault_metadata_identity_integration.py
+
+SHA256: f5340252c6b2410b726c4529c51ecef9ec9aab60b41c5ca3cef989573668b9d3 | Bytes: 3801 | Git mode: 100644
+
+```
+import importlib.util
+from importlib.machinery import SourceFileLoader
+import pytest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _broker():
+    pytest.importorskip("pwd", reason="Vault broker is POSIX-only")
+    spec = importlib.util.spec_from_loader("vault_broker", SourceFileLoader("vault_broker", str(ROOT / "linux" / "devfleet-vault-broker")))
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_broker_delegates_descriptor_safe_identity_to_installed_helper(monkeypatch, tmp_path):
+    broker = _broker()
+    calls = []
+
+    class Result:
+        returncode = 0
+
+    monkeypatch.setattr(broker.subprocess, "run", lambda command, **kwargs: calls.append((command, kwargs)) or Result())
+    assert broker._restored_identity_matches(tmp_path, "demo", "12345678-1234-1234-1234-123456789012")
+    command, kwargs = calls[-1]
+    assert command == ["python3", "-I", "/opt/devfleet/devfleet/metadata_io.py", "--identity", str(tmp_path), "demo", "12345678-1234-1234-1234-123456789012"]
+    assert kwargs["stdin"] is broker.subprocess.DEVNULL
+    assert kwargs["stdout"] is broker.subprocess.DEVNULL
+    assert kwargs["stderr"] is broker.subprocess.DEVNULL
+
+
+def test_broker_binds_transfer_identity_arguments(monkeypatch, tmp_path):
+    broker = _broker()
+    seen = []
+    monkeypatch.setattr(broker.subprocess, "run", lambda command, **kwargs: seen.append(command) or type("R", (), {"returncode": 0})())
+    assert broker._restored_identity_matches(tmp_path, "demo", "12345678-1234-1234-1234-123456789012", "12345678-1234-1234-1234-123456789013", "failover")
+    assert seen[0][-2:] == ["12345678-1234-1234-1234-123456789013", "failover"]
+
+
+def test_broker_rejects_standalone_canonical_action(monkeypatch):
+    broker = _broker()
+    with pytest.raises(broker.ProtocolError):
+        broker._parse_request({"action": "restore-canonical", "project": "demo", "project_id": "12345678-1234-1234-1234-123456789012"})
+    assert "restore-canonical" not in (ROOT / "linux" / "devfleet-vault-request").read_text(encoding="utf-8")
+
+
+def test_broker_attempts_quarantine_on_invalid_recovered_identity(monkeypatch, tmp_path):
+    broker = _broker()
+    broker.WORKSPACES = tmp_path
+    # Supply the external configuration precondition; never read real credentials.
+    monkeypatch.setattr(broker.os, "access", lambda path, mode: path == "/etc/devfleet/restic.env")
+    target = tmp_path / "demo-recovered-20260916-123456-deadbeef"
+    target.mkdir()
+    monkeypatch.setattr(broker, "_run_child", lambda *_args, **_kwargs: type("R", (), {"returncode": 0, "stdout": str(target) + "\n"})())
+    monkeypatch.setattr(broker, "_restored_identity_matches", lambda *_args: False)
+    quarantined = []
+    monkeypatch.setattr(broker, "_quarantine_invalid_copy", lambda path, project: quarantined.append((path, project)) or True)
+    result = broker._run_fixed_operation("restore-copy", "demo", "12345678-1234-1234-1234-123456789012")
+    assert result["ok"] is False and quarantined == [(target, "demo")]
+
+
+def test_restore_shell_uses_metadata_io_identity_cli():
+    script = (ROOT / "linux" / "devfleet-restore-project").read_text(encoding="utf-8")
+    assert "python3 -I /opt/devfleet/devfleet/metadata_io.py --identity" in script
+    assert "jq -e --arg slug" not in script
+
+
+def test_restore_shell_quarantines_unmarked_recovered_target_after_move():
+    script = (ROOT / "linux" / "devfleet-restore-project").read_text(encoding="utf-8")
+    assert 'if [[ "$mode" != --canonical ]] && ! workspace_identity_matches "$target"' in script
+    assert 'vault-recovery-invalid-$stamp-$project' in script
+    assert 'Recovered workspace identity failed; the unmarked copy was quarantined.' in script
+
+```
+
+
+## FILE: source/tests/test_verify_package_watchdog.py
+
+SHA256: 51cb998ef256cd58f3c6f63c63d23aa330566f0f4030c7f7237eb962967c3d4c | Bytes: 974 | Git mode: 100644
+
+```
 import sys
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'app'))
-from devfleet.configuration import migrate_cluster_config,validate_cluster_config
-p=argparse.ArgumentParser();p.add_argument('source',type=Path);p.add_argument('--output',type=Path);p.add_argument('--clean-install',action='store_true');p.add_argument('--write',action='store_true');a=p.parse_args();data=json.loads(a.source.read_text());out,changes=migrate_cluster_config(data,clean_install=a.clean_install);validate_cluster_config(out);print(json.dumps({'changes':changes,'configuration':out},indent=2));
-if a.write:(a.output or a.source).write_text(json.dumps(out,indent=2)+'\n')
+from pathlib import Path
+
+import pytest
+
+
+TOOLS = Path(__file__).parents[1] / "tools"
+sys.path.insert(0, str(TOOLS))
+from verify_package import run_bounded  # noqa: E402
+
+
+def test_verify_package_watchdog_allows_normal_success():
+    result = run_bounded([sys.executable, "-c", "print('ok')"], timeout=5, label="normal test")
+    assert result.returncode == 0
+    assert result.stdout.strip() == "ok"
+
+
+def test_verify_package_watchdog_reports_timeout():
+    with pytest.raises(RuntimeError, match="timeout"):
+        run_bounded([sys.executable, "-c", "import time; time.sleep(30)"], timeout=0.2, label="sleeping hook")
+
+
+def test_verify_package_watchdog_reports_output_flood():
+    with pytest.raises(RuntimeError, match="output limit"):
+        run_bounded(
+            [sys.executable, "-c", "import sys; sys.stdout.write('x' * 1000000); sys.stdout.flush()"],
+            timeout=5,
+            output_limit=4096,
+            label="flooding hook",
+        )
 
 ```
 
 
-## FILE: source/tools/release_fingerprint.py
+## FILE: source/tests/test_worktrees_and_v1_restore.py
 
-SHA256: f5440bfaeafb54607fa71d284ec6d63e115fe15e2de6e72bc7f1de644363cf6b | Bytes: 5826 | Git mode: 100644
+SHA256: 7cf54e4291b6c4df1063afb2ab5113bf35b78498c8f035ac1633d3c41d7c3b2f | Bytes: 3037 | Git mode: 100644
 
 ```
-"""Build a deterministic fingerprint for the shipping packaging closure."""
+import json,shutil,subprocess,uuid
+from pathlib import Path
+from devfleet import projects, workspace_archives
+from devfleet.core import SETTINGS
+
+ROOT=Path(__file__).resolve().parents[1]
+
+def git(cwd,*args):
+ return subprocess.run(['git',*args],cwd=cwd,text=True,capture_output=True,check=True)
+
+def test_git_worktree_project_creation(monkeypatch):
+ source=SETTINGS.workspaces/f'source-{uuid.uuid4().hex[:8]}'
+ dest_slug=f'worktree-{uuid.uuid4().hex[:8]}'
+ dest=SETTINGS.workspaces/dest_slug
+ source.mkdir(parents=True)
+ try:
+  git(source,'init');git(source,'config','user.name','DevFleet Test');git(source,'config','user.email','devfleet@example.invalid')
+  (source/'seed.txt').write_text('seed');git(source,'add','.');git(source,'commit','-m','seed');git(source,'branch','feature')
+  monkeypatch.setattr(projects,'TEMPLATE_ROOT',ROOT/'templates')
+  meta=projects.create_project(dest_slug,template='generic',worktree_source=source.name,worktree_branch='feature',use_ollama=False)
+  assert meta['worktree'] and (dest/'.git').is_file() and json.loads((dest/'.devfleet/project.json').read_text())['identity']==dest_slug
+ finally:
+  if dest.exists():subprocess.run(['git','worktree','remove','--force',str(dest)],cwd=source,check=False)
+  shutil.rmtree(source,ignore_errors=True);shutil.rmtree(dest,ignore_errors=True)
+
+def test_v1_project_without_schema2_metadata_remains_discoverable(tmp_path):
+ project=tmp_path/'legacy-project';project.mkdir()
+ meta=projects.load_meta(project)
+ assert meta['slug']=='legacy-project' and meta['template']=='existing'
+ assert meta['runtime_provider']=='docker-compose' and meta['resource_profile']=='standard'
+ assert meta['resource_limits']['memory_gb']==4.0 and meta['resource_limits']['cpus']==2.0
+
+def test_canonical_vault_restore_quarantines_existing_v1_copy():
+ text=(ROOT/'linux/devfleet-restore-project').read_text()
+ assert 'transfer-replaced-' in text and 'mv -T --no-clobber -- "$target" "$quarantine"' in text
+ assert 'Canonical restore could not quarantine the existing workspace.' in text
+
+def test_workspace_restore_failure_restores_previous_canonical(tmp_path,monkeypatch):
+ slug='rollback-fixture'
+ source=tmp_path/slug;source.mkdir();(source/'old.txt').write_text('old');(source/'.devfleet').mkdir();(source/'.devfleet/project.json').write_text(json.dumps({'slug':slug,'schema_version':2}))
+ archive=tmp_path/'backup.tar.gz'
+ workspace_archives.create_workspace_archive(source,slug,archive)
+ (source/'old.txt').write_text('original-must-survive')
+ original=workspace_archives.inspect_workspace
+ calls={'count':0}
+ def fail_after_promotion(path):
+  calls['count']+=1
+  if calls['count'] == 1:
+   raise RuntimeError('injected post-promotion failure')
+  return original(path)
+ monkeypatch.setattr(workspace_archives,'inspect_workspace',fail_after_promotion)
+ try:
+  workspace_archives.restore_workspace_archive(archive,source,slug)
+ except RuntimeError:
+  pass
+ else:
+  raise AssertionError('fault injection did not fail')
+ assert (source/'old.txt').read_text() == 'original-must-survive'
+
+```
+
+
+## FILE: source/tools/Build-InstallerSourceZip.ps1
+
+SHA256: 8b654e01e2be6f4faa42628be4168e9c349348a8dac29fa8cbf5d24bf86badcf | Bytes: 2625 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)][string]$SourceRoot,
+    [Parameter(Mandatory)][string]$InstallerRoot,
+    [Parameter(Mandatory)][string]$OutputPath
+)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+$sourceRootResolved = (Resolve-Path -LiteralPath $SourceRoot).Path
+$sourceCandidate = Join-Path $sourceRootResolved 'source'
+$source = if (Test-Path -LiteralPath (Join-Path $sourceCandidate 'VERSION')) { (Resolve-Path -LiteralPath $sourceCandidate).Path } else { $sourceRootResolved }
+$installer = (Resolve-Path -LiteralPath $InstallerRoot).Path
+$output = [IO.Path]::GetFullPath($OutputPath)
+New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($output)) | Out-Null
+if ([IO.File]::Exists($output)) { [IO.File]::Delete($output) }
+
+$excluded = @(
+    '\.git([\\/]|$)',
+    '(^|[\\/])(bin|obj|node_modules|__pycache__|\.pytest_cache|\.test-runtime|\.venv[^\\/]*|test-images|outputs|audit|dotnet-sdk)([\\/]|$)',
+    '(^|[\\/])DevFleet\.Setup([\\/])Payload([\\/]).*\.(tar\.gz|exe)$',
+    '\.(vhd|vhdx|avhdx|iso|exe)$'
+)
+$seen = @{}
+$zip = [IO.Compression.ZipFile]::Open($output, [IO.Compression.ZipArchiveMode]::Create)
+try {
+    foreach ($root in @($source, $installer)) {
+        foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File | Sort-Object FullName) {
+            $relative = ([Uri]::new(($root.TrimEnd('\') + '\')).MakeRelativeUri([Uri]::new($file.FullName)).ToString()).Replace('/','/')
+            if ($excluded | Where-Object { $relative -match $_ }) { continue }
+            $entryName = $relative
+            if ($seen.ContainsKey($entryName)) {
+                if ($root -eq $installer -and $entryName -eq 'dependencies.json') { continue }
+                $existingHash = $seen[$entryName]
+                $currentHash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+                if ($existingHash -ne $currentHash) { throw "Source archive collision with different contents: $entryName" }
+                continue
+            }
+            $entry = $zip.CreateEntry($entryName, [IO.Compression.CompressionLevel]::Optimal)
+            $input = [IO.File]::OpenRead($file.FullName); $outputStream = $entry.Open()
+            try { $input.CopyTo($outputStream) } finally { $outputStream.Dispose(); $input.Dispose() }
+            $seen[$entryName] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+        }
+    }
+} finally { $zip.Dispose() }
+$result = Get-Item -LiteralPath $output
+Write-Host "Installer source archive generated: $output ($($result.Length) bytes)"
+
+```
+
+
+## FILE: source/tools/Verify-Package.ps1
+
+SHA256: 823ed5d1f17bf4b46a0f8f306ff73833df46ab50221734ff5116a8cac7e84cec | Bytes: 3453 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([switch]$SkipChecksums)
+$ErrorActionPreference='Stop'
+$root=Split-Path -Parent $PSScriptRoot
+$required=@('VERSION','README-FIRST.md','Upgrade-DevFleet.ps1','DevFleet-v1.1.0-MIGRATION.md','DevFleet-v1.1.0-VALIDATION.md','DevFleet-v1.1.0-FILE-CHANGES.md','config\devfleet.config.json','config\ollama-profiles.json','client\Configure-SSH.ps1','client\Configure-DockerContext.ps1','windows\Migrate-Config.ps1','windows\Configure-Ollama.ps1','windows\Set-DevFleetDockerMode.ps1','linux\devfleet-switch-docker-mode','app\devfleet\main.py','docs\13-PERFORMANCE-TUNING.md')
+foreach($r in $required){if(-not(Test-Path(Join-Path $root $r))){throw "Missing $r"}}
+$errors=@();Get-ChildItem $root -Recurse -File|Where-Object Extension -in @('.ps1','.psm1')|ForEach-Object{$tokens=$null;$parse=$null;[void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$parse);foreach($e in $parse){$errors+="$($_.FullName):$($e.Extent.StartLineNumber): $($e.Message)"}};if($errors){throw "PowerShell parsing failed:`n$($errors -join "`n")"}
+$jsonErrors=@();Get-ChildItem $root -Recurse -File -Filter *.json|Where-Object{$_.FullName -notmatch '[\\/](\.git|\.pytest_cache|\.test-runtime|__pycache__|runtime-migrations)[\\/]'}|ForEach-Object{try{[void](Get-Content $_.FullName -Raw|ConvertFrom-Json)}catch{$jsonErrors+="$($_.FullName): $($_.Exception.Message)"}};if($jsonErrors){throw "JSON parsing failed:`n$($jsonErrors -join "`n")"}
+$version=(Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim();$cfg=Get-Content (Join-Path $root 'config\devfleet.config.json') -Raw|ConvertFrom-Json;if([int]$cfg.SchemaVersion -ne 2 -or [string]$cfg.PackageVersion -ne $version){throw "Default configuration is not schema 2 / v$version."}
+$transientPackageParts=@('.git','.pytest_cache','.test-runtime','__pycache__','runtime-migrations','outputs','audit-extract');$bad=Get-ChildItem $root -Recurse -File|Where-Object{$relative=$_.FullName.Substring($root.Length).TrimStart([char]92,[char]47).Replace([char]92,[char]47);$parts=$relative.Split('/');$generated=($parts|Where-Object{$_ -eq '.venv' -or $_ -like '.venv-*' -or $transientPackageParts -contains $_}).Count -gt 0;(-not $generated) -and $_.Length -eq 0 -and $_.Name -ne '__init__.py'};if($bad){throw "Unexpected empty files: $($bad.FullName -join ', ')"}
+if(-not $SkipChecksums){$manifest=Join-Path $root 'CHECKSUMS.sha256';foreach($line in Get-Content $manifest){if($line -notmatch '^([0-9a-f]{64})  (.+)$'){continue};$expected=$Matches[1];$rel=$Matches[2].Replace('/','\');$path=Join-Path $root $rel;if(-not(Test-Path $path)){throw "Missing checksum target $rel"};$actual=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant();if($actual -ne $expected){$bytes=[IO.File]::ReadAllBytes($path);$hasLoneCr=$false;for($i=0;$i -lt $bytes.Length;$i++){if($bytes[$i] -eq 13 -and ($i+1 -ge $bytes.Length -or $bytes[$i+1] -ne 10)){$hasLoneCr=$true;break}};if(-not $hasLoneCr -and ($bytes -contains 13)){$normalized=[Text.Encoding]::UTF8.GetBytes(([Text.Encoding]::UTF8.GetString($bytes) -replace "`r`n", "`n"));$sha=[Security.Cryptography.SHA256]::Create();try{$actual=([BitConverter]::ToString($sha.ComputeHash($normalized))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}}};if($actual -ne $expected){throw "Checksum mismatch $rel"}}}
+Write-Host 'Package structure, PowerShell AST syntax, JSON/schema, and checksums verified.' -ForegroundColor Green
+
+```
+
+
+## FILE: source/tools/build_release.py
+
+SHA256: 59e38747a1c410ea7710b522c5bb2dab73adb841e892503c87114aed97dc5712 | Bytes: 8017 | Git mode: 100644
+
+```
+"""Reproducible DevFleet TAR and portable bundle builder."""
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
-import os
+import re
+import stat
+import tarfile
+import zipfile
 from pathlib import Path
 
-try:
-    from hook_modes import executable_template_hooks
-except ModuleNotFoundError:  # imported as tools.release_fingerprint in tests
-    from .hook_modes import executable_template_hooks
+from hook_modes import executable_template_hooks, hook_mode_manifest
 
-
-TRANSIENT_PARTS = {
-    ".git",
-    ".pytest_cache",
-    ".test-runtime",
-    "__pycache__",
-    "bin",
-    "obj",
-    "outputs",
-    "audit",
-    "Payload",
-}
+TRANSIENT = {".git", ".pytest_cache", ".test-runtime", "__pycache__", "runtime-migrations"}
 
 
 def is_transient_part(part: str) -> bool:
-    return part in TRANSIENT_PARTS or part.startswith(".venv")
+    return part in TRANSIENT or part.startswith(".venv")
+
+
+def files(root: Path) -> list[Path]:
+    candidates = (
+        p
+        for p in root.rglob("*")
+        if p.is_file()
+        and not any(is_transient_part(part) for part in p.relative_to(root).parts)
+    )
+    return sorted(
+        candidates,
+        key=lambda path: path.relative_to(root).as_posix().encode("utf-8"),
+    )
 
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
     return digest.hexdigest()
 
 
-def _included(path: Path, root: Path) -> bool:
-    relative = path.relative_to(root)
-    return path.is_file() and not any(is_transient_part(part) for part in relative.parts)
+def write_checksums(root: Path) -> None:
+    manifest = root / "CHECKSUMS.sha256"
+    lines = [f"{sha256(path)}  {path.relative_to(root).as_posix()}" for path in files(root) if path != manifest]
+    # Keep the tracked manifest byte-identical to a Git archive on Windows;
+    # newline translation here would make a frozen commit unreproducible.
+    manifest.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
-def _entries(root: Path, label: str, *, executable_by_contract: set[str] | frozenset[str] = frozenset()) -> list[dict[str, object]]:
-    result: list[dict[str, object]] = []
-    for path in sorted(root.rglob("*")):
-        if not _included(path, root):
-            continue
-        relative = path.relative_to(root).as_posix()
-        result.append(
-            {
-                "root": label,
-                "path": relative,
-                "bytes": path.stat().st_size,
-                "sha256": sha256(path),
-                # This is the mode written into the canonical TAR/portable
-                # payload, never the incidental mode of the checkout host.
-                "mode": "0755" if relative in executable_by_contract else "0644",
-            }
-        )
-    return result
+def build_tar(root: Path, output: Path) -> set[str]:
+    hooks = executable_template_hooks(root)
+    with output.open("wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed, tarfile.open(fileobj=compressed, mode="w") as archive:
+        for path in files(root):
+            rel = path.relative_to(root).as_posix()
+            info = archive.gettarinfo(str(path), arcname=rel)
+            info.mode = 0o755 if rel in hooks else 0o644
+            info.mtime = 0; info.uid = 0; info.gid = 0; info.uname = "root"; info.gname = "root"
+            with path.open("rb") as stream:
+                archive.addfile(info, stream)
+    return hooks
 
 
-def _tooling_fingerprint(source_root: Path) -> dict[str, object]:
-    """Fingerprint non-shipping release/audit tooling separately.
-
-    The shipping release identity intentionally excludes repository-level tooling and
-    automation so a review-bundle or harness change cannot silently invalidate a
-    byte-identical application candidate.  Tooling still receives its own identity.
-    """
-    workspace = source_root.parent
-    roots = [(workspace / "tools", "tools"), (workspace / "automation", "automation")]
-    entries = [entry for root, label in roots if root.exists() for entry in _entries(root, label)]
-    canonical = {"schemaVersion": 1, "toolingInputs": entries}
-    serialized = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return {**canonical, "toolingFingerprintId": hashlib.sha256(serialized.encode("utf-8")).hexdigest()}
-
-
-def build_fingerprint(
-    source_root: Path,
-    installer_root: Path,
-    artifacts: dict[str, Path] | None = None,
-    *,
-    source_executable_paths: set[str] | None = None,
-) -> dict[str, object]:
-    source_root = source_root.resolve()
-    installer_root = installer_root.resolve()
-    version = (source_root / "VERSION").read_text(encoding="utf-8").strip()
-    installer_version = (installer_root / "INSTALLER_VERSION").read_text(encoding="utf-8").strip()
-    executable_paths = executable_template_hooks(source_root) if source_executable_paths is None else set(source_executable_paths)
-    unknown_executables = sorted(executable_paths - {path.relative_to(source_root).as_posix() for path in source_root.rglob("*") if _included(path, source_root)})
-    if unknown_executables:
-        raise ValueError(f"shipping mode contract names a missing file: {unknown_executables[0]}")
-    entries = _entries(source_root, "source", executable_by_contract=executable_paths) + _entries(installer_root, "installer-source")
-    artifact_entries: list[dict[str, object]] = []
-    for name, path in sorted((artifacts or {}).items()):
-        if not path.exists():
-            continue
-        artifact_entries.append({"name": name, "bytes": path.stat().st_size, "sha256": sha256(path)})
-    canonical = {
-        "schemaVersion": 2,
-        "devfleetVersion": version,
-        "installerVersion": installer_version,
-        "shippingModeContract": {
-            "schemaVersion": 1,
-            "defaultMode": "0644",
-            "executableMode": "0755",
-            "executableByContract": sorted(executable_paths),
-        },
-        "shippingInputs": entries,
-        "artifacts": artifact_entries,
+def portable_metadata(entries: list[tuple[str, bytes]], version: str, nested_tar: Path, root: Path) -> list[tuple[str, bytes]]:
+    nested_tar_name = nested_tar.name
+    current_source = [("source/" + path.relative_to(root).as_posix(), path.read_bytes()) for path in files(root)]
+    source_names = [name for name, _ in current_source]
+    source_hashes = [{"path": name, "sha256": sha256_bytes(data)} for name, data in current_source]
+    manifest = {"version": version, "file_count": len(source_names), "files": source_hashes}
+    canonical_docs = {
+        "README.md": (
+            f"# DevFleet Safe Remote Development v{version}\n\n"
+            f"This is the clean-room v{version} portable bundle. The TAR is the authoritative POSIX-mode artifact.\n\n"
+            f"Verify `CHECKSUMS.sha256`, then run `python source/tools/verify_package.py --archive {nested_tar_name}` from the extracted bundle root.\n"
+        ).encode(),
+        "CLEAN-ROOM-VERIFICATION.md": (
+            f"# DevFleet {version} clean-room verification\n\n"
+            "Extract this ZIP into a fresh directory. From the extracted bundle root, run:\n\n"
+            f"`python source/tools/verify_package.py --archive {nested_tar_name}`\n\n"
+            "The command must complete successfully before the portable package is accepted.\n"
+        ).encode(),
+        "DIRECTORY-LAYOUT.md": (
+            f"# DevFleet {version} portable layout\n\n"
+            f"`source/` contains the complete canonical source. `{nested_tar_name}` preserves the release source and trusted POSIX hook modes.\n"
+        ).encode(),
     }
-    serialized = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return {
-        **canonical,
-        "releaseFingerprintId": hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
-        "toolingFingerprint": _tooling_fingerprint(source_root),
-    }
+    rebuilt: list[tuple[str, bytes]] = []
+    for name, data in entries:
+        if name.startswith("devfleet-v1.2.") and name.endswith(".tar.gz"):
+            continue
+        if name.startswith("source/"):
+            continue
+        if name in {"portable-codebase-manifest.json", "portable-codebase-sha256.txt", "source-tree-manifest.json", "source-tree-sha256.txt"}:
+            continue
+        if name in canonical_docs:
+            continue
+        rebuilt.append((name, data))
+    rebuilt.extend(canonical_docs.items())
+    rebuilt.append((nested_tar_name, nested_tar.read_bytes()))
+    rebuilt.extend(current_source)
+    rebuilt.append(("portable-codebase-manifest.json", json.dumps(manifest, indent=2).encode()))
+    rebuilt.append(("source-tree-manifest.json", json.dumps({"version": version, "file_count": len(source_names), "files": source_hashes}, indent=2).encode()))
+    rebuilt.append(("source-tree-sha256.txt", ("\n".join(f"{item['sha256']}  {item['path']}" for item in source_hashes) + "\n").encode()))
+    rebuilt.append(("portable-codebase-sha256.txt", ("\n".join(f"{sha256_bytes(data)}  {name}" for name, data in sorted(rebuilt, key=lambda item: item[0].encode("utf-8")) if name not in {"portable-codebase-sha256.txt"}) + "\n").encode()))
+    _assert_portable_instruction_identity(rebuilt, version, nested_tar_name)
+    return rebuilt
 
 
-def main() -> int:
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _assert_portable_instruction_identity(entries: list[tuple[str, bytes]], version: str, nested_tar_name: str) -> None:
+    instruction_names = {"README.md", "CLEAN-ROOM-VERIFICATION.md", "DIRECTORY-LAYOUT.md"}
+    stale_version = re.compile(r"(?:DevFleet\s+v|devfleet-v)(\d+\.\d+\.\d+)")
+    for name, data in entries:
+        if name not in instruction_names:
+            continue
+        text = data.decode("utf-8", errors="strict")
+        for match in stale_version.finditer(text):
+            context = text[max(0, match.start() - 80):match.end() + 80].lower()
+            if match.group(1) != version and "historical" not in context:
+                raise ValueError(f"Portable release instruction {name} contains an unapproved prior release identity.")
+        if name == "CLEAN-ROOM-VERIFICATION.md" and nested_tar_name not in text:
+            raise ValueError(f"Portable clean-room instructions do not name {nested_tar_name}.")
+
+
+def main() -> None:
+    global args, root
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source-root", type=Path, required=True)
-    parser.add_argument("--installer-root", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--artifact", action="append", default=[], metavar="NAME=PATH")
+    parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--old-portable", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
-    artifacts = {}
-    for value in args.artifact:
-        name, separator, raw_path = value.partition("=")
-        if not separator or not name or not raw_path:
-            parser.error(f"artifact must be NAME=PATH: {value}")
-        artifacts[name] = Path(raw_path)
-    output = build_fingerprint(args.source_root, args.installer_root, artifacts)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = args.output.with_suffix(args.output.suffix + ".tmp")
-    temporary.write_text(json.dumps(output, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(temporary, args.output)
-    print(output["releaseFingerprintId"])
-    return 0
+    root = args.source.resolve()
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    (root / "CHECKSUMS.sha256").unlink(missing_ok=True)
+    write_checksums(root)
+    version = (root / "VERSION").read_text(encoding="utf-8").strip()
+    tar = args.output_dir / f"devfleet-v{version}.tar.gz"
+    hooks = build_tar(root, tar)
+    with zipfile.ZipFile(args.old_portable) as source_zip:
+        entries = [(item.filename, source_zip.read(item.filename)) for item in source_zip.infolist() if not item.is_dir()]
+    portable = args.output_dir / f"DevFleet-v{version}-Portable-Codebase-Verified-r1.zip"
+    rebuilt = portable_metadata(entries, version, tar, root)
+    with zipfile.ZipFile(portable, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as out:
+        for name, data in sorted(rebuilt, key=lambda item: item[0].encode("utf-8")):
+            info = zipfile.ZipInfo(name)
+            mode = 0o755 if name.removeprefix("source/") in hooks else 0o644
+            info.create_system = 3  # Unix origin; required for standard unzip mode restoration.
+            info.external_attr = (stat.S_IFREG | mode) << 16
+            out.writestr(info, data)
+    manifest = hook_mode_manifest(root); manifest.update({"version": version, "mode": "0755"})
+    (args.output_dir / "hook-mode-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({"tar": str(tar), "portable": str(portable), "hook_count": len(hooks), "tar_sha256": sha256(tar), "portable_sha256": sha256(portable)}, indent=2))
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
 
 ```
 
 
-## FILE: source/tools/validate_ai_audit_bundle.py
+## FILE: source/tools/check_dependency_advisories.py
 
-SHA256: d9f46d511192d552013ce289ffe7547bb3befd1d9c65d40b61038e979e93a70c | Bytes: 26859 | Git mode: 100644
+SHA256: 8901ed5ad3d19846030f2c6b8af5f03274277ef76b641b540a127d9994906185 | Bytes: 11275 | Git mode: 100644
 
 ```
-"""Validate the universal DevFleet AI audit bundle.
-
-This validator is intentionally independent of the PowerShell packager.  It
-extracts the ZIP into a temporary directory whose name contains spaces and
-checks the archive's source closure, hashes, modes, candidate tuple, and
-security exclusions.  It does not trust a completeness claim made by the
-bundle manifest.
-"""
+"""Reproducible OSV freshness gate for the exact DevFleet dependency lock."""
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
-import os
-import re
-import shutil
-import stat
-import subprocess
 import sys
-import tempfile
-import zipfile
-from pathlib import Path, PurePosixPath
-from typing import Any
-
-
-REQUIRED = {
-    "AUDIT-README.md",
-    "AUDIT-MANIFEST.json",
-    "CURRENT-CANDIDATE.json",
-    "AUDIT-TREE.txt",
-    "SHA256SUMS.txt",
-    "SOURCE-MODES.json",
-    "finalization-state.json",
-    "outputs/final-artifact-hashes.json",
-    "outputs/release-fingerprint.json",
-    "outputs/tooling-fingerprint-current.json",
-    "outputs/dependency-advisory-gate.json",
-}
-RELEASE_REQUIRED = REQUIRED | {"outputs/independent-osv-reconciliation.json"}
-FORBIDDEN_PARTS = {
-    ".git",
-    ".venv",
-    "node_modules",
-    "bin",
-    "obj",
-    "__pycache__",
-    ".pytest_cache",
-    "build",
-    "dist",
-    "vhdx",
-    "snapshots",
-    "browser-profile",
-}
-ALLOWED_OUTPUT_METADATA = {
-    "outputs/final-artifact-hashes.json",
-    "outputs/release-fingerprint.json",
-    "outputs/tooling-fingerprint-current.json",
-    "outputs/dependency-advisory-gate.json",
-    "outputs/independent-osv-reconciliation.json",
-}
-SECRET_PATTERNS = (
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-    re.compile(r"(?i)\b(?:ghp|github_pat|tskey)-[A-Za-z0-9_:-]{20,}"),
-    re.compile(r"(?i)\bAKIA[0-9A-Z]{16}\b"),
-    re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~-]{24,}"),
-)
-FAILED_ATTEMPT_SNAPSHOT = "audit/luna-high-failed-attempt-freeze-20260831T002237512571Z.json"
-FAILED_ATTEMPT_BLOCKER = "REPLACEMENT_CANDIDATE_BINDING_MISMATCH"
-FAILED_ATTEMPT_CURRENT_RECORDS = (
-    "evidence/CURRENT-PROOF.json",
-    "audit/attemptedReplacementCandidate.json",
-    "audit/candidateBindingFailure.json",
-)
-FAILED_ATTEMPT_INVENTORY_FILES = ("EVIDENCE-MODES.json", "EVIDENCE-SHA256SUMS.txt")
-
-
-def _json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8-sig"))
-
-
-def _sha(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _validate_failed_attempt_records(extracted: Path, names: set[str], manifest: dict[str, Any]) -> None:
-    missing = sorted((set(FAILED_ATTEMPT_CURRENT_RECORDS) | set(FAILED_ATTEMPT_INVENTORY_FILES)) - names)
-    if missing:
-        raise ValueError(f"failed-attempt diagnostic blocker records are missing: {missing}")
-    proof = _json(extracted / "evidence/CURRENT-PROOF.json")
-    attempted = _json(extracted / "audit/attemptedReplacementCandidate.json")
-    failure = _json(extracted / "audit/candidateBindingFailure.json")
-    if str(proof.get("status") or "") != "NOT_OBSERVED" or str(proof.get("outcome") or "") != "NOT_OBSERVED" or str(proof.get("blockerCode") or "") != FAILED_ATTEMPT_BLOCKER:
-        raise ValueError("failed-attempt CURRENT-PROOF is not the current NOT_OBSERVED blocker record")
-    expected = {
-        "attemptedCommit": "21752fc0e50978183322204c523b40947d073aa0",
-        "commitShippingInputIdentity": "6e0bac4b4eebc83cdcd9eddda2008607ba15c8835e5c72a931792f5b83c653f4",
-        "buildTimeShippingInputIdentity": "3a65fd54d70fe05565ac3a32f73100ca2c81a77a4008feb361f99f229f025f8a",
-    }
-    if attempted.get("snapshotPath") != FAILED_ATTEMPT_SNAPSHOT or attempted.get("blockerCode") != FAILED_ATTEMPT_BLOCKER or any(attempted.get(key) != value for key, value in expected.items()):
-        raise ValueError("attemptedReplacementCandidate does not bind the failed-attempt snapshot and identities")
-    if attempted.get("artifactTupleValid") is not True or attempted.get("artifactTupleMatchesCandidate") is not False or attempted.get("buildInvocationCount") != 1 or attempted.get("signingInvocationCount") != 1:
-        raise ValueError("attemptedReplacementCandidate one-shot/artifact state is contradictory")
-    if failure.get("blockerCode") != FAILED_ATTEMPT_BLOCKER or any(failure.get(key) != value for key, value in expected.items()) or failure.get("artifactTupleValid") is not True or failure.get("artifactTupleMatchesCandidate") is not False:
-        raise ValueError("candidateBindingFailure contradicts attempted replacement evidence")
-    if failure.get("currentProofOutcome") != "NOT_OBSERVED" or failure.get("fullReleasePassed") is not False or failure.get("releaseEligible") is not False:
-        raise ValueError("candidateBindingFailure permits an unobserved proof or release")
-    inventory = manifest.get("evidenceInventory")
-    if not isinstance(inventory, list):
-        raise ValueError("failed-attempt diagnostic manifest is missing evidenceInventory")
-    inventory_by_path = {str(row.get("path")): row for row in inventory if isinstance(row, dict)}
-    if set(inventory_by_path) != set(FAILED_ATTEMPT_CURRENT_RECORDS):
-        raise ValueError("failed-attempt evidenceInventory does not contain exactly the required blocker records")
-    for relative in FAILED_ATTEMPT_CURRENT_RECORDS:
-        row = inventory_by_path[relative]
-        path = extracted / Path(*relative.split("/"))
-        if not path.is_file() or int(row.get("bytes", -1)) != path.stat().st_size or str(row.get("sha256") or "").lower() != _sha(path) or row.get("mode") != "0644":
-            raise ValueError(f"failed-attempt evidenceInventory hash/mode mismatch: {relative}")
-    modes = _json(extracted / "EVIDENCE-MODES.json")
-    mode_by_path = {str(row.get("path")): row for row in modes if isinstance(row, dict)} if isinstance(modes, list) else {}
-    if set(mode_by_path) != set(FAILED_ATTEMPT_CURRENT_RECORDS) or any(row.get("posixMode") != 420 or row.get("mode") != "0644" for row in mode_by_path.values()):
-        raise ValueError("failed-attempt evidence mode inventory is missing or contradictory")
-    hash_rows = {}
-    for line in (extracted / "EVIDENCE-SHA256SUMS.txt").read_text(encoding="utf-8-sig").splitlines():
-        if line.strip():
-            digest, relative = line.split("  ", 1)
-            hash_rows[relative] = digest.lower()
-    if set(hash_rows) != set(FAILED_ATTEMPT_CURRENT_RECORDS) or any(hash_rows[path] != inventory_by_path[path]["sha256"] for path in FAILED_ATTEMPT_CURRENT_RECORDS):
-        raise ValueError("failed-attempt evidence hash inventory is missing or contradictory")
-
-
-def _safe_name(name: str) -> str:
-    normalized = name.replace("\\", "/")
-    pure = PurePosixPath(normalized)
-    if not normalized or pure.is_absolute() or ".." in pure.parts:
-        raise ValueError(f"unsafe ZIP entry: {name}")
-    if any(part.lower() in FORBIDDEN_PARTS for part in pure.parts):
-        raise ValueError(f"transient or generated ZIP entry: {name}")
-    if "outputs" in {part.lower() for part in pure.parts} and normalized not in ALLOWED_OUTPUT_METADATA:
-        raise ValueError(f"non-metadata output ZIP entry: {name}")
-    if pure.name.lower().endswith((".pyc", ".pyo")):
-        raise ValueError(f"compiled Python ZIP entry: {name}")
-    return str(pure)
-
-
-def _extract(archive: Path, destination: Path) -> list[str]:
-    names: list[str] = []
-    with zipfile.ZipFile(archive) as bundle:
-        for info in bundle.infolist():
-            name = _safe_name(info.filename)
-            if name in names:
-                raise ValueError(f"duplicate ZIP entry: {name}")
-            names.append(name)
-            file_type = (info.external_attr >> 16) & stat.S_IFMT(0o170000)
-            if file_type in (stat.S_IFLNK, stat.S_IFCHR, stat.S_IFBLK, stat.S_IFIFO):
-                raise ValueError(f"unsupported special ZIP entry: {name}")
-            target = destination / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if not info.is_dir():
-                with bundle.open(info) as source, target.open("xb") as output:
-                    shutil.copyfileobj(source, output)
-                mode = (info.external_attr >> 16) & 0o777
-                if mode and os.name != "nt":
-                    target.chmod(mode)
-    return names
-
-
-def _run_optional(command: list[str], cwd: Path, timeout: int = 120) -> dict[str, Any]:
-    try:
-        completed = subprocess.run(command, cwd=cwd, capture_output=True, text=True, timeout=timeout)
-    except FileNotFoundError:
-        return {"status": "SKIPPED", "reason": f"tool unavailable: {command[0]}"}
-    except subprocess.TimeoutExpired:
-        return {"status": "FAIL", "reason": f"timeout: {' '.join(command)}"}
-    if completed.returncode:
-        return {
-            "status": "FAIL",
-            "reason": f"exit {completed.returncode}: {(completed.stderr or completed.stdout)[-2000:]}",
-        }
-    return {"status": "PASS", "command": command, "stdout": completed.stdout, "stderr": completed.stderr}
-
-
-def _run_candidate_validator(command: list[str], cwd: Path, mode: str) -> dict[str, Any]:
-    """Run and preserve the candidate-bound validator's structured result."""
-    result = _run_optional(command, cwd)
-    if result.get("status") != "PASS":
-        return result
-    output = str(result.pop("stdout", ""))
-    result.pop("stderr", None)
-    if not output.strip():
-        raise ValueError("candidate coherence check returned no structured JSON")
-    try:
-        structured = json.loads(output)
-    except json.JSONDecodeError as exc:
-        raise ValueError("candidate coherence check returned malformed JSON") from exc
-    if not isinstance(structured, dict) or set(structured) == set():
-        raise ValueError("candidate coherence check returned a non-object JSON result")
-    status = structured.get("status")
-    if mode == "diagnostic":
-        if status != "PASS_WITH_BLOCKER" or structured.get("releaseEligible") is not False or not isinstance(structured.get("blockerCode"), str) or not structured["blockerCode"]:
-            raise ValueError("diagnostic candidate coherence result was downgraded or contradictory")
-    elif status != "PASS" or structured.get("blockerCode"):
-        raise ValueError("release candidate coherence result contains a blocker")
-    return structured
-
-
-def validate(archive: Path, report_path: Path | None = None, mode: str = "release") -> dict[str, Any]:
-    if mode not in {"diagnostic", "release"}:
-        raise ValueError("validator mode must be diagnostic or release")
-    archive = archive.resolve()
-    if not archive.is_file():
-        raise FileNotFoundError(archive)
-    temp_parent = Path(tempfile.mkdtemp(prefix="DevFleet AI Audit "))
-    extracted = temp_parent / "bundle with spaces"
-    extracted.mkdir()
-    try:
-        names = _extract(archive, extracted)
-        name_set = set(names)
-        required = RELEASE_REQUIRED if mode == "release" else REQUIRED
-        missing = sorted(required - name_set)
-        if missing:
-            raise ValueError(f"required audit files are missing: {missing}")
-        if "source" not in name_set and not any(name.startswith("source/") for name in names):
-            raise ValueError("shipping source is missing")
-        if "installer-source" not in name_set and not any(name.startswith("installer-source/") for name in names):
-            raise ValueError("installer source is missing")
-        # Load the manifest before any failed-attempt record consumer.  The
-        # evidence inventory is part of the failed-attempt contract, so a
-        # malformed or missing manifest must fail closed before validation.
-        manifest = _json(extracted / "AUDIT-MANIFEST.json")
-        failed_attempt = FAILED_ATTEMPT_SNAPSHOT in name_set
-        if failed_attempt and mode == "release":
-            raise ValueError("release mode rejects failed replacement-attempt evidence")
-        if failed_attempt and mode == "diagnostic":
-            _validate_failed_attempt_records(extracted, name_set, manifest)
-        if not any(name.startswith("automation/release-e2e/") for name in names):
-            raise ValueError("release-E2E automation source is missing")
-
-        candidate = _json(extracted / "CURRENT-CANDIDATE.json")
-        attempted_commit = str(candidate.get("candidateCommit") or candidate.get("candidateGitCommit") or "").lower()
-        if mode == "diagnostic" and attempted_commit == "21752fc0e50978183322204c523b40947d073aa0" and not failed_attempt:
-            raise ValueError("failed replacement-attempt snapshot is mandatory for this diagnostic candidate")
-        required_tuple = (
-            "devfleetVersion",
-            "installerVersion",
-            "gitCommit",
-            "shippingInputIdentity",
-            "candidateShippingInputIdentity",
-            "candidateCommit",
-            "releaseFingerprintId",
-            "toolingFingerprintId",
-            "exeSha256",
-            "tarSha256",
-            "portableSha256",
-            "installerSourceSha256",
-            "candidateIsCurrent",
-            "sourceChangedSinceCandidate",
-            "rebuildRequired",
-        )
-        for key in required_tuple:
-            if key not in candidate:
-                raise ValueError(f"current candidate is missing {key}")
-        if candidate["devfleetVersion"] != manifest.get("devfleetVersion"):
-            raise ValueError("manifest and current candidate disagree on DevFleet version")
-        if candidate["installerVersion"] != manifest.get("installerVersion"):
-            raise ValueError("manifest and current candidate disagree on installer version")
-        if candidate["sourceChangedSinceCandidate"] and not candidate["rebuildRequired"]:
-            raise ValueError("sourceChangedSinceCandidate requires rebuildRequired")
-        if candidate["rebuildRequired"] and candidate["candidateIsCurrent"]:
-            raise ValueError("rebuildRequired candidate cannot be current")
-        for key in ("releaseFingerprintId", "toolingFingerprintId"):
-            if not re.fullmatch(r"[0-9a-f]{64}", str(candidate[key])):
-                raise ValueError(f"malformed {key}")
-            if str(candidate[key]) == "0" * 64:
-                raise ValueError(f"zero {key} is not a current identity")
-        if not re.fullmatch(r"[0-9a-fA-F]{40}", str(candidate["candidateCommit"])) or str(candidate["candidateCommit"]).lower() == "0" * 40:
-            raise ValueError("malformed candidateCommit")
-        for key in ("shippingInputIdentity", "candidateShippingInputIdentity"):
-            if not re.fullmatch(r"[0-9a-f]{64}", str(candidate[key])) or str(candidate[key]) == "0" * 64:
-                raise ValueError(f"malformed {key}")
-        for key in ("exeSha256", "tarSha256", "portableSha256", "installerSourceSha256"):
-            if not re.fullmatch(r"[0-9a-f]{64}", str(candidate[key])):
-                raise ValueError(f"malformed candidate artifact hash: {key}")
-        artifact_names = {
-            "exeSha256": {"exe", "installer", "installerexe"},
-            "tarSha256": {"tar", "payload"},
-            "portableSha256": {"portable"},
-            "installerSourceSha256": {"installersource", "installer_source"},
-        }
-        artifact_manifest = _json(extracted / "outputs/final-artifact-hashes.json")
-        artifact_rows = manifest.get("artifacts") or (artifact_manifest.get("artifacts") if isinstance(artifact_manifest, dict) else [])
-        manifest_artifacts = {
-            str(row.get("name") or "").lower().replace("-", "").replace("_", ""): row
-            for row in artifact_rows
-            if isinstance(row, dict)
-        }
-        for candidate_key, expected_names in artifact_names.items():
-            row = next((manifest_artifacts[name.replace("-", "").replace("_", "")] for name in expected_names if name.replace("-", "").replace("_", "") in manifest_artifacts), None)
-            if row is None or str(row.get("sha256") or "").lower() != str(candidate[candidate_key]).lower():
-                raise ValueError(f"candidate artifact tuple does not match manifest: {candidate_key}")
-            bytes_key = candidate_key[:-6] + "Bytes" if candidate_key.endswith("Sha256") else ""
-            if bytes_key and bytes_key in candidate and int(row.get("bytes", -1)) != int(candidate[bytes_key]):
-                raise ValueError(f"candidate artifact tuple byte count does not match manifest: {candidate_key}")
-
-        coherence = _run_candidate_validator(
-            [sys.executable, "source/tools/validate_audit_coherence.py", "--root", str(extracted), "--mode", mode],
-            extracted,
-            mode,
-        )
-        if coherence.get("status") not in ({"PASS_WITH_BLOCKER"} if mode == "diagnostic" else {"PASS"}):
-            raise ValueError(f"candidate coherence check failed: {coherence.get('reason', '')}")
-        if failed_attempt:
-            if mode != "diagnostic" or coherence.get("blockerCode") != FAILED_ATTEMPT_BLOCKER or coherence.get("releaseEligible") is not False:
-                raise ValueError("failed replacement-attempt result was downgraded or made release eligible")
-            if candidate.get("candidateIsCurrent") is not False or candidate.get("sourceChangedSinceCandidate") is not True or candidate.get("rebuildRequired") is not True or candidate.get("artifactTupleMatchesCandidate") is not False:
-                raise ValueError("failed replacement-attempt candidate flags are not truthful")
-
-        inventory = manifest.get("sourceInventory")
-        if not isinstance(inventory, list) or not inventory:
-            raise ValueError("sourceInventory is empty")
-        inventory_paths = {str(item["path"]) for item in inventory}
-        source_paths = {
-            name
-            for name in names
-            if name.startswith(("source/", "installer-source/", "automation/release-e2e/", "release-tooling/"))
-            and not name.endswith("/")
-            and (extracted / name).is_file()
-        }
-        if inventory_paths != source_paths:
-            raise ValueError(
-                "source inventory mismatch: "
-                f"missing={sorted(inventory_paths - source_paths)[:5]} "
-                f"unexpected={sorted(source_paths - inventory_paths)[:5]}"
-            )
-        if int(manifest.get("expectedSourceCount", -1)) != len(source_paths):
-            raise ValueError("expectedSourceCount does not match extracted source")
-        hashes = {}
-        for line in (extracted / "SHA256SUMS.txt").read_text(encoding="utf-8-sig").splitlines():
-            if not line.strip():
-                continue
-            digest, path = line.split("  ", 1)
-            hashes[path] = digest.lower()
-        if set(hashes) != source_paths:
-            raise ValueError("SHA256SUMS.txt does not cover exactly the source closure")
-        for path in sorted(source_paths):
-            actual = _sha(extracted / path)
-            if hashes[path] != actual:
-                raise ValueError(f"source hash mismatch: {path}")
-
-        modes = {str(item["path"]): int(item["posixMode"]) for item in _json(extracted / "SOURCE-MODES.json")}
-        if set(modes) != source_paths:
-            raise ValueError("SOURCE-MODES.json does not cover exactly the source closure")
-        mode_mismatches = []
-        with zipfile.ZipFile(archive) as bundle:
-            for info in bundle.infolist():
-                if info.filename in modes:
-                    archived = (info.external_attr >> 16) & 0o777
-                    if archived != modes[info.filename]:
-                        mode_mismatches.append(info.filename)
-        if mode_mismatches:
-            raise ValueError(f"POSIX mode mismatch: {mode_mismatches[:5]}")
-
-        secret_findings = []
-        for path in sorted(source_paths):
-            try:
-                text = (extracted / path).read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue
-            for pattern in SECRET_PATTERNS:
-                if pattern.search(text):
-                    secret_findings.append(path)
-        if secret_findings:
-            raise ValueError(f"secret-like material found in source: {sorted(set(secret_findings))[:5]}")
-
-        checks: dict[str, Any] = {
-            "pythonCompile": "SKIPPED",
-            "javascriptSyntax": "SKIPPED",
-            "bashSyntax": "SKIPPED",
-            "powershellParse": "SKIPPED",
-            "dotnetBuild": "SKIPPED",
-            "dotnetTests": "SKIPPED",
-        }
-        py_files = [str(path) for path in (extracted / "source").rglob("*.py")]
-        if py_files:
-            checks["pythonCompile"] = _run_optional([sys.executable, "-m", "compileall", "-q", "source"], extracted)["status"]
-            if checks["pythonCompile"] == "FAIL":
-                raise ValueError("Python compile check failed")
-        js_files = [path.relative_to(extracted).as_posix() for path in (extracted / "source").rglob("*.js")]
-        node_available = shutil.which("node")
-        if js_files and node_available:
-            for path in js_files:
-                result = _run_optional([node_available, "--check", path], extracted)
-                if result["status"] == "FAIL":
-                    raise ValueError(f"JavaScript syntax check failed: {path}")
-            checks["javascriptSyntax"] = "PASS"
-        elif js_files:
-            checks["javascriptSyntax"] = "SKIPPED"
-        sh_files = [path.relative_to(extracted).as_posix() for path in (extracted / "source").rglob("*.sh")]
-        bash = shutil.which("bash")
-        if sh_files and bash:
-            probe = _run_optional([bash, "--version"], extracted)
-            if probe["status"] == "PASS":
-                for path in sh_files:
-                    result = _run_optional([bash, "-n", path], extracted)
-                    if result["status"] == "FAIL":
-                        raise ValueError(f"Bash syntax check failed: {path}")
-                checks["bashSyntax"] = "PASS"
-            else:
-                checks["bashSyntax"] = "SKIPPED"
-        ps = shutil.which("pwsh") or shutil.which("powershell")
-        if ps:
-            scripts = [
-                path.relative_to(extracted).as_posix()
-                for root in (extracted / "source", extracted / "installer-source", extracted / "automation")
-                if root.exists()
-                for path in root.rglob("*")
-                if path.suffix.lower() in {".ps1", ".psm1", ".psd1"}
-            ]
-            parse_script_path = extracted / "_audit_parse.ps1"
-            parse_script_path.write_text(
-                "param([Parameter(Mandatory)][string]$Path)\n"
-                "$tokens=$null; $errors=$null\n"
-                "[System.Management.Automation.Language.Parser]::ParseFile($Path,[ref]$tokens,[ref]$errors) | Out-Null\n"
-                "if($errors.Count){ $errors | ForEach-Object { Write-Error $_.Message }; exit 2 }\n",
-                encoding="utf-8",
-            )
-            for path in scripts:
-                result = _run_optional([ps, "-NoProfile", "-NonInteractive", "-File", "_audit_parse.ps1", "-Path", path], extracted)
-                if result["status"] == "FAIL":
-                    raise ValueError(f"PowerShell parse check failed: {path}")
-            checks["powershellParse"] = "PASS"
-        dotnet = shutil.which("dotnet")
-        if dotnet and (extracted / "installer-source").exists():
-            try:
-                probe = subprocess.run([dotnet, "--list-sdks"], cwd=extracted, capture_output=True, text=True, timeout=20)
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                probe = None
-            if probe is not None and probe.returncode == 0 and probe.stdout.strip():
-                build = _run_optional([dotnet, "build", "DevFleet.Setup/DevFleet.Setup.csproj", "--no-restore", "-v:minimal"], extracted / "installer-source", timeout=180)
-                if build["status"] == "FAIL":
-                    raise ValueError(".NET installer build failed")
-                checks["dotnetBuild"] = build["status"]
-                tests = _run_optional([dotnet, "build", "DevFleet.Setup.Tests/DevFleet.Setup.Tests.csproj", "--no-restore", "-v:minimal"], extracted / "installer-source", timeout=180)
-                if tests["status"] == "FAIL":
-                    raise ValueError(".NET installer test project build failed")
-                checks["dotnetTests"] = tests["status"]
-
-        if mode == "release" and (not bool(candidate.get("candidateIsCurrent")) or bool(candidate.get("sourceChangedSinceCandidate")) or bool(candidate.get("rebuildRequired"))):
-            raise ValueError("release mode rejects an invalidated or historical candidate")
-        report = {
-            "status": "PASS_WITH_BLOCKER" if mode == "diagnostic" else "COMPLETE_FOR_AI_AUDIT",
-            "bundleMode": mode,
-            "releaseEligible": mode == "release",
-            "candidateIsCurrent": bool(candidate.get("candidateIsCurrent")),
-            "sourceChangedSinceCandidate": bool(candidate.get("sourceChangedSinceCandidate")),
-            "rebuildRequired": bool(candidate.get("rebuildRequired")),
-            "archive": str(archive),
-            "temporaryExtraction": str(extracted),
-            "expectedSourceCount": len(source_paths),
-            "includedSourceCount": len(source_paths),
-            "releaseE2EToolingIncluded": True,
-            "modeVerification": "PASS",
-            "coherenceVerification": coherence["status"],
-            "coherenceBlockerCode": coherence.get("blockerCode"),
-            "secretScan": "PASS",
-            "checks": checks,
-        }
-        if failed_attempt:
-            report.update({"status": "PASS_WITH_BLOCKER", "blockerCode": FAILED_ATTEMPT_BLOCKER, "releaseEligible": False, "candidateIsCurrent": False, "sourceChangedSinceCandidate": True, "rebuildRequired": True, "failedAttemptSnapshot": FAILED_ATTEMPT_SNAPSHOT})
-        if report_path:
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-        return report
-    finally:
-        shutil.rmtree(temp_parent, ignore_errors=True)
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--archive", type=Path, required=True)
-    parser.add_argument("--report", type=Path)
-    parser.add_argument("--mode", choices=("diagnostic", "release"), default="release")
-    args = parser.parse_args()
-    try:
-        report = validate(args.archive, args.report, args.mode)
-    except Exception as exc:  # noqa: BLE001 - CLI must return a useful deterministic failure.
-        print(json.dumps({"status": "INCOMPLETE_FOR_AI_AUDIT", "error": str(exc)}))
-        return 2
-    print(json.dumps(report, indent=2))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-```
-
-
-## FILE: source/tools/validate_audit_coherence.py
-
-SHA256: 9c5f6b489571f076a332da9128767ccc44d72882445b72029e5f2c07cafed651 | Bytes: 73537 | Git mode: 100644
-
-```
-"""Validate that a review bundle has one coherent current candidate.
-
-Historical records are useful evidence, but they must opt in explicitly with
-``historical: true``.  Everything else that names a candidate is treated as a
-current record and is compared with finalization-state.json.
-"""
-from __future__ import annotations
-
-import argparse
-import hashlib
-import json
-import io
-import re
-import subprocess
-import sys
-import tarfile
-import tempfile
-import shutil
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+
+from packaging.markers import Marker
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
+
+try:
+    from cvss import CVSS2, CVSS3, CVSS4
+    from cvss.exceptions import CVSSError
+except ImportError as exc:  # pragma: no cover - exercised by release preflight
+    raise RuntimeError(
+        "release dependency gate requires the pinned 'cvss' release-tool dependency"
+    ) from exc
 
 
-ARTIFACT_ALIASES = {
-    "exe": ("exe", "EXE", "installer", "installerExe"),
-    "tar": ("tar", "TAR", "payload"),
-    "portable": ("portable", "PORTABLE"),
-    "installer_source": ("installerSource", "installer_source", "INSTALLER_SOURCE"),
-}
-
-# The previous signed candidate is retained as evidence only.  This narrow
-# allow-list is deliberately not a general historical bypass: diagnostic mode
-# must prove this exact candidate/provenance pair and release mode never
-# accepts it.
-HISTORICAL_CANDIDATE = "2739e0366d070285e44b4fc764ef9247d40b2f94"
-HISTORICAL_PROVENANCE = "f334a6eff999287b170fdbd9b6a31c3ef24a6119"
-HISTORICAL_SHIPPING_IDENTITY = "daa30ef9f521a47fedb4bacce91e3440c20e1a8f05543b4d5e823e5c3541e64e"
-HISTORICAL_RAW_GIT_SHIPPING_IDENTITY = "cdabf0791016282b1dc116c2e0d407718e7d7249d93935f90cc681afd737e92e"
-HISTORICAL_RELEASE_FINGERPRINT = "80c8b88c2f2ec828f5ab0f9713d63fa3f4cc4cbad7c382aa2f154f3196c3de84"
-HISTORICAL_PRESERVED_CANONICAL_PREFIX = "454edc"
-HISTORICAL_RAW_GIT_PREFIX = "cdab"
-HISTORICAL_RAW_RELEASE_PREFIX = "eba40"
-FAILED_ATTEMPT_SNAPSHOT = "audit/luna-high-failed-attempt-freeze-20260831T002237512571Z.json"
-FAILED_ATTEMPT_SNAPSHOT_SHA256 = "ac37997945b6fa5ae9326b083ee730494b2c0c2e60d4809e7b49fc9707c0caac"
-FAILED_ATTEMPT_COMMIT = "21752fc0e50978183322204c523b40947d073aa0"
-FAILED_ATTEMPT_GIT_SHIPPING_IDENTITY = "6e0bac4b4eebc83cdcd9eddda2008607ba15c8835e5c72a931792f5b83c653f4"
-FAILED_ATTEMPT_BUILD_SHIPPING_IDENTITY = "3a65fd54d70fe05565ac3a32f73100ca2c81a77a4008feb361f99f229f025f8a"
-FAILED_ATTEMPT_BLOCKER = "REPLACEMENT_CANDIDATE_BINDING_MISMATCH"
-FAILED_ATTEMPT_GENERATED_ROWS = frozenset({
-    "source/CHECKSUMS.sha256",
-    "installer-source/DevFleet.Setup/PayloadManifest.cs",
-    "installer-source/INSTALLER-BUILD-MANIFEST.json",
-})
-HISTORICAL_ARTIFACTS = {
-    "exe": (72078576, "e31e566cd8f9845cbaf5c85d972dceeeacbcaa6d55101868b8a71026cbde1c57"),
-    "tar": (385200, "1b267c632f2219f4b49839a3b4eff064915d5d0acda83727e0a69fb49bd82985"),
-    "portable": (2501018, "668e07dce12d7df8d61936b21e6b52ad2c3685dd7069a13cbfb7a1752c463dec"),
-    "installersource": (702352, "e645019106b7e26080d8accf6c1da7f94be51150c19e347da35f8c047240abdc"),
-}
-AUTHORIZED_SHIPPING_PATHS = frozenset({
-    "installer-source/DevFleet.Setup/Services/InstallerLifecycle.cs",
-    "installer-source/DevFleet.Setup/Services/InstallerServices.cs",
-    "installer-source/DevFleet.Setup.Tests/Program.cs",
-    "source/tools/validate_audit_coherence.py",
-    "source/tools/validate_ai_audit_bundle.py",
-    "source/tests/test_audit_coherence.py",
-    "source/windows/DevFleet.Common.psm1",
-})
+OSV_QUERY_URL = "https://api.osv.dev/v1/query"
+TIMEOUT_SECONDS = 8
+HIGH_SCORE = 7.0
+CRITICAL_SCORE = 9.0
+KNOWN_SEVERITIES = {"NONE", "LOW", "MEDIUM", "MODERATE", "HIGH", "CRITICAL"}
+BLOCKING_SEVERITIES = {"HIGH", "CRITICAL", "UNKNOWN"}
 
 
-def _load(path: Path) -> Any:
-    try:
-        # Windows PowerShell 5 may emit a UTF-8 BOM when it writes generated
-        # audit manifests.  Accept that transport encoding while still
-        # requiring strict JSON content.
-        return json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"Invalid JSON: {path}: {exc}") from exc
+def _logical_requirement_lines(lock: Path) -> list[str]:
+    """Return requirement expressions from a pip-compile style lock.
 
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _walk(value: Any, path: str = "$") -> Iterable[tuple[str, dict[str, Any]]]:
-    if isinstance(value, dict):
-        yield path, value
-        for key, child in value.items():
-            yield from _walk(child, f"{path}.{key}")
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            yield from _walk(child, f"{path}[{index}]")
-
-
-def _bool(value: Any, name: str, location: str) -> bool:
-    if not isinstance(value, bool):
-        raise ValueError(f"{location}.{name} must be a JSON boolean")
-    return value
-
-
-def _artifact_rows(state: dict[str, Any], manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    rows: dict[str, dict[str, Any]] = {}
-    for source in (state.get("candidate"),):
-        if isinstance(source, dict):
-            for key, value in source.items():
-                if isinstance(value, dict) and value.get("sha256"):
-                    rows[key] = value
-    for value in (manifest.get("artifacts"),):
-        if isinstance(value, list):
-            for row in value:
-                if isinstance(row, dict) and row.get("sha256"):
-                    name = str(row.get("name") or "")
-                    rows[name] = row
-    return rows
-
-
-def _shipping_rows(value: Any) -> dict[tuple[str, str], dict[str, Any]]:
-    """Normalize a release-fingerprint or bundle inventory to shipping rows."""
-    rows: dict[tuple[str, str], dict[str, Any]] = {}
-    if not isinstance(value, list):
-        return rows
-    for item in value:
-        if not isinstance(item, dict):
+    Hashes and pip-compile annotations are deliberately ignored.  A continued
+    marker expression is retained, while a continued requirement is finalized
+    before the next top-level package line.
+    """
+    expressions: list[str] = []
+    pending: str | None = None
+    for physical in lock.read_text(encoding="utf-8").splitlines():
+        line = physical.strip()
+        if not line or line.startswith("#") or line.startswith("--hash="):
             continue
-        raw_path = str(item.get("path") or "").replace("\\", "/").lstrip("/")
-        if raw_path.startswith("source/"):
-            root, path = "source", raw_path[len("source/"):]
-        elif raw_path.startswith("installer-source/"):
-            root, path = "installer-source", raw_path[len("installer-source/"):]
-        elif str(item.get("root") or "") in {"source", "installer-source"}:
-            root, path = str(item["root"]), raw_path
+        # pip-compile may emit other option continuations; none are part of the
+        # PEP 508 requirement we need to query.
+        if line.startswith("--"):
+            continue
+        if " #" in line:
+            line = line.split(" #", 1)[0].rstrip()
+        if not line:
+            continue
+        if pending is not None:
+            if line.startswith(";") or line.startswith(","):
+                pending = f"{pending} {line}"
+                if pending.endswith("\\"):
+                    pending = pending[:-1].rstrip()
+                continue
+            expressions.append(pending)
+            pending = None
+        if line.endswith("\\"):
+            pending = line[:-1].rstrip()
         else:
-            # A source inventory is allowed to contain non-shipping audit
-            # tooling (automation/release-tooling), but a row that purports to
-            # be shipping and cannot be classified is an ambiguity, never a
-            # row to silently discard.
-            non_shipping = raw_path.startswith(("automation/", "release-tooling/")) or str(item.get("root") or "") in {"automation", "release-tooling"}
-            if not non_shipping:
-                raise ValueError(f"unclassified shipping row: {raw_path or item.get('root')}")
-            continue
-        key = (root, path)
-        if key in rows:
-            raise ValueError(f"duplicate shipping row: {root}/{path}")
-        if "mode" not in item:
-            raise ValueError(f"{raw_path or item.get('root')} shipping row is missing its canonical mode")
-        mode = str(item.get("mode") or "")
-        if mode not in {"0644", "0755"}:
-            raise ValueError(f"{raw_path or item.get('root')} shipping row has an invalid canonical mode")
-        rows[key] = {
-            "root": root,
-            "path": path,
-            "bytes": int(item.get("bytes", -1)),
-            "sha256": str(item.get("sha256") or "").lower(),
-            "mode": mode,
-        }
-    return rows
+            expressions.append(line)
+    if pending is not None:
+        expressions.append(pending)
+    return expressions
 
 
-def _shipping_identity(rows: dict[tuple[str, str], dict[str, Any]], mode: dict[str, Any], version: str, installer: str) -> str:
-    # Match release_fingerprint.py exactly: Path.rglob is sorted separately
-    # for each root, with Windows path components compared case-insensitively.
-    # Compare components (rather than the joined string) so a directory named
-    # ``python`` sorts before its sibling ``python-fastapi`` just as Path does.
-    # The release contract concatenates source rows before installer rows.
-    root_order = {"source": 0, "installer-source": 1}
-    ordered_keys = sorted(
-        rows,
-        key=lambda key: (
-            root_order.get(key[0], 2),
-            tuple(component.casefold() for component in key[1].split("/")),
-        ),
-    )
-    ordered = [rows[key] for key in ordered_keys]
-    payload = {"schemaVersion": 1, "devfleetVersion": version, "installerVersion": installer, "shippingModeContract": mode, "shippingInputs": ordered}
-    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _release_id(record: dict[str, Any]) -> str:
-    payload = {
-        "schemaVersion": record.get("schemaVersion"),
-        "devfleetVersion": record.get("devfleetVersion"),
-        "installerVersion": record.get("installerVersion"),
-        "shippingModeContract": record.get("shippingModeContract"),
-        "shippingInputs": record.get("shippingInputs"),
-        "artifacts": record.get("artifacts", []),
-    }
-    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _candidate_fingerprint_from_git(root: Path, commit: str) -> tuple[dict[str, Any], Path]:
-    if not (root / ".git").exists():
-        raise ValueError("candidate shipping rows are not embedded in the bundl
+def _requirement_expression(line: str) -> tuple[str, str, str | None]:
+    try:
+        requirement = Requirement(line)
+    except InvalidRequirement as exc:
+        raise ValueError(f"unsupported lock requirement: {line!r}") from exc
+    specifiers = list(requirement.specifier)
+    if len(specifiers) != 1 or specifiers[0].operator != "==" or specifiers[0].version.endswith(".*"):
+        raise ValueError(f"lock requirement is not an exact == pin: {line!r}")
+    version = specifiers[0].version.strip()
+    if not version or any(ch.isspace() for ch in version) or ";" in version:
+        raise ValueError(f"lock requirement has an invalid pinned version: {line!r}")
+    marker = str(requi

@@ -1,835 +1,437 @@
 # DevFleet source part 032
 
 Full-source UTF-8 byte interval [1441500, 1488000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 7b5e37cf8aed94d91ed7939777304a74083118e001507881802c38ab6a9782ae
+Payload SHA-256: abc39804838a70384b5ced1ac97d68f9fff9a92e5699929152493fe77b7c6f12
 
 <!-- BEGIN SOURCE SLICE -->
-ted", "foreignLeaseStartRejected",
-            "originalUsable", "onlyIntendedOwnerStarts"),
-}
-# Includes product command maxima plus bounded queue/observation margins. The
-# parent owns the larger phase deadline and must also budget cleanup separately.
-OPERATION_SECONDS = {
-    "create": 600, "start": 2100, "stop": 720, "restart": 2100,
-    "health": 420, "test": 1920, "backup": 2400, "quarantine": 3300,
-    "restore-quarantine": 300, "restore-vault": 3900, "analyze-force": 300,
-}
-MAX_DOCUMENT = 2 * 1024 * 1024
-OWNER_FILE = ".df-real-use-owner.json"
-SENTINEL_FILE = "df-real-use-sentinel.txt"
-SMOKE_TEXT = "Template smoke test passed"
-TERMINAL_STATES = frozenset({"completed", "failed", "interrupted", "cancelled", "canceled"})
-LABELS = {
-    "managed_by": "io.devfleet.managed-by",
-    "project_id": "io.devfleet.project-id",
-    "slug": "io.devfleet.project-slug",
-    "runtime_id": "io.devfleet.runtime-id",
-    "deployment_id": "io.devfleet.deployment-id",
-    "host_id": "io.devfleet.host-id",
-}
-
-
-class AcceptanceError(Exception):
-    """Only fixed, nonsecret error codes may cross the evidence boundary."""
-
-    def __init__(self, code: str, receipt: dict[str, Any] | None = None):
-        self.code = code if re.fullmatch(r"[A-Z][A-Z0-9_]{1,95}", code) else "UNCLASSIFIED_FAILURE"
-        self.receipt = receipt
-        super().__init__(self.code)
-
-
-def require(condition: Any, code: str) -> None:
-    if not condition:
-        raise AcceptanceError(code)
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def instant(value: Any) -> float:
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        require(parsed.tzinfo is not None, "DEADLINE_TIMEZONE_REQUIRED")
-        return parsed.timestamp()
-    except (TypeError, ValueError, OverflowError):
-        raise AcceptanceError("INVALID_TIMESTAMP") from None
-
-
-def canonical(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-
-
-def digest(path: Path) -> str:
-    value = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            value.update(chunk)
-    return value.hexdigest()
-
-
-def read_json(path: Path) -> dict[str, Any]:
-    require(path.is_file() and not path.is_symlink(), "JSON_FILE_UNSAFE_OR_ABSENT")
-    require(path.stat().st_size <= MAX_DOCUMENT, "JSON_FILE_TOO_LARGE")
-    try:
-        value = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (UnicodeError, json.JSONDecodeError):
-        raise AcceptanceError("INVALID_JSON_DOCUMENT") from None
-    require(isinstance(value, dict), "JSON_OBJECT_REQUIRED")
-    return value
-
-
-def write_json(path: Path, value: Any) -> None:
-    """Atomic private output; caller must provision its exact parent directory."""
-    require(path.parent.is_dir() and not path.parent.is_symlink(), "OUTPUT_PARENT_UNSAFE")
-    require(not path.is_symlink(), "OUTPUT_SYMLINK_REJECTED")
-    temporary = path.with_name(path.name + ".tmp-" + secrets.token_hex(6))
-    try:
-        fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(canonical(value) + b"\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-        if os.name != "nt":
-            path.chmod(0o600)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
-
-
-def redact(value: Any, secret_values: list[str]) -> Any:
-    """Defense in depth after allowlisting, including strings in exception tests."""
-    if isinstance(value, dict):
-        return {str(key): redact(item, secret_values) for key, item in value.items()}
-    if isinstance(value, list):
-        return [redact(item, secret_values) for item in value]
-    if isinstance(value, str):
-        for secret in sorted(set(secret_values), key=len, reverse=True):
-            if secret and (len(secret) >= 4 or value == secret):
-                value = value.replace(secret, "[REDACTED]")
-        return value
-    return value
-
-
-def safe_child(root: Path, name: str, *, exists: bool = False) -> Path:
-    require(bool(SLUG.fullmatch(name)), "UNSAFE_CHILD_NAME")
-    require(root.is_absolute() and root.is_dir(), "UNSAFE_ROOT")
-    for part in (root, *root.parents):
-        require(not part.is_symlink(), "ROOT_SYMLINK_REJECTED")
-    path = root / name
-    require(not path.is_symlink() and path.resolve().parent == root.resolve(), "CHILD_BOUNDARY_VIOLATION")
-    if exists:
-        require(path.is_dir(), "OWNED_DIRECTORY_ABSENT")
-    return path
-
-
-def exact_returned_child(root: Path, value: Any, code: str) -> Path:
-    require(isinstance(value, str) and "\x00" not in value, code)
-    path = Path(value)
-    require(path.is_absolute() and path.parent == root and path.name not in {"", ".", ".."}, code)
-    require(str(path) == value and not path.is_symlink() and path.is_dir(), code)
-    require(path.resolve().parent == root.resolve(), code)
-    return path
-
-
-def normalized_request(value: dict[str, Any], self_hash: str) -> dict[str, Any]:
-    require(value.get("schemaVersion") == 1, "REQUEST_SCHEMA")
-    run_id = value.get("runId", "")
-    require(isinstance(run_id, str) and len(run_id) <= 128 and RUN_ID.fullmatch(run_id), "RUN_ID_INVALID")
-    candidate, execution, paths = value.get("candidate"), value.get("execution"), value.get("paths")
-    require(isinstance(candidate, dict) and isinstance(execution, dict) and isinstance(paths, dict), "REQUEST_BINDING_MISSING")
-    for key in CANDIDATE_FIELDS:
-        pattern = re.compile(r"[0-9a-f]{40,64}") if key in {"repositoryHead", "candidateCommit"} else SHA256
-        require(isinstance(candidate.get(key), str) and pattern.fullmatch(candidate[key]), "CANDIDATE_BINDING_INVALID")
-    require(value.get("runnerSha256") == self_hash, "RUNNER_HASH_MISMATCH")
-    require(execution.get("role") == "Laptop / Surrogate", "ROLE_MISMATCH")
-    for key in EXECUTION_FIELDS:
-        require(isinstance(execution.get(key), str) and execution[key], "EXECUTION_BINDING_MISSING")
-    for key in ("vmName", "vmId", "computeInstanceName", "vaultInstanceName", "deploymentId",
-                "nodeId", "nodeName", "transactionId", "invocationId"):
-        require(IDENTIFIER.fullmatch(execution[key]), "EXECUTION_IDENTIFIER_INVALID")
-    require(execution["vmName"].lower().startswith("devfleet-e2e-"), "L1_SCOPE_INVALID")
-    require(execution["computeInstanceName"] != execution["vaultInstanceName"], "PRODUCT_TARGETS_NOT_UNIQUE")
-    require(SHA256.fullmatch(execution["surrogateEvidenceSha256"]), "SURROGATE_EVIDENCE_HASH_INVALID")
-    for key in ("workspaces", "quarantine", "runtimeRoot"):
-        require(isinstance(paths.get(key), str) and Path(paths[key]).is_absolute(), "INSTALLED_PATH_INVALID")
-    require(len({paths[key] for key in ("workspaces", "quarantine", "runtimeRoot")}) == 3, "INSTALLED_PATHS_OVERLAP")
-    url = urllib.parse.urlsplit(str(value.get("baseUrl", "")))
-    require(url.scheme == "http" and url.hostname == "127.0.0.1" and url.port
-            and not url.username and not url.password and url.path in {"", "/"}
-            and not url.query and not url.fragment, "DASHBOARD_ORIGIN_INVALID")
-    deadline = instant(value.get("deadlineUtc"))
-    require(0 < deadline - time.time() <= 24 * 3600, "OWNER_DEADLINE_INVALID")
-    return {
-        "schemaVersion": 1, "runId": run_id, "runnerSha256": self_hash,
-        "candidate": {key: candidate[key] for key in CANDIDATE_FIELDS},
-        "execution": {key: execution[key] for key in EXECUTION_FIELDS},
-        "paths": {key: paths[key] for key in ("workspaces", "quarantine", "runtimeRoot")},
-        "baseUrl": f"http://127.0.0.1:{url.port}", "deadlineUtc": value["deadlineUtc"],
-    }
-
-
-def binding_hash(request: dict[str, Any]) -> str:
-    # A resumed stage may have less time remaining, never a different identity.
-    return hashlib.sha256(canonical({key: value for key, value in request.items() if key != "deadlineUtc"})).hexdigest()
-
-
-@dataclass
-class Response:
-    status: int
-    headers: dict[str, str]
-    body: str
-
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
-class HttpTransport:
-    def __init__(self, origin: str):
-        self.origin = origin
-        self.cookies = http.cookiejar.CookieJar()
-        self.opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(self.cookies), NoRedirect()
-        )
-
-    def request(self, method: str, route: str, fields: dict[str, str] | None, timeout: float) -> Response:
-        require(route.startswith("/") and not route.startswith("//") and not urllib.parse.urlsplit(route).netloc,
-                "CROSS_ORIGIN_REQUEST_REJECTED")
-        headers = {"Accept": "text/html,application/json", "Origin": self.origin, "Referer": self.origin + "/"}
-        data = None
-        if fields is not None:
-            data = urllib.parse.urlencode(fields).encode("utf-8")
-            headers["Content-Type"] = "application/x-www-form-urlencoded"
-        req = urllib.request.Request(self.origin + route, data=data, headers=headers, method=method)
-        try:
-            try:
-                stream = self.opener.open(req, timeout=timeout)
-            except urllib.error.HTTPError as exc:
-                stream = exc
-            with stream:
-                body = stream.read(MAX_DOCUMENT + 1)
-                require(len(body) <= MAX_DOCUMENT, "HTTP_RESPONSE_TOO_LARGE")
-                return Response(stream.code, {key.lower(): val for key, val in stream.headers.items()},
-                                body.decode("utf-8", errors="replace"))
-        except (urllib.error.URLError, TimeoutError, OSError):
-            raise AcceptanceError("HTTP_TRANSPORT_FAILURE") from None
-
-    def secrets(self) -> list[str]:
-        return [cookie.value for cookie in self.cookies]
-
-
-class Page(HTMLParser):
-    def __init__(self, text: str):
-        super().__init__(convert_charrefs=True)
-        self.forms: list[dict[str, Any]] = []
-        self.current: dict[str, Any] | None = None
-        self.csrf = ""
-        self.banners: dict[str, str] = {}
-        self.project_states: list[str] = []
-        self.text: list[str] = []
-        self.feed(text)
-
-    def handle_starttag(self, tag: str, attributes: list[tuple[str, str | None]]) -> None:
-        attrs = dict(attributes)
-        if tag == "form":
-            self.current = {"action": attrs.get("action", ""), "method": attrs.get("method", "get").lower(), "fields": {}}
-            self.forms.append(self.current)
-        if tag == "input" and attrs.get("name") and self.current is not None:
-            if "disabled" not in attrs and (attrs.get("type") not in {"checkbox", "radio"} or "checked" in attrs):
-                self.current["fields"][attrs["name"]] = attrs.get("value", "")
-        if attrs.get("name") == "csrf_token" and attrs.get("value"):
-            self.csrf = str(attrs["value"])
-        if attrs.get("id") == "devfleet-csrf":
-            self.csrf = str(attrs.get("data-token") or self.csrf)
-        if "data-operation-id" in attrs:
-            classes = str(attrs.get("class") or "").split()
-            self.banners[str(attrs["data-operation-id"])] = (
-                "failed" if "failed" in classes else "completed" if "complete" in classes else "pending"
-            )
-        if "data-project-state" in attrs:
-            self.project_states.append(str(attrs["data-project-state"]))
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag == "form":
-            self.current = None
-
-    def handle_data(self, text: str) -> None:
-        self.text.append(text)
-
-    def form(self, action: str, match_fields: dict[str, str] | None = None) -> dict[str, Any]:
-        matches = [form for form in self.forms if form["method"] == "post" and form["action"] == action
-                   and all(form["fields"].get(key) == val for key, val in (match_fields or {}).items())]
-        require(bool(matches), "DASHBOARD_FORM_MISSING")
-        # The same action can legitimately appear in both project hero and tab.
-        require(all(form["fields"].get("csrf_token") for form in matches), "DASHBOARD_CSRF_MISSING")
-        return matches[0]
-
-
-class Dashboard:
-    def __init__(self, transport: Any, deadline: float, *, clock: Callable[[], float] = time.time,
-                 sleep: Callable[[float], None] = time.sleep):
-        self.transport, self.deadline, self.clock, self.sleep = transport, deadline, clock, sleep
-        self.secret_values: list[str] = []
-
-    def request(self, method: str, route: str, fields: dict[str, str] | None = None) -> Response:
-        remaining = self.deadline - self.clock()
-        require(remaining > 0, "OWNER_DEADLINE_EXPIRED")
-        return self.transport.request(method, route, fields, min(30.0, remaining))
-
-    def page(self, route: str) -> Page:
-        response = self.request("GET", route)
-        require(response.status == 200, "DASHBOARD_PAGE_NOT_AUTHENTICATED")
-        page = Page(response.body)
-        if page.csrf:
-            self.secret_values.append(page.csrf)
-        return page
-
-    def login(self, username: str, password: str) -> None:
-        require(username and password, "DASHBOARD_CREDENTIALS_MISSING")
-        self.secret_values.extend((username, password))
-        form = self.page("/login").form("/login")
-        fields = dict(form["fields"])
-        fields.update(username=username, password=password, next="/")
-        response = self.request("POST", "/login", fields)
-        require(response.status == 303 and response.headers.get("location") == "/", "DASHBOARD_LOGIN_FAILED")
-        page = self.page("/")
-        page.form("/logout")
-        require(page.csrf, "AUTHENTICATED_CSRF_MISSING")
-
-    def json(self, route: str) -> dict[str, Any]:
-        response = self.request("GET", route)
-        require(response.status == 200, "DASHBOARD_JSON_NOT_AVAILABLE")
-        try:
-            value = json.loads(response.body)
-        except json.JSONDecodeError:
-            raise AcceptanceError("DASHBOARD_JSON_INVALID") from None
-        require(isinstance(value, dict), "DASHBOARD_JSON_INVALID")
-        return value
-
-    def submit(self, page_route: str, action: str, fields: dict[str, str] | None = None, *,
-               match_fields: dict[str, str] | None = None, negative_fixture: bool = False) -> tuple[str, int]:
-        page = self.page(page_route)
-        if negative_fixture:
-            require(page.csrf and action.startswith("/projects/"), "NEGATIVE_FIXTURE_FORM_INVALID")
-            payload = {"csrf_token": page.csrf}
-        else:
-            payload = dict(page.form(action, match_fields)["fields"])
-        payload.update(fields or {})
-        require(payload.get("csrf_token"), "DASHBOARD_CSRF_MISSING")
-        response = self.request("POST", action, payload)
-        if response.status == 303:
-            location = response.headers.get("location", "")
-            parsed = urllib.parse.urlsplit(location)
-            require(not parsed.scheme and not parsed.netloc and parsed.path == "/", "OPERATION_REDIRECT_INVALID")
-            ids = urllib.parse.parse_qs(parsed.query).get("operation", [])
-            require(len(ids) == 1, "OPERATION_ID_MISSING")
-            op_id = ids[0]
-        elif response.status == 202:
-            try:
-                op_id = json.loads(response.body).get("operation_id", "")
-            except (AttributeError, json.JSONDecodeError):
-                raise AcceptanceError("OPERATION_ID_MISSING") from None
-        else:
-            raise AcceptanceError("DASHBOARD_MUTATION_NOT_ACCEPTED")
-        require(isinstance(op_id, str) and IDENTIFIER.fullmatch(op_id), "OPERATION_ID_INVALID")
-        return op_id, response.status
-
-    def wait_operation(self, op_id: str, kind: str, project: str, expected: str, timeout: float) -> tuple[dict[str, Any], dict[str, Any]]:
-        boundary = min(self.deadline, self.clock() + timeout)
-        while self.clock() < boundary:
-            operation = self.json("/ui/operations/" + op_id)
-            require(operation.get("id", operation.get("operation_id")) == op_id
-                    and operation.get("kind") == kind and operation.get("project") == project,
-                    "OPERATION_IDENTITY_MISMATCH")
-            state = operation.get("state")
-            require(state in TERMINAL_STATES | {"queued", "running"}, "OPERATION_STATE_INVALID")
-            if state in TERMINAL_STATES:
-                rendered = self.page("/?operation=" + op_id).banners.get(op_id)
-                receipt = {
-                    "id": op_id, "kind": kind, "project": project, "state": state,
-                    "expectedState": expected, "renderedState": rendered,
-                    "smokeOutputObserved": SMOKE_TEXT in str(operation.get("result", "")),
-                }
-                if rendered != state:
-                    raise AcceptanceError("RENDERED_OPERATION_DISAGREES", receipt)
-                if state != expected:
-                    raise AcceptanceError("OPERATION_UNEXPECTED_TERMINAL", receipt)
-                return operation, receipt
-            self.sleep(min(1.0, max(0.0, boundary - self.clock())))
-        raise AcceptanceError("OPERATION_DEADLINE_EXPIRED")
-
-
-class NativeProbe:
-    """Only read-only OS/product observations; no product function imports."""
-
-    def __init__(self):
-        import pwd
-        self.control_uid = pwd.getpwnam("devfleet-control").pw_uid
-        self.runner_uid = pwd.getpwnam("devrunner").pw_uid
-        self.docker_host = f"unix:///run/user/{self.runner_uid}/docker.sock"
-
-    def command(self, arguments: list[str], timeout: float = 30) -> str:
-        try:
-            result = subprocess.run(arguments, capture_output=True, text=True, timeout=timeout,
-                                    check=False, env={"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-                                                      "LANG": "C.UTF-8", "DOCKER_HOST": self.docker_host})
-        except (OSError, subprocess.TimeoutExpired):
-            raise AcceptanceError("NATIVE_OBSERVATION_FAILED") from None
-        require(result.returncode == 0, "NATIVE_OBSERVATION_FAILED")
-        require(len(result.stdout) <= MAX_DOCUMENT, "NATIVE_OBSERVATION_TOO_LARGE")
-        return result.stdout
-
-    def service(self) -> dict[str, Any]:
-        text = self.command(["/usr/bin/systemctl", "show", "devfleet.service", "--property=InvocationID",
-                             "--property=MainPID", "--property=ActiveState", "--property=User"])
-        values = dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
-        require(values.get("ActiveState") == "active" and values.get("User") == "devfleet-control",
-                "INSTALLED_DAEMON_NOT_ACTIVE")
-        require(re.fullmatch(r"[0-9a-f]{32}", values.get("InvocationID", "")), "SERVICE_INVOCATION_INVALID")
-        require(values.get("MainPID", "").isdigit() and int(values["MainPID"]) > 0, "SERVICE_PID_INVALID")
-        boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-        require(re.fullmatch(r"[0-9a-f-]{36}", boot), "BOOT_ID_INVALID")
-        return {"invocationId": values["InvocationID"], "pid": int(values["MainPID"]),
-                "active": True, "user": "devfleet-control", "bootId": boot}
-
-    def preflight(self, request: dict[str, Any]) -> dict[str, Any]:
-        require(os.geteuid() == self.control_uid, "DRIVER_REQUIRES_CONTROL_UID")
-        config = read_json(Path("/etc/devfleet/config.json"))
-        identity = read_json(Path("/etc/devfleet/node-identity.json"))
-        expected = request["execution"]
-        require(config.get("node_role") == identity.get("node_role") == "surrogate", "INSTALLED_ROLE_MISMATCH")
-        for key, field in (("deployment_id", "deploymentId"), ("node_id", "nodeId"), ("node_name", "nodeName")):
-            require(identity.get(key) == expected[field], "INSTALLED_NODE_IDENTITY_MISMATCH")
-        require(config.get("deployment_id") == expected["deploymentId"] and config.get("node_name") == expected["nodeName"],
-                "INSTALLED_CONFIG_IDENTITY_MISMATCH")
-        for key, field in (("workspaces", "workspaces"), ("quarantine", "quarantine"), ("runtime_root", "runtimeRoot")):
-            require(config.get(key) == request["paths"][field], "INSTALLED_PATH_MISMATCH")
-            root = Path(config[key])
-            require(root.is_dir() and not root.is_symlink(), "INSTALLED_PATH_UNAVAILABLE")
-        require(request["baseUrl"] == f"http://127.0.0.1:{int(config.get('portal_port', 0))}", "INSTALLED_PORT_MISMATCH")
-        require(config.get("backup_before_quarantine") is True, "QUARANTINE_BACKUP_POLICY_REQUIRED")
-        require(config.get("docker_mode") == "rootless", "ROOTLESS_RUNTIME_REQUIRED")
-        broker = Path("/run/devfleet-vault-broker.sock")
-        require(broker.exists() and stat.S_ISSOCK(broker.stat().st_mode) and os.access(broker, os.R_OK | os.W_OK),
-                "VAULT_BROKER_UNAVAILABLE")
-        require(os.access("/usr/local/bin/devfleet-vault-request", os.X_OK), "VAULT_REQUEST_CLIENT_UNAVAILABLE")
-        require(self.command(["/usr/bin/systemctl", "is-active", "devfleet-vault-broker.socket"]).strip() == "active",
-                "VAULT_BROKER_UNIT_INACTIVE")
-        backup = read_json(Path("/var/lib/devfleet/backup-status/config.json"))
-        # Never emit repository, usernames, passwords, tokens or environment text.
-        require(re.fullmatch(r"rest:http://100\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/[^\s?#]+",
-                             str(backup.get("repository", ""))), "VAULT_TAILSCALE_TRANSPORT_NOT_CONFIGURED")
-        self.command(["/usr/bin/docker", "--host", self.docker_host, "version", "--format", "{{.Server.Version}}"])
-        return {"installedRole": "surrogate", "installedIdentityVerified": True, "brokerAccessible": True,
-                "vaultTransport": "tailscale-rest", "rootlessDocker": True, "service": self.service()}
-
-    def containers(self, project_id: str) -> list[dict[str, Any]]:
-        require(PROJECT_ID.fullmatch(project_id), "PROJECT_ID_INVALID")
-        ids = self.command(["/usr/bin/docker", "--host", self.docker_host, "ps", "-aq", "--no-trunc",
-                            "--filter", "label=io.devfleet.project-id=" + project_id]).split()
-        require(all(SHA256.fullmatch(item) for item in ids), "CONTAINER_ID_NOT_CANONICAL")
-        if not ids:
-            return []
-        try:
-            values = json.loads(self.command(["/usr/bin/docker", "--host", self.docker_host, "inspect", *ids]))
-        except json.JSONDecodeError:
-            raise AcceptanceError("CONTAINER_INSPECT_INVALID") from None
-        require(isinstance(values, list) and len(values) == len(ids), "CONTAINER_INSPECT_INVALID")
-        return values
-
-
-class FixtureStore:
-    def __init__(self, paths: dict[str, str]):
-        self.workspaces = Path(paths["workspaces"])
-        self.quarantine = Path(paths["quarantine"])
-        self.runtime = Path(paths["runtimeRoot"])
-
-    def metadata(self, path: Path) -> dict[str, Any]:
-        require(path.is_dir() and not path.is_symlink() and not (path / ".devfleet").is_symlink(),
-                "PROJECT_PATH_UNSAFE")
-        return read_json(path / ".devfleet" / "project.json")
-
-    def operation_ids(self) -> list[str]:
-        root = self.runtime / "operations"
-        require(root.is_dir() and not root.is_symlink(), "OPERATION_STORE_UNAVAILABLE")
-        values = []
-        for path in root.glob("*.json"):
-            require(path.is_file() and not path.is_symlink() and IDENTIFIER.fullmatch(path.stem),
-                    "OPERATION_STORE_UNSAFE")
-            values.append(path.stem)
-        return sorted(values)
-
-    def verify_identity(self, path: Path, fixture: dict[str, Any], execution: dict[str, Any], *, copy: bool = False) -> dict[str, Any]:
-        meta = self.metadata(path)
-        require(int(meta.get("schema_version", 0)) >= 3 and meta.get("managed_by") == "devfleet",
-                "PROJECT_OWNERSHIP_INVALID")
-        require(meta.get("slug") == fixture["slug"] and meta.get("project_id") == fixture["projectId"]
-                and meta.get("deployment_id") == execution["deploymentId"] and meta.get("host_id") == execution["nodeName"]
-                and meta.get("runtime_provider") == "docker-compose" and meta.get("runtime_id") == fixture["runtimeId"],
-                "PROJECT_IDENTITY_CHANGED")
-        require(copy or path.name == fixture["slug"] or path.parent == self.quarantine, "PROJECT_PATH_IDENTITY_MISMATCH")
-        return meta
-
-    def verify_owner(self, path: Path, fixture: dict[str, Any]) -> None:
-        marker = read_json(path / OWNER_FILE)
-        require(marker == fixture["owner"], "FIXTURE_OWNER_MISMATCH")
-        sentinel = path / SENTINEL_FILE
-        require(sentinel.is_file() and not sentinel.is_symlink() and digest(sentinel) == fixture["sentinelSha256"],
-                "FIXTURE_SENTINEL_MISMATCH")
-
-    def verify_copy(self, value: Any, fixture: dict[str, Any], execution: dict[str, Any]) -> Path:
-        path = exact_returned_child(self.workspaces, value, "RESTORE_COPY_PATH_INVALID")
-        require(SLUG.fullmatch(path.name) and re.fullmatch(re.escape(fixture["slug"]) + r"-recovered-[0-9]{8}-[0-9]{6}-[0-9a-f]{8}", path.name),
-                "RESTORE_COPY_NAME_INVALID")
-        require(path != self.workspaces / fixture["slug"], "RESTORE_COPY_OVERWROTE_ORIGINAL")
-        self.verify_identity(path, fixture, execution, copy=True)
-        self.verify_owner(path, fixture)
-        return path
-
-    def verify_backup(self, meta: dict[str, Any], fixture: dict[str, Any]) -> dict[str, Any]:
-        backup_id = str(meta.get("backup_id", ""))
-        require(backup_id.startswith(fixture["slug"] + "-") and IDENTIFIER.fullmatch(backup_id), "BACKUP_ID_INVALID")
-        root = self.runtime / "workspace-backups"
-        directory = root / backup_id
-        require(directory.is_dir() and not root.is_symlink() and not directory.is_symlink()
-                and directory.resolve().parent == root.resolve(), "BACKUP_PATH_INVALID")
-        archive = directory / (fixture["slug"] + ".tar.gz")
-        require(meta.get("backup_path") == str(archive) and archive.is_file() and not archive.is_symlink(),
-                "BACKUP_ARCHIVE_PATH_INVALID")
-        expected_hash = str(meta.get("backup_sha256", ""))
-        require(SHA256.fullmatch(expected_hash) and digest(archive) == expected_hash, "BACKUP_ARCHIVE_HASH_MISMATCH")
-        manifest_path = directory / "manifest.json"
-        manifest = read_json(manifest_path)
-        require(manifest.get("backup_id") == backup_id and manifest.get("project_id") == fixture["projectId"]
-                and manifest.get("slug") == fixture["slug"] and manifest.get("verification", {}).get("integrity_verified") is True
-                and manifest.get("verification", {}).get("status") == "verified"
-                and manifest.get("workspace", {}).get("archive_sha256") == expected_hash, "BACKUP_MANIFEST_MISMATCH")
-        return {"kind": "backup", "path": str(directory), "backupId": backup_id,
-                "archiveSha256": expected_hash, "manifestSha256": digest(manifest_path)}
-
-    def remove_owned_tree(self, path: Path, fixture: dict[str, Any]) -> None:
-        require(path.parent in {self.workspaces, self.quarantine} and path.is_dir() and not path.is_symlink(),
-                "CLEANUP_PATH_NOT_OWNED")
-        self.verify_owner(path, fixture)
-        require(not any(item.is_symlink() for item in path.rglob("*")), "CLEANUP_TREE_SYMLINK_REJECTED")
-        shutil.rmtree(path)
-        require(not path.exists(), "CLEANUP_DIRECTORY_REMAINS")
-
-
-class AcceptanceRunner:
-    def __init__(self, request: dict[str, Any], state_path: Path, dashboard: Dashboard, probe: Any,
-                 *, store: FixtureStore | None = None, state: dict[str, Any] | None = None):
-        self.request, self.state_path, self.ui, self.probe = request, state_path, dashboard, probe
-        self.store = store or FixtureStore(request["paths"])
-        self.state = state or {
-            "schemaVersion": 1, "bindingHash": binding_hash(request), "runId": request["runId"],
-            "startedAtUtc": utc_now(), "ownerDeadlineUtc": request["deadlineUtc"],
-            "prepared": False, "resumed": False, "fixture": {},
-            "journeys": [{"id": key, "status": "NOT_RUN", "assertions": {}, "observations": {}} for key in ASSERTIONS],
-            "operations": [], "ledger": [], "temporaryEdits": [], "currentJourney": "",
-            "cleanup": {"status": "NOT_RUN", "ownedOnly": True, "resources": [], "errors": [],
-                        "vaultSnapshots": "RETAINED_APPEND_ONLY_IN_DISPOSABLE_VAULT"},
-            "failure": None, "cleanupFailure": None,
+ng]$service.State -ne 'Running'){throw "Multipass service did not return to Running before the readiness deadline; state=$([string]$service.State)."}
+            [pscustomobject]@{status='PASS';service='Multipass';reason=$Reason;stateBefore=$before;stateAfter=[string]$service.State;forcedDaemonTermination=$forced;trustedDaemonPath=$expectedDaemon;autoRestarted=$autoRestarted;ownerDeadlineUtc=$OwnerDeadlineUtc.ToUniversalTime().ToString('o')}
         }
-        require(self.state.get("schemaVersion") == 1 and self.state.get("bindingHash") == binding_hash(request)
-                and self.state.get("runId") == request["runId"], "RESUME_BINDING_MISMATCH")
-        require(instant(request["deadlineUtc"]) <= instant(self.state.get("ownerDeadlineUtc")),
-                "RESUME_CANNOT_EXTEND_DEADLINE")
-        if self.state["fixture"]:
-            expected_slug = "df-accept-" + hashlib.sha256(request["runId"].encode()).hexdigest()[:12]
-            require(self.fixture.get("slug") == expected_slug
-                    and self.fixture.get("originalPath") == str(self.store.workspaces / expected_slug),
-                    "RESUME_FIXTURE_SCOPE_MISMATCH")
-            if self.fixture.get("owner"):
-                require(self.fixture["owner"].get("runId") == request["runId"]
-                        and self.fixture["owner"].get("slug") == expected_slug
-                        and self.fixture["owner"].get("projectId") == self.fixture.get("projectId"),
-                        "RESUME_FIXTURE_OWNER_MISMATCH")
+        function Get-ExactNestedPrimaryVm {
+            param([Parameter(Mandatory)][string]$ExpectedName)
+            $byName=@(& $VmLookupProvider -Name $ExpectedName)
+            if($byName.Count -ne 1){throw "Expected exactly one nested Hyper-V Primary named $ExpectedName; found $($byName.Count)."}
+            $selected=$byName[0]
+            $immutableId=[guid]$selected.Id
+            if($immutableId -eq [guid]::Empty){throw 'Nested Hyper-V Primary did not expose a valid immutable identity.'}
+            $byId=& $VmLookupProvider -Id $immutableId
+            if($byId.Name -cne $ExpectedName -or [guid]$byId.Id -ne $immutableId){throw 'Nested Hyper-V Primary immutable identity did not revalidate against the configured name.'}
+            return $byId
+        }
+        $probeInvoker=if($NativeProbeProvider){$NativeProbeProvider}else{${function:Invoke-NestedMultipass}}
+        $controlPlaneRecoveryInvoker=if($ControlPlaneRecoveryProvider){$ControlPlaneRecoveryProvider}else{${function:Invoke-NestedMultipassControlPlaneRecovery}}
+        $readinessDeadline=([datetime](& $ClockProvider)).AddSeconds(180)
+        # A restored L1 can expose a running nested Hyper-V Primary before
+        # its Multipass daemon has a usable management channel. Treat only
+        # this bounded transport timeout/nonzero inventory as a recovery
+        # condition; identity, readiness, and the final JSON inventory
+        # remain mandatory below. The recovery is confined to the exact
+        # product Primary inside this disposable L1.
+        $primaryReadiness=$null;$controlPlaneRecovery=$null;$inventoryResult=$null;$inventoryError=''
+        # Retain only categorical readiness telemetry on failure. Raw guest output,
+        # service command lines, addresses, and credentials do not belong here.
+        $readinessTrace=[ordered]@{inventory='UNVERIFIED';controlPlane='NONE';hyperVBefore='UNVERIFIED';hyperVCycle='NONE';infoAttempts=0;infoTimeouts=0;lastInfoClass='NOT_RUN'}
+        try{$inventoryResult=& $probeInvoker @('list','--format','json') 30}catch{$inventoryError=$_.Exception.Message}
+        if($inventoryError -or $inventoryResult.exitCode -ne 0){
+            $failureClass=if($inventoryError){'TIMEOUT_OR_TRANSPORT_ERROR'}else{"NONZERO_EXIT_$([int]$inventoryResult.exitCode)"}
+            try{$controlPlaneRecovery=& $controlPlaneRecoveryInvoker $failureClass $readinessDeadline;$readinessTrace.controlPlane='RECOVERED'}catch{throw "MULTIPASS_CONTROL_PLANE_RECOVERY_FAILED: $($_.Exception.Message)"}
+            $remaining=[int][Math]::Floor(($readinessDeadline-[datetime](& $ClockProvider)).TotalSeconds)
+            if($remaining -le 0){throw 'MULTIPASS_CONTROL_PLANE_RECOVERY_FAILED: recovery exhausted the 180-second readiness deadline.'}
+            $inventoryResult=$null;$inventoryError=''
+            try{$inventoryResult=& $probeInvoker @('list','--format','json') ([Math]::Min(30,$remaining))}catch{$inventoryError=$_.Exception.Message}
+            if($inventoryError -or -not $inventoryResult -or $inventoryResult.exitCode -ne 0){$detail=if($inventoryError){$inventoryError}else{@($inventoryResult.output)-join ' '};throw "MULTIPASS_CONTROL_PLANE_UNAVAILABLE_AFTER_RECOVERY: $detail"}
+        }
+        if($inventoryResult.exitCode -ne 0){throw "Multipass inventory failed inside L1: $($inventoryResult.output -join ' ')"}
+        $inventoryRaw=@($inventoryResult.stdout)
+        $inventory=($inventoryRaw -join "`n")|ConvertFrom-Json
+        $instances=@($inventory.list|Where-Object name -ceq $primary)
+        if($instances.Count -ne 1){throw "Expected exactly one configured Primary instance inside L1; found $($instances.Count)."}
+        $readinessTrace.inventory='PASS'
+        if(-not $primaryReadiness){$primaryReadiness=[ordered]@{initialMultipassState=[string]$instances[0].state;initialInfoExitCode=$null;recovery=if($controlPlaneRecovery){'bounded-Multipass-control-plane-recovery'}else{'none'};controlPlaneRecovery=$controlPlaneRecovery;hyperVStateBefore=$null;ipv4=$null;ready=$false}}else{$primaryReadiness.initialMultipassState=[string]$instances[0].state}
+        $infoResult=$null;$infoError=''
+        $remaining=[int][Math]::Floor(($readinessDeadline-[datetime](& $ClockProvider)).TotalSeconds)
+        if($remaining -gt 0){$readinessTrace.infoAttempts++;try{$infoResult=& $probeInvoker @('info',$primary) ([Math]::Min(90,$remaining))}catch{$infoError=$_.Exception.Message;if($infoError -like 'Nested Multipass operation timed out*'){$readinessTrace.infoTimeouts++}}}else{$infoError='readiness deadline exhausted before initial info probe'}
+        $primaryReadiness.initialInfoExitCode=if($infoResult){$infoResult.exitCode}else{$null}
+        $infoText=if($infoResult){@($infoResult.stdout)-join "`n"}else{$infoError}
+        $ipv4Match=[regex]::Match($infoText,'(?im)^\s*IPv4:\s*(?<ip>\S+)\s*$')
+        $infoReady=($infoResult -and $infoResult.exitCode -eq 0 -and $ipv4Match.Success -and $ipv4Match.Groups['ip'].Value -notmatch '^(--|-)$')
+        $readinessTrace.lastInfoClass=if($infoReady){'READY'}elseif($infoResult -and $infoResult.exitCode -ne 0){'NONZERO'}elseif($infoResult){'NO_IPV4'}elseif($infoError -like 'Nested Multipass operation timed out*'){'TIMEOUT'}else{'TRANSPORT_ERROR'}
+        # Checkpoint restore may preserve Hyper-V Running state without a
+        # usable Multipass management address.  Reset only the nested VM in
+        # this disposable L1, then wait for Multipass to report IPv4/SSH.
+        if(-not $infoReady -or [string]$instances[0].state -ceq 'Stopped'){
+            $primaryVm=Get-ExactNestedPrimaryVm -ExpectedName $primary
+            $primaryReadiness.hyperVStateBefore=$primaryVm.State.ToString()
+            $readinessTrace.hyperVBefore=$primaryVm.State.ToString()
+            if($primaryVm.State -ne 'Off'){& $VmStopProvider $primaryVm}
+            & $VmStartProvider (& $VmLookupProvider -Id ([guid]$primaryVm.Id))|Out-Null
+            $readinessTrace.hyperVCycle='PASS'
+            $primaryReadiness.recovery='bounded-disposable-nested-HyperV-powercycle'
+        }
+        $ready=$infoReady;$lastInfo=$infoText
+        if($infoReady){$primaryReadiness.ipv4=$ipv4Match.Groups['ip'].Value}
+        while(-not $ready -and [datetime](& $ClockProvider) -lt $readinessDeadline){
+            $remaining=[int][Math]::Floor(($readinessDeadline-[datetime](& $ClockProvider)).TotalSeconds);if($remaining -le 0){break}
+            $infoResult=$null
+            $readinessTrace.infoAttempts++
+            try{$infoResult=& $probeInvoker @('info',$primary) ([Math]::Min(30,$remaining));$lastInfo=@($infoResult.output)-join "`n"}catch{$lastInfo=$_.Exception.Message;if($lastInfo -like 'Nested Multipass operation timed out*'){$readinessTrace.infoTimeouts++}}
+            if($infoResult){$infoStdout=@($infoResult.stdout)-join "`n";$ipv4Match=[regex]::Match($infoStdout,'(?im)^\s*IPv4:\s*(?<ip>\S+)\s*$')}else{$ipv4Match=$null}
+            $readinessTrace.lastInfoClass=if(-not $infoResult){if($lastInfo -like 'Nested Multipass operation timed out*'){'TIMEOUT'}else{'TRANSPORT_ERROR'}}elseif($infoResult.exitCode -ne 0){'NONZERO'}elseif(-not $ipv4Match.Success -or $ipv4Match.Groups['ip'].Value -match '^(--|-)$'){'NO_IPV4'}else{'READY'}
+            if($infoResult -and $infoResult.exitCode -eq 0 -and $ipv4Match.Success -and $ipv4Match.Groups['ip'].Value -notmatch '^(--|-)$'){
+                $ready=$true;$primaryReadiness.ipv4=$ipv4Match.Groups['ip'].Value;break
+            }
+            $remaining=[int][Math]::Floor(($readinessDeadline-[datetime](& $ClockProvider)).TotalSeconds);if($remaining -gt 0){& $SleepProvider ([Math]::Min(5000,$remaining*1000))}
+        }
+        if(-not $ready){$traceText=@($readinessTrace.GetEnumerator()|ForEach-Object{"$($_.Key)=$($_.Value)"}) -join ';';throw "Configured Primary did not become Multipass/SSH-ready within 180 seconds. READINESS_TRACE: $traceText"}
+        $primaryReadiness.ready=$true
+        return $primaryReadiness
+    }
+}
 
-    def save(self) -> None:
-        write_json(self.state_path, self.state)
+function Invoke-NestedProductScenario {
+    param([Parameter(Mandatory)][psobject]$Context,[Parameter(Mandatory)][string]$Scenario)
+    $nestedIdentity=Resolve-DevFleetNestedScenarioIdentity -RunId ([string]$Context.runId) -PhaseId ([string]$Context.phaseId) -Scenario $Scenario
+    # Materialize the already-validated identity properties before building a
+    # remoting ArgumentList.  PowerShell parses a member access preceded by a
+    # type literal differently inside that array expression and can otherwise
+    # send the literal text `[string]@{...}.runId` across the boundary.
+    $validatedRunId=[string]$nestedIdentity.runId
+    $validatedPhaseId=[string]$nestedIdentity.phaseId
+    $validatedScenario=[string]$nestedIdentity.scenario
+    $candidate=Assert-ExactCandidate $Context
+    $tarPath=[string]$Context.candidate.tar.path
+    $tarHash=(Get-FileHash -LiteralPath $tarPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if($tarHash -ne [string]$Context.candidate.tar.sha256){throw "Exact candidate TAR changed before $($Context.phaseId)."}
+    if([string]$Context.vmName -notlike 'DevFleet-E2E-*'){throw "$($Context.phaseId) requires an ownership-scoped disposable L1."}
+    $localDriver=Join-Path $PSScriptRoot 'Invoke-ProductLifecycleScenario.py'
+    if(-not(Test-Path -LiteralPath $localDriver -PathType Leaf)){throw 'Product lifecycle scenario driver is missing.'}
+    $session=$null
+    try{
+        $session=Connect-DevFleetGuest -VmId ([guid][string]$Context.vmId)
+        $remoteRoot="C:\Users\Public\DevFleet-E2E\$validatedRunId\$validatedPhaseId"
+        $remoteTar=Join-Path $remoteRoot (Split-Path -Leaf $tarPath)
+        $remoteDriver=Join-Path $remoteRoot 'Invoke-ProductLifecycleScenario.py'
+        Invoke-Command -Session $session -ScriptBlock {param($path) New-Item -ItemType Directory -Path $path -Force|Out-Null} -ArgumentList $remoteRoot
+        $stage=Get-StageIntegrity -LocalPath $tarPath -Session $session -RemotePath $remoteTar
+        if(-not $stage.equal){throw 'Exact candidate TAR changed while staging to the disposable L1.'}
+        Copy-Item -LiteralPath $localDriver -Destination $remoteDriver -ToSession $session -Force
+        $driverHash=(Get-FileHash -LiteralPath $localDriver -Algorithm SHA256).Hash.ToLowerInvariant()
+        $readinessSource=(Get-DevFleetNestedPrimaryReadinessScriptBlock).ToString()
+        $vaultFixtureJson=if($Context.PSObject.Properties['maintenanceVault']){$Context.maintenanceVault|ConvertTo-Json -Depth 8 -Compress}else{''}
+        $guestResult=Invoke-Command -Session $session -ScriptBlock {
+            param($tar,$expectedTarHash,$driver,$expectedDriverHash,$runId,$phaseId,$scenario,$readinessSource,$vaultFixtureJson)
+            $ErrorActionPreference='Stop'
+            if($env:COMPUTERNAME -notlike 'DEVFLEET-E2E-*'){throw 'Product scenario is not running inside the disposable L1.'}
+            if((Get-FileHash -LiteralPath $tar -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedTarHash){throw 'L1 candidate TAR hash mismatch.'}
+            if((Get-FileHash -LiteralPath $driver -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedDriverHash){throw 'L1 scenario driver hash mismatch.'}
+            $configPath='C:\ProgramData\DevFleet\devfleet.config.json'
+            $identityPath='C:\ProgramData\DevFleet\node-identity.json'
+            if(-not(Test-Path -LiteralPath $configPath -PathType Leaf) -or -not(Test-Path -LiteralPath $identityPath -PathType Leaf)){throw 'Installed DevFleet L1 configuration or deployment identity is missing.'}
+            $config=Get-Content -LiteralPath $configPath -Raw|ConvertFrom-Json
+            $hostIdentity=Get-Content -LiteralPath $identityPath -Raw|ConvertFrom-Json
+            $primary=[string]$config.Primary.InstanceName
+            if($primary -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$' -or -not [string]$hostIdentity.deployment_id){throw 'Installed Primary/deployment identity is invalid.'}
+            $expectedMultipass=Join-Path $env:ProgramFiles 'Multipass\bin\multipass.exe'
+            $multipass=@(Get-Command multipass.exe -All -ErrorAction Stop|Where-Object{$_.Source -ceq $expectedMultipass})
+            if($multipass.Count -ne 1){throw 'Trusted machine Multipass resolution is ambiguous or missing inside L1.'}
+            $mp=$multipass[0].Source
+            $primaryReadiness=. ([scriptblock]::Create($readinessSource)) -Primary $primary -MultipassPath $mp
+            if($scenario-in@('permanent-delete','delete-restore','vault')){
+                if(-not$vaultFixtureJson){throw 'Positive Vault scenario lacks its configured checkpoint prerequisite.'}
+                $fixture=$vaultFixtureJson|ConvertFrom-Json -ErrorAction Stop
+                if([string]$fixture.status-cne'PASS'-or[string]$fixture.payloadSha256-cne$expectedTarHash-or[string]$fixture.primaryRole-cne'primary'-or[string]$fixture.primaryName-cne$primary-or[string]$fixture.deploymentId-cne[string]$hostIdentity.deployment_id-or[string]$fixture.vaultName-cne[string]$config.Vault.InstanceName-or$fixture.configurationPresent-isnot[bool]-or-not$fixture.configurationPresent-or$fixture.proofCredit-isnot[bool]-or$fixture.proofCredit){throw 'Configured Vault prerequisite identity/configuration differs.'}
+                foreach($entry in @(@{name=$primary;id=$fixture.primaryId},@{name=[string]$fixture.vaultName;id=$fixture.vaultId})){
+                    $owned=Get-VM -Id ([guid][string]$entry.id) -ErrorAction Stop
+                    if($owned.Name-cne[string]$entry.name){throw 'Configured Vault prerequisite nested immutable identity differs.'}
+                }
+                # Reuse the existing exact-ID restored-nested readiness route;
+                # a checkpoint's VM presence is not an SSH readiness receipt.
+                $vaultReadiness=& ([scriptblock]::Create($readinessSource)) -Primary ([string]$fixture.vaultName) -MultipassPath $mp
+            }
+            $runId=[string]$runId;$phaseId=[string]$phaseId;$scenario=[string]$scenario
+            if($runId.Length -gt 128 -or $runId -cnotmatch '\A(?:e2e|fullrelease)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\z'){
+                throw "Nested scenario RunId failed remote ownership validation: length=$($runId.Length)."
+            }
+            $expectedPhase=switch($scenario){
+                'permanent-delete' {'PERMANENT-DELETE'}
+                'delete-restore' {'DELETE-RESTORE'}
+                'stopped-project' {'STOPPED-PROJECT'}
+                'host-concurrency' {'HOST-CONCURRENCY'}
+                'operation-recovery' {'OPERATION-RECOVERY'}
+                'ownership' {'OWNERSHIP'}
+                'vault' {'VAULT'}
+                default {throw "Nested scenario identity was not recognized: scenarioLength=$($scenario.Length)."}
+            }
+            if($phaseId -cne $expectedPhase){throw "Nested scenario phase does not match its destructive scenario identity: phaseLength=$($phaseId.Length)."}
+            $expectedRoot="/tmp/devfleet-e2e/$runId/$phaseId"
+            if($expectedRoot -cnotmatch '\A/tmp/devfleet-e2e/(?:e2e|fullrelease)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*/[A-Z0-9]+(?:-[A-Z0-9]+)*\z'){
+                throw "Nested scenario root failed remote ownership validation: runIdLength=$($runId.Length); phaseIdLength=$($phaseId.Length)."
+            }
+            $l2Root=$expectedRoot
+            $l2Tar="$l2Root/candidate.tar.gz";$l2Driver="$l2Root/Invoke-ProductLifecycleScenario.py"
+            $incoming="$l2Root/.incoming";$incomingTar="$incoming/candidate.tar.gz";$incomingDriver="$incoming/Invoke-ProductLifecycleScenario.py"
+            $scenarioCompleted=$false
+            try{
+                $cleanupRoot=Invoke-NestedMultipass @('exec',$primary,'--','sudo','rm','-rf','--',$l2Root)
+                if($cleanupRoot.exitCode -ne 0){throw "Nested scenario root cleanup failed: $($cleanupRoot.output -join ' ')"}
+                $makeRoot=Invoke-NestedMultipass @('exec',$primary,'--','sudo','install','-d','-o','root','-g','root','-m','0755',$l2Root,"$l2Root/source")
+                if($makeRoot.exitCode -ne 0){throw "Nested scenario root could not be created: $($makeRoot.output -join ' ')"}
+                $makeIncoming=Invoke-NestedMultipass @('exec',$primary,'--','sudo','install','-d','-o','ubuntu','-g','ubuntu','-m','0700',$incoming)
+                if($makeIncoming.exitCode -ne 0){throw "Nested scenario transfer staging could not be created: $($makeIncoming.output -join ' ')"}
+                $tarTransfer=Invoke-NestedMultipass @('transfer',$tar,"$primary`:$incomingTar")
+                if($tarTransfer.exitCode -ne 0){throw "Candidate TAR transfer from L1 to Primary failed: $($tarTransfer.output -join ' ')"}
+                $driverTransfer=Invoke-NestedMultipass @('transfer',$driver,"$primary`:$incomingDriver")
+                if($driverTransfer.exitCode -ne 0){throw "Scenario driver transfer from L1 to Primary failed: $($driverTransfer.output -join ' ')"}
+                $lockIncoming=Invoke-NestedMultipass @('exec',$primary,'--','sudo','chown','-R','root:root','--',$incoming)
+                if($lockIncoming.exitCode -ne 0){throw "Nested scenario transfer staging could not be locked: $($lockIncoming.output -join ' ')"}
+                $promoteTar=Invoke-NestedMultipass @('exec',$primary,'--','sudo','install','-T','-o','root','-g','root','-m','0644',$incomingTar,$l2Tar)
+                if($promoteTar.exitCode -ne 0){throw "Candidate TAR could not be promoted into the owned root: $($promoteTar.output -join ' ')"}
+                $promoteDriver=Invoke-NestedMultipass @('exec',$primary,'--','sudo','install','-T','-o','root','-g','root','-m','0644',$incomingDriver,$l2Driver)
+                if($promoteDriver.exitCode -ne 0){throw "Scenario driver could not be promoted into the owned root: $($promoteDriver.output -join ' ')"}
+                $removeIncoming=Invoke-NestedMultipass @('exec',$primary,'--','sudo','rm','-rf','--',$incoming)
+                if($removeIncoming.exitCode -ne 0){throw "Nested scenario transfer staging cleanup failed: $($removeIncoming.output -join ' ')"}
+                $hashResult=Invoke-NestedMultipass @('exec',$primary,'--','sha256sum',$l2Tar)
+                $hashLines=@($hashResult.stdout);$l2Hash=if($hashLines.Count -eq 1){([string]$hashLines[0]).Split(' ',[StringSplitOptions]::RemoveEmptyEntries)[0].ToLowerInvariant()}else{''}
+                if($hashResult.exitCode -ne 0 -or $hashLines.Count -ne 1 -or $l2Hash -ne $expectedTarHash){throw 'L2 candidate TAR hash differs from host/L1 identity.'}
+                $driverHashResult=Invoke-NestedMultipass @('exec',$primary,'--','sha256sum',$l2Driver)
+                $driverHashLines=@($driverHashResult.stdout);$l2DriverHash=if($driverHashLines.Count -eq 1){([string]$driverHashLines[0]).Split(' ',[StringSplitOptions]::RemoveEmptyEntries)[0].ToLowerInvariant()}else{''}
+                if($driverHashResult.exitCode -ne 0 -or $driverHashLines.Count -ne 1 -or $l2DriverHash -ne $expectedDriverHash){throw 'L2 scenario driver hash differs from the exact L1 driver.'}
+                $extractResult=Invoke-NestedMultipass @('exec',$primary,'--','sudo','tar','-xzf',$l2Tar,'-C',"$l2Root/source")
+                if($extractResult.exitCode -ne 0){throw "Exact candidate extraction failed in Primary: $($extractResult.output -join ' ')"}
+                $sourceRoot="$l2Root/source"
+                $sourceCheck=Invoke-NestedMultipass @('exec',$primary,'--','test','-f',"$sourceRoot/VERSION")
+                if($sourceCheck.exitCode -ne 0){throw 'Exact candidate extraction did not produce the canonical source root.'}
+                $pythonResult=Invoke-NestedMultipass @('exec',$primary,'--','bash','-lc','for p in /opt/devfleet/venv/bin/python /opt/devfleet/venv/bin/python3; do test -x "$p" && echo "$p" && exit 0; done; exit 1')
+                $pythonLines=@($pythonResult.stdout);$python=if($pythonLines.Count -eq 1){[string]$pythonLines[0]}else{''}
+                if($pythonResult.exitCode -ne 0 -or $pythonLines.Count -ne 1 -or -not $python.StartsWith('/opt/devfleet/venv/bin/python')){throw 'Installed DevFleet Python runtime is unavailable in Primary.'}
+                $scenarioResultRaw=Invoke-NestedMultipass @('exec',$primary,'--','sudo','-u','devfleet-control','env','HOME=/nonexistent',$python,$l2Driver,'--source-root',$sourceRoot,'--run-id',$runId,'--scenario',$scenario)
+                $raw=@($scenarioResultRaw.stdout)
+                $exit=$scenarioResultRaw.exitCode
+                $jsonLine=@($raw|ForEach-Object{[string]$_}|Where-Object{$_.TrimStart().StartsWith('{')}|Select-Object -Last 1)
+                if($jsonLine.Count -ne 1){throw "Product scenario returned no structured result: $((@($scenarioResultRaw.output)|Select-Object -Last 8)-join ' | ')"}
+                $scenarioResult=$jsonLine[0]|ConvertFrom-Json
+                if($exit -ne 0 -or [string]$scenarioResult.status -ne 'PASS'){throw "Product scenario failed: $([string]$scenarioResult.error)"}
+                $guestIdentityResult=Invoke-NestedMultipass @('exec',$primary,'--','sudo','cat','/etc/devfleet/node-identity.json')
+                $guestIdentityRaw=@($guestIdentityResult.stdout);if($guestIdentityResult.exitCode -ne 0){throw 'Primary node identity could not be read.'}
+                $guestIdentity=($guestIdentityRaw -join "`n")|ConvertFrom-Json
+                if([string]$guestIdentity.deployment_id -ne [string]$hostIdentity.deployment_id){throw 'Primary deployment identity differs from the owning L1 deployment.'}
+                $result=[ordered]@{status='PASS';scenario=$scenario;multipassReadiness=$primaryReadiness;l1=[ordered]@{computer=$env:COMPUTERNAME;deploymentId=[string]$hostIdentity.deployment_id};primary=[ordered]@{name=$primary;deploymentId=[string]$guestIdentity.deployment_id;nodeId=[string]$guestIdentity.node_id};tarSha256=[ordered]@{l1=$expectedTarHash;l2=$l2Hash};product=$scenarioResult;secretsInEvidence=$false}
+                $scenarioCompleted=$true
+                return $result
+            }finally{
+                $cleanupFailure=$null
+                try{$cleanupResult=Invoke-NestedMultipass @('exec',$primary,'--','sudo','rm','-rf','--',$l2Root);if($cleanupResult.exitCode -ne 0){throw "exit $($cleanupResult.exitCode): $($cleanupResult.output -join ' ')"}}catch{$cleanupFailure=$_.Exception.Message}
+                Remove-Item -LiteralPath (Split-Path -Parent $tar) -Recurse -Force -ErrorAction SilentlyContinue
+                if($scenarioCompleted -and $cleanupFailure){throw "Nested scenario completed but its exact owned-root cleanup failed: $cleanupFailure"}
+            }
+        } -ArgumentList $remoteTar,$tarHash,$remoteDriver,$driverHash,$validatedRunId,$validatedPhaseId,$validatedScenario,$readinessSource,$vaultFixtureJson
+        $evidencePath=Join-Path ([string]$Context.runDir) ("$($Context.phaseId.ToLowerInvariant())-product-evidence.json")
+        [IO.File]::WriteAllText($evidencePath,(($guestResult|ConvertTo-Json -Depth 32)+[Environment]::NewLine),[Text.UTF8Encoding]::new($false))
+        return [ordered]@{status='REAL E2E PASS';phase=[string]$Context.phaseId;contract='exact-candidate-product-lifecycle-in-owned-primary';candidate=$candidate;scenario=$Scenario;guest=$guestResult;evidencePath=$evidencePath}
+    }finally{if($session){Remove-DevFleetGuestSession $session -ErrorAction SilentlyContinue}}
+}
 
-    @property
-    def fixture(self) -> dict[str, Any]:
-        return self.state["fixture"]
+function Invoke-DisposableSyntheticRebootProbe {
+    <# Independent harness probe. It owns only a run-scoped PFRO trigger and
+       never reads, creates, or advances a product lifecycle checkpoint. #>
+    param([Parameter(Mandatory)][psobject]$Context)
+    if([string]$Context.vmName -notlike 'DevFleet-E2E-*'){throw 'Synthetic reboot probe requires an ownership-scoped disposable L1.'}
+    $session=$null
+    try {
+        $session=Connect-DevFleetGuest -VmId ([guid][string]$Context.vmId)
+        $baseline=Invoke-Command -Session $session -ScriptBlock {
+            $pfr=@((Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue).PendingFileRenameOperations)
+            $meaningful=@($pfr|Where-Object{-not [string]::IsNullOrWhiteSpace([string]$_)});$pairs=@();for($i=0;$i -lt $pfr.Count;$i+=2){$pairs+=[ordered]@{source=[string]$pfr[$i];destination=if($i+1 -lt $pfr.Count){[string]$pfr[$i+1]}else{''}}}
+            [ordered]@{boot=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o');pendingCount=$meaningful.Count;pendingFileRenameOperationsPresent=($meaningful.Count -gt 0);pairs=$pairs}
+        }
+        $pre=Invoke-Command -Session $session -ScriptBlock {
+            param($runId,$phaseId)
+            $safeRun=$runId -replace '[^A-Za-z0-9-]','';$safePhase=$phaseId -replace '[^A-Za-z0-9-]',''
+            $root="C:\Users\Public\DevFleet-E2E\$safeRun\$safePhase\synthetic-reboot";$source=Join-Path $root 'source.bin';$destination=Join-Path $root 'destination.bin'
+            New-Item -ItemType Directory -Force -Path $root|Out-Null;[IO.File]::WriteAllText($source,'DevFleet synthetic reboot probe')
+            if(-not ('DevFleetE2EMoveFile' -as [type])){Add-Type @'
+using System.Runtime.InteropServices;
+public static class DevFleetE2EMoveFile { [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] public static extern bool MoveFileEx(string a,string b,int f); }
+'@}
+            if(-not [DevFleetE2EMoveFile]::MoveFileEx($source,$destination,4)){throw 'MoveFileEx synthetic trigger failed.'}
+            $os=Get-CimInstance Win32_OperatingSystem;[ordered]@{source=$source;destination=$destination;boot=$os.LastBootUpTime.ToUniversalTime().ToString('o');queued=$true}
+        } -ArgumentList ([string]$Context.runId),([string]$Context.phaseId)
+        try{Invoke-Command -Session $session -ScriptBlock {Restart-Computer -Force} -ErrorAction Stop|Out-Null}catch{}
+    }finally{if($session){Remove-DevFleetGuestSession $session -ErrorAction SilentlyContinue}}
+    Start-Sleep -Seconds 10;$post=$null;$lastError='';$deadline=(Get-Date).AddMinutes(5)
+    do {$probe=$null;try{$probe=Connect-DevFleetGuest -VmId ([guid][string]$Context.vmId);$post=Invoke-Command -Session $probe -ScriptBlock {$os=Get-CimInstance Win32_OperatingSystem;[ordered]@{boot=$os.LastBootUpTime.ToUniversalTime().ToString('o')}};if([datetime]$post.boot -le [datetime]$pre.boot){$post=$null}}catch{$lastError=$_.Exception.Message}finally{if($probe){Remove-DevFleetGuestSession $probe -ErrorAction SilentlyContinue}};if(-not $post){Start-Sleep -Seconds 5}}while(-not $post -and (Get-Date)-lt $deadline)
+    if(-not $post){throw "Synthetic reboot probe did not observe a changed boot identity: $lastError"}
+    $settlementSession=$null;$settled=$null
+    try{$settlementSession=Connect-DevFleetGuest -VmId ([guid][string]$Context.vmId);$settled=Invoke-Command -Session $settlementSession -ScriptBlock {param($source,$destination,$baselinePairs)$pfr=@((Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue).PendingFileRenameOperations);$meaningful=@($pfr|Where-Object{-not [string]::IsNullOrWhiteSpace([string]$_)});$pairs=@();for($i=0;$i -lt $pfr.Count;$i+=2){$pairs+=[ordered]@{source=[string]$pfr[$i];destination=if($i+1 -lt $pfr.Count){[string]$pfr[$i+1]}else{''}}};$keys=@($pairs|ForEach-Object{"$($_.source)`n$($_.destination)"});$baseKeys=@($baselinePairs|ForEach-Object{"$($_.source)`n$($_.destination)"});[ordered]@{sourceExists=(Test-Path -LiteralPath $source -PathType Leaf);destinationExists=(Test-Path -LiteralPath $destination -PathType Leaf);pendingCount=$meaningful.Count;pendingFileRenameOperationsMeaningfulCount=$meaningful.Count;unrelatedEntriesPreserved=(@($baseKeys|Where-Object{$keys -contains $_}).Count -eq $baseKeys.Count);pairs=$pairs}} -ArgumentList ([string]$pre.source),([string]$pre.destination),@($baseline.pairs)}finally{if($settlementSession){Remove-DevFleetGuestSession $settlementSession -ErrorAction SilentlyContinue}}
+    if([bool]$settled.sourceExists -or -not [bool]$settled.destinationExists){throw 'Synthetic reboot run-owned delayed operation did not settle.'}
+    # Windows may legitimately consume unrelated pending operations while the
+    # owned operation settles. Never delete or rewrite foreign state; retain a
+    # before/after comparison for audit and make the ownership-specific verdict
+    # the gate.
+    $settled.unrelatedStateChangedByHarness=$false
+    $settled.unrelatedStatePreserved=[bool]$settled.unrelatedEntriesPreserved
+    $settled.ownershipSpecificVerdict='PASS'
+    $evidence=[ordered]@{status='PASS';phase='SYNTHETIC-REBOOT-PROBE';contract='run-owned-PFRO-only';baseline=$baseline;preBoot=$pre;postBoot=$post;settlement=$settled;bootIdentityChanged=$true;interactiveDesktop=[ordered]@{status='NOT_APPLICABLE';reason='Synthetic probe does not launch product UI.'};productLifecycleTouched=$false}
+    $path=Join-Path ([string]$Context.runDir) 'synthetic-reboot-probe.json';Write-EvidenceJson -Path $path -Value $evidence;$evidence.evidencePath=$path;return $evidence
+}
 
-    def begin(self, journey: str) -> dict[str, Any]:
-        self.state["currentJourney"] = journey
-        row = next(row for row in self.state["journeys"] if row["id"] == journey)
-        row["status"] = "IN_PROGRESS"
-        self.save()
-        return row
+function Invoke-RebootResumePhase {
+    param([Parameter(Mandatory)][psobject]$Context,[psobject]$InitialResult,[scriptblock]$WpfProvider,[scriptblock]$TransitionProvider,[scriptblock]$RebootProvider,[scriptblock]$SettleProvider)
+    $synthetic=$null
+    $skipFound=$false;$skipSynthetic=Get-LifecycleProperty $Context 'skipSyntheticReboot' ([ref]$skipFound);if(-not ($skipFound -and [bool]$skipSynthetic)){
+        $syntheticProviderFound=$false;$syntheticProvider=Get-LifecycleProperty $Context 'syntheticRebootProvider' ([ref]$syntheticProviderFound);if($syntheticProviderFound){$synthetic=&$syntheticProvider ([pscustomobject]@{context=$Context;phaseId=(Get-LifecycleProperty $Context 'phaseId' ([ref]$skipFound))})}else{$synthetic=Invoke-DisposableSyntheticRebootProbe -Context $Context}
+        $syntheticStatusFound=$false;$syntheticStatus=Get-LifecycleProperty $synthetic 'status' ([ref]$syntheticStatusFound);if(-not $syntheticStatusFound -or [string]$syntheticStatus -ne 'PASS'){throw 'Synthetic reboot probe did not pass.'}
+    }
+    # The synthetic boundary and product lifecycle are independent proofs. The
+    # product loop gets a new WPF process and owns every product generation.
+    $product=Invoke-ProductFreshInstallLifecycle -Context $Context -Role 'Primary / Desktop' -WpfProvider $WpfProvider -TransitionProvider $TransitionProvider -RebootProvider $RebootProvider -SettleProvider $SettleProvider
+    $productCandidate = if($product.PSObject.Properties['candidate']){$product.candidate}else{$Context.candidate}
+    $productGuest = if($product.PSObject.Properties['guest']){$product.guest}else{$null}
+    $productEvidence = if($product.PSObject.Properties['evidencePath']){$product.evidencePath}else{$null}
+    $completionFound = $false
+    $completionValue = Get-LifecycleProperty $product 'completionVerified' ([ref]$completionFound)
+    $productCompletionVerified = $completionFound -and [bool]$completionValue
+    $statusFound = $false
+    $statusValue = Get-LifecycleProperty $product 'status' ([ref]$statusFound)
+    $productStatus = if($statusFound){[string]$statusValue}elseif($productCompletionVerified){'REAL E2E PASS'}else{'TERMINAL_FAILURE'}
+    if($productStatus -ne 'REAL E2E PASS' -or -not $productCompletionVerified){ return [ordered]@{status='TERMINAL_FAILURE';phase=[string]$Context.phaseId;contract='pure-product-lifecycle';completionVerified=$false;synthetic=$synthetic;product=$product;candidate=$productCandidate;guest=$productGuest;evidencePath=$productEvidence} }
+    return [ordered]@{status='REAL E2E PASS';phase=[string]$Context.phaseId;contract=if($synthetic){'synthetic-probe-then-pure-product-lifecycle'}else{'pure-product-lifecycle'};synthetic=$synthetic;product=$product;candidate=$productCandidate;guest=$productGuest;evidencePath=$productEvidence}
+}
 
-    def complete(self, journey: str, observations: dict[str, Any] | None = None) -> None:
-        row = next(row for row in self.state["journeys"] if row["id"] == journey)
-        row.update(status="PASS", assertions={key: True for key in ASSERTIONS[journey]}, observations=observations or {})
-        self.save()
+function Invoke-ProductLifecycleConsumer {
+    <# Actual phase dispatch seam used by focused tests and by consumers that
+       need only the supported product lifecycle. #>
+    param([Parameter(Mandatory)][psobject]$Context)
+    $wpfProvider = if ($Context.PSObject.Properties['lifecycleWpfProvider']) { $Context.lifecycleWpfProvider } else { $null }
+    $transitionProvider = if ($Context.PSObject.Properties['lifecycleTransitionProvider']) { $Context.lifecycleTransitionProvider } else { $null }
+    $rebootProvider = if ($Context.PSObject.Properties['lifecycleRebootProvider']) { $Context.lifecycleRebootProvider } else { $null }
+    $settleProvider = if ($Context.PSObject.Properties['lifecycleSettleProvider']) { $Context.lifecycleSettleProvider } else { $null }
+    if((Get-ProductLifecycleConsumerMode -PhaseId ([string]$Context.phaseId)) -eq 'SYNTHETIC_THEN_PRODUCT'){
+        return Invoke-RebootResumePhase -Context $Context -WpfProvider $wpfProvider -TransitionProvider $transitionProvider -RebootProvider $rebootProvider -SettleProvider $settleProvider
+    }
+    if((Get-ProductLifecycleConsumerMode -PhaseId ([string]$Context.phaseId)) -eq 'PRODUCT_ONLY'){
+        return Invoke-ProductFreshInstallLifecycle -Context $Context -Role 'Primary / Desktop' -WpfProvider $wpfProvider -TransitionProvider $transitionProvider -RebootProvider $rebootProvider -SettleProvider $settleProvider
+    }
+    throw "No product lifecycle consumer dispatch exists for $($Context.phaseId)."
+}
 
-    def operation(self, kind: str, *, page: str | None = None, route: str | None = None,
-                  fields: dict[str, str] | None = None, project: str | None = None,
-                  match_fields: dict[str, str] | None = None, expected: str = "completed",
-                  negative_fixture: bool = False) -> dict[str, Any]:
-        slug = project or self.fixture["slug"]
-        route = route or f"/projects/{slug}/{kind}"
-        page = page or f"/projects/{self.fixture['slug']}"
-        op_id, status = self.ui.submit(page, route, fields, match_fields=match_fields, negative_fixture=negative_fixture)
-        require(op_id not in {row["id"] for row in self.state["operations"]}, "OPERATION_REUSED_FROM_PRIOR_STEP")
-        entry = {"id": op_id, "kind": kind, "project": slug, "route": route, "httpStatus": status,
-                 "state": "submitted", "expectedState": expected, "renderedState": "", "smokeOutputObserved": False}
-        self.state["operations"].append(entry)
-        self.save()
-        try:
-            result, receipt = self.ui.wait_operation(op_id, kind, slug, expected, OPERATION_SECONDS[kind])
-        except AcceptanceError as exc:
-            if exc.receipt:
-                entry.update(exc.receipt)
-                self.save()
-            raise
-        entry.update(receipt)
-        self.save()
-        return result
+function Get-ProductLifecycleConsumerMode {
+    param([Parameter(Mandatory)][string]$PhaseId)
+    if($PhaseId -eq 'REBOOT-RESUME'){return 'SYNTHETIC_THEN_PRODUCT'}
+    if($PhaseId -in @('LINUX','SURROGATE-DISPOSABLE','MAINTENANCE-READY-PROVISION','DEPENDENCY-MATRIX')){return 'PRODUCT_ONLY'}
+    return 'NOT_APPLICABLE'
+}
 
-    def original(self) -> Path:
-        return safe_child(self.store.workspaces, self.fixture["slug"], exists=True)
+function Invoke-WindowsSentinelPhase {
+    param([Parameter(Mandatory)][psobject]$Context)
+    $result=Invoke-ActualWpfAction -Context $Context -Action 'Uninstall' -AllowMutation
+    if([string]$result.foreignSentinels.status -ne 'PASS' -or -not [bool]$result.foreignSentinels.unchanged){throw 'Windows foreign sentinels did not survive the exact candidate destructive lifecycle.'}
+    return [ordered]@{status='REAL E2E PASS';phase='WINDOWS-SENTINELS';contract='foreign-task-service-firewall-registry-file-survive-real-uninstall';candidate=$result.candidate;guest=$result.guest;sentinels=$result.foreignSentinels;evidencePath=$result.evidencePath}
+}
 
-    def identity(self) -> dict[str, Any]:
-        path = self.original()
-        meta = self.store.verify_identity(path, self.fixture, self.request["execution"])
-        self.store.verify_owner(path, self.fixture)
-        return meta
+function Invoke-AiBundlePhase {
+    param([Parameter(Mandatory)][psobject]$Context)
+    $candidate = Assert-ExactCandidate $Context
+    $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+    $builder = Join-Path $workspace 'tools\Build-AIAuditBundle.ps1'
+    $archive = Join-Path $workspace ('outputs\DevFleet-v{0}-AI-Audit-LATEST.zip' -f $Context.candidate.releaseVersion)
+    if (-not (Test-Path -LiteralPath $builder -PathType Leaf)) { throw 'Canonical AI audit builder is missing.' }
+    $buildOutput = @(& (Get-Command pwsh.exe -ErrorAction Stop).Source -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $builder -Workspace $workspace 2>&1)
+    $buildExit = $LASTEXITCODE
+    $buildRawPath = Join-Path ([string]$Context.runDir) 'ai-bundle-build-output.txt'
+    $buildOutput | ForEach-Object { [string]$_ } | Set-Content -LiteralPath $buildRawPath -Encoding UTF8
+    if ($buildExit -ne 0 -or -not (Test-Path -LiteralPath $archive -PathType Leaf)) { throw "Canonical AI audit builder failed; evidence=$buildRawPath" }
+    $report = Join-Path ([string]$Context.runDir) 'ai-audit-bundle-self-test.json'
+    $builderReport = Join-Path $workspace 'audit\ai-audit-bundle-self-test.json'
+    if (-not (Test-Path -LiteralPath $builderReport -PathType Leaf)) { throw 'Canonical builder validator report is missing.' }
+    $validated = Get-Content -LiteralPath $builderReport -Raw | ConvertFrom-Json
+    $manifest = "$archive.manifest.json"
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { throw 'Canonical AI audit sidecar manifest is missing.' }
+    $bundleManifest = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+    if ([string]$bundleManifest.selfTest -ne 'PASS' -or [int]$bundleManifest.expectedSourceCount -ne [int]$bundleManifest.includedSourceCount) { throw 'Canonical AI audit source inventory is incomplete.' }
+    # The builder chooses its mode from truthful native state and has already
+    # clean-extracted this archive. Bind reuse to its exact completed bytes.
+    $archiveHash=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ([string]$bundleManifest.sha256 -cne $archiveHash -or [long]$bundleManifest.bytes -ne [long](Get-Item -LiteralPath $archive).Length -or [string]$bundleManifest.path -cne [IO.Path]::GetFullPath($archive) -or [string]$validated.archive -cne [IO.Path]::GetFullPath($archive)) { throw 'Canonical builder validation archive binding mismatch.' }
+    $validMode=([string]$validated.bundleMode -ceq 'diagnostic' -and [string]$validated.status -ceq 'PASS_WITH_BLOCKER' -and $validated.releaseEligible -eq $false) -or ([string]$validated.bundleMode -ceq 'release' -and [string]$validated.status -ceq 'COMPLETE_FOR_AI_AUDIT' -and $validated.releaseEligible -eq $true)
+    if (-not $validMode -or [string]$validated.secretScan -cne 'PASS' -or [string]$validated.modeVerification -cne 'PASS' -or [int]$validated.includedSourceCount -ne [int]$bundleManifest.includedSourceCount) { throw 'Canonical builder validation report is not a successful matching round-trip.' }
+    Copy-Item -LiteralPath $builderReport -Destination $report -Force
+    $tarList = @(& tar.exe -tzf ([string]$Context.candidate.tar.path) 2>&1)
+    if ($LASTEXITCODE -ne 0 -or @($tarList | Where-Object { $_ -match '(^|/)linux/bootstrap-compute\.sh$' }).Count -ne 1) { throw 'Standard TAR extraction cannot locate the exact Linux bootstrap entrypoint.' }
+    return [ordered]@{status='REAL E2E PASS';phase='AI-BUNDLE';contract='current-candidate-audit-builder-validator';candidate=$candidate;archive=[ordered]@{path=$archive;bytes=[int64](Get-Item $archive).Length;sha256=(Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant();sourceCount=[int]$bundleManifest.includedSourceCount;validatorReport=$report};buildOutput=$buildRawPath;standardTarListing='PASS' }
+}
 
-    def observe_runtime(self, *, running: bool, healthy: bool = False) -> dict[str, Any]:
-        meta = self.identity()
-        containers = self.probe.containers(self.fixture["projectId"])
-        persistent: list[dict[str, Any]] = []
-        for item in containers:
-            labels = (item.get("Config") or {}).get("Labels") or {}
-            require(isinstance(labels, dict), "CONTAINER_LABELS_INVALID")
-            for key, label in LABELS.items():
-                require(labels.get(label) == str(meta.get(key, "")), "CONTAINER_OWNERSHIP_MISMATCH")
-            require(labels.get("com.docker.compose.project") == self.fixture["runtimeId"]
-                    and labels.get("com.docker.compose.service"), "COMPOSE_IDENTITY_MISMATCH")
-            require(SHA256.fullmatch(str(item.get("Id", ""))), "CONTAINER_ID_NOT_CANONICAL")
-            if str(labels.get("com.docker.compose.oneoff", "")).lower() == "true":
-                require(not (item.get("State") or {}).get("Running"), "TRANSIENT_WRITER_REMAINS")
-                continue
-            persistent.append(item)
-        active = [item for item in persistent if (item.get("State") or {}).get("Running") is True]
-        require(len(active) == (1 if running else 0), "PERSISTENT_WRITER_COUNT_MISMATCH")
-        ui_page = self.ui.page(f"/projects/{self.fixture['slug']}")
-        require(ui_page.project_states and ui_page.project_states == [("running" if running else "stopped")],
-                "UI_RUNTIME_STATE_DISAGREES")
-        require(meta.get("lifecycle_status") == ("running" if running else "stopped"), "BACKEND_RUNTIME_STATE_DISAGREES")
-        if healthy:
-            require(meta.get("health_status") == "healthy", "APPLICATION_NOT_HEALTHY")
-        ids = []
-        for item in active:
-            observed = self.ui.json("/containers/" + item["Id"] + "/inspect")
-            require(observed.get("Id") == item["Id"] and (observed.get("State") or {}).get("Running") is True,
-                    "UI_CONTAINER_INSPECT_DISAGREES")
-            if healthy:
-                require((item.get("State") or {}).get("Health", {}).get("Status") == "healthy", "CONTAINER_NOT_HEALTHY")
-            ids.append(item["Id"])
-        return {"persistentContainerIds": ids, "persistentWriters": len(active), "healthy": healthy}
+function Invoke-ReconcilePhase {
+    param([Parameter(Mandatory)][psobject]$Context)
+    $candidate = Assert-ExactCandidate $Context
+    $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+    $head = (& git -C $workspace rev-parse HEAD).Trim()
+    $manifest = Get-Content -LiteralPath (Join-Path $workspace 'outputs\final-artifact-hashes.json') -Raw | ConvertFrom-Json
+    $state = Get-Content -LiteralPath (Join-Path $workspace 'finalization-state.json') -Raw | ConvertFrom-Json
+    $release = Get-Content -LiteralPath (Join-Path $workspace 'outputs\release-fingerprint.json') -Raw | ConvertFrom-Json
+    $tooling = Get-Content -LiteralPath (Join-Path $workspace 'outputs\tooling-fingerprint-current.json') -Raw | ConvertFrom-Json
+    $currentShippingIdentity = [string]$state.shipping_input_identity
+    if (-not $currentShippingIdentity -or [string]$state.candidate_git_commit -ne [string]$Context.candidate.gitCommit) { throw 'RECONCILE is missing independent repository-head/candidate identity.' }
+    if ([string]$manifest.shippingInputIdentity -and [string]$manifest.shippingInputIdentity -ne $currentShippingIdentity) { throw 'RECONCILE shipping-input identity mismatch.' }
+    foreach($pair in @(@('releaseFingerprintId',$Context.candidate.releaseFingerprintId,$manifest.releaseFingerprintId,$release.releaseFingerprintId,$tooling.releaseFingerprintId),@('toolingFingerprintId',$Context.candidate.toolingFingerprintId,$manifest.toolingFingerprintId,$release.toolingFingerprint.toolingFingerprintId,$tooling.toolingFingerprintId))){ if(@($pair[1..4] | ForEach-Object {[string]$_} | Select-Object -Unique).Count -ne 1){throw "RECONCILE identity mismatch: $($pair[0])"} }
+    if (-not [bool]$state.candidate_is_current -or [bool]$state.source_changed_since_candidate -or [bool]$state.rebuild_required) { throw 'RECONCILE found a stale candidate state or rebuild requirement.' }
+    $rows = @()
+    $recordsPath = Join-Path ([string]$Context.runDir) 'fullrelease-phase-records.json'
+    if (Test-Path -LiteralPath $recordsPath) { $rows = @(Get-Content -LiteralPath $recordsPath -Raw | ConvertFrom-Json) }
+    $required = @('HOST-SAFETY','CANDIDATE-VERIFY','RESTORE-CLEAN','ESTABLISH-SESSION','DEPENDENCY-MATRIX','SECURITY-POISON','FRESH-INSTALL-WPF','PRIMARY','LINUX','HTTP-HOSTILE','MAINTENANCE-READY','WINDOWS-SENTINELS','REPAIR','CLEAN-REINSTALL','UNINSTALL','FACTORY-RESET','REBOOT-RESUME','PERMANENT-DELETE','DELETE-RESTORE','STOPPED-PROJECT','HOST-CONCURRENCY','OPERATION-RECOVERY','OWNERSHIP','VAULT','SURROGATE-DISPOSABLE','REAL-USE-ACCEPTANCE','TAILSCALE-DEFERRED','TAILSCALE-AUTH','AI-BUNDLE')
+    $missing=@($required | Where-Object { $row=$rows | Where-Object id -eq $_ | Select-Object -Last 1; -not $row -or [string]$row.status -ne 'PASS' })
+    if($missing.Count){throw "RECONCILE found mandatory phases missing or not PASS: $($missing -join ', ')"}
+    $realUseRecord = @($rows | Where-Object { [string]$_.id -ceq 'REAL-USE-ACCEPTANCE' }) | Select-Object -Last 1
+    Assert-RealUseAcceptancePhaseEvidence -PhaseResult $realUseRecord.evidence.executor -Context $Context | Out-Null
+    $maintenance=@('REPAIR','CLEAN-REINSTALL','UNINSTALL','FACTORY-RESET','REBOOT-RESUME') | ForEach-Object { $rows | Where-Object id -eq $_ | Select-Object -Last 1 }
+    if(@($maintenance).Count -ne 5){throw 'RECONCILE maintenance count is not 5/5.'}
+    return [ordered]@{status='REAL E2E PASS';phase='RECONCILE';contract='exact-candidate-final-state-reconciliation';candidate=$candidate;repositoryHead=$head;candidateCommit=[string]$state.candidate_git_commit;shippingInputIdentity=$currentShippingIdentity;identities=[ordered]@{releaseFingerprintId=$release.releaseFingerprintId;toolingFingerprintId=$tooling.toolingFingerprintId};candidateState=[ordered]@{candidateIsCurrent=$state.candidate_is_current;sourceChangedSinceCandidate=$state.source_changed_since_candidate;rebuildRequired=$state.rebuild_required};mandatoryPhaseCount=$required.Count;maintenance='5/5';recordsPath=$recordsPath }
+}
 
-    def wait_healthy(self) -> dict[str, Any]:
-        # Docker healthcheck is independent of the successful user health job.
-        deadline = min(self.ui.deadline, self.ui.clock() + 180)
-        while True:
-            try:
-                return self.observe_runtime(running=True, healthy=True)
-            except AcceptanceError as exc:
-                if exc.code not in {"CONTAINER_NOT_HEALTHY"} or self.ui.clock() >= deadline:
-                    raise
-                self.ui.sleep(min(1.0, max(0.0, deadline - self.ui.clock())))
+function Invoke-RealProductPhase {
+    param([Parameter(Mandatory)][string]$ContextJson)
+    $context = Read-PhaseContext $ContextJson
+    # Generic Diagnostics is not a contract proof for named lifecycle phases; every such phase below dispatches scenario-specific evidence.
+    switch ([string]$context.phaseId) {
+        'DEPENDENCY-MATRIX' { return Invoke-DependencyMatrix $context }
+        'SECURITY-POISON' { return Invoke-ActualWpfAction $context 'Diagnostics' -AllowMutation }
+        'FRESH-INSTALL-WPF' {
+            $ui=Invoke-SupportedFreshInstallLifecycle -Context $context -Role 'Primary / Desktop' -CompleteLifecycle
+            if([string]$ui.status -ne 'REAL E2E PASS' -or -not [bool]$ui.completionVerified){throw "FRESH-INSTALL-WPF requires verified lifecycle completion; observed $([string]$ui.status)."}
+            return $ui
+        }
+        'PRIMARY' { throw 'PRIMARY must be dispatched by Invoke-PrimaryPhase.ps1, not the generic product driver.' }
+        'LINUX' { throw 'LINUX must be dispatched by Invoke-LinuxPhase.ps1, not the generic product driver.' }
+        'HTTP-HOSTILE' { throw 'HTTP-HOSTILE must be dispatched by Invoke-HttpHostilePhase.ps1, not the generic product driver.' }
+        'REPAIR' { return Invoke-ActualWpfAction $context 'Repair' -AllowMutation }
+        'CLEAN-REINSTALL' { return Invoke-ActualWpfAction $context 'CleanReinstall' -AllowMutation }
+        'UNINSTALL' { return Invoke-ActualWpfAction $context 'Uninstall' -AllowMutation }
+        'FACTORY-RESET' { return Invoke-ActualWpfAction $context 'FactoryReset' -AllowMutation }
+        'REBOOT-RESUME' { return Invoke-RebootResumePhase $context }
+        'MAINTENANCE-READY-PROVISION' { return Invoke-ProductLifecycleConsumer -Context $context }
+        'PERMANENT-DELETE' { return Invoke-NestedProductScenario $context 'permanent-delete' }
+        'DELETE-RESTORE' { return Invoke-NestedProductScenario $context 'delete-restore' }
+        'STOPPED-PROJECT' { return Invoke-NestedProductScenario $context 'stopped-project' }
+        'HOST-CONCURRENCY' { return Invoke-NestedProductScenario $context 'host-concurrency' }
+        'OPERATION-RECOVERY' { return Invoke-NestedProductScenario $context 'operation-recovery' }
+        'OWNERSHIP' { return Invoke-NestedProductScenario $context 'ownership' }
+        'WINDOWS-SENTINELS' { return Invoke-WindowsSentinelPhase $context }
+        'VAULT' { return Invoke-NestedProductScenario $context 'vault' }
+        'SURROGATE-DISPOSABLE' { return Invoke-SurrogateDisposablePhase $context }
+        'REAL-USE-ACCEPTANCE' { return Invoke-RealUseAcceptancePhase -Context $context }
+        'TAILSCALE-DEFERRED' { return Invoke-TailscalePolicyPhase $context }
+        'TAILSCALE-AUTH' { return Invoke-TailscalePolicyPhase $context }
+        'AI-BUNDLE' { return Invoke-AiBundlePhase $context }
+        'RECONCILE' { return Invoke-ReconcilePhase $context }
+        default { throw "No phase-specific product driver exists for $($context.phaseId)." }
+    }
+}
 
-    def assert_no_pending(self) -> None:
-        for entry in self.state["operations"]:
-            operation = self.ui.json("/ui/operations/" + entry["id"])
-            require(operation.get("state") == entry["expectedState"], "ACCEPTANCE_OPERATION_PENDING_OR_CHANGED")
+Export-ModuleMember -Function Get-DevFleetNestedPrimaryReadinessScriptBlock,New-DevFleetExactProofBinding,Invoke-RealProductPhase,Invoke-PrimaryRolePhase,Invoke-LinuxBootstrapPhase,Invoke-SupportedFreshInstallLifecycle,Invoke-ProductFreshInstallLifecycle,Invoke-DisposableSyntheticRebootProbe,Invoke-RebootResumePhase,Invoke-ProductLifecycleConsumer,Get-ProductLifecycleConsumerMode,Get-ProductLifecycleObservation,Wait-DevFleetProductLifecycleTransition,Test-ProductMeaningfulProgress,Test-RebootBoundaryIdentity,Get-DurableProgressClassification,Get-PhaseAwareBudgetSeconds,Resolve-GuestProgressMarkerRead,Add-GuestProgressMarkerObservation
 
-    def prepare(self, credentials: tuple[str, str]) -> None:
-        require(not self.state["prepared"] and not self.fixture, "PREPARE_ALREADY_ATTEMPTED")
-        self.state["preflight"] = self.probe.preflight(self.request)
-        self.begin("U01")
-        self.ui.login(*credentials)
-        slug = "df-accept-" + hashlib.sha256(self.request["runId"].encode()).hexdigest()[:12]
-        path = safe_child(self.store.workspaces, slug)
-        require(not path.exists(), "FIXTURE_ALREADY_EXISTS")
-        self.state["fixture"] = {"slug": slug, "originalPath": str(path), "recoveredPath": ""}
-        self.save()
-        self.operation("create", page="/?view=projects", route="/projects/create", project=slug,
-                       fields={"slug": slug, "display_name": slug, "template": "generic", "target": "local",
-                               "runtime_isolation": "container", "resource_profile": "small", "scale": "small",
-                               "intent": "prototype", "profile": "balanced", "testing_level": "standard",
-                               "git_url": "", "language": "", "framework": "", "pid_mode": "private", "pid_limit": "4096"})
-        meta = self.store.metadata(path)
-        require(PROJECT_ID.fullmatch(str(meta.get("project_id", ""))), "CREATED_PROJECT_ID_INVALID")
-        self.fixture.update(projectId=meta["project_id"], runtimeId=meta.get("runtime_id", ""))
-        self.store.verify_identity(path, self.fixture, self.request["execution"])
-        require(meta.get("template") == "generic", "CREATED_TEMPLATE_MISMATCH")
-        for asset in ("compose.yaml", ".devcontainer/devcontainer.json", ".devfleet/project.json",
-                      ".devfleet/smoke-test.sh", ".devfleet/health-check.sh"):
-            require((path / asset).is_file() and not (path / asset).is_symlink(), "TEMPLATE_ASSET_MISSING")
-        owner = {"schemaVersion": 1, "runId": self.request["runId"], "slug": slug,
-                 "projectId": meta["project_id"], "nonce": secrets.token_hex(24)}
-        self.fixture["owner"] = owner
-        sentinel = f"DevFleet real-use acceptance\nrun:{owner['runId']}\nnonce:{owner['nonce']}\n".encode()
-        for name, data in ((OWNER_FILE, canonical(owner)), (SENTINEL_FILE, sentinel)):
-            with (path / name).open("xb") as stream:
-                stream.write(data)
-        self.fixture["sentinelSha256"] = hashlib.sha256(sentinel).hexdigest()
-        self.state["ledger"].append({"kind": "project", "path": str(path)})
-        self.save()
-        self.complete("U01", {"template": "generic", "projectId": meta["project_id"]})
-        self.begin("U02")
-        self.operation("start")
-        self.operation("health")
-        test = self.operation("test")
-        require(SMOKE_TEXT in str(test.get("result", "")), "TEMPLATE_SMOKE_OUTPUT_MISSING")
-        runtime = self.wait_healthy()
-        self.complete("U02", runtime)
-        self.begin("U03")
-        self.operation("stop")
-        self.observe_runtime(running=False)
-        self.operation("start")
-        self.operation("health")
-        self.wait_healthy()
-        self.assert_no_pending()
-        self.state["serviceBeforeRestart"] = self.probe.service()
-        self.state["prepared"] = True
-        self.save()
+```
 
-    def backup_evidence(self, path: Path) -> dict[str, Any]:
-        meta = self.store.verify_identity(path, self.fixture, self.request["execution"])
-        require(meta.get("backup_status") == "verified", "PRODUCT_BACKUP_NOT_VERIFIED")
-        evidence = self.store.verify_backup(meta, self.fixture)
-        if evidence["path"] not in {entry["path"] for entry in self.state["ledger"]}:
-            self.state["ledger"].append(evidence)
-            self.save()
-        return evidence
 
-    def u04(self) -> None:
-        self.begin("U04")
-        self.identity()
-        backup_root = self.store.runtime / "workspace-backups"
-        self.state["backupBaseline"] = sorted(path.name for path in backup_root.iterdir()) if backup_root.is_dir() else []
-        self.state["backupDiscoveryRequired"] = True
-        self.save()
-        result = self.operation("backup", page=f"/projects/{self.fixture['slug']}?tab=backups")
-        try:
-            receipt = json.loads(result["result"]) if isinstance(result.get("result"), str) else result["result"]
-        except (KeyError, json.JSONDecodeError):
-            raise AcceptanceError("BACKUP_RECEIPT_INVALID") from None
-        # Even an insufficient durability receipt can have created a valid local
-        # archive. Bind that fixture before rejecting Vault acceptance.
-        immediate = self.backup_evidence(self.original())
-        require(isinstance(receipt, dict) and receipt.get("ok") is True and receipt.get("backup_status") == "verified"
-                and receipt.get("vault_upload_status") == "verified" and receipt.get("durability_level") == "vault",
-                "VAULT_UPLOAD_NOT_VERIFIED")
-        require(receipt.get("backup_id") == immediate["backupId"] and receipt.get("backup_sha256") == immediate["archiveSha256"],
-                "BACKUP_RECEIPT_DISAGREES")
-        self.state["quarantineUnverified"] = True
-        self.save()
-        quarantined = self.operation("quarantine", page=f"/projects/{self.fixture['slug']}?tab=isolate",
-                                    fields={"confirm_quarantine": "true"})
-        path = exact_returned_child(self.store.quarantine, quarantined.get("result"), "QUARANTINE_PATH_INVALID")
-        require(re.fullmatch(r"[0-9]{8}-[0-9]{6}-" + re.escape(self.fixture["slug"]), path.name),
-                "QUARANTINE_NAME_INVALID")
-        self.store.verify_identity(path, self.fixture, self.request["execution"])
-        self.store.verify_owner(path, self.fixture)
-        require(not Path(self.fixture["originalPath"]).exists(), "QUARANTINE_ORIGINAL_REMAINS")
-        self.state["ledger"].append({"kind": "quarantine", "path": str(path)})
-        self.state["quarantineUnverified"] = False
-        self.save()
-        quarantine_backup = self.backup_evidence(path)
-        require(not any((item.get("State") or {}).get("Running") for item in self.probe.containers(self.fixture["projectId"])),
-                "QUARANTINED_RUNTIME_REMAINS")
-        collision = safe_child(self.store.workspaces, self.fixture["slug"])
-        collision.mkdir()
-        marker = canonical({"runId": self.request["runId"], "nonce": self.fixture["owner"]["nonce"], "collision": True})
-        with (collision / OWNER_FILE).open("xb") as stream:
-            stream.write(marker)
-        self.state["collisionSha256"] = hashlib.sha256(marker).hexdigest()
-        self.save()
-        try:
-            failed = self.operation("restore-quarantine", page="/?view=settings", route="/quarantine/restore",
-                                    fields={"name": path.name}, match_fields={"name": path.name},
-                                    project=path.name, expected="failed")
-            require("already exists" in str(failed.get("error", "")), "QUARANTINE_COLLISION_WRONG_FAILURE")
-            require(list(collision.iterdir()) == [collision / OWNER_FILE]
-                    and digest(collision / OWNER_FILE) == self.state["collisionSha256"], "COLLISION_WAS_MODIFIED")
-            self.store.verify_owner(path, self.fixture)
-        finally:
-            self.remove_collision()
-        self.operation("restore-quarantine", page="/?view=settings", route="/quarantine/restore",
-                       fields={"name": path.name}, match_fields={"name": path.name}, project=path.name)
-        require(not path.exists(), "QUARANTINE_RESTORE_SOURCE_REMAINS")
-        self.identity()
-        self.complete("U04", {"immediateBackup": immediate, "quarantineBackup": quarantine_backup,
-                              "quarantineName": path.name, "sentinelSha256": self.fixture["sentinelSha256"]})
+## FILE: automation/release-e2e/modules/executors/Invoke-RealUseAcceptance.py
 
-    def remove_collision(self) -> None:
-        if not self.state.get("collisionSha256"):
-            return
-        path = safe_child(self.store.workspaces, self.fixture["slug"], exists=True)
-        require(list(path.iterdir()) == [path / OWNER_FILE] and not (path / OWNER_FILE).is_symlink()
-                and digest(path / OWNER_FILE) == self.state["collisionSha256"], "COLLISION_CLEANUP_REFUSED")
-        (path / OWNER_FILE).unlink()
-        path.rmdir()
-        self.state.pop("collisionSha256")
-        self.save()
-
-    @contextlib.contextmanager
-    def fixture_edit(self, relative: str, replacement: bytes):
-        require(relative in {"compose.yaml", ".devfleet/ownership-lease.json"}, "FIXTURE_EDIT_NOT_ALLOWED")
-        path = self.original() / relative
-        require(path.is_file() and not path.is_symlink() and not path.parent.is_symlink(), "FIXTURE_EDIT_PATH_UNSAFE")
-        original = path.read_bytes()
-        require(len(original) < 65536, "FIXTURE_EDIT_SOURCE_TOO_LARGE")
-        entry = {"relative": relative, "originalBase64": base64.b64encode(original).decode("ascii"),
-                 "originalSha256": hashlib.sha256(original).hexdigest(), "replacementSha256": hashlib.sha256(replacement).hexdigest()}
-        self.state["temporaryEdits"].append(entry)
-        self.save()
-        path.write_bytes(replacement)
-        body_failure = None
-        try:
-            yield
-        except BaseException as exc:
-            body_failure = exc
-            raise
-        finally:
-            try:
-                require(not path.is_symlink() and digest(path) == entry["replacementSha256"], "FIXTURE_EDIT_CHANGED_EXTERNALLY")
-                path.write_bytes(original)
-                self.state["temporaryEdits"].remove(entry)
-                self.save()
-            except Exception as cleanup_exc:
-                if body_failure is None:
-                    raise
-                self.record_failure(body_failure)
-                self.record_failure(cleanup_exc, cleanup=True)
-
-    def u05(self) -> None:
-        self.begin("U05")
-        before = self.identity()
-        existing_names = {path.name for path in self.store.workspaces.iterdir()}
-        # A failed or malformed return still requires explicit parent cleanup;
-        # never silently claim that an unobserved recovery produced no files.
-        self.state["recoveryUnverified"] = True
-        self.save()
-        result = self.operation("restore-vault", page=f"/projects/{self.fixture['slug']}?tab=backups")
-        copy = self.store.verify_copy(result.get("result"), self.fixture, self.request["execution"])
-        require(copy.name not in existing_names, "RESTORE_COPY_OVERWROTE_EXISTING_PATH")
-        self.fixture["recoveredPath"] = str(copy)
-        self.state["ledger"].append({"kind": "recovered-copy", "path": str(copy)})
-        self.state["recoveryUnverified"] = False
-        self.save()
-        after = self.identity()
-        require(all(before.get(key) == after.get(key) for key in ("project_id", "slug", "runtime_id", "deployment_id", "host_id")),
-                "ORIGINAL_CHANGED_DURING_COPY")
-        # The unadopted copy must be rejected synchronously, before admission to
-     
+SHA256: 80d79b63d6f5eb5f69d7ebb5cdf4d00c8c30f33084d3b7cbc480019bed45e31a | Bytes: 6345

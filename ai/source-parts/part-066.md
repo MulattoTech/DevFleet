@@ -1,1124 +1,747 @@
 # DevFleet source part 066
 
 Full-source UTF-8 byte interval [3022500, 3069000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 590ba53d523a18d03dbfccc8dd90a286f47ac7abcb4c54722ed41191feaa59ef
+Payload SHA-256: 0ba7babe15ca99c16d5d65f95ef6d8ae408668905fcfd49203aaaeabc5efec3b
 
 <!-- BEGIN SOURCE SLICE -->
-project or crosses a symlink.", rel))
+ates were checked for required formatter, linter, test, bootstrap, and health metadata.
+- Native sample tests executed successfully where the sandbox toolchain was available: Python, Python/FastAPI, Node.js, and Go.
+- Preservation comparison against the verified v1.0.0 ZIP confirmed that no baseline file path was removed.
+- Embedded SHA-256 verification and independent post-extraction archive verification are performed after the final manifests are frozen.
 
+## PowerShell validation boundary
 
-def _port_state(port: Any) -> tuple[str, str]:
-    if isinstance(port, dict):
-        host = str(port.get("host_ip", ""))
-        text = json.dumps(port, sort_keys=True)
-    else:
-        text = str(port)
-        parts = text.rsplit(":", 2)
-        host = parts[0] if len(parts) >= 3 else ""
-    if host in {"127.0.0.1", "::1", "[::1]"}:
-        return "loopback", text
-    if host.startswith("100."):
-        try:
-            n = int(host.split(".")[1])
-            return ("tailnet" if 64 <= n <= 127 else "public"), text
-        except Exception:
-            pass
-    return "public", text
+The package includes `tools/Verify-Package.ps1`, which uses the real PowerShell AST parser on Windows before installation. PowerShell was not installed in the offline Linux sandbox, and outbound DNS prevented downloading it, so the final sandbox pass uses the companion structural PowerShell validator. The real AST check remains a hard preflight on the target Windows machines.
 
+## Checks requiring Dylan's actual environment
 
-def _scan(project: Path, profile: str) -> list[dict[str, str]]:
-    out: list[dict[str, str]] = []
-    references: set[Path] = set()
-    found = False
-    for relative in COMPOSE_FILES:
-        path = project / relative
-        if not path.exists():
-            continue
-        found = True
-        if path.is_symlink():
-            out.append(finding("critical", "project.symlink-config", "Container configuration may not be a symbolic link.", relative))
-            continue
-        document = _preflight_compose(project, path, out, references, set(), {"bytes": 0}, 0)
-        if document:
-            services = document.get("services") or {}
-            if isinstance(services, dict):
-                for name, service in services.items():
-                    if isinstance(service, dict):
-                        _scan_compose_service(project, path, str(name), service, profile, out)
-    dc = project / ".devcontainer/devcontainer.json"
-    if dc.exists():
-        found = True
-        _scan_devcontainer(project, profile, out, references)
-    if not found:
-        out.append(finding("warning", "project.no-container-config", "No supported Compose or Dev Container configuration found."))
-    for pth in project.rglob("*"):
-        if pth.is_symlink():
-            try:
-                pth.resolve().relative_to(project.resolve())
-            except ValueError:
-                out.append(finding("critical", "project.symlink-escape", "Symbolic link resolves outside the project.", str(pth.relative_to(project))))
-    return sorted(out, key=lambda x: {"critical": 0, "error": 1, "warning": 2, "info": 3}.get(x["severity"], 9))
+These cannot be truthfully completed offline and remain installation/preflight tests:
 
+- Hyper-V or VirtualBox selection and firmware virtualization.
+- Multipass launch, stopped-state snapshots, VM refresh, and host-mount disablement.
+- Rootless/rootful Docker stores, BuildKit, Compose validation against a live daemon, and Docker-over-SSH context.
+- Tailscale login, MagicDNS, ACL reachability, tailnet-only port/firewall behavior, and peer transfer.
+- Append-only rest-server/restic credentials, backup/restore, vault retention authority, and encrypted offline export.
+- GitHub device authorization and private-repository access.
+- VS Code Remote SSH/Dev Containers against `CodexDevVM`.
+- CodexPro installation/connector authorization and project bootstrap against Dylan's live service.
+- Windows Ollama, RX 7900 XTX observation, expected model availability, concurrency profiles, and OpenAI-compatible `/v1` behavior.
 
-def _fingerprint(project: Path, profile: str) -> str:
-    h = hashlib.sha256()
-    for value in (ANALYZER_POLICY_VERSION, COMPOSE_SUPPORTED_SCHEMA, DEVCONTAINER_SUPPORTED_SCHEMA, profile):
-        h.update(value.encode("utf-8"))
-        h.update(b"\0")
-    try:
-        files = sorted(project.rglob("*"), key=lambda item: str(item.relative_to(project)))
-    except OSError:
-        files = []
-    for path in files:
-        try:
-            relative = path.relative_to(project)
-            if relative.as_posix() == ".devfleet/runtime/analyzer-cache.json" or not path.is_file():
-                continue
-            h.update(str(relative).encode("utf-8"))
-            h.update(b"\0")
-            if path.is_symlink():
-                h.update(b"symlink:")
-                h.update(str(path.resolve(strict=False)).encode("utf-8"))
-            else:
-                h.update(b"file:")
-                h.update(hashlib.sha256(path.read_bytes()).digest())
-            h.update(b"\0")
-        except (OSError, ValueError):
-            h.update(f"unreadable:{path}".encode("utf-8"))
-    return h.hexdigest()
-
-
-def analyze_project(project: Path, profile: str | None = None, force: bool = False) -> list[dict[str, str]]:
-    profile = (profile or SETTINGS.development_profile).lower()
-    fp = _fingerprint(project, profile)
-    cache = project / ".devfleet/runtime/analyzer-cache.json"
-    if SETTINGS.enable_analyzer_cache and not force:
-        try:
-            data = json.loads(cache.read_text(encoding="utf-8"))
-            if data.get("fingerprint") == fp and data.get("policyVersion") == ANALYZER_POLICY_VERSION:
-                return data.get("findings", [])
-        except Exception:
-            pass
-    findings = _scan(project, profile)
-    if SETTINGS.enable_analyzer_cache:
-        atomic_json(cache, {"fingerprint": fp, "policyVersion": ANALYZER_POLICY_VERSION, "findings": findings})
-    return findings
-
-
-def has_blockers(findings: list[dict[str, str]]) -> bool:
-    return any(x["severity"] in {"critical", "error"} for x in findings)
+The install and upgrade scripts stop rather than silently bypassing these checks when a required real-machine prerequisite is missing.
 
 ```
 
 
-## FILE: source/app/devfleet/auth.py
+## FILE: source/INSTALL-CHECKLIST.txt
 
-SHA256: 9810905e7e2ab9d1f1a426ffb9644e2c388de5d199aedf9848f953918ff7cb3d | Bytes: 13026 | Git mode: 100644
+SHA256: 1eaa7f8e5513960dce8b9ef1501f9d1f6a60383aa6f0529c906666a08b04a163 | Bytes: 2117 | Git mode: 100644
+
+```
+DEVFLEET SAFE REMOTE DEVELOPMENT v1.1.0 — INSTALL / UPGRADE CHECKLIST
+
+CLEAN INSTALL
+[ ] Extract locally on both Windows computers; do not run from a cloud-synced folder.
+[ ] Review config/devfleet.config.json and docs/00-HARD-STOPS-AND-ASSUMPTIONS.md.
+[ ] Close MuMu/other hypervisors during provisioning.
+[ ] Laptop Administrator: START-HERE-LAPTOP.cmd
+[ ] Approve Tailscale for Windows, failover VM, and vault VM.
+[ ] Transfer encrypted laptop bootstrap bundle to desktop.
+[ ] Desktop Administrator: START-HERE-DESKTOP.cmd
+[ ] Review the rootful-Docker explanation; type ENABLE ROOTFUL CODEXDEVVM only when you accept VM-internal rootful authority.
+[ ] Approve Tailscale for Windows and devfleet-primary.
+[ ] Transfer encrypted desktop pairing bundle to laptop.
+[ ] Laptop: windows\Complete-Cluster.ps1 -DesktopPairingBundlePath <bundle>
+[ ] Confirm Complete-Cluster configured the CodexDevVM SSH alias and core VS Code extensions.
+[ ] Optional: client\Configure-VSCode.ps1 -ExtensionSets core,python,web,enterprise,systems
+[ ] Optional Docker CLI: client\Configure-DockerContext.ps1
+[ ] Desktop: windows\Configure-Ollama.ps1 -Profile stable-interactive
+[ ] Restart Ollama, then windows\Test-Ollama.ps1 -ProbeGeneration
+[ ] Create a disposable test project; start, test, back up, quarantine, and restore it.
+
+UPGRADE
+[ ] Keep and verify the original v1.0.0 ZIP.
+[ ] Administrator: pwsh -File .\Upgrade-DevFleet.ps1 -FromVersion 1.0.0 -PreviewOnly
+[ ] Review the migration preview and backup path under C:\ProgramData\DevFleet.
+[ ] Administrator: pwsh -File .\Upgrade-DevFleet.ps1 -FromVersion 1.0.0
+[ ] Confirm pre-v1-1-0 snapshots and the upgrade-result.json file.
+[ ] Confirm baseline deployments remain Strict/rootless.
+[ ] Test health, backup, restore, CodexPro, analyzer, and ownership transfer before changing profile.
+
+NEVER
+[ ] Never enable Multipass host mounts.
+[ ] Never expose Docker 2375 or unauthenticated Docker TCP.
+[ ] Never mount Windows profiles/drives/cloud shares into projects.
+[ ] Never give ordinary project containers docker.sock.
+[ ] Never prune vault history with compute credentials.
+
+```
+
+
+## FILE: source/Install-DevFleet.ps1
+
+SHA256: a6eb7b82456f5de4c0d9446aa1901b70311e2dc8adf8bd8311affa25688d494e | Bytes: 12735 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)]
+    [ValidateSet('Laptop','Desktop')]
+    [string]$Role,
+    [string]$BootstrapBundlePath,
+    [string]$PackageRoot,
+    [ValidateSet('Connected')]
+    [string]$InstallationMode = 'Connected',
+    [switch]$NonInteractive,
+    [switch]$SkipWindowsUpdates,
+    [switch]$ForceReprovision,
+  [switch]$DeferNetworkPairing,
+  [switch]$AcknowledgeRootfulDocker,
+  [string]$TransactionDeadlineUtc,
+  [string]$TransactionId,
+  [string]$TransactionPayloadSha256,
+  [string]$TransactionAction,
+  [string]$TransactionRole,
+  [string]$TransactionPreparedUtc,
+  [string]$DeadlinePolicyVersion = '1.0.0'
+)
+
+$ErrorActionPreference = 'Stop'
+if($Role-eq'Laptop'-and$DeferNetworkPairing){throw 'Laptop / Failover / Vault setup requires connected Tailscale pairing. Clear Configure network pairing later before installing or repairing this role.'}
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$packageRoot = if ($PackageRoot) { (Resolve-Path -LiteralPath $PackageRoot).Path } else { $here }
+if (-not (Test-Path -LiteralPath (Join-Path $packageRoot 'windows\00-Preflight.ps1'))) { throw "Package root is not a valid DevFleet package: $packageRoot" }
+Import-Module (Join-Path $here 'windows\DevFleet.Common.psm1') -Force
+if($DeadlinePolicyVersion -ne '1.0.0'){throw "Unsupported deadline policy version: $DeadlinePolicyVersion"}
+$transactionDeadline = if($TransactionDeadlineUtc){try{[datetime]::Parse($TransactionDeadlineUtc).ToUniversalTime()}catch{throw 'Transaction deadline is not a valid UTC timestamp.'}}else{[datetime]::UtcNow.AddSeconds((Get-DevFleetTransactionBudgetSeconds $Role))}
+Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'preflight' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'preflight') | Out-Null
+Assert-PowerShell7
+Assert-Administrator
+Initialize-DevFleetState -PackageRoot $here
+# Establish the host-secret record before any durable deployment identity is
+# created. A prerequisite 3010 boundary must resume with credentials intact.
+Get-OrCreateSecrets | Out-Null
+$activeTransaction=Wait-ActiveDevFleetTransaction -ExpectedRole $Role
+if(-not (Test-DevFleetTransactionBinding -Transaction $activeTransaction -ExpectedRole $Role) -and $TransactionId -and $TransactionPayloadSha256 -and $TransactionAction -and $TransactionRole -and $TransactionPreparedUtc){
+ $propagated=[pscustomobject]@{transactionId=$TransactionId;payloadSha256=$TransactionPayloadSha256;action=$TransactionAction;role=$TransactionRole;preparedUtc=$TransactionPreparedUtc}
+ if(Test-DevFleetTransactionBinding -Transaction $propagated -ExpectedRole $Role){$activeTransaction=$propagated}
+}
+if(-not (Test-DevFleetTransactionBinding -Transaction $activeTransaction -ExpectedRole $Role)){throw 'The installer parent could not establish an exact active transaction binding before child stages.'}
+$checkpointPath=Join-Path (Join-Path $env:ProgramData 'M-TechLabs\DevFleet\Installer') 'resume-checkpoint.json'
+$resumedTransaction=$false
+if(Test-Path -LiteralPath $checkpointPath -PathType Leaf){
+ try{
+  $checkpoint=Get-Content -LiteralPath $checkpointPath -Raw|ConvertFrom-Json
+  $checkpointRole=if([string]$checkpoint.role -match '(?i)Laptop'){'Laptop'}elseif([string]$checkpoint.role -match '(?i)Desktop'){'Desktop'}else{''}
+  if([string]$checkpoint.state -ne 'waiting-for-reboot' -or
+     [string]$checkpoint.transactionId -cne [string]$activeTransaction.transactionId -or
+     [string]$checkpoint.payloadSha256 -cne [string]$activeTransaction.payloadSha256 -or
+     [string]$checkpoint.action -cne [string]$activeTransaction.action -or
+     $checkpointRole -cne [string]$activeTransaction.role){throw 'The installer resume checkpoint does not match the active DevFleet transaction.'}
+  $resumedTransaction=$true
+ }catch{throw "The installer resume checkpoint could not be established safely: $($_.Exception.Message)"}
+}
+Set-DevFleetPendingRebootBaseline -ResumedTransaction:$resumedTransaction | Out-Null
+$transactionStageArgs=@{
+    TransactionId=[string]$activeTransaction.transactionId
+    TransactionPayloadSha256=[string]$activeTransaction.payloadSha256
+    TransactionAction=[string]$activeTransaction.action
+    TransactionRole=[string]$activeTransaction.role
+    TransactionPreparedUtc=[string]$activeTransaction.preparedUtc
+}
+
+Write-Host "`n=== DevFleet installation: $Role ===" -ForegroundColor Cyan
+& (Join-Path $here 'windows\00-Preflight.ps1') -Role $Role -InstallationMode $InstallationMode
+if(-not (Test-StageMarker "prereqs-$Role")){ Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'prerequisites' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'prerequisites') | Out-Null; & (Join-Path $here 'windows\01-Install-Prerequisites.ps1') -Role $Role -OfflinePackageRoot $packageRoot -InstallationMode $InstallationMode -SkipWindowsUpdates:$SkipWindowsUpdates }
+
+if (Test-PendingReboot) {
+    Write-Warning 'Windows requires a reboot before VM provisioning. Re-run this same command after reboot; completed stages will be detected.'
+    exit 3010
+}
+
+# Do not create durable deployment identity before the prerequisite stage has
+# crossed its reboot boundary.
+$nodeIdentity = Get-OrCreateNodeIdentity -Role $Role
+
+if (-not $DeferNetworkPairing -and -not (Test-StageMarker 'windows-tailscale')) {
+    Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'windowsTailscale' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'windowsTailscale') | Out-Null
+    & (Join-Path $here 'windows\04a-Connect-WindowsTailscale.ps1')
+    if ([int]$LASTEXITCODE -eq 3010) { exit 3010 }
+    Write-StageMarker 'windows-tailscale'
+} elseif ($DeferNetworkPairing) { Write-Warning 'Windows Tailscale pairing was deliberately deferred; complete it from Maintenance.' }
+if (Test-PendingReboot) {
+    Write-Warning 'Windows reported a new reboot requirement after the Windows Tailscale stage. Re-run this same transaction after reboot; completed stages will be detected.'
+    exit 3010
+}
+if(-not (Test-StageMarker 'host-agent')){ Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'hostAgent' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'hostAgent') | Out-Null; & (Join-Path $here 'windows\Install-DevFleet-HostAgent.ps1'); Write-StageMarker 'host-agent' }
+
+if ($Role -eq 'Desktop') {
+    $installedConfig = Get-DevFleetConfig
+if ($AcknowledgeRootfulDocker -and [string]$installedConfig.Docker.PrimaryMode -eq 'rootful') { $installedConfig.Docker.RootfulModeAcknowledged = $true; Save-DevFleetConfig -Config $installedConfig }
+if ([string]$installedConfig.Docker.PrimaryMode -eq 'rootful' -and -not [bool]$installedConfig.Docker.RootfulModeAcknowledged) {
+        if ($NonInteractive) { throw 'NonInteractive installation cannot acknowledge rootful Docker; configure rootless mode or provide an explicit reviewed configuration.' }
+        $phrase = Read-Host 'CodexDevVM is an isolated VM, but rootful Docker has broader VM-level authority. Type ENABLE ROOTFUL CODEXDEVVM to continue'
+        if ($phrase -ne 'ENABLE ROOTFUL CODEXDEVVM') { throw 'Rootful Docker acknowledgement did not match. Set Docker.PrimaryMode to rootless or rerun and acknowledge it.' }
+        $installedConfig.Docker.RootfulModeAcknowledged = $true
+        Save-DevFleetConfig -Config $installedConfig
+    }
+}
+
+if ($Role -eq 'Laptop') {
+    if(-not (Test-StageMarker 'compute-devfleet-failover')){ Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'compute' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'compute') | Out-Null; & (Join-Path $here 'windows\02-Provision-ComputeNode.ps1') -NodeRole Failover -ForceReprovision:$ForceReprovision @transactionStageArgs }
+    if(-not (Test-StageMarker 'vault')){ Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'vault' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'vault') | Out-Null; & (Join-Path $here 'windows\03-Provision-Vault.ps1') -ForceReprovision:$ForceReprovision @transactionStageArgs }
+    if (-not $DeferNetworkPairing) { Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'tailscale' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'tailscale') | Out-Null; & (Join-Path $here 'windows\04-Connect-Tailscale.ps1') -InstanceName (Get-DevFleetConfig).Failover.InstanceName; & (Join-Path $here 'windows\04-Connect-Tailscale.ps1') -InstanceName (Get-DevFleetConfig).Vault.InstanceName }
+    Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'vaultClient' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'vaultClient') | Out-Null; & (Join-Path $here 'windows\05-Configure-LocalVaultClient.ps1') -InstanceName (Get-DevFleetConfig).Failover.InstanceName
+    Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'shortcuts' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'shortcuts') | Out-Null; & (Join-Path $here 'windows\08-Install-Shortcuts.ps1') -LocalInstanceName (Get-DevFleetConfig).Failover.InstanceName
+    $sevenzip = @((Get-CanonicalDependencyManifest -PackageRoot $packageRoot).dependencies) | Where-Object id -eq 'sevenzip' | Select-Object -First 1
+    if ($sevenzip -and (Get-DependencyStatus -Dependency $sevenzip).Status -eq 'Compatible') {
+        Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'export' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'export') | Out-Null; & (Join-Path $here 'windows\09-Export-Laptop-Bootstrap.ps1')
+    } else {
+        Write-Warning '7-Zip is not available; encrypted laptop bootstrap export is unavailable, but core Laptop installation remains complete.'
+    }
+    Write-Host "`nLaptop stage complete. Copy the encrypted bootstrap bundle shown above to the desktop." -ForegroundColor Green
+} else {
+    if(-not (Test-StageMarker 'compute-devfleet-primary')){ Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'compute' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'compute') | Out-Null; & (Join-Path $here 'windows\02-Provision-ComputeNode.ps1') -NodeRole Primary -ForceReprovision:$ForceReprovision @transactionStageArgs }
+    if (-not $DeferNetworkPairing) { Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'tailscale' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'tailscale') | Out-Null; & (Join-Path $here 'windows\04-Connect-Tailscale.ps1') -InstanceName (Get-DevFleetConfig).Primary.InstanceName }
+    if ($BootstrapBundlePath) {
+        & (Join-Path $here 'windows\06-Import-Laptop-Bootstrap.ps1') -BundlePath $BootstrapBundlePath
+    } else {
+        Write-Warning 'No laptop bootstrap bundle was supplied. The primary works locally, but backups and peer control are not configured yet.'
+    }
+    Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'shortcuts' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'shortcuts') | Out-Null; & (Join-Path $here 'windows\08-Install-Shortcuts.ps1') -LocalInstanceName (Get-DevFleetConfig).Primary.InstanceName
+    $sevenzip = @((Get-CanonicalDependencyManifest -PackageRoot $packageRoot).dependencies) | Where-Object id -eq 'sevenzip' | Select-Object -First 1
+    if ($sevenzip -and (Get-DependencyStatus -Dependency $sevenzip).Status -eq 'Compatible') {
+        Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'export' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'export') | Out-Null; & (Join-Path $here 'windows\10-Export-Desktop-Pairing.ps1') -NonInteractive:$NonInteractive
+    } else {
+        Write-Warning '7-Zip is not available; encrypted desktop pairing export is unavailable, but core Desktop installation remains complete.'
+    }
+    Write-Host "`nDesktop stage complete. Copy the desktop pairing bundle back to the laptop and run Complete-Cluster.ps1." -ForegroundColor Green
+}
+
+# A servicing signal can appear asynchronously while Host Agent or nested
+# compute provisioning is running. Surface it before final verification so the
+# lifecycle persists a new bounded reboot generation instead of committing
+# install-state over an outstanding Windows reboot obligation.
+if (Test-PendingReboot) {
+    Write-Warning 'Windows reported a new reboot requirement after provisioning. Re-run this same transaction after reboot; completed stages will be detected.'
+    exit 3010
+}
+
+Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'verification' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'verification') | Out-Null
+& (Join-Path $here 'windows\Test-DevFleet.ps1') -AllLocalInstances
+
+```
+
+
+## FILE: source/MIGRATION-ROLLBACK.md
+
+SHA256: f777b8611323924d101515ff1d8a0401d1f2d4b0e5d4b1fe1e1afafdb8c91552 | Bytes: 179 | Git mode: 100644
+
+```
+# Migration and Rollback
+
+Mutations use a transaction state machine and retain recovery artifacts before reinstall/removal. Rollback-incomplete is surfaced rather than hidden.
+
+```
+
+
+## FILE: source/README-FIRST.md
+
+SHA256: 5ec4487ad07cec2145a6ade137e641047c19769957c03628978218a06dfb05a4 | Bytes: 3346 | Git mode: 100644
+
+````
+# DevFleet Safe Remote Development v1.2.13
+
+DevFleet turns an installed Windows host into isolated primary compute and a separately configured Windows host into the optional client, failover compute, and append-only vault host. It preserves the v1.0.0 three-VM recovery architecture while adding configurable development profiles, rootless/rootful Docker modes, reusable caches, language-aware templates, first-class CodexPro status/bootstrap, nonblocking dashboard operations, ownership leases, Ollama profiles, and a friendly `CodexDevVM` SSH alias. The internal Multipass instance remains `devfleet-primary`.
+
+## Clean install
+
+1. Review `docs/00-HARD-STOPS-AND-ASSUMPTIONS.md` and `config/devfleet.config.json`.
+2. On the configured Surrogate host run `START-HERE-LAPTOP.cmd` as Administrator.
+3. Transfer the encrypted pairing bundle and run `START-HERE-DESKTOP.cmd` on the configured Primary host.
+4. Return the encrypted desktop pairing bundle and run `windows\Complete-Cluster.ps1` on the laptop.
+5. `Complete-Cluster.ps1` configures SSH and core VS Code support automatically; optionally run the client scripts again for additional language extension groups or a Docker-over-SSH context.
+6. Configure/test Windows Ollama with `windows\Configure-Ollama.ps1` and `windows\Test-Ollama.ps1`.
+7. Run the health shortcut and a disposable create/start/test/backup/quarantine/restore exercise.
+
+A clean installation defaults to Balanced with rootless Docker on both CodexDevVM and failover. Rootful mode requires the exact `ENABLE ROOTFUL CODEXDEVVM` acknowledgement and a separately provisioned privileged helper; the bootstrap does not provision that helper. Windows host folders remain unavailable to all VMs and containers.
+
+## Upgrade v1.0.0
+
+```powershell
+pwsh -File .\Upgrade-DevFleet.ps1 -FromVersion 1.0.0 -PreviewOnly
+pwsh -File .\Upgrade-DevFleet.ps1 -FromVersion 1.0.0
+```
+
+The upgrade backs up installed state and creates stopped-state Multipass snapshots before service changes. A baseline v1.0 deployment remains Strict/rootless until you explicitly change profile or Docker store.
+
+## CodexPro
+
+The project hook is an idempotent adapter using only capabilities verified in the connected CodexPro interface. It validates the active root, creates `.ai-bridge/local-agent` runtime folders, checks loopback health, invokes the verified `codexpro start` command when installed, and writes actionable logs. Private installation sources and connector authorization are never embedded. A documented multi-workspace registration command was not exposed, so DevFleet does not invent one.
+
+## Safety invariants
+
+All profiles retain the Windows-host filesystem boundary, project-root/path/symlink validation, no unauthenticated Docker TCP, no ordinary application access to `docker.sock`, append-only compute backup credentials, separate vault-admin retention authority, backup-before-quarantine, reversible quarantine, one writable owner per project identity, explicit split-brain acknowledgement, offline encrypted vault export, and GitHub as off-device committed history.
+
+## Audit reports
+
+- `DevFleet-v1.1.0-VALIDATION.md` and `DevFleet-v1.1.0-FILE-CHANGES.md` are historical records only.
+- Current v1.2.13 release identity, hashes, and audit state are generated from `VERSION`, `INSTALLER_VERSION`, and the universal AI Audit bundle.
+
+````
+
+
+## FILE: source/SECURITY-NOTES.txt
+
+SHA256: 85ba7a2aa2c127e12f830f96aa1787f237598fae20e3ae7543828552b161f469 | Bytes: 607 | Git mode: 100644
+
+```
+DevFleet intentionally does NOT:
+- expose Docker over TCP;
+- mount Windows folders, drives, SMB shares, or Google Drive into guests;
+- mount Docker sockets into project containers;
+- execute CodexPro hooks on the VM host;
+- offer permanent deletion in the web dashboard;
+- run docker system prune, docker volume prune, or compose down -v;
+- run automatic restic forget/prune from compute nodes;
+- automatically fail over when a peer is unreachable;
+- give the dashboard VM/vault/Windows administration authority;
+- store encrypted-bundle passphrases;
+- bypass Tailscale or GitHub interactive authorization.
+
+```
+
+
+## FILE: source/START-HERE-DESKTOP.cmd
+
+SHA256: 155b462f564dd1c2ae210029544d39194c14c0c85fb8062d31eb2a614e84d42f | Bytes: 232 | Git mode: 100644
+
+```
+@echo off
+setlocal
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powershell.exe -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File ""%~dp0Bootstrap-Install.ps1"" -Role Desktop'"
+endlocal
+
+```
+
+
+## FILE: source/START-HERE-LAPTOP.cmd
+
+SHA256: 97b7b3a91ffa320f1729e1662da3d615bf82bc6aa116e276c2bf373d0b6fd065 | Bytes: 231 | Git mode: 100644
+
+```
+@echo off
+setlocal
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powershell.exe -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File ""%~dp0Bootstrap-Install.ps1"" -Role Laptop'"
+endlocal
+
+```
+
+
+## FILE: source/Upgrade-DevFleet.ps1
+
+SHA256: 3905ac18b10325246b765a33daac907f548c000372a1144ef736f44ef9136b2a | Bytes: 3712 | Git mode: 100644
+
+```
+[CmdletBinding(SupportsShouldProcess)]
+param([Parameter(Mandatory)][ValidateSet('1.0.0')][string]$FromVersion,[ValidateSet('Auto','Laptop','Desktop')][string]$Role='Auto',[switch]$PreviewOnly)
+$ErrorActionPreference='Stop';$here=Split-Path -Parent $MyInvocation.MyCommand.Path;Import-Module (Join-Path $here 'windows\DevFleet.Common.psm1') -Force;Assert-PowerShell7;Assert-Administrator
+$state=Get-DevFleetStateRoot;$configPath=Join-Path $state 'devfleet.config.json';if(-not(Test-Path $configPath)){throw 'No installed DevFleet configuration found.'};$old=Get-Content $configPath -Raw|ConvertFrom-Json;$schema=[int]$old.SchemaVersion;$version=[string]$old.PackageVersion;$isV10=($schema -eq 1 -and ([string]::IsNullOrWhiteSpace($version) -or $version -eq '1.0.0'));$isV11=($schema -eq 2 -and $version -eq '1.1.0');if(-not($isV10 -or $isV11)){throw "Unsupported source schema/package: $schema/$version"};$label=if($isV10){'v1.0.0'}else{'v1.1.0-rerun'};$stamp=(Get-Date).ToString('yyyyMMdd-HHmmss');$backup=Join-Path $state "upgrade-backups\$label-$stamp";New-Item -ItemType Directory $backup -Force|Out-Null;Copy-Item $configPath (Join-Path $backup 'devfleet.config.json');foreach($n in @('secrets','exports')){if(Test-Path(Join-Path $state $n)){Copy-Item (Join-Path $state $n) (Join-Path $backup $n) -Recurse -Force}};if(Test-Path(Join-Path $state 'package-root.txt')){Copy-Item (Join-Path $state 'package-root.txt') $backup}
+& (Join-Path $here 'windows\Migrate-Config.ps1') -ConfigPath $configPath -OutputPath $configPath -PreviewOnly;if($PreviewOnly){Write-Host "Preview complete. Backup: $backup";return}
+$instances=Get-MultipassInstances;$localNames=@($instances|ForEach-Object name);$targets=@();foreach($n in @([string]$old.Primary.InstanceName,[string]$old.Failover.InstanceName,[string]$old.Vault.InstanceName)){if($n -and $n -in $localNames){$targets+=$n}}
+foreach($n in $targets){New-DevFleetSnapshotSafe -InstanceName $n -SnapshotName "pre-v1-1-0-$stamp"|Out-Null}
+& (Join-Path $here 'windows\Migrate-Config.ps1') -ConfigPath $configPath -OutputPath $configPath -Confirm:$false;Protect-DevFleetStateAcl;Set-Content (Join-Path $state 'package-root.txt') $here -Encoding utf8;$config=Get-DevFleetConfig
+if($config.Primary.InstanceName -in $localNames){& (Join-Path $here 'windows\02-Provision-ComputeNode.ps1') -NodeRole Primary};if($config.Failover.InstanceName -in $localNames){& (Join-Path $here 'windows\02-Provision-ComputeNode.ps1') -NodeRole Failover};if($config.Vault.InstanceName -in $localNames){& (Join-Path $here 'windows\03-Provision-Vault.ps1')}
+$local=if($config.Primary.InstanceName -in $localNames){$config.Primary.InstanceName}elseif($config.Failover.InstanceName -in $localNames){$config.Failover.InstanceName}else{$null};if($local){& (Join-Path $here 'windows\08-Install-Shortcuts.ps1') -LocalInstanceName $local};if($Role -eq 'Laptop' -or ($Role -eq 'Auto' -and $config.Failover.InstanceName -in $localNames)){try{& (Join-Path $here 'client\Configure-SSH.ps1') -SkipConnectivityTest}catch{Write-Warning $_};try{& (Join-Path $here 'client\Configure-VSCode.ps1') -ExtensionSets core}catch{Write-Warning $_}}
+& (Join-Path $here 'windows\Test-DevFleet.ps1') -AllLocalInstances;[ordered]@{From=$label;To='1.1.0';Completed=(Get-Date).ToString('o');StateBackup=$backup;Snapshots=$targets;Preserved='VMs, projects, Git repositories, both Docker stores, volumes, credentials, restic snapshots, vault data, Tailscale identities, SSH keys, dashboard credentials, pairing, quarantine and custom configuration'}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $backup 'upgrade-result.json') -Encoding utf8;Write-Host "DevFleet v1.1.0 upgrade complete. Recovery: $backup" -ForegroundColor Green
+
+```
+
+
+## FILE: source/VERSION
+
+SHA256: c21698334b1e2308b8556ac1d10402342b8d3e837f65fa1c431eb23392824b1d | Bytes: 7 | Git mode: 100644
+
+```
+1.2.13
+
+```
+
+
+## FILE: source/app/devfleet/__init__.py
+
+SHA256: 2736ff45f82f5c2ae6fd243801f786562d4ddfa6326f19cce66a72c6b9e28602 | Bytes: 33 | Git mode: 100644
+
+```
+from .version import __version__
+
+```
+
+
+## FILE: source/app/devfleet/analyzer.py
+
+SHA256: 0ebb618f06b728c84a5e8cfeeb04485536824f11bce37e752f5ed9c9a160e785 | Bytes: 28948 | Git mode: 100644
 
 ```
 from __future__ import annotations
-import hashlib, hmac, json, secrets, time, threading, math, os, tempfile
-from contextlib import contextmanager
-from pathlib import Path
-from fastapi import Header, HTTPException, Request, status
-from .core import SETTINGS, atomic_json
 
-SESSION_COOKIE = "devfleet_session"
-LOGIN_CSRF_COOKIE = "devfleet_login_csrf"
-SESSION_TTL = 12 * 60 * 60
-REMEMBERED_TTL = 7 * 24 * 60 * 60
-SESSION_SAMESITE = "strict"
-SESSION_SECURE_COOKIE = True
-_SESSION_LOCK = threading.RLock()
-_LOGIN_LOCK = threading.RLock()
-_LOGIN_FAILURES = {}
-_SOURCE_FAILURES = {}
-_CREDENTIAL_FAILURES = {}
-_GLOBAL_FAILURES = []
-_BACKOFF_BASE = 0.25
-_BACKOFF_MAX = 8.0
-_SOURCE_WINDOW = 15 * 60
-_GLOBAL_WINDOW = 60.0
-_GLOBAL_LIMIT = 40
+import hashlib
+import json
+import re
+from pathlib import Path, PurePosixPath
+from typing import Any, Iterable
 
-
-def _session_path() -> Path:
-    return SETTINGS.runtime_root / "sessions.json"
-
-
-@contextmanager
-def _session_file_lock():
-    """Serialize the complete sessions read/modify/write transaction across workers."""
-    path = _session_path().with_name("sessions.json.lock")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    handle = open(path, "a+b")
-    try:
-        if os.name != "nt":
-            os.chmod(path, 0o600)
-    except OSError:
-        pass
-    try:
-        if os.name != "nt":
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        else:
-            import msvcrt
-
-            handle.seek(0, os.SEEK_END)
-            if handle.tell() == 0:
-                handle.write(b"0")
-                handle.flush()
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-        yield
-    finally:
-        try:
-            if os.name != "nt":
-                import fcntl
-
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-            else:
-                import msvcrt
-
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        finally:
-            handle.close()
-    try:
-        if os.name != "nt":
-            path.chmod(0o600)
-    except OSError:
-        pass
-
-
-def _load_sessions() -> dict[str, dict]:
-    try:
-        value = json.loads(_session_path().read_text(encoding="utf-8"))
-        return value if isinstance(value, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
-def _save_sessions(value: dict[str, dict]) -> None:
-    path = _session_path()
-    parent = path.parent
-    parent.mkdir(parents=True, exist_ok=True)
-    if os.name != "nt":
-        try:
-            parent.chmod(0o700)
-        except OSError:
-            pass
-    payload = json.dumps(value, indent=2, sort_keys=True, default=str) + "\n"
-    fd, temp_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=str(parent)
-    )
-    try:
-        if hasattr(os, "fchmod"):
-            os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            fd = -1
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        replace_error = None
-        for attempt in range(6):
-            try:
-                os.replace(temp_name, path)
-                replace_error = None
-                break
-            except PermissionError as exc:
-                replace_error = exc
-                if os.name != "nt" or attempt == 5:
-                    raise
-                time.sleep(0.02 * (attempt + 1))
-        if replace_error is not None:
-            raise replace_error
-    finally:
-        if fd != -1:
-            os.close(fd)
-        try:
-            Path(temp_name).unlink(missing_ok=True)
-        except OSError:
-            pass
-    if os.name != "nt":
-        try:
-            path.chmod(0o600)
-        except OSError:
-            pass
-
-
-def _credential_generation() -> str:
-    return hashlib.sha256(
-        (str(SETTINGS.admin_user) + "\0" + str(SETTINGS.admin_password)).encode()
-    ).hexdigest()
-
-
-def _prune_sessions(
-    sessions: dict[str, dict], now: int | None = None
-) -> dict[str, dict]:
-    now = int(time.time() if now is None else now)
-    return {
-        k: v
-        for k, v in sessions.items()
-        if isinstance(v, dict) and int(v.get("expires_at", 0)) > now
-    }
-
-
-def login_csrf_token() -> str:
-    return secrets.token_urlsafe(32)
-
-
-def session_cookie_options(request: Request | None = None) -> dict:
-    """Cookie settings for callers that emit the session cookie.
-
-    v1.2.1's route signatures remain unchanged; this centralizes the strict,
-    secure-compatible policy for future/compatible emitters.
-    """
-    return {
-        "httponly": True,
-        "samesite": SESSION_SAMESITE,
-        "secure": bool(request and request.url.scheme == "https"),
-        "path": "/",
-    }
-
-
-def safe_next(value: str | None) -> str:
-    value = str(value or "/").strip()
-    if (
-        not value.startswith("/")
-        or value.startswith("//")
-        or "\\" in value
-        or "://" in value
-    ):
-        return "/"
-    return value
-
-
-def _backoff_key(user: str, source: str | None = None) -> str:
-    return f'{source or "unknown"}:{user}'
-
-
-def _source_key(source: str | None) -> str:
-    return str(source or "unknown").strip().lower()[:200]
-
-
-def _credential_key(user: str) -> str:
-    return hashlib.sha256(str(user or "").strip().lower().encode()).hexdigest()
-
-
-def _backoff_seconds(entries: dict[str, dict], key: str, now: float) -> float:
-    entry = entries.get(key)
-    return max(0.0, float(entry["until"]) - now) if entry else 0.0
-
-
-def login_backoff_seconds(
-    user: str, source: str | None = None, now: float | None = None
-) -> float:
-    now = time.monotonic() if now is None else now
-    key = _backoff_key(user, source)
-    with _LOGIN_LOCK:
-        entry = _LOGIN_FAILURES.get(key)
-        return max(0.0, float(entry["until"]) - now) if entry else 0.0
-
-
-def _record_login_failure(
-    user: str, source: str | None = None, now: float | None = None
-) -> None:
-    now = time.monotonic() if now is None else now
-    key = _backoff_key(user, source)
-    with _LOGIN_LOCK:
-        cutoff = now - _SOURCE_WINDOW
-        _LOGIN_FAILURES.update(
-            {k: v for k, v in _LOGIN_FAILURES.items() if v["last"] >= cutoff}
-        )
-        entry = _LOGIN_FAILURES.get(key, {"count": 0, "last": now, "until": now})
-        count = min(int(entry["count"]) + 1, 8)
-        entry = {
-            "count": count,
-            "last": now,
-            "until": now + min(_BACKOFF_MAX, _BACKOFF_BASE * (2 ** (count - 1))),
-        }
-        _LOGIN_FAILURES[key] = entry
-        for entries, entry_key in (
-            (_SOURCE_FAILURES, _source_key(source)),
-            (_CREDENTIAL_FAILURES, _credential_key(user)),
-        ):
-            old = entries.get(entry_key, {"count": 0, "last": now, "until": now})
-            n = min(int(old["count"]) + 1, 8)
-            entries[entry_key] = {
-                "count": n,
-                "last": now,
-                "until": now + min(_BACKOFF_MAX, _BACKOFF_BASE * (2 ** (n - 1))),
-            }
-        _GLOBAL_FAILURES[:] = [t for t in _GLOBAL_FAILURES if t >= now - _GLOBAL_WINDOW]
-        if len(_GLOBAL_FAILURES) < _GLOBAL_LIMIT:
-            _GLOBAL_FAILURES.append(now)
-
-
-def login_retry_after(
-    user: str, source: str | None = None, now: float | None = None
-) -> int:
-    now = time.monotonic() if now is None else now
-    with _LOGIN_LOCK:
-        source_delay = _backoff_seconds(_SOURCE_FAILURES, _source_key(source), now)
-        credential_delay = _backoff_seconds(
-            _CREDENTIAL_FAILURES, _credential_key(user), now
-        )
-        global_delay = 0.0
-        if len(_GLOBAL_FAILURES) >= _GLOBAL_LIMIT:
-            global_delay = max(0.0, (_GLOBAL_FAILURES[0] + _GLOBAL_WINDOW) - now)
-    return max(0, math.ceil(max(source_delay, credential_delay, global_delay)))
-
-
-def valid_credentials(user: str, password: str, source: str | None = None) -> bool:
-    user = str(user or "")
-    password = str(password or "")
-    # Keep both comparisons on every credential attempt.  Input-shape
-    # rejection is applied only after the comparisons so an invalid username
-    # cannot skip the password comparison.
-    user_ok = hmac.compare_digest(user, SETTINGS.admin_user)
-    password_ok = hmac.compare_digest(password, SETTINGS.admin_password)
-    valid = bool(user.strip() and password and (user_ok & password_ok))
-    if not user.strip() or not password:
-        _record_login_failure(user, source)
-        return False
-    if not valid:
-        if login_retry_after(user, source):
-            return False
-        _record_login_failure(user, source)
-    else:
-        # A correct credential must not be permanently locked out by earlier
-        # failures for the same account; throttle invalid attempts while allowing
-        # the owner to recover without waiting for the backoff window.
-        with _LOGIN_LOCK:
-            _LOGIN_FAILURES.pop(_backoff_key(user, source), None)
-            _CREDENTIAL_FAILURES.pop(_credential_key(user), None)
-            _SOURCE_FAILURES.pop(_source_key(source), None)
-    return valid
-
-
-def issue_session(user: str, remember: bool = False) -> tuple[str, int, str]:
-    now = int(time.time())
-    ttl = REMEMBERED_TTL if remember else SESSION_TTL
-    session_id = secrets.token_urlsafe(32)
-    csrf = secrets.token_urlsafe(32)
-    with _SESSION_LOCK, _session_file_lock():
-        sessions = _prune_sessions(_load_sessions())
-        sessions[session_id] = {
-            "user": user,
-            "issued_at": now,
-            "expires_at": now + ttl,
-            "csrf": csrf,
-            "credential_generation": _credential_generation(),
-        }
-        _save_sessions(sessions)
-    return session_id, ttl, csrf
-
-
-def _session_file_generation() -> tuple[int, int]:
-    try:
-        stat = _session_path().stat()
-        return (int(stat.st_mtime_ns), int(stat.st_size))
-    except OSError:
-        return (0, 0)
-
-
-def _request_session_record(request: Request) -> dict | None:
-    token = request.cookies.get(SESSION_COOKIE)
-    signature = (token, _credential_generation(), _session_file_generation())
-    state = getattr(request, "state", None)
-    cached = (
-        getattr(state, "devfleet_session_cache", None) if state is not None else None
-    )
-    if isinstance(cached, dict) and cached.get("signature") == signature:
-        return cached.get("record")
-    with _SESSION_LOCK, _session_file_lock():
-        record = _prune_sessions(_load_sessions()).get(token or "")
-    if (
-        not isinstance(record, dict)
-        or record.get("user") != SETTINGS.admin_user
-        or record.get("credential_generation") != signature[1]
-        or int(record.get("expires_at", 0)) <= int(time.time())
-    ):
-        record = None
-    if state is not None:
-        state.devfleet_session_cache = {"signature": signature, "record": record}
-    return record
-
-
-def validate_session(token: str | None) -> str | None:
-    if not token:
-        return None
-    with _SESSION_LOCK, _session_file_lock():
-        record = _prune_sessions(_load_sessions()).get(token)
-    if (
-        not isinstance(record, dict)
-        or record.get("user") != SETTINGS.admin_user
-        or record.get("credential_generation") != _credential_generation()
-    ):
-        return None
-    if int(record.get("expires_at", 0)) <= int(time.time()):
-        revoke_session(token)
-        return None
-    return str(record["user"])
-
-
-def session_user(request: Request) -> str | None:
-    record = _request_session_record(request)
-    return str(record["user"]) if isinstance(record, dict) else None
-
-
-def check_session(request: Request) -> None:
-    if not session_user(request):
-        raise HTTPException(status_code=401, detail="Login required.")
-
-
-def session_csrf_token(request: Request) -> str:
-    record = _request_session_record(request)
-    return str(record.get("csrf", "")) if isinstance(record, dict) else ""
-
-
-def validate_login_csrf(cookie: str | None, form_value: str) -> bool:
-    return bool(cookie and form_value) and hmac.compare_digest(cookie, form_value)
-
-
-def validate_session_csrf(request: Request, form_value: str) -> bool:
-    return bool(form_value) and hmac.compare_digest(
-        session_csrf_token(request), form_value
-    )
-
-
-def revoke_session(token: str | None) -> None:
-    if not token:
-        return
-    with _SESSION_LOCK, _session_file_lock():
-        sessions = _load_sessions()
-        sessions.pop(token, None)
-        _save_sessions(sessions)
-
-
-def api_token_valid(token: str | None) -> bool:
-    """Validate the API token without short-circuiting the digest comparison."""
-    expected = str(SETTINGS.api_token or "")
-    supplied = str(token or "")
-    configured = bool(expected.strip())
-    provided = bool(supplied.strip())
-    matches = hmac.compare_digest(supplied, expected)
-    return configured and provided and matches
-
-
-def check_api(x_devfleet_token: str = Header(default="")) -> None:
-    if not api_token_valid(x_devfleet_token):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API token"
-        )
-
-```
-
-
-## FILE: source/app/devfleet/caches.py
-
-SHA256: 9772d26aae5fa5d81142a9e1e29361886b9effbaa92f3eef8a99724bd985441d | Bytes: 1733 | Git mode: 100644
-
-```
-from __future__ import annotations
-from pathlib import Path
-from typing import Any
 import yaml
-from .core import SETTINGS
-MOUNTS={'python':[('pip','/home/vscode/.cache/pip'),('uv','/home/vscode/.cache/uv')],'javascript':[('npm','/home/node/.npm'),('pnpm','/home/node/.local/share/pnpm/store')],'typescript':[('npm','/home/node/.npm'),('pnpm','/home/node/.local/share/pnpm/store')],'java':[('maven','/home/vscode/.m2/repository'),('gradle','/home/vscode/.gradle/caches')],'kotlin':[('maven','/home/vscode/.m2/repository'),('gradle','/home/vscode/.gradle/caches')],'csharp':[('nuget','/home/vscode/.nuget/packages')],'go':[('go-mod','/go/pkg/mod'),('go-build','/home/vscode/.cache/go-build')],'rust':[('cargo-registry','/usr/local/cargo/registry'),('cargo-git','/usr/local/cargo/git')],'php':[('composer','/home/vscode/.cache/composer')],'ruby':[('bundler','/usr/local/bundle/cache')]}
-def cache_override(project:Path,compose_file:Path,meta:dict[str,Any])->Path|None:
- if not SETTINGS.enable_shared_caches or meta.get('profile',SETTINGS.development_profile)=='strict':return None
- mounts=MOUNTS.get(str(meta.get('language','')).lower(),[])
- if not mounts:return None
- data=yaml.safe_load(compose_file.read_text()) or {};services=data.get('services') or {};override={'services':{}}
- for service in services:
-  volumes=[]
-  for name,target in mounts:
-   source=SETTINGS.cache_root/name;source.mkdir(parents=True,exist_ok=True);volumes.append({'type':'bind','source':str(source),'target':target})
-  override['services'][service]={'volumes':volumes}
- out=SETTINGS.runtime_root/'compose-overrides'/f'{project.name}.cache.yaml';out.parent.mkdir(parents=True,exist_ok=True);out.write_text(yaml.safe_dump(override,sort_keys=False));return out
 
-```
-
-
-## FILE: source/app/devfleet/codexpro.py
-
-SHA256: 30b25cb2a5e7479b08aeb3e1b161fe5b53d6eafe21f6b53ea6d2b827df5689a4 | Bytes: 867 | Git mode: 100644
-
-```
-from __future__ import annotations
-import json,time
-from pathlib import Path
-from typing import Any
-from .core import SETTINGS
-def codexpro_status(project:Path)->dict[str,Any]:
- runtime=project/'.ai-bridge/local-agent';status=project/'.devfleet/runtime/codexpro-status.json';log=project/'.devfleet/runtime/codexpro-bootstrap.log';handoff=project/'.ai-bridge/current-plan.md'
- data={'healthy':False,'state':'not-bootstrapped','workspace':str(project),'runtime_log':str(log),'model_endpoint':SETTINGS.ollama_base_url,'handoff_age_seconds':None}
- try:data.update(json.loads(status.read_text()))
- except Exception:pass
- if handoff.exists():data['handoff_age_seconds']=max(0,int(time.time()-handoff.stat().st_mtime))
- data['runtime_directory']=str(runtime);return data
-def bootstrap_command(project:Path)->list[str]:return [str(project/'.devfleet/codexpro-bootstrap.sh')]
-
-```
-
-
-## FILE: source/app/devfleet/configuration.py
-
-SHA256: 3ad7879d81b09b62d176c5483204281caf4d7f81a57d03d6fd77cf9a7f4c1ee1 | Bytes: 4081 | Git mode: 100644
-
-```
-from __future__ import annotations
-from copy import deepcopy
-from typing import Any
-SCHEMA_VERSION=2
-PROFILE_NAMES={'strict','balanced','fast'}
-DOCKER_MODES={'rootless','rootful'}
-
-def _setdefault_path(data:dict[str,Any],path:tuple[str,...],value:Any)->None:
-    cur=data
-    for key in path[:-1]:cur=cur.setdefault(key,{})
-    cur.setdefault(path[-1],value)
-
-def migrate_cluster_config(source:dict[str,Any],*,clean_install:bool=False)->tuple[dict[str,Any],list[str]]:
-    data=deepcopy(source); version=int(data.get('SchemaVersion',1)); changes=[]
-    if version>2: raise ValueError(f'Configuration schema {version} is newer than this package supports.')
-    if version==1:
-        profile='balanced' if clean_install else 'strict'
-        _setdefault_path(data,('Hosts',),{'DesktopFriendlyName':'DevFleet Primary','LaptopFriendlyName':'DevFleet Surrogate'})
-        for key,friendly,alias in [('Primary','CodexDevVM','CodexDevVM'),('Failover','DevFleetFailover','DevFleetFailover'),('Vault','DevFleetVault','DevFleetVault')]:
-            node=data.setdefault(key,{}); node.setdefault('FriendlyName',friendly); node.setdefault('SshAlias',alias)
-        data.setdefault('Development',{'Profile':profile,'EnableSharedBuildCaches':profile!='strict','EnableAnalyzerCache':True,'EnableTrustedOrchestrator':True,'AllowLoopbackPortPublishing':True,'AllowTailnetPortPublishing':profile!='strict','AutoStartCodexPro':True,'AutoStartProjectServices':True,'RequireConfirmationForRoutineRebuild':False,'RequireConfirmationForRoutineRepair':False,'BackupBeforeRebuild':False,'BackupBeforeQuarantine':True})
-        data.setdefault('Docker',{'PrimaryMode':'rootless','FailoverMode':'rootless','EnableBuildKit':True,'EnableSharedBuildCache':profile!='strict','EnableRegistryCache':False,'RootfulModeAcknowledged':False})
-        data.setdefault('CodexPro',{'Mode':'project-scoped-adapter','AutoBootstrap':True,'ToolCards':True,'DefaultHost':'127.0.0.1','DefaultPort':8787,'SharedTransportStatus':'adapter-only-until-a-verified-multi-workspace-registration-interface-is-exposed'})
-        ollama=data.setdefault('Ollama',{}); ollama.setdefault('PreferredBaseUrl',''); ollama.setdefault('Profile','stable-interactive'); ollama.setdefault('ProfilesFile','config/ollama-profiles.json')
-        network=data.setdefault('Network',{}); network.setdefault('TailnetCidr','100.64.0.0/10'); network.setdefault('PublicBindingAllowed',False)
-        backup=data.setdefault('Backup',{}); backup.setdefault('RequireVerifiedBackupBeforeQuarantine',True); backup.setdefault('OfflineExportEnabled',True)
-        safety=data.setdefault('Safety',{}); safety.setdefault('BlockWindowsPaths',True); safety.setdefault('BlockUncPaths',True); safety.setdefault('BlockWorkspaceEscape',True); safety.setdefault('OrdinaryContainersMayMountDockerSocket',False)
-        data.setdefault('LanguagePolicy',{'DefaultAutomation':'python','DefaultWindowsAdministration':'powershell','DefaultLinuxAdministration':'bash-or-python','DefaultCrossPlatformCli':'go','DefaultWebFrontend':'typescript','DefaultRapidApi':'python-fastapi'})
-        data['SchemaVersion']=2
-        changes += ['SchemaVersion: 1 -> 2',f'Development.Profile: {profile}','Existing rootless Docker stores preserved; no implicit image/volume migration','Primary friendly name and SSH alias: CodexDevVM; instance remains devfleet-primary']
-    data['PackageVersion']=__import__('devfleet.version',fromlist=['__version__']).__version__
-    return data,changes
-
-def validate_cluster_config(data:dict[str,Any])->None:
-    if int(data.get('SchemaVersion',0))!=2: raise ValueError('SchemaVersion must be 2 after migration.')
-    if str(data.get('Development',{}).get('Profile','')).lower() not in PROFILE_NAMES: raise ValueError('Unknown development profile.')
-    for key in ('PrimaryMode','FailoverMode'):
-        if str(data.get('Docker',{}).get(key,'')).lower() not in DOCKER_MODES: raise ValueError(f'Docker.{key} must be rootless or rootful.')
-    if data.get('Safety',{}).get('AllowDockerTcp'): raise ValueError('Unauthenticated Docker TCP remains unsupported.')
-
-```
-
-
-## FILE: source/app/devfleet/containers.py
-
-SHA256: 56dc9aa80609796d45523c4d701e05afde736cccbc9a925fab4f8d50304dc600 | Bytes: 11180 | Git mode: 100644
-
-```
-from __future__ import annotations
-
-import json
-import re
-from typing import Any
-
-from .core import SETTINGS, run, safe_child, validate_project_id, validate_slug
+from .core import SETTINGS, atomic_json
 from .metadata_io import read_project_metadata
+from .profiles import get_profile
 
 
-_CONTAINER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
-_ACTIONS = {
-    "start": "start",
-    "stop": "stop",
-    "restart": "restart",
-    "pause": "pause",
-    "unpause": "unpause",
-    "remove": "rm",
+# The analyzer intentionally supports a reviewed subset instead of invoking a
+# resolver on attacker-controlled files. Changing either identifier changes the
+# analyzer's security boundary and therefore its cache identity.
+ANALYZER_POLICY_VERSION = "2.0.0"
+COMPOSE_SUPPORTED_SCHEMA = "compose-spec-safe-subset-2026-08"
+DEVCONTAINER_SUPPORTED_SCHEMA = "devcontainer-json-safe-subset-2026-08"
+MAX_REFERENCE_DEPTH = 8
+MAX_REFERENCE_FILES = 256
+MAX_REFERENCE_BYTES = 32 * 1024 * 1024
+
+WINDOWS_PATH = re.compile(r"^[a-z]:[\\/]", re.I)
+UNC_PATH = re.compile(r"^(?:\\\\|//)")
+DOCKER_SOCKET = re.compile(r"(?:docker\.sock|/run/user/\d+/docker\.sock)", re.I)
+RELEVANT_NAMES = {"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml", "devcontainer.json", ".env", "project.json"}
+COMPOSE_FILES = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml", ".devcontainer/compose.yaml", ".devcontainer/docker-compose.yml")
+
+# Current Docker Compose service keys. Unknown keys are blocking so a future
+# execution-affecting field cannot silently disappear from review.
+COMPOSE_SERVICE_KEYS = {
+    "annotations", "attach", "build", "blkio_config", "cpu_count", "cpu_percent", "cpu_shares", "cpu_period",
+    "cpu_quota", "cpu_rt_runtime", "cpu_rt_period", "cpus", "cpuset", "cap_add", "cap_drop", "cgroup",
+    "cgroup_parent", "command", "configs", "container_name", "credential_spec", "depends_on", "deploy", "develop",
+    "device_cgroup_rules", "devices", "dns", "dns_opt", "dns_search", "domainname", "entrypoint", "env_file",
+    "environment", "expose", "external_links", "extra_hosts", "gpus", "group_add", "healthcheck", "hostname",
+    "image", "init", "ipc", "isolation", "labels", "label_file", "links", "logging", "mac_address", "mem_limit",
+    "mem_reservation", "mem_swappiness", "memswap_limit", "models", "network_mode", "networks", "oom_kill_disable",
+    "oom_score_adj", "pid", "pids_limit", "platform", "ports", "post_start", "pre_start", "pre_stop", "privileged",
+    "profiles", "provider", "pull_policy", "read_only", "restart", "runtime", "scale", "secrets", "security_opt",
+    "shm_size", "stdin_open", "stop_grace_period", "stop_signal", "storage_opt", "sysctls", "tmpfs", "tty",
+    "ulimits", "use_api_socket", "user", "userns_mode", "uts", "volumes", "volumes_from", "working_dir", "extends",
 }
-_IMMUTABLE_CONTAINER_ID = re.compile(r"^[0-9a-fA-F]{64}$")
-OWNERSHIP_LABELS = {
-    "managed_by": "io.devfleet.managed-by",
-    "project_id": "io.devfleet.project-id",
-    "slug": "io.devfleet.project-slug",
-    "runtime_id": "io.devfleet.runtime-id",
-    "deployment_id": "io.devfleet.deployment-id",
-    "host_id": "io.devfleet.host-id",
+COMPOSE_TOP_LEVEL_KEYS = {"name", "version", "services", "networks", "volumes", "secrets", "configs", "models", "include"}
+COMPOSE_UNSUPPORTED_KEYS = {
+    "include", "extends", "use_api_socket", "volumes_from", "provider", "post_start", "pre_start", "pre_stop",
+    "credential_spec", "runtime", "gpus", "device_cgroup_rules", "cgroup_parent", "sysctls", "tmpfs", "isolation",
+}
+COMPOSE_HOST_NAMESPACE_KEYS = {"network_mode", "pid", "ipc", "uts", "userns_mode"}
+
+DEVCONTAINER_KEYS = {
+    "name", "image", "dockerFile", "dockerfile", "context", "build", "dockerComposeFile", "service", "workspaceFolder",
+    "workspaceMount", "shutdownAction", "overrideCommand", "remoteUser", "containerUser", "containerEnv", "remoteEnv",
+    "mounts", "runArgs", "privileged", "capAdd", "securityOpt", "features", "overrideFeatureInstallOrder",
+    "initializeCommand", "onCreateCommand", "updateContentCommand", "postCreateCommand", "postStartCommand",
+    "postAttachCommand", "forwardPorts", "portsAttributes", "otherPortsAttributes", "appPort", "init", "customizations",
+    "hostRequirements", "waitFor", "userEnvProbe", "secrets",
 }
 
 
-def container_ownership_labels(metadata: dict[str, Any]) -> dict[str, str]:
-    values = {
-        "managed_by": str(metadata.get("managed_by") or "").strip().lower(),
-        "project_id": str(metadata.get("project_id") or "").strip(),
-        "slug": str(metadata.get("slug") or "").strip(),
-        "runtime_id": str(metadata.get("runtime_id") or "").strip(),
-        "deployment_id": str(metadata.get("deployment_id") or "").strip(),
-        "host_id": str(metadata.get("host_id") or "").strip(),
-    }
-    if values["managed_by"] != "devfleet":
-        raise ValueError("Container ownership binding is missing the DevFleet manager identity.")
-    validate_project_id(values["project_id"])
-    validate_slug(values["slug"])
-    if any(not values[key] for key in ("runtime_id", "deployment_id", "host_id")):
-        raise ValueError("Container ownership binding is incomplete.")
-    return {label: values[field] for field, label in OWNERSHIP_LABELS.items()}
+def finding(severity: str, code: str, message: str, file: str = "") -> dict[str, str]:
+    return {"severity": severity, "code": code, "message": message, "file": file}
 
 
-def _authoritative_container_binding(inspected: dict[str, Any]) -> tuple[str, dict[str, str]]:
-    immutable_id = str(inspected.get("Id") or "").strip()
-    if not _IMMUTABLE_CONTAINER_ID.fullmatch(immutable_id):
-        raise ValueError("Container ownership verification failed: Docker returned no canonical immutable ID.")
-    config = inspected.get("Config")
-    labels = config.get("Labels") if isinstance(config, dict) else None
-    if not isinstance(labels, dict):
-        raise ValueError("Container ownership verification failed: container labels are missing.")
-    slug = str(labels.get(OWNERSHIP_LABELS["slug"]) or "")
+def _unsafe_source(source: str) -> str | None:
+    source = source.strip()
+    norm = source.replace("\\", "/")
+    if not source:
+        return "empty path"
+    if "$" in source:
+        return "environment-variable interpolation"
+    if WINDOWS_PATH.search(source) or UNC_PATH.search(source):
+        return "Windows/UNC host path"
+    if DOCKER_SOCKET.search(source):
+        return "Docker socket"
+    if source.startswith(("/", "~")):
+        return "absolute host path"
+    if ".." in PurePosixPath(norm).parts:
+        return "parent-directory traversal"
+    return None
+
+
+def _severity(profile: str, kind: str) -> str:
+    p = get_profile(profile)
+    if kind in {"hardening", "health"}:
+        return "critical" if p.block_hardening else "warning"
+    if kind in {"device", "privileged"}:
+        return "warning" if p.name == "fast" else "critical"
+    return "critical"
+
+
+def _inside_project(project: Path, candidate: Path) -> bool:
     try:
-        slug = validate_slug(slug)
-        project = safe_child(SETTINGS.workspaces, slug)
-    except ValueError as exc:
-        raise ValueError("Container ownership verification failed: project slug binding is invalid.") from exc
-    try:
-        metadata = read_project_metadata(project).value
-    except (OSError, ValueError, UnicodeError, TypeError) as exc:
-        raise ValueError("Container ownership verification failed: authoritative project state is unreadable.") from exc
-    if not isinstance(metadata, dict) or str(metadata.get("runtime_provider") or "") != "docker-compose":
-        raise ValueError("Container ownership verification failed: project is not currently Compose-managed.")
-    expected = container_ownership_labels(metadata)
-    if expected[OWNERSHIP_LABELS["deployment_id"]] != SETTINGS.deployment_id or expected[OWNERSHIP_LABELS["host_id"]] != SETTINGS.host_id:
-        raise ValueError("Container ownership verification failed: project deployment or host binding is not current.")
-    mismatches = [key for key, value in expected.items() if str(labels.get(key) or "") != value]
-    compose_project = str(labels.get("com.docker.compose.project") or "")
-    compose_service = str(labels.get("com.docker.compose.service") or "")
-    if compose_project != expected[OWNERSHIP_LABELS["runtime_id"]] or not compose_service:
-        mismatches.append("com.docker.compose.project/service")
-    if mismatches:
-        raise ValueError("Container ownership verification failed: complete DevFleet/Compose binding does not match current project state (" + ", ".join(sorted(set(mismatches))) + ").")
-    return immutable_id, expected
-
-
-def validate_container_ref(value: str) -> str:
-    value = str(value or "").strip()
-    if not _CONTAINER_ID.fullmatch(value):
-        raise ValueError("Invalid container reference.")
-    return value
-
-
-def _json_lines(args: list[str], timeout: int = 8) -> list[dict[str, Any]]:
-    result = run(args, check=False, timeout=timeout)
-    rows: list[dict[str, Any]] = []
-    for line in (result.stdout or "").splitlines():
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(value, dict):
-            rows.append(value)
-    return rows
-
-
-def _docker_inspect(ref: str) -> dict[str, Any]:
-    result = run(["docker", "inspect", ref], check=False, timeout=10)
-    if result.returncode:
-        raise ValueError((result.stderr or "Container not found.").strip()[-1000:])
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise ValueError("Docker returned invalid inspect data.") from exc
-    if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], dict):
-        raise ValueError("Container not found.")
-    return data[0]
-
-
-def _authorized_read(ref: str) -> tuple[str, dict[str, str], dict[str, Any]]:
-    """Resolve, bind, and revalidate a read before data can leave the service."""
-    inspected = _docker_inspect(ref)
-    immutable_id, expected = _authoritative_container_binding(inspected)
-    try:
-        current = _docker_inspect(immutable_id)
-    except ValueError as exc:
-        raise ValueError("Container ownership verification failed: immutable container disappeared before the read.") from exc
-    current_id, current_expected = _authoritative_container_binding(current)
-    if current_id != immutable_id or current_expected != expected:
-        raise ValueError("Container ownership verification failed: immutable identity changed before the read.")
-    return immutable_id, expected, current
-
-
-def list_containers() -> list[dict[str, Any]]:
-    """Return a safe, Portainer-style summary without exposing the Docker socket."""
-    containers = _json_lines([
-        "docker", "ps", "-a", "--no-trunc", "--format",
-        "{{json .}}",
-    ])
-    stats = _json_lines([
-        "docker", "stats", "--no-stream", "--format", "{{json .}}",
-    ])
-    stats_by_id = {str(item.get("ID") or ""): item for item in stats}
-    result: list[dict[str, Any]] = []
-    for item in containers:
-        ref = str(item.get("ID") or "")
-        if not ref:
-            continue
-        try:
-            immutable_id, expected, inspected = _authorized_read(ref)
-        except ValueError:
-            # A Docker-engine container without a current authoritative DevFleet
-            # binding is deliberately absent, including from metrics.
-            continue
-        stat = stats_by_id.get(immutable_id) or {}
-        name = str(inspected.get("Name") or item.get("Names") or immutable_id[:12]).lstrip("/")
-        result.append({
-            "id": immutable_id,
-            "short_id": immutable_id[:12],
-            "name": name,
-            "image": item.get("Image") or "",
-            "state": item.get("State") or "unknown",
-            "status": item.get("Status") or "",
-            "created": item.get("CreatedAt") or "",
-            "ports": item.get("Ports") or "",
-            "labels": expected,
-            "cpu_percent": stat.get("CPUPerc") or "—",
-            "memory_usage": stat.get("MemUsage") or "—",
-            "memory_percent": stat.get("MemPerc") or "—",
-            "network_io": stat.get("NetIO") or "—",
-            "block_io": stat.get("BlockIO") or "—",
-            "pids": stat.get("PIDs") or "—",
-        })
-    return result
-
-
-def inspect_container(ref: str) -> dict[str, Any]:
-    ref = validate_container_ref(ref)
-    _, _, inspected = _authorized_read(ref)
-    return inspected
-
-
-def container_logs(ref: str, tail: int = 200) -> str:
-    ref = validate_container_ref(ref)
-    tail = max(1, min(int(tail), 1000))
-    immutable_id, _, _ = _authorized_read(ref)
-    result = run([
-        "docker", "logs", "--timestamps", "--tail", str(tail), immutable_id,
-    ], check=False, timeout=15)
-    output = ((result.stdout or "") + (result.stderr or "")).strip()
-    return output[-30000:] or "No container log output."
-
-
-def container_action(ref: str, action: str) -> str:
-    ref = validate_container_ref(ref)
-    command = _ACTIONS.get(str(action or "").lower())
-    if not command:
-        raise ValueError("Unsupported container action.")
-    inspected = _docker_inspect(ref)
-    immutable_id, expected = _authoritative_container_binding(inspected)
-    slug = expected[OWNERSHIP_LABELS["slug"]]
-    project_id = expected[OWNERSHIP_LABELS["project_id"]]
-    # Lazy import avoids the projects -> containers module dependency cycle.
-    # Both paths use the same cross-process lock and control-owned marker.
-    from .projects import (
-        load_authoritative_project_identity_for_mutation,
-        project_transfer_lock,
-    )
-
-    with project_transfer_lock(slug):
-        try:
-            current = _docker_inspect(ref)
-        except ValueError as exc:
-            raise ValueError("Container ownership verification failed: immutable container disappeared before mutation; no same-name replacement was touched.") from exc
-        current_id, current_expected = _authoritative_container_binding(current)
-        if current_id != immutable_id or current_expected != expected:
-            raise ValueError("Container ownership verification failed: immutable identity changed before mutation.")
-        project = safe_child(SETTINGS.workspaces, slug)
-        authoritative = load_authoritative_project_identity_for_mutation(project)
-        if (
-            str(authoritative.get("runtime_provider") or "") != "docker-compose"
-            or container_ownership_labels(authoritative) != expected
-            or str(authoritative.get("project_id") or "") != project_id
-        ):
-            raise ValueError(
-                "Container ownership verification failed: authoritative project identity changed before mutation."
-            )
-        # Reinspect the immutable ID after the authority decision. A receiver cannot
-        # create pending authority or promote a replacement while this lock is held.
-        try:
-            final = _docker_inspect(immutable_id)
-        except ValueError as exc:
-            raise ValueError(
-                "Container ownership verification failed: immutable container disappeared before mutation."
-            ) from exc
-        final_id, final_expected = _authoritative_container_binding(final)
-        if final_id != immutable_id or final_expected != expected:
-            raise ValueError(
-                "Container ownership verification failed: immutable identity changed before mutation."
-            )
-        result = run(["docker", command, immutable_id], check=False, timeout=60)
-        if result.returncode:
-            raise ValueError((result.stderr or result.stdout or "Docker action failed.").strip()[-2000:])
-        return (result.stdout or result.stderr or f"Container {action} completed.").strip()[-4000:]
-
-```
-
-
-## FILE: source/app/devfleet/core.py
-
-SHA256: 244499e96e005ac615042edbe10082a93110f186de8340cdc8a77c95341ac77c | Bytes: 13760 | Git mode: 100644
-
-```
-"""Shared DevFleet settings, validation, and crash-safe filesystem helpers.
-
-This module deliberately contains no host-management logic.  Host changes are
-made only through the narrow authenticated host-agent client.
-"""
-from __future__ import annotations
-
-import json
-import ipaddress
-import os
-import re
-import secrets
-import stat
-import subprocess
-import tempfile
-import time
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
-
-from .metadata_io import enable_inherited_backup_read
-
-try:
-    import pwd
-except ImportError:  # pragma: no cover - Windows has no pwd module.
-    pwd = None
-
-
-CONFIG_PATH = Path(os.environ.get("DEVFLEET_CONFIG_PATH", "/etc/devfleet/config.json"))
-SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,62}$")
-PROJECT_ID_RE = re.compile(r"^[0-9a-fA-F-]{36}$")
-
-
-@dataclass(frozen=True)
-class Settings:
-    node_name: str
-    deployment_id: str
-    node_role: str
-    friendly_name: str
-    portal_port: int
-    workspaces: Path
-    quarantine: Path
-    peer_file: Path
-    runtime_root: Path
-    cache_root: Path
-    ollama_base_url: str
-    ollama_model: str
-    ollama_profile: str
-    development_profile: str
-    docker_mode: str
-    docker_host: str
-    docker_owner_uid: int | None
-    enable_shared_caches: bool
-    enable_analyzer_cache: bool
-    auto_start_codexpro: bool
-    allow_tailnet_ports: bool
-    backup_before_rebuild: bool
-    backup_before_quarantine: bool
-    allow_permanent_delete: bool
-    host_control_enabled: bool
-    host_control_url: str
-    host_control_token: str
-    expected_host_name: str
-    host_agent_timeout_seconds: int
-    host_resource_policy: dict[str, Any]
-    admin_user: str
-    admin_password: str
-    api_token: str
-    require_tailscale: bool
-    tailnet_cidr: str
-    public_binding_allowed: bool
-
-    @property
-    def operations(self) -> Path:
-        return self.runtime_root / "operations"
-
-    @property
-    def host_id(self) -> str:
-        return self.node_name
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _default_config() -> dict[str, Any]:
-    root = Path(os.environ.get("DEVFLEET_TEST_ROOT", "/tmp/devfleet"))
-    return {
-        "node_name": os.environ.get("DEVFLEET_NODE_NAME", "devfleet-primary"),
-        "deployment_id": os.environ.get("DEVFLEET_DEPLOYMENT_ID", ""),
-        "node_role": "primary",
-        "friendly_name": "DevFleet",
-        "portal_port": 8787,
-        "workspaces": str(root / "workspaces"),
-        "quarantine": str(root / "quarantine"),
-        "peer_file": str(root / "peer.json"),
-        "runtime_root": str(root / "runtime"),
-        "cache_root": str(root / "cache"),
-        "docker_mode": "rootless",
-        "docker_host": os.environ.get("DOCKER_HOST", ""),
-        "host_resource_policy": {},
-        "require_tailscale": True,
-        "tailnet_cidr": "100.64.0.0/10",
-        "public_binding_allowed": False,
-    }
-
-
-def load_settings() -> Settings:
-    if CONFIG_PATH.exists():
-        try:
-            if os.name != "nt" and str(CONFIG_PATH).startswith("/etc/devfleet/"):
-                stat = CONFIG_PATH.stat()
-                if stat.st_uid != 0 or stat.st_mode & 0o022:
-                    raise ValueError("security configuration ownership or permissions are unsafe")
-            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, TypeError) as exc:
-            raise ValueError("security configuration is missing, malformed, or unreadable; refusing fail-open defaults") from exc
-        if not isinstance(cfg, dict):
-            raise ValueError("security configuration must be a JSON object")
-    else:
-        cfg = _default_config()
-    policy = dict(cfg.get("host_resource_policy") or {})
-    return Settings(
-        node_name=str(cfg.get("node_name", cfg.get("host_id", "devfleet-primary"))),
-        deployment_id=str(cfg.get("deployment_id", "")),
-        node_role=str(cfg.get("node_role", "primary")),
-        friendly_name=str(cfg.get("friendly_name", cfg.get("node_name", "DevFleet"))),
-        portal_port=int(cfg.get("portal_port", 8787)),
-        workspaces=Path(cfg.get("workspaces", "/var/lib/devfleet/workspaces")),
-        quarantine=Path(cfg.get("quarantine", "/var/lib/devfleet/quarantine")),
-        peer_file=Path(cfg.get("peer_file", "/etc/devfleet/peer.json")),
-        runtime_root=Path(cfg.get("runtime_root", "/var/lib/devfleet/runtime")),
-        cache_root=Path(cfg.get("cache_root", "/var/cache/devfleet")),
-        ollama_base_url=str(cfg.get("ollama_base_url", "")),
-        ollama_model=str(cfg.get("ollama_model", "")),
-        ollama_profile=str(cfg.get("ollama_profile", "stable-interactive")),
-        development_profile=str(cfg.get("development_profile", "strict")),
-        docker_mode=str(cfg.get("docker_mode", "rootless")),
-        docker_host=str(os.environ.get("DOCKER_HOST", cfg.get("docker_host", ""))),
-        docker_owner_uid=(int(os.environ["DEVFLEET_DOCKER_OWNER_UID"]) if os.environ.get("DEVFLEET_DOCKER_OWNER_UID") else (int(cfg["docker_owner_uid"]) if cfg.get("docker_owner_uid") is not None else None)),
-        enable_shared_caches=bool(cfg.get("enable_shared_caches", False)),
-        enable_analyzer_cache=bool(cfg.get("enable_analyzer_cache", True)),
-        auto_start_codexpro=bool(cfg.get("auto_start_codexpro", True)),
-        allow_tailnet_ports=bool(cfg.get("allow_tailnet_ports", False)),
-        backup_before_rebuild=bool(cfg.get("backup_before_rebuild", False)),
-        backup_before_quarantine=bool(cfg.get("backup_before_quarantine", True)),
-        allow_permanent_delete=bool(cfg.get("allow_permanent_delete", False)),
-        host_control_enabled=_env_bool("DEVFLEET_HOST_CONTROL_ENABLED", bool(cfg.get("host_control_enabled", False))),
-        host_control_url=str(os.environ.get("DEVFLEET_HOST_CONTROL_URL", cfg.get("host_control_url", ""))),
-        host_control_token=str(os.environ.get("DEVFLEET_HOST_CONTROL_TOKEN", cfg.get("host_control_token", ""))),
-        expected_host_name=str(cfg.get("expected_host_name", cfg.get("host_name", os.environ.get("COMPUTERNAME", "devfleet-host")))),
-        host_agent_timeout_seconds=int(cfg.get("host_agent_timeout_seconds", 30)),
-        host_resource_policy=policy,
-        admin_user=os.environ.get("DEVFLEET_ADMIN_USER", ""),
-        admin_password=os.environ.get("DEVFLEET_ADMIN_PASSWORD", ""),
-        api_token=os.environ.get("DEVFLEET_API_TOKEN", ""),
-        require_tailscale=bool(cfg.get("require_tailscale", cfg.get("RequireTailscale", True))),
-        tailnet_cidr=str(cfg.get("tailnet_cidr", cfg.get("TailnetCidr", "100.64.0.0/10"))),
-        public_binding_allowed=bool(cfg.get("public_binding_allowed", cfg.get("PublicBindingAllowed", False))),
-    )
-
-
-SETTINGS = load_settings()
-
-
-_ROOTLESS_DOCKER_HOST = re.compile(r"^unix:///run/user/(?P<uid>[1-9][0-9]*)/docker\.sock$")
-
-
-def _expected_docker_owner_uid() -> int:
-    if SETTINGS.docker_owner_uid is not None:
-        return SETTINGS.docker_owner_uid
-    if pwd is not None:
-        try:
-            return int(pwd.getpwnam("devrunner").pw_uid)
-        except KeyError:
-            pass
-    raise RuntimeError("Rootless Docker owner identity is not configured; refusing to guess from the controller UID.")
-
-
-def _validate_rootless_docker_host(raw: str) -> str:
-    match = _ROOTLESS_DOCKER_HOST.fullmatch(str(raw or "").strip())
-    if not match:
-        raise RuntimeError("Rootless Docker requires an explicit unix:///run/user/<devrunner-uid>/docker.sock endpoint.")
-    configured_uid = int(match.group("uid"))
-    expected_uid = _expected_docker_owner_uid()
-    if configured_uid != expected_uid:
-        raise RuntimeError("Configured Docker socket UID is not the authoritative devrunner owner UID.")
-    socket_path = Path(raw[len("unix://"):])
-    try:
-        socket_stat = os.lstat(socket_path)
-    except OSError as exc:
-        raise RuntimeError("Configured rootless Docker socket is missing or unreadable.") from exc
-    if stat.S_ISLNK(socket_stat.st_mode) or not stat.S_ISSOCK(socket_stat.st_mode):
-        raise RuntimeError("Configured rootless Docker endpoint is not a Unix socket.")
-    if int(socket_stat.st_uid) != expected_uid:
-        raise RuntimeError("Configured rootless Docker socket has an unexpected owner.")
-    return raw
-
-
-def client_allowed_by_network(host: str | None) -> bool:
-    """Enforce the configured portal boundary using the TCP peer address.
-
-    Loopback is always allowed for local bootstrap/proxy operations.  When the
-    portal requires Tailscale, only the configured tailnet CIDR is accepted;
-    arbitrary RFC1918 peers are deliberately not treated as trusted.
-    """
-    if SETTINGS.public_binding_allowed or not SETTINGS.require_tailscale:
+        candidate.resolve(strict=False).relative_to(project.resolve())
         return True
-    try:
-        address = ipaddress.ip_address(str(host or "").split("%", 1)[0])
-        if address.is_loopback:
-            return True
-        return address in ipaddress.ip_network(SETTINGS.tailnet_cidr, strict=False)
     except ValueError:
         return False
 
 
-def validate_slug(value: str) -> str:
-    value = str(value or "").strip().lower()
-    if not SLUG_RE.fullmatch(value):
-        raise ValueError("Project slug must be 2-63 lowercase letters, numbers, dots, underscores, or dashes.")
-    return value
+def _contains_symlink(project: Path, candidate: Path) -> bool:
+    try:
+        relative = candidate.relative_to(project)
+    except ValueError:
+        return True
+    current = project
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
 
 
-def validate_project_id(value: str) -> str:
-    value = str(value or "").strip()
-    if not PROJECT_ID_RE.fullmatch(value):
-        raise ValueError("Project id must be a UUID-shaped value.")
-    return value
-
-
-def safe_child(base: Path, name: str) -> Path:
-    slug = validate_slug(name)
-    base_real = base.resolve()
-    lexical = base_real / slug
-    if lexical.is_symlink():
-        raise ValueError("Project path may not be a symbolic link.")
-    candidate = lexical.resolve(strict=False)
-    if candidate.parent != base_real or candidate.name != slug:
-        raise ValueError("Unsafe project path.")
+def _reference(project: Path, base: Path, raw: Any, rel: str, kind: str, findings: list[dict[str, str]], references: set[Path], *, required: bool = False) -> Path | None:
+    path_code = "docker.mount-resolution" if kind == "bind mount source" else "docker.build-context" if kind == "build.context" else "compose.path-escape"
+    value = str(raw or "").strip()
+    reason = _unsafe_source(value)
+    if reason:
+        findings.append(finding("critical", "compose.path-reference", f"{kind} is unsafe ({reason}): {value!r}.", rel))
+        return None
+    candidate = (base / value).resolve(strict=False)
+    if not _inside_project(project, candidate):
+        findings.append(finding("critical", path_code, f"{kind} resolves outside the project boundary: {value!r}.", rel))
+        return None
+    lexical = base / value
+    if _contains_symlink(project, lexical):
+        findings.append(finding("critical", path_code, f"{kind} may not traverse a symlink: {value!r}.", rel))
+        return None
+    if required and not candidate.is_file():
+        findings.append(finding("critical", "compose.missing-reference", f"Referenced {kind} does not exist: {value!r}.", rel))
+        return None
+    references.add(candidate)
     return candidate
 
 
-def run(
-    cmd: list[str],
-    *,
-    cwd: Path | None = None,
-    timeout: int = 900,
-    check: bool = True,
-) -> subprocess.CompletedProcess[str]:
-    """Run a known executable with bounded time and captured output."""
-    if not cmd or any(not isinstance(part, str) or not part for part in cmd):
-        rais
+def _short_bind_source(value: str) -> str | None:
+    value = value.strip()
+    if not value:
+        return None
+    if WINDOWS_PATH.search(value) or UNC_PATH.search(value) or DOCKER_SOCKET.search(value):
+        return value
+    if ":" not in value:
+        return value if value.startswith((".", "..", "/", "~")) else None
+    return value.split(":", 1)[0]
+
+
+def _volume_source(value: Any) -> tuple[str, bool]:
+    if isinstance(value, dict):
+        kind = str(value.get("type", "volume")).lower()
+        source = str(value.get("source") or value.get("src") or "")
+        return source, kind == "bind"
+    source = _short_bind_source(str(value))
+    return source or "", source is not None
+
+
+def _parse_yaml(path: Path) -> dict[str, Any] | None:
+    try:
+        value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _iter_env_files(value: Any) -> Iterable[Any]:
+    if isinstance(value, (str, dict)):
+        return (value,)
+    return value or ()
+
+
+def _strings(value: Any) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from _strings(key)
+            yield from _strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+
+
+def _preflight_compose(project: Path, path: Path, findings: list[dict[str, str]], references: set[Path], seen: set[Path], state: dict[str, int], depth: int) -> dict[str, Any] | None:
+    rel = str(path.relative_to(project)) if _inside_project(project, path) else str(path)
+    if depth > MAX_REFERENCE_DEPTH:
+        findings.append(finding("critical", "compose.reference-depth", "Compose reference depth exceeds the bounded policy.", rel))
+        return None
+    path = path.resolve(strict=False)
+    if path in seen:
+        return _parse_yaml(path)
+    if len(seen) >= MAX_REFERENCE_FILES:
+        findings.append(finding("critical", "compose.reference-count", "Compose reference count exceeds the bounded policy.", rel))
+        return None
+    seen.add(path)
+    if not path.is_file():
+        findings.append(finding("critical", "compose.missing-reference", "Compose configuration is missing.", rel))
+        return None
+    state["bytes"] += path.stat().st_size
+    if state["bytes"] > MAX_REFERENCE_BYTES:
+        findings.append(finding("critical", "compose.reference-bytes", "Compose referenced input bytes exceed the bounded policy.", rel))
+        return None
+    data = _parse_yaml(path)
+    if data is None:
+        findings.append(finding("error", "yaml.invalid", "Compose configuration is not a YAML object.", rel))
+        return None
+    if any("${" in text for text in _strings(data)):
+        findings.append(finding("critical", "compose.interpolation", "Compose environment interpolation is blocked in the security-reviewed subset.", rel))
+    for key in data:
+        if not str(key).startswith("x-") and key not in COMPOSE_TOP_LEVEL_KEYS:
+            findings.append(finding("critical", "compose.unknown-field", f"Unreviewed top-level Compose field is blocked: {key!r}.", rel))
+    includes = data.get("include")
+    if includes:
+        findings.append(finding("critical", "compose.include", "Compose include is blocked until a bounded resolver is certified.", rel))
+        entries = includes if isinstance(includes, list) else [includes]
+        for entry in entries:
+            include_path = entry.get("path") if isinstance(entry, dict) else entry
+            included = _reference(project, path.parent, include_path, rel, "Compose include", findings, references)
+            if included and included.is_file():
+                _preflight_compose(project, included, findings, references, seen, state, depth + 1)
+    services = data.get("services") or {}
+    if not isinstance(services, dict):
+        findings.append(finding("error", "compose.services", "Compose services must be a mapping.", rel))
+        return data
+    for name, service in services.items():
+        if not isinstance(service, dict):
+            findings.append(finding("error", "compose.service", f"Compose service {name!r} must be a mapping.", rel))
+            continue
+        for key in service:
+            if key not in COMPOSE_SERVICE_KEYS and not str(key).startswith("x-"):
+                findings.append(finding("critical", "compose.unknown-field", f"Unreviewed service field is blocked: {name}.{key}.", rel))
+        extends = service.get("extends")
+        if extends:
+            findings.append(finding("critical", "compose.extends", "Compose extends is blocked until effective-model resolution is certified.", rel))
+            if isinstance(extends, dict) and extends.get("file"):
+                inherited = _reference(project, path.parent, extends.get("file"), rel, "Compose extends file", findings, references)
+                if inherited and inherited.is_file():
+                    _preflight_compose(project, inherited, findings, references, seen, state, depth + 1)
+        for env_file in _iter_env_files(service.get("env_file")):
+            env_path = env_file.get("path") if isinstance(env_file, dict) else env_file
+            _reference(project, path.parent, env_path, rel, "env_file", findings, references)
+        build = service.get("build")
+        if isinstance(build, str):
+            _reference(project, path.parent, build, rel, "build.context", findings, references)
+        elif isinstance(build, dict):
+            context = build.get("context")
+            if context:
+                context_path = _reference(project, path.parent, context, rel, "build.context", findings, references)
+                if context_path and build.get("dockerfile"):
+                    _reference(project, context_path.parent, build.get("dockerfile"), rel, "build.dockerfile", findings, references, required=True)
+        for volume in service.get("volumes") or ():
+            source, is_bind = _volume_source(volume)
+            if is_bind:
+                _reference(project, path.parent, source, rel, "bind mount source", findings, references)
+        for key in ("secrets", "configs"):
+            value = service.get(key)
+            if value:
+                findings.append(finding("critical", "compose.secret-config", f"Service {name}.{key} is blocked until host-file authorization is certified.", rel))
+    for key in ("secrets", "configs"):
+        declarations = data.get(key)
+        if isinstance(declarations, dict):
+            for name, declaration in declarations.items():
+                if isinstance(declaration, dict) and declaration.get("file"):
+                    _reference(project, path.parent, declaration["file"], rel, f"{key}.{name} file", findings, references, required=True)
+                if declaration:
+                    findings.append(finding("critical", "compose.secret-config", f"Top-level {key}.{name} is blocked until host-file authorization is certified.", rel))
+    return data
+
+
+def _scan_compose_service(project: Path, path: Path, name: str, svc: dict[str, Any], profile: str, out: list[dict[str, str]]) -> None:
+    rel = str(path.relative_to(project))
+    metadata: dict[str, Any] = {}
+    try:
+        value = read_project_metadata(project).value
+        metadata = value if isinstance(value, dict) else {}
+    except Exception:
+        pass
+    for key in COMPOSE_UNSUPPORTED_KEYS:
+        if key in svc and svc.get(key) not in (None, False, [], {}):
+            out.append(finding("critical", f"compose.{key.replace('_', '-')}", f"{name}.{key} is blocked by the supported Compose security policy.", rel))
+    if svc.get("container_name"):
+        out.append(finding("critical" if profile == "strict" else "warning", "docker.container-name", f"{name}: explicit container_name can collide across projects.", rel))
+    if svc.get("privileged") is True:
+        severity = _severity(profile, "privileged")
+        if profile == "fast" and not metadata.get("allow_privileged"):
+            severity = "critical"
+        out.append(finding(severity, "docker.privileged", f"{name}: privileged mode requires Fast Trusted plus project-level acknowledgement.", rel))
+    for key in COMPOSE_HOST_NAMESPACE_KEYS:
+        value = str(svc.get(key, "")).lower()
+        if value == "host" or value.startswith(("container:", "service:")):
+            out.append(finding("critical", "docker.host-namespace", f"{name}: {key}={value} is forbidden.", rel))
+    caps = [str(x).upper() for x in (svc.get("cap_add") or [])]
+    if caps:
+        severity = _severity(profile, "device")
+        if profile == "fast" and not metadata.get("allow_privileged"):
+            severity = "critical"
+        out.append(finding(severity, "docker.capabilities", f"{name}: capabilities require explicit reviewed acknowledgement: {caps}.", rel))
+    if svc.get("devices"):
+        severity = _severity(profile, "device")
+        if profile == "fast" and not metadata.get("allow_devices"):
+            severity = "critical"
+        out.append(finding(severity, "docker.devices", f"{name}: device access requires Fast Trusted plus project-level acknowledgement.", rel))
+    for volume in svc.get("volumes") or ():
+        source, is_bind = _volume_source(volume)
+        if is_bind:
+            reason = _unsafe_source(source)
+            if reason:
+                out.append(finding("critical", "docker.mount", f"{name}: rejected {reason}: {source!r}.", rel))
+    build = svc.get("build")
+    if build:
+        context = build if isinstance(build, str) else str(build.get("context", "."))
+        reason = _unsafe_source(context)
+        if reason and context not in {".", "./"}:
+            out.append(finding("critical", "docker.build-context", f"{name}: rejected {reason}: {context}.", rel))
+        if isinstance(build, dict) and build.get("privileged"):
+            out.append(finding("critical", "docker.build-privileged", f"{name}: privileged image builds are blocked.", rel))
+        if isinstance(build, dict) and build.get("secrets"):
+            out.append(finding("critical", "docker.build-secrets", f"{name}: build secrets are blocked.", rel))
+        context_path = (path.parent / context).resolve(strict=False)
+        dockerfile_name = "Dockerfile" if isinstance(build, str) else str(build.get("dockerfile", "Dockerfile"))
+        dockerfile = (context_path / dockerfile_name).resolve(strict=False)
+        if _inside_project(project, dockerfile) and dockerfile.is_file():
+            users = []
+            for line in dockerfile.read_text(encoding="utf-8", errors="ignore").splitlines():
+                parts = line.split(None, 1)
+                if len(parts) == 2 and parts[0].upper() == "USER":
+                    users.append(parts[1].strip())
+            if not users or users[-1].lower() in {"root", "0", "0:0"}:
+                out.append(finding(_severity(profile, "hardening"), "docker.non-root-user", f"{name}: Dockerfile does not finish with a non-root USER.", str(dockerfile.relative_to(project))))
+    for env_file in _iter_env_files(svc.get("env_file")):
+        value = str(env_file.get("path", "")) if isinstance(env_file, dict) else str(env_file)
+        reason = _unsafe_source(value)
+        if reason:
+            out.append(finding("critical", "docker.env-file", f"{name}: unsafe env_file ({reason}): {value}.", rel))
+    for port in svc.get("ports") or ():
+        state, text = _port_state(port)
+        if state == "public":
+            out.append(finding("critical", "docker.port-public", f"{name}: public/unbound port publication is forbidden: {text}.", rel))
+        elif state == "tailnet" and not (get_profile(profile).allow_tailnet and SETTINGS.allow_tailnet_ports):
+            out.append(finding("critical", "docker.port-tailnet", f"{name}: tailnet port requires policy approval: {text}.", rel))
+    if "healthcheck" not in svc:
+        out.append(finding(_severity(profile, "health"), "docker.healthcheck", f"{name}: no container healthcheck is defined.", rel))
+    image = str(svc.get("image", ""))
+    if image.endswith(":latest") or (image and ":" not in image):
+        out.append(finding(_severity(profile, "hardening"), "docker.unpinned-image", f"{name}: development image is not pinned.", rel))
+    security = [str(x).lower() for x in (svc.get("security_opt") or [])]
+    if any("unconfined" in x for x in security):
+        out.append(finding("critical", "docker.unconfined", f"{name}: unconfined security profile is forbidden.", rel))
+    if not any("no-new-privileges" in x for x in security):
+        out.append(finding(_severity(profile, "hardening"), "docker.no-new-privileges", f"{name}: no-new-privileges is not set.", rel))
+
+
+def _strip_jsonc(text: str) -> str:
+    result: list[str] = []
+    i = 0
+    in_string = False
+    escaped = False
+    while i < len(text):
+        char = text[i]
+        if in_string:
+            result.append(char)
+            if escaped:
+                escaped = False

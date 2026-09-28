@@ -37,28 +37,19 @@ Also read `AGENTS.md`, `docs/ai/devfleet-release/START-HERE.md`, `docs/ai/devfle
 - Never reset, stash, clean, or discard the existing dirty evidence tree wholesale.
 - Never rebuild/sign unless a newly proven shipping defect requires it.
 - Never claim PASS from mocks, fastlane, diagnostics, or historical evidence.
-## Current frozen candidate tuple
-Treat these as expected until a fresh native read proves otherwise:
-- branch: `v1.2.13-audit-remediation`
-- repository HEAD: `3e54aa87b098d8b45f0cab066c8a5fe414ddfdde`
-- candidate build commit: `4f1ca4570466f1595c0f05fb84eab408f6e99b31`
-- shipping input identity: `e4f92a35bb9983d951747eafaeef2cc133a7a695ff73c0b46809cbdcb590ecb0`
-- release fingerprint: `b83cfcb13fd2b6bf3f8bbb0a576318b9166790527007ce7fef1ec45069d1541f`
-- tooling fingerprint: `ce38270ae38b901cc74e9fb7d5dc26d9ad4923ac8fd0b0a0423374dd6a3ba17e`
-- signed EXE SHA-256: `178d792d9a3dea995b21e1bff88b5864d554f70750fbc74c37d7006a9e5076e9`
-- shipping source remains frozen unless native evidence proves a material defect.
+## Current candidate tuple
+Read the current native candidate, qualification, journal, accepted baseline, and artifact records together. Recompute source and artifact hashes from actual files. Preserve the signed shipping inputs unless native evidence proves a material defect. A tuple copied into this skill or an old handoff is historical context, never current authority.
 
 ## Exact disposable lab
 - L1: `DevFleet-E2E-Win11-01`
 - L1 GUID: `84b7d8b8-ee6c-4085-aa29-4b0adc316de2`
-- CLEAN checkpoint: `DevFleet-E2E-CLEAN`
-- CLEAN GUID: `19865b76-4c3a-44f7-ba39-841e9d3c40c9`
+- Accepted CLEAN checkpoint: read the current native baseline pointer and its hash-bound receipt. The original `DevFleet-E2E-CLEAN` / `19865b76-4c3a-44f7-ba39-841e9d3c40c9` is historical lineage, not an automatic restore target.
 - nested L2 expected name: `DevFleet-E2E-Linux-01`
 Final state must be L1 OFF and nested L2 proven ABSENT using supported in-L1 inventory.
 
 ## Historical admission snapshot on 2026-09-25 (not the current campaign)
-- The last recorded standard-token receipt for this tuple is PASS: `standard-token-20260925T100200Z-c0299d15`. Reconcile current native identity before using it.
-- It is bound to the tuple above and came from `MULATTOTECHBOX\Developer`, Medium integrity, non-admin, non-elevated.
+- The then-recorded standard-token receipt was PASS: `standard-token-20260925T100200Z-c0299d15`. Reconcile current native identity before using any receipt.
+- It was bound to the September 25 tuple and came from `MULATTOTECHBOX\Developer`, Medium integrity, non-admin, non-elevated.
 - Exact CLEAN credential rehearsal proved the current Dylan DPAPI store has username `E2EAdmin` but its password is invalid.
 - The exact CLEAN rehearsal returned L1 to OFF.
 - Campaign B has zero recorded counters but later unreserved token/readiness invocations. Their accounting and sole owner need a native decision; do not infer unused allowance from zero counters.
@@ -102,6 +93,12 @@ This is VM-free, non-certifying qualification: static readiness, fastlane regres
 release-tooling tests, aggregate harness, audit coherence, git diff validation, shipping
 Python tests, installer tests, and candidate-tuple immutability. It writes logs only under
 `%LOCALAPPDATA%\DevFleet\CertificationPreflight\`.
+
+Run the full VM-free sweep once after the candidate tuple and relevant inputs are frozen. Capture its structured stdout as JSON outside the checkout and record its RunId, result path, SHA-256, exit code, and exact candidate/tooling/artifact tuple. Reuse that PASS only while the retained result says `fullLocalSweep=true`, `certificationCredit=false`, the tuple still matches, and no tested input or prerequisite has changed. A new chat, model, or documentation-only edit is not itself a reason to repeat the sweep. After a changed source/tooling input or failed group, rerun the relevant narrow suite first; repeat the full sweep when native staleness or the next gate requires it. If a known prerequisite is still blocked, run static readiness and the narrow relevant VM-free test rather than spending another full sweep. None of these results replace fresh raw HostSafety, exact owner/admission, accepted checkpoint, authenticated guest readiness, proofs, FullRelease, or final acceptance.
+
+Before starting an expensive native stage, prevalidate its downstream RunId grammar and ownership/reservation contract against the actual entrypoint, along with current tuple, qualification, accepted baseline, and fresh HostSafety. Earlier FullRelease evidence spent about 11 minutes in install work before a downstream RunId grammar rejection; this ordering catches that class of orchestration error without weakening any gate. Do not reserve, mutate the VM, or claim credit from this static check.
+
+Before charging a finite build/sign slot, prevalidate the post-build wrapper against the actual native output schema, including PowerShell enum serialization (Authenticode `Valid` can serialize as JSON numeric `0`), and run read-only artifact verification on a representative preserved output. A wrapper false-negative does not justify rerunning or refunding a charged native attempt; retain its terminal evidence and correct the wrapper before any separately authorized continuation, and assess reuse of verified signed output before rebuilding.
 
 After a legitimate matching credential/baseline prerequisite is established and a
 fresh diagnostic admission is valid, run

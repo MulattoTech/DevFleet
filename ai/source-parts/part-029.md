@@ -1,393 +1,377 @@
 # DevFleet source part 029
 
 Full-source UTF-8 byte interval [1302000, 1348500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 5cdf6358c947bdd107f85e51f4accfc15596a2dfdebeb96383031e973b27ab71
+Payload SHA-256: db11bd74d61e2e28317b08823c8ad785c975decc25968b5ff396d997117e4e84
 
 <!-- BEGIN SOURCE SLICE -->
-(Test-Path -LiteralPath $checkpointPath -PathType Leaf);receiptFiles=$receipts;installStatePresent=(Test-Path -LiteralPath $installPath -PathType Leaf);installStateLastWriteUtc=if(Test-Path -LiteralPath $installPath){(Get-Item -LiteralPath $installPath).LastWriteTimeUtc.ToString('o')}else{$null};ownershipPresent=(Test-Path -LiteralPath $ownershipPath -PathType Leaf);nodeIdentityPresent=(Test-Path -LiteralPath 'C:\ProgramData\DevFleet\node-identity.json' -PathType Leaf);hostAgentPresent=(Test-Path -LiteralPath 'C:\ProgramData\DevFleetHostAgent' -PathType Container);hostAgentTaskPresent=[bool](Get-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue);listenerPresent=[bool](Get-NetTCPConnection -LocalPort 8790 -State Listen -ErrorAction SilentlyContinue);pendingCbs=(Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending');pendingWindowsUpdate=(Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired')}
-            } -ArgumentList $candidatePid,$candidateSessionId,$expectedCandidatePath
-            [void]$observationSamples.Add($sample)
-            Write-EvidenceJson -Path $observationPath -Value @($observationSamples)
-        } catch {
-            [void]$observationSamples.Add([ordered]@{timestampUtc=(Get-Date).ToUniversalTime().ToString('o');sampleError=$_.Exception.Message})
-            Write-EvidenceJson -Path $observationPath -Value @($observationSamples)
+ne $payload -or [string]$checkpoint.role -cne $ExpectedRole -or [string]$checkpoint.action -cne 'FreshInstall' -or -not [bool]$generation.reboot.bootIdentityChanged -or [string]$generation.resume.status -cne 'REAL E2E OBSERVER HANDOFF'){throw 'Exact proof reboot evidence lacks the bound transaction, changed boot, or resumed WPF handoff.'}
+        $records.Add([ordered]@{file=$file;sha256=[string]$reference.sha256})
+    }
+    for($number=1;$number -le $seen.Count;$number++){if(-not $seen.Contains($number)){throw 'Exact proof checkpoint generations are not contiguous.'}}
+    return [ordered]@{schemaVersion=1;role=$ExpectedRole;phaseId=$expectedPhase;transactionId=$tx;checkpointLineageId=$lineage;payloadSha256=$payload;roleEvidence=$roleEvidence;evidence=@($records)}
+}
+
+function Write-ProductLifecycleTerminalEvidence {
+    param(
+        [Parameter(Mandatory)][string]$InvocationDir,
+        [Parameter(Mandatory)][string]$Phase,
+        [Parameter(Mandatory)][string]$InvocationId,
+        [Parameter(Mandatory)][string]$Provider,
+        [Parameter(Mandatory)][string]$LastStableStep,
+        [Parameter(Mandatory)][string]$ErrorMessage,
+        [string]$TransactionId,
+        [string]$PayloadSha256,
+        [string]$Action='FreshInstall',
+        [string]$Role='Primary / Desktop',
+        [string]$Outcome='TERMINAL_FAILURE',
+        [object]$Detail,
+        [System.Collections.IDictionary]$SafeFailure
+    )
+    $now=(Get-Date).ToUniversalTime().ToString('o')
+    $journalPath=Join-Path $InvocationDir 'product-lifecycle-progress.jsonl'
+    $currentPath=Join-Path $InvocationDir 'product-lifecycle-progress-current.json'
+    $terminalPath=Join-Path $InvocationDir 'product-lifecycle-terminal.json'
+    $providerPath=Join-Path $InvocationDir 'product-lifecycle-provider-failure.json'
+    $entry=[ordered]@{event='TERMINAL';terminalReason=$Outcome;status=$Outcome;completionVerified=$false;phase=$Phase;invocationId=$InvocationId;provider=$Provider;lastStableStep=$LastStableStep;error=$ErrorMessage;timestampUtc=$now;transactionId=$TransactionId;payloadSha256=$PayloadSha256;action=$Action;role=$Role}
+    if($Detail){$entry.detail=$Detail}
+    if($SafeFailure){$entry.safeFailure=$SafeFailure}
+    New-Item -ItemType Directory -Path $InvocationDir -Force|Out-Null
+    Add-Content -LiteralPath $journalPath -Value ($entry|ConvertTo-Json -Compress -Depth 24) -Encoding UTF8
+    Write-EvidenceJson -Path $currentPath -Value $entry
+    Write-EvidenceJson -Path $terminalPath -Value $entry
+    $providerEntry=[ordered]@{status=$Outcome;contract='product-lifecycle-provider-failure';phase=$Phase;invocationId=$InvocationId;provider=$Provider;lastStableStep=$LastStableStep;error=$ErrorMessage;evidencePath=$terminalPath;terminalEvidencePath=$terminalPath;providerFailurePath=$providerPath;progressJournalPath=$journalPath;progressCurrentPath=$currentPath;timestampUtc=$now}
+    if($Detail){$providerEntry.detail=$Detail}
+    if($SafeFailure){$providerEntry.safeFailure=$SafeFailure}
+    Write-EvidenceJson -Path $providerPath -Value $providerEntry
+    return [pscustomobject]$providerEntry
+}
+
+function Get-SafeGuestSessionFailureMetadata {
+    param([AllowNull()][System.Exception]$Exception)
+    $allowedCodes=@('LAB_GUEST_AUTHENTICATION_REJECTED','LAB_SESSION_ACCESS_DENIED','LAB_SESSION_OPEN_TIMEOUT','LAB_SESSION_TRANSPORT_FAILED','LAB_SESSION_OPEN_FAILED')
+    $current=$Exception;$depth=0
+    while($null -ne $current -and $depth -lt 8){
+        $candidate=$current;$current=$current.InnerException;$depth++
+        if($null -eq $candidate.Data -or -not $candidate.Data.Contains('failureCode')){continue}
+        $code=[string]$candidate.Data['failureCode'];$attempt=0
+        if($code -notin $allowedCodes -or -not [int]::TryParse([string]$candidate.Data['attemptCount'],[ref]$attempt) -or $attempt -lt 1 -or $attempt -gt 3){continue}
+        $auth=[string]$candidate.Data['authenticationOutcome'];if($auth -notin @('UNVERIFIED','REJECTED')){continue}
+        if([string]$candidate.Data['credentialFreshness'] -cne 'UNVERIFIED'){continue}
+        $safe=[ordered]@{failureCode=$code;attemptCount=$attempt;authenticationOutcome=$auth;credentialFreshness='UNVERIFIED'}
+        $nativeCode=0
+        if([int]::TryParse([string]$candidate.Data['nativeErrorCode'],[ref]$nativeCode) -and $nativeCode -ge 0 -and $nativeCode -le 65535){$safe.nativeErrorCode=$nativeCode}
+        return $safe
+    }
+    return $null
+}
+
+function Invoke-ProductFreshInstallLifecycle {
+    <# One product-owned loop. Synthetic reboot state is intentionally absent.
+       MaxRebootBoundaries limits product reboots, not the final observation
+       after the last WPF resume. Provider seams are test-only and retain all
+       production binding/ordering checks around their results. #>
+    param(
+        [Parameter(Mandatory)][psobject]$Context,
+        [string]$Role='Primary / Desktop',
+        [psobject]$InitialResult,
+        [scriptblock]$WpfProvider,
+        [scriptblock]$TransitionProvider,
+        [scriptblock]$RebootProvider,
+        [scriptblock]$SettleProvider,
+        [scriptblock]$RemoteObservationProvider,
+        [scriptblock]$GuestMarkerReadProvider,
+        [object]$ObservationAdapterContext,
+        [scriptblock]$OAuthCredentialCleanupProvider
+    )
+    if(-not $WpfProvider -and (Test-LifecycleProperty -Value $Context -Name 'lifecycleWpfProvider')){$found=$false;$WpfProvider=Get-LifecycleProperty $Context 'lifecycleWpfProvider' ([ref]$found)};if(-not $TransitionProvider -and (Test-LifecycleProperty -Value $Context -Name 'lifecycleTransitionProvider')){$found=$false;$TransitionProvider=Get-LifecycleProperty $Context 'lifecycleTransitionProvider' ([ref]$found)};if(-not $RebootProvider -and (Test-LifecycleProperty -Value $Context -Name 'lifecycleRebootProvider')){$found=$false;$RebootProvider=Get-LifecycleProperty $Context 'lifecycleRebootProvider' ([ref]$found)};if(-not $SettleProvider -and (Test-LifecycleProperty -Value $Context -Name 'lifecycleSettleProvider')){$found=$false;$SettleProvider=Get-LifecycleProperty $Context 'lifecycleSettleProvider' ([ref]$found)}
+    $candidate=Assert-ExactCandidate $Context
+    $expectedPayload=[string]$Context.candidate.tar.sha256
+    $expectedVersion=[string]$Context.candidate.releaseVersion
+    $expectedInstaller=[string]$Context.candidate.installerVersion
+    if($expectedPayload -notmatch '^[0-9a-fA-F]{64}$'){throw 'TERMINAL_FAILURE: lifecycle payload identity is missing.'}
+    if($expectedVersion -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$' -or $expectedInstaller -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$'){throw 'TERMINAL_FAILURE: lifecycle version identity is missing or malformed.'}
+    $invocationStart=(Get-Date).ToUniversalTime().ToString('o')
+    # Provider-driven behavioral tests never cross the real observation
+    # boundary. Production owns the identity lookup and fails closed before
+    # the first authenticated observation if the exact candidate config is
+    # unavailable or malformed.
+    $productIdentity=if($TransitionProvider){$null}else{Get-DevFleetProductObservationIdentity -Context $Context -Role $Role}
+    $expectedComputeInstanceName=if($productIdentity){[string]$productIdentity.computeInstanceName}else{''};$expectedVaultInstanceName=if($productIdentity){[string]$productIdentity.vaultInstanceName}else{''}
+    $contextPhaseFound=$false;$contextPhaseValue=Get-LifecycleProperty $Context 'phaseId' ([ref]$contextPhaseFound);$rawPhase=if($contextPhaseFound){[string]$contextPhaseValue}else{'PRODUCT-LIFECYCLE'}
+    $logicalPhase=$rawPhase
+    $safePhase=($rawPhase -replace '[^A-Za-z0-9_.-]','_').Trim('_');if(-not $safePhase){$safePhase='PRODUCT-LIFECYCLE'}
+    $invocationId=[guid]::NewGuid().ToString('N')
+    $invocationDir=Join-Path ([string]$Context.runDir) ("lifecycle-{0}-{1}" -f $safePhase,$invocationId)
+    New-Item -ItemType Directory -Path $invocationDir -Force|Out-Null
+    $contextConfigFound=$false;$contextConfig=Get-LifecycleProperty $Context 'config' ([ref]$contextConfigFound);$contextBudgetFound=$false;$contextBudget=Get-LifecycleProperty $Context 'phaseBudgetSeconds' ([ref]$contextBudgetFound)
+    $lifeContext=[ordered]@{logicalPhaseId=$logicalPhase;phaseId=("{0}-{1}" -f $safePhase,$invocationId);lifecycleInvocationId=$invocationId;runDir=$invocationDir;vmId=$Context.vmId;vmName=$Context.vmName;candidate=$Context.candidate;config=$contextConfig;phaseBudgetSeconds=$contextBudget;invocationStartUtc=$invocationStart;expectedProductComputeInstanceName=$expectedComputeInstanceName;expectedProductVaultInstanceName=$expectedVaultInstanceName;expectedProductTargets=if($productIdentity){@($productIdentity.targets)}else{@()};productConfigSha256=if($productIdentity){[string]$productIdentity.configSha256}else{''}}
+    if($Context -is [System.Collections.IDictionary]){foreach($key in $Context.Keys){if(-not $lifeContext.Contains([string]$key)){$lifeContext[[string]$key]=$Context[$key]}}}else{foreach($prop in @($Context.PSObject.Properties)){if(-not $lifeContext.Contains($prop.Name)){$lifeContext[$prop.Name]=$prop.Value}}}
+    $lifeContext=[pscustomobject]$lifeContext
+    $transactionId=''
+    $providerFailure={param($kind,$message,$step,$detail,$safeFailure)$failure=Write-ProductLifecycleTerminalEvidence -InvocationDir ([string]$lifeContext.runDir) -Phase $logicalPhase -InvocationId $invocationId -Provider $kind -LastStableStep $step -ErrorMessage $message -TransactionId $transactionId -PayloadSha256 $expectedPayload -Action 'FreshInstall' -Role $Role -Detail $detail -SafeFailure $safeFailure;$failure|Add-Member -NotePropertyName completionVerified -NotePropertyValue $false -Force;$failure|Add-Member -NotePropertyName evidencePath -NotePropertyValue (Join-Path ([string]$lifeContext.runDir) 'product-lifecycle-terminal.json') -Force;return $failure}
+    $callProvider={param($provider,$state,$kind,$required)$value=$null;try{$value=&$provider $state;if(-not $value){throw "$kind returned null"};if($required -and -not (Test-LifecycleProperty -Value $value -Name $required)){throw "$kind result lacks $required"};[ordered]@{ok=$true;value=$value}}catch{[ordered]@{ok=$false;error=$_.Exception.Message}}}
+    try {
+    if($InitialResult){$current=$InitialResult}elseif($WpfProvider){$wpfCall=&$callProvider $WpfProvider ([pscustomobject]@{context=$lifeContext;role=$Role;action='FreshInstall';generation=0;invocationId=$invocationId}) 'WpfProvider' 'status';if(-not $wpfCall.ok){return &$providerFailure 'WpfProvider' $wpfCall.error 'initial-WPF'};$current=$wpfCall.value}else{try{$current=Invoke-ActualWpfAction -Context $lifeContext -Action 'FreshInstall' -Role $Role -EvidenceLabel 'initial-FreshInstall' -LaunchMode 'initial' -AllowMutation -AllowRebootRequired -UseDurableCompletionFallback -DeferDurableCompletionFallback -DeferOAuthCredentialCleanup -ElevatedResume:$false}catch{return &$providerFailure 'WpfProvider' $_.Exception.Message 'initial-WPF'}}
+    if($current -is [System.Collections.IDictionary]){$current=[pscustomobject]$current}
+    if(-not $current){return &$providerFailure 'WpfProvider' 'WPF result was null' 'initial-WPF'}
+    $currentProperties=Get-LifecyclePropertyNames $current;$found=$false;$currentStatus=Get-LifecycleProperty $current 'status' ([ref]$found);if(-not $found){return &$providerFailure 'WpfProvider' 'WPF result lacks status' 'initial-WPF'}
+    if([string]$currentStatus -notin @('REAL E2E PASS','REAL E2E REBOOT REQUIRED','REAL E2E OBSERVER HANDOFF')){return &$providerFailure 'WpfProvider' "WPF result returned unsupported status $([string]$currentStatus)" 'initial-WPF'}
+    $legs=[System.Collections.Generic.List[object]]::new();$max=3;$priorGeneration=0;$transactionId='';$rebootCount=0;$checkpoint=$null
+    while($true) {
+        [void]$legs.Add($current)
+        $found=$false;$currentGuest=Get-LifecycleProperty $current 'guest' ([ref]$found);$guestFound=$false;$guestCompleted=Get-LifecycleProperty $currentGuest 'completionVerified' ([ref]$guestFound);$currentCompleted=($currentGuest -and $guestFound -and [bool]$guestCompleted)
+        $found=$false;$currentStatus=Get-LifecycleProperty $current 'status' ([ref]$found)
+        if([string]$currentStatus -eq 'REAL E2E PASS' -and $currentCompleted){
+            $completionReason='';if(-not (Test-LifecycleCompletionInput -Value $current -Reason ([ref]$completionReason))){return &$providerFailure 'WpfProvider' "immediate WPF PASS rejected: $completionReason" ("generation-{0}" -f $priorGeneration)}
+            try{$verifySession=$null;try{$verifySession=Connect-DevFleetGuest -VmId ([guid][string]$lifeContext.vmId);$verification=Get-ProductLifecycleObservation -Session $verifySession -TransactionId $transactionId -PayloadSha256 $expectedPayload -Action 'FreshInstall' -Role $Role -ExpectedDevFleetVersion $expectedVersion -ExpectedInstallerVersion $expectedInstaller -ObservationTimeoutSeconds 30 -InvocationStartUtc $invocationStart -ExpectedComputeInstanceName ([string]$lifeContext.expectedProductComputeInstanceName) -ExpectedVaultInstanceName ([string]$lifeContext.expectedProductVaultInstanceName) -ExpectedNestedLinuxName ([string]$lifeContext.config.NestedLinux.Name)}finally{if($verifySession){Remove-DevFleetGuestSession $verifySession -ErrorAction SilentlyContinue}}
+                if(-not $verification.installStateValid -or -not $verification.canonicalOwnershipValid -or -not $verification.authenticatedHealthOk -or -not $verification.matchingConsumedReceipt){throw 'immediate WPF PASS could not be bound to current installer/receipt/ownership/health ledgers.'}
+                if(-not $transactionId -and $verification.receipt){$transactionId=[string]$verification.receipt.transactionId};if($transactionId -notmatch '^[0-9a-fA-F]{32}$'){throw 'immediate WPF PASS has no exact consumed transaction receipt.'}
+                $authority=New-ProductLifecycleCompletionAuthority -Context $lifeContext -Candidate $Context.candidate -Role $Role -TransactionId $transactionId -PayloadSha256 $expectedPayload -Observation $verification -Legs @($legs);Write-EvidenceJson -Path $authority.evidencePath -Value $authority;return $authority
+            }catch{return &$providerFailure 'CompletionVerification' $_.Exception.Message ("generation-{0}" -f $priorGeneration)}
         }
+        if([string]$currentStatus -notin @('REAL E2E REBOOT REQUIRED','REAL E2E OBSERVER HANDOFF')){return &$providerFailure 'WpfProvider' "WPF result returned unsupported status $([string]$currentStatus)" ("generation-{0}" -f $priorGeneration)}
+        $tx=$transactionId;if($tx -and $tx -notmatch '^[0-9a-fA-F]{32}$'){return &$providerFailure 'TransitionProvider' 'product transaction identity is malformed' ("generation-{0}" -f $priorGeneration)}
+        $observer=$null
+        if($TransitionProvider){
+            $transitionCall=&$callProvider $TransitionProvider ([pscustomobject]@{context=$lifeContext;transactionId=$tx;payloadSha256=$expectedPayload;action='FreshInstall';role=$Role;priorGeneration=$priorGeneration;maxGeneration=$max;generation=$priorGeneration;invocationId=$invocationId}) 'TransitionProvider' 'outcome';if(-not $transitionCall.ok){return &$providerFailure 'TransitionProvider' $transitionCall.error ("WPF-generation-{0}" -f $priorGeneration)};$transition=$transitionCall.value
+            if($transition -is [System.Collections.IDictionary]){$transition=[pscustomobject]$transition}
+            if(-not (Test-LifecycleProperty -Value $transition -Name 'outcome')){return &$providerFailure 'TransitionProvider' 'transition provider result lacks outcome' ("WPF-generation-{0}" -f $priorGeneration)}
+            $found=$false;$outcomeValue=Get-LifecycleProperty $transition 'outcome' ([ref]$found);$outcome=[string]$outcomeValue
+            if($outcome -notin @('COMPLETED','NEXT_REBOOT','TERMINAL_FAILURE','NO_PROGRESS_TIMEOUT','ABSOLUTE_TIMEOUT')){return &$providerFailure 'TransitionProvider' 'transition provider returned an unknown outcome' ("WPF-generation-{0}" -f $priorGeneration)}
+            if($outcome -eq 'NEXT_REBOOT' -and -not (Test-LifecycleProperty -Value $transition -Name 'checkpoint')){return &$providerFailure 'TransitionProvider' 'NEXT_REBOOT result lacks checkpoint' ("WPF-generation-{0}" -f $priorGeneration)}
+            if($outcome -in @('COMPLETED','TERMINAL_FAILURE','NO_PROGRESS_TIMEOUT','ABSOLUTE_TIMEOUT') -and -not (Test-LifecycleProperty -Value $transition -Name 'observation')){$transition|Add-Member -NotePropertyName observation -NotePropertyValue ([pscustomobject]@{}) -Force}
+            $found=$false;$transitionCheckpoint=Get-LifecycleProperty $transition 'checkpoint' ([ref]$found);$checkpoint=if($found){ConvertTo-CanonicalLifecycleCheckpoint $transitionCheckpoint}else{$null}
+            $topCheckpointFound=$false;$topCheckpointValue=Get-LifecycleProperty $transition 'checkpoint' ([ref]$topCheckpointFound);$topFlagFound=$false;$topFlagValue=Get-LifecycleProperty $transition 'checkpointPresent' ([ref]$topFlagFound);$topActualPresent=($topCheckpointFound -and $null -ne $topCheckpointValue);if($topFlagFound -and ([bool]$topFlagValue) -ne $topActualPresent){return &$providerFailure 'TransitionProvider' 'transition checkpointPresent flag disagrees with top-level checkpoint object' ("WPF-generation-{0}" -f $priorGeneration)};if($topActualPresent -and -not $topFlagFound){return &$providerFailure 'TransitionProvider' 'transition checkpoint object has no checkpointPresent flag' ("WPF-generation-{0}" -f $priorGeneration)};if($outcome -eq 'NEXT_REBOOT' -and (-not $topFlagFound -or -not [bool]$topFlagValue)){return &$providerFailure 'TransitionProvider' 'NEXT_REBOOT transition lacks an affirmative top-level checkpointPresent binding' ("WPF-generation-{0}" -f $priorGeneration)}
+            if($outcome -eq 'NEXT_REBOOT' -and -not $checkpoint){return &$providerFailure 'TransitionProvider' 'transition provider returned a malformed checkpoint schema' ("WPF-generation-{0}" -f $priorGeneration)}
+            if($checkpoint -and -not $tx){$tx=[string]$checkpoint.transactionId}
+            if($tx -and $tx -notmatch '^[0-9a-fA-F]{32}$'){return &$providerFailure 'TransitionProvider' 'product transaction identity is malformed' ("WPF-generation-{0}" -f $priorGeneration)}
+            if($checkpoint -and -not (Test-RebootBoundaryIdentity -PriorCheckpoint ([pscustomobject]@{checkpointGeneration=$priorGeneration;transactionId=$tx;payloadSha256=$expectedPayload;action='FreshInstall';role=$Role;state='waiting-for-reboot'}) -CurrentCheckpoint $checkpoint -MaxGeneration $max)){return &$providerFailure 'TransitionProvider' ("transition provider returned an inexact checkpoint boundary: checkpoint=$($checkpoint|ConvertTo-Json -Compress -Depth 8); tx=$tx; expectedPayload=$expectedPayload; prior=$priorGeneration") ("WPF-generation-{0}" -f $priorGeneration)}
+            $transitionObservationFound=$false;$transitionObservation=Get-LifecycleProperty $transition 'observation' ([ref]$transitionObservationFound);if($transitionObservationFound){$bindingReason='';if(-not (Test-LifecycleTransitionObservationBinding -Observation $transitionObservation -Checkpoint $checkpoint -Reason ([ref]$bindingReason))){return &$providerFailure 'TransitionProvider' $bindingReason ("WPF-generation-{0}" -f $priorGeneration)}}
+            if($checkpoint){$transition.checkpoint=$checkpoint}
+            if($outcome -eq 'COMPLETED'){$completionReason='';if(-not (Test-LifecycleCompletionInput -Value $transition -Reason ([ref]$completionReason))){return &$providerFailure 'TransitionProvider' "COMPLETED transition rejected: $completionReason" ("WPF-generation-{0}" -f $priorGeneration)}}
+            $observer=$transition
+        }else{
+            # Observe from generation zero.  The earlier checkpoint-only poll
+            # hid the exact child lifetime, CPU/stage movement, servicing
+            # state, and normal-completion path for up to 30 minutes.  The
+            # bounded observer can safely begin with an unknown transaction;
+            # it adopts the transaction only from a fully candidate-bound
+            # checkpoint or consumed receipt.
+            $checkpoint=[pscustomobject]@{generation=$priorGeneration;checkpointGeneration=$priorGeneration;transactionId=$tx;payloadSha256=$expectedPayload;action='FreshInstall';role=$Role;state='waiting-for-reboot'}
+            try {
+                $observerSession=$null;$usingObservationAdapters=[bool]($RemoteObservationProvider -or $GuestMarkerReadProvider)
+                try {
+                    $observerSession=if($usingObservationAdapters){[pscustomobject]@{fixture=$true}}else{Connect-DevFleetGuest -VmId ([guid][string]$lifeContext.vmId)}
+                    $guestFound=$false;$guestProcessId=Get-LifecycleProperty $currentGuest 'processId' ([ref]$guestFound);if(-not $guestFound){$guestProcessId=Get-LifecycleProperty $current 'processId' ([ref]$guestFound)};$candidateProcessId=if($guestFound){[int]$guestProcessId}else{0}
+                    $policy=Get-HarnessBudgetPolicy -Config $lifeContext.config;$transactionBudget=if($Role -ceq 'Laptop / Surrogate'){[int]$policy.transactionBudgetsSeconds.Laptop}else{[int]$policy.transactionBudgetsSeconds.Desktop};$observerAbsoluteBudget=if($Role -ceq 'Laptop / Surrogate'){[int]$policy.observerAbsoluteBudgetsSeconds.Laptop}else{[int]$policy.observerAbsoluteBudgetsSeconds.Desktop};$observerOwnerDeadline=(ConvertTo-WpfUtcInstant $invocationStart).AddSeconds($observerAbsoluteBudget)
+                    $sessionProvider=if($usingObservationAdapters){$null}else{{Connect-DevFleetGuest -VmId ([guid][string]$lifeContext.vmId)}}
+                    $observer=Wait-DevFleetProductLifecycleTransition -Session $observerSession -SessionProvider $sessionProvider -TransactionId $tx -PayloadSha256 $expectedPayload -Action 'FreshInstall' -Role $Role -PriorGeneration $priorGeneration -MaxGeneration $max -BudgetSeconds $transactionBudget -NoProgressBudgetSeconds ([int]$policy.observerNoProgressBudgetSeconds) -AbsoluteBudgetSeconds $observerAbsoluteBudget -AbsoluteDeadlineUtc $observerOwnerDeadline.ToString('o') -CandidateProcessId $candidateProcessId -ExpectedDevFleetVersion $expectedVersion -ExpectedInstallerVersion $expectedInstaller -ObservationTimeoutSeconds 30 -EvidencePath (Join-Path ([string]$lifeContext.runDir) ("product-lifecycle-observer-generation-{0}.json" -f $priorGeneration)) -InvocationStartUtc $invocationStart -ExpectedComputeInstanceName ([string]$lifeContext.expectedProductComputeInstanceName) -ExpectedVaultInstanceName ([string]$lifeContext.expectedProductVaultInstanceName) -ExpectedNestedLinuxName ([string]$lifeContext.config.NestedLinux.Name) -RemoteObservationProvider $RemoteObservationProvider -GuestMarkerReadProvider $GuestMarkerReadProvider -ObservationAdapterContext $ObservationAdapterContext
+                } finally {if(-not $usingObservationAdapters -and $observerSession){Remove-DevFleetGuestSession $observerSession -ErrorAction SilentlyContinue}}
+            } catch {$caught=$_.Exception;$safeFailure=Get-SafeGuestSessionFailureMetadata -Exception $caught;return &$providerFailure 'TransitionObserver' $caught.Message ("generation-{0}" -f $priorGeneration) $null $safeFailure}
+            $observerCheckpointFound=$false;$observerCheckpoint=Get-LifecycleProperty $observer 'checkpoint' ([ref]$observerCheckpointFound);if($observerCheckpointFound -and $observerCheckpoint){$checkpoint=$observerCheckpoint}
+            if(-not $tx){
+                if($checkpoint -and [int]$checkpoint.checkpointGeneration -gt 0){$tx=[string]$checkpoint.transactionId}
+                else{$observerObservationFound=$false;$observerObservation=Get-LifecycleProperty $observer 'observation' ([ref]$observerObservationFound);if($observerObservationFound -and $observerObservation -and $observerObservation.matchingConsumedReceipt -and $observerObservation.receipt){$tx=[string]$observerObservation.receipt.transactionId}}
+                if($tx -and $tx -notmatch '^[0-9a-fA-F]{32}$'){return &$providerFailure 'TransitionObserver' 'observer returned a malformed product transaction identity' ("generation-{0}" -f $priorGeneration)}
+            }
+        }
+        $observerEvidenceGeneration=if($checkpoint){[int]$checkpoint.generation}else{$priorGeneration};$observerSummaryPath=Join-Path ([string]$lifeContext.runDir) ("product-lifecycle-observer-generation-{0}.json" -f $observerEvidenceGeneration);if($TransitionProvider){Write-EvidenceJson -Path $observerSummaryPath -Value $observer}
+        $transactionId=$tx
+        $lifeContext | Add-Member -NotePropertyName lifecycleTransactionId -NotePropertyValue $transactionId -Force
+        $found=$false;$observerOutcome=Get-LifecycleProperty $observer 'outcome' ([ref]$found);if([string]$observerOutcome -eq 'COMPLETED'){try{$found=$false;$observerObservation=Get-LifecycleProperty $observer 'observation' ([ref]$found);$authority=New-ProductLifecycleCompletionAuthority -Context $lifeContext -Candidate $Context.candidate -Role $Role -TransactionId $tx -PayloadSha256 $expectedPayload -Observation $observerObservation -Legs @($legs);Write-EvidenceJson -Path $authority.evidencePath -Value $authority;return $authority}catch{return &$providerFailure 'TransitionProvider' $_.Exception.Message ("generation-{0}" -f $priorGeneration)}}
+        if([string]$observerOutcome -notin @('NEXT_REBOOT')){return &$providerFailure 'TransitionProvider' "$([string]$observerOutcome): product lifecycle observer stopped at generation $priorGeneration." ("generation-{0}" -f $priorGeneration)}
+        if(-not $checkpoint -or [int]$checkpoint.generation -gt $max){return &$providerFailure 'TransitionProvider' 'generation 4 product reboot requested; MaxRebootBoundaries is 3' ("generation-{0}" -f $priorGeneration)}
+        if($RebootProvider){$rebootCall=&$callProvider $RebootProvider ([pscustomobject]@{context=$lifeContext;checkpoint=$checkpoint;priorGeneration=$priorGeneration;generation=[int]$checkpoint.generation;invocationId=$invocationId}) 'RebootProvider' 'bootIdentityChanged';if(-not $rebootCall.ok){return &$providerFailure 'RebootProvider' $rebootCall.error ("NEXT_REBOOT-generation-{0}" -f [int]$checkpoint.generation)};$reboot=$rebootCall.value;$bootChangedFound=$false;$bootChanged=Get-LifecycleProperty $reboot 'bootIdentityChanged' ([ref]$bootChangedFound);if(-not $bootChangedFound -or -not [bool]$bootChanged){return &$providerFailure 'RebootProvider' 'reboot provider did not prove a changed boot identity' ("NEXT_REBOOT-generation-{0}" -f [int]$checkpoint.generation)};if($SettleProvider){$settleCall=&$callProvider $SettleProvider ([pscustomobject]@{context=$lifeContext;checkpoint=$checkpoint;reboot=$reboot;priorGeneration=$priorGeneration;generation=[int]$checkpoint.generation;invocationId=$invocationId}) 'SettlementProvider' 'stable';if(-not $settleCall.ok){return &$providerFailure 'SettlementProvider' $settleCall.error ("reboot-generation-{0}" -f [int]$checkpoint.generation)};$settlement=$settleCall.value;$stableFound=$false;$stable=Get-LifecycleProperty $settlement 'stable' ([ref]$stableFound);if(-not $stableFound -or -not [bool]$stable){return &$providerFailure 'SettlementProvider' 'servicing settlement provider did not establish a stable boundary' ("reboot-generation-{0}" -f [int]$checkpoint.generation)};$reboot=[ordered]@{reboot=$reboot;servicingSettlement=$settlement}}}else{try{$reboot=Invoke-ProductRebootBoundary -Context $lifeContext -Checkpoint $checkpoint -PriorGeneration $priorGeneration}catch{return &$providerFailure 'RebootProvider' $_.Exception.Message ("NEXT_REBOOT-generation-{0}" -f [int]$checkpoint.generation)}}
+        $priorGeneration=[int]$checkpoint.generation;$rebootCount++
+        if($WpfProvider){$wpfCall=&$callProvider $WpfProvider ([pscustomobject]@{context=$lifeContext;role=$Role;action='FreshInstall';generation=$priorGeneration;priorGeneration=$priorGeneration;invocationId=$invocationId;resume=$true}) 'WpfProvider' 'status';if(-not $wpfCall.ok){return &$providerFailure 'WpfProvider' $wpfCall.error ("reboot-generation-{0}" -f $priorGeneration)};$current=$wpfCall.value}else{try{$current=Invoke-ActualWpfAction -Context $lifeContext -Action 'FreshInstall' -Role $Role -EvidenceLabel ("resume-generation-{0}" -f $priorGeneration) -LaunchMode 'resume' -AllowMutation -AllowRebootRequired -UseDurableCompletionFallback -DeferDurableCompletionFallback -DeferOAuthCredentialCleanup -ElevatedResume:$true}catch{return &$providerFailure 'WpfProvider' $_.Exception.Message ("reboot-generation-{0}" -f $priorGeneration)}}
+        if($current -is [System.Collections.IDictionary]){$current=[pscustomobject]$current}
+        if(-not $current){return &$providerFailure 'WpfProvider' 'WPF result was null' ("reboot-generation-{0}" -f $priorGeneration)}
+        $currentProperties=Get-LifecyclePropertyNames $current;$found=$false;$currentStatus=Get-LifecycleProperty $current 'status' ([ref]$found);if(-not $found){return &$providerFailure 'WpfProvider' 'WPF result lacks status' ("reboot-generation-{0}" -f $priorGeneration)}
+        if([string]$currentStatus -notin @('REAL E2E PASS','REAL E2E REBOOT REQUIRED','REAL E2E OBSERVER HANDOFF')){return &$providerFailure 'WpfProvider' "WPF result returned unsupported status $([string]$currentStatus)" ("reboot-generation-{0}" -f $priorGeneration)}
+        $record=[ordered]@{generation=$priorGeneration;reboot=$reboot;observer=$observer;resume=$current;invocationId=$invocationId;observerEvidencePath=$observerSummaryPath;generationEvidencePath=(Join-Path ([string]$lifeContext.runDir) ("product-lifecycle-generation-{0}.json" -f $priorGeneration))};Write-EvidenceJson -Path (Join-Path ([string]$lifeContext.runDir) ("product-lifecycle-generation-{0}.json" -f $priorGeneration)) -Value $record
+    }
+    }
+    finally {
+        $cleanupRequiredFound=$false
+        $cleanupRequired=Get-LifecycleProperty -Value $lifeContext -Name 'oauthCredentialCleanupRequired' -Found ([ref]$cleanupRequiredFound)
+        if($cleanupRequiredFound -and [bool]$cleanupRequired){
+            if($OAuthCredentialCleanupProvider){&$OAuthCredentialCleanupProvider $lifeContext|Out-Null}else{Invoke-DevFleetTailscaleOAuthCredentialCleanup -Context $lifeContext|Out-Null}
+            $lifeContext|Add-Member -NotePropertyName oauthCredentialCleanupRequired -NotePropertyValue $false -Force
+        }
+    }
+}
+
+function Invoke-SupportedFreshInstallLifecycle {
+    <# Shared release-tooling contract. Product checkpoints and receipts remain authoritative. #>
+    param(
+        [Parameter(Mandatory)][psobject]$Context,
+        [string]$Role = 'Primary / Desktop',
+        [switch]$CompleteLifecycle
+    )
+    if (-not $CompleteLifecycle) { return Invoke-ActualWpfAction -Context $Context -Action 'FreshInstall' -Role $Role -EvidenceLabel 'initial-FreshInstall' -LaunchMode 'initial' -AllowMutation -AllowRebootRequired -UseDurableCompletionFallback:$false -DeferDurableCompletionFallback -ElevatedResume:$false }
+    return Invoke-ProductFreshInstallLifecycle -Context $Context -Role $Role
+}
+
+function Read-PhaseContext {
+    param([Parameter(Mandatory)][string]$ContextJson)
+    $context = $ContextJson | ConvertFrom-Json -ErrorAction Stop
+    if (-not $context.candidate.candidate.path -or -not $context.vmName -or -not $context.runDir) { throw 'FullRelease phase context is missing exact candidate, disposable VM, or evidence identity.' }
+    return $context
+}
+
+function Assert-ExactCandidate {
+    param([Parameter(Mandatory)][psobject]$Context)
+    $item = Get-Item -LiteralPath ([string]$Context.candidate.candidate.path) -ErrorAction Stop
+    $hash = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($hash -ne [string]$Context.candidate.candidate.sha256 -or [int64]$item.Length -ne [int64]$Context.candidate.candidate.bytes) { throw "Exact candidate changed before phase $($Context.phaseId)." }
+    return [ordered]@{ path=$item.FullName; bytes=[int64]$item.Length; sha256=$hash; releaseFingerprintId=[string]$Context.candidate.releaseFingerprintId; toolingFingerprintId=[string]$Context.candidate.toolingFingerprintId }
+}
+
+function New-GuestForeignSentinels {
+    param([Parameter(Mandatory)][System.Management.Automation.Runspaces.PSSession]$Session,[Parameter(Mandatory)][string]$RunId,[Parameter(Mandatory)][string]$PhaseId)
+    Invoke-Command -Session $Session -ScriptBlock {
+        param($runId,$phaseId)
+        $sha256=[Security.Cryptography.SHA256]::Create()
+        try{$suffix=($sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes("${runId}:${phaseId}"))|ForEach-Object{$_.ToString('x2')}) -join ''}finally{$sha256.Dispose()}
+        $suffix=$suffix.Substring(0,12)
+        $taskName="DevFleet-E2E-Foreign-$suffix"
+        $serviceName="DevFleetE2EForeign$suffix"
+        $firewallName="DevFleet-E2E-Foreign-Firewall-$suffix"
+        $registryPath="HKLM:\SOFTWARE\DevFleet-E2E\ForeignSentinels\$suffix"
+        $filePath="C:\Users\Public\DevFleet-E2E\Sentinels\$suffix.txt"
+        $value="foreign-sentinel-${runId}-${phaseId}"
+        if(Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue){throw 'Foreign scheduled-task sentinel already exists.'}
+        $existingService=Get-CimInstance Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
+        $serviceCommand='"'+(Join-Path $env:SystemRoot 'System32\cmd.exe')+'" /d /c exit 0'
+        $reuseExactService=$false
+        if($existingService){
+            $normalizeServiceCommand={param([string]$v)(($v -replace '"','' -replace '\s+',' ').Trim()).ToLowerInvariant()}
+            $existingServiceCommand=&$normalizeServiceCommand ([string]$existingService.PathName)
+            $expectedServiceCommand=&$normalizeServiceCommand $serviceCommand
+            if([string]$existingService.StartMode -ne 'Disabled' -or $existingServiceCommand -cne $expectedServiceCommand){throw 'Foreign service sentinel already exists.'}
+            # The exact run/phase-derived service can survive a product reboot
+            # while the other run-owned sentinel objects are torn down. Reuse
+            # it only when its immutable definition is exactly our sentinel;
+            # any mismatched service remains a fail-closed collision.
+            $reuseExactService=$true
+        }
+        $existingFirewall=@(Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue)
+        $reuseExactFirewall=$false
+        if($existingFirewall.Count -gt 0){
+            $existingPortFilters=@(Get-NetFirewallPortFilter -AssociatedNetFirewallRule $existingFirewall[0] -ErrorAction SilentlyContinue)
+            $profileText=[string]$existingFirewall[0].Profile
+            $protocolText=if($existingPortFilters.Count -eq 1){[string]$existingPortFilters[0].Protocol}else{''}
+            $localPortText=if($existingPortFilters.Count -eq 1){[string]$existingPortFilters[0].LocalPort}else{''}
+            $profileMatches=$profileText -in @('Any','32767')
+            $protocolMatches=$protocolText -ieq 'TCP' -or $protocolText -eq '6'
+            $firewallMatches=($existingFirewall.Count -eq 1 -and [string]$existingFirewall[0].DisplayName -ceq $firewallName -and [string]$existingFirewall[0].Group -ceq 'DevFleet E2E Foreign Sentinels' -and [string]$existingFirewall[0].Direction -ieq 'Inbound' -and [string]$existingFirewall[0].Action -ieq 'Block' -and [string]$existingFirewall[0].Enabled -ieq 'True' -and $profileMatches -and $existingPortFilters.Count -eq 1 -and $protocolMatches -and $localPortText -eq '65535')
+            if(-not $firewallMatches){throw 'Foreign firewall sentinel already exists.'}
+            # The exact run/phase-derived firewall can survive a product reboot
+            # while the other run-owned sentinel objects are torn down. Reuse
+            # it only when its immutable definition is exactly our sentinel;
+            # any mismatched rule remains a fail-closed collision.
+            $reuseExactFirewall=$true
+        }
+        $taskAction=New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\cmd.exe') -Argument '/d /c exit 0'
+        $taskSettings=New-ScheduledTaskSettingsSet -Disable
+        Register-ScheduledTask -TaskName $taskName -Action $taskAction -Settings $taskSettings -User 'SYSTEM' -RunLevel Highest -Force|Out-Null
+        if(-not $reuseExactService){& (Join-Path $env:SystemRoot 'System32\sc.exe') create $serviceName 'binPath=' $serviceCommand 'start=' 'disabled' 'DisplayName=' "DevFleet E2E Foreign Sentinel $suffix"|Out-Null;if($LASTEXITCODE -ne 0){throw 'Foreign service sentinel creation failed.'}}
+        if(-not $reuseExactFirewall){New-NetFirewallRule -Name $firewallName -DisplayName $firewallName -Group 'DevFleet E2E Foreign Sentinels' -Direction Inbound -Action Block -Protocol TCP -LocalPort 65535 -Profile Any|Out-Null}
+        New-Item -ItemType Directory -Path (Split-Path -Parent $filePath) -Force|Out-Null
+        New-Item -Path $registryPath -Force|Out-Null
+        New-ItemProperty -Path $registryPath -Name Value -Value $value -PropertyType String -Force|Out-Null
+        [IO.File]::WriteAllText($filePath,$value,[Text.UTF8Encoding]::new($false))
+        $sha256=[Security.Cryptography.SHA256]::Create()
+        try{$valueSha256=($sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($value))|ForEach-Object{$_.ToString('x2')})-join ''}finally{$sha256.Dispose()}
+        return [ordered]@{task=$taskName;service=$serviceName;firewall=$firewallName;registry=$registryPath;file=$filePath;valueSha256=$valueSha256;fileSha256=(Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant();serviceReused=$reuseExactService;firewallReused=$reuseExactFirewall}
+    } -ArgumentList $RunId,$PhaseId
+}
+
+function Test-GuestForeignSentinels {
+    param([Parameter(Mandatory)][System.Management.Automation.Runspaces.PSSession]$Session,[Parameter(Mandatory)][psobject]$Sentinels)
+    Invoke-Command -Session $Session -ScriptBlock {
+        param($sentinels)
+        $task=@(Get-ScheduledTask -TaskName ([string]$sentinels.task) -ErrorAction SilentlyContinue)
+        $service=@(Get-CimInstance Win32_Service -Filter "Name='$([string]$sentinels.service)'" -ErrorAction SilentlyContinue)
+        $firewall=@(Get-NetFirewallRule -Name ([string]$sentinels.firewall) -ErrorAction SilentlyContinue)
+        $value=[string](Get-ItemProperty -Path ([string]$sentinels.registry) -Name Value -ErrorAction Stop).Value
+        $sha256=[Security.Cryptography.SHA256]::Create()
+        try{$valueSha=($sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($value))|ForEach-Object{$_.ToString('x2')})-join ''}finally{$sha256.Dispose()}
+        $fileSha=if(Test-Path -LiteralPath ([string]$sentinels.file) -PathType Leaf){(Get-FileHash -LiteralPath ([string]$sentinels.file) -Algorithm SHA256).Hash.ToLowerInvariant()}else{''}
+        $checks=[ordered]@{scheduledTask=($task.Count -eq 1);service=($service.Count -eq 1 -and [string]$service[0].StartMode -eq 'Disabled');firewall=($firewall.Count -eq 1 -and [string]$firewall[0].Action -eq 'Block');registry=($valueSha -eq [string]$sentinels.valueSha256);file=($fileSha -eq [string]$sentinels.fileSha256)}
+        if(@($checks.GetEnumerator()|Where-Object{-not [bool]$_.Value}).Count){throw 'One or more unrelated Windows sentinels changed during the lifecycle action.'}
+        return [ordered]@{status='PASS';checks=$checks;unchanged=$true}
+    } -ArgumentList $Sentinels
+}
+
+function Remove-GuestForeignSentinels {
+    param([Parameter(Mandatory)][System.Management.Automation.Runspaces.PSSession]$Session,[Parameter(Mandatory)][psobject]$Sentinels)
+    Invoke-Command -Session $Session -ScriptBlock {
+        param($sentinels)
+        Unregister-ScheduledTask -TaskName ([string]$sentinels.task) -Confirm:$false -ErrorAction SilentlyContinue
+        if(Get-CimInstance Win32_Service -Filter "Name='$([string]$sentinels.service)'" -ErrorAction SilentlyContinue){& (Join-Path $env:SystemRoot 'System32\sc.exe') delete ([string]$sentinels.service)|Out-Null;$serviceDeadline=(Get-Date).AddSeconds(15);do{$serviceStillPresent=$null -ne (Get-CimInstance Win32_Service -Filter "Name='$([string]$sentinels.service)'" -ErrorAction SilentlyContinue);if($serviceStillPresent){Start-Sleep -Milliseconds 250}}while($serviceStillPresent -and (Get-Date)-lt $serviceDeadline)}
+        Get-NetFirewallRule -Name ([string]$sentinels.firewall) -ErrorAction SilentlyContinue|Remove-NetFirewallRule -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath ([string]$sentinels.registry) -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath ([string]$sentinels.file) -Force -ErrorAction SilentlyContinue
+        $remaining=[ordered]@{task=[bool](Get-ScheduledTask -TaskName ([string]$sentinels.task) -ErrorAction SilentlyContinue);service=[bool](Get-CimInstance Win32_Service -Filter "Name='$([string]$sentinels.service)'" -ErrorAction SilentlyContinue);firewall=[bool](Get-NetFirewallRule -Name ([string]$sentinels.firewall) -ErrorAction SilentlyContinue);registry=(Test-Path -LiteralPath ([string]$sentinels.registry));file=(Test-Path -LiteralPath ([string]$sentinels.file))}
+        if(@($remaining.GetEnumerator()|Where-Object{[bool]$_.Value}).Count){throw 'Run-owned Windows sentinel cleanup was incomplete.'}
+        return [ordered]@{status='PASS';absent=$true}
+    } -ArgumentList $Sentinels
+}
+
+function Invoke-RebootResumeWpfFallback {
+    param(
+        [Parameter(Mandatory)][psobject]$Context,
+        [Parameter(Mandatory)][System.Management.Automation.Runspaces.PSSession]$Session,
+        [Parameter(Mandatory)][psobject]$DriverReport
+    )
+    $expectedPayload = [string]$Context.candidate.tar.sha256
+    $expectedCandidatePath = Join-Path "C:\Users\Public\DevFleet-E2E\$($Context.runId)\$($Context.phaseId)" (Split-Path -Leaf ([string]$Context.candidate.candidate.path))
+    $candidatePid = 0
+    $candidateSessionId = -1
+    $driverProcessFound=$false;$driverProcess=Get-LifecycleProperty $DriverReport 'processId' ([ref]$driverProcessFound);if($driverProcessFound){$candidatePid=[int]$driverProcess}
+    $driverSessionFound=$false;$driverSession=Get-LifecycleProperty $DriverReport 'sessionId' ([ref]$driverSessionFound);if($driverSessionFound){$candidateSessionId=[int]$driverSession}
+    $observationSeconds = 180
+    $diagnosticSecondsFound=$false;$diagnosticSeconds=Get-LifecycleProperty $Context 'diagnosticObservationSeconds' ([ref]$diagnosticSecondsFound);if ($diagnosticSecondsFound) {
+        $requestedSeconds = 0
+        if ([int]::TryParse([string]$diagnosticSeconds, [ref]$requestedSeconds) -and $requestedSeconds -gt 180) {
+            $observationSeconds = [Math]::Min($requestedSeconds, 1800)
+        }
+    }
+    $observationPath = Join-Path ([string]$Context.runDir) 'durable-observation-samples.json'
+    $observationSamples = [System.Collections.Generic.List[object]]::new()
+    $deadline = (Get-Date).AddSeconds($observationSeconds)
+    $lastError = 'durable completion not yet observable'
+    do {
         try {
-            $durable = Invoke-MaintenanceReadyGuestValidation -VmId ([guid][string]$Context.vmId) -Fingerprint $Context.candidate -Session $Session -OwnerDeadlineUtc $deadline.ToUniversalTime()
-            $receiptSeconds=[int][math]::Floor(($deadline-(Get-Date)).TotalSeconds)
-            if($receiptSeconds-le0){throw 'Reboot receipt observation owner deadline is exhausted.'}
-            $health = Invoke-DevFleetBoundedGuestCommand -Session $Session -TimeoutSeconds ([math]::Min(10,$receiptSeconds)) -ScriptBlock {
-                param($payload)
-                $checkpoint = 'C:\ProgramData\M-TechLabs\DevFleet\Installer\resume-checkpoint.json'
-                if (Test-Path -LiteralPath $checkpoint -PathType Leaf) { throw 'Reboot checkpoint remains present; completion is not verified.' }
-                $consumedRoot = 'C:\ProgramData\M-TechLabs\DevFleet\Installer\resume-consumed'
-                $receipt = @(Get-ChildItem -LiteralPath $consumedRoot -Filter '*.json' -File -ErrorAction SilentlyContinue | ForEach-Object {
-                    try { $value = Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json; if ([string]$value.payloadSha256 -ceq $payload) { $_ } } catch { }
-                } | Select-Object -Last 1)
-                if (-not $receipt) { throw 'No consumed reboot receipt matched the exact candidate payload.' }
-                [ordered]@{status='PASS';receiptPath=$receipt.FullName}
-            } -ArgumentList @($expectedPayload)
-            if([string]$durable.status-cne'PASS'-or$durable.hostAgentHealth.authenticated-isnot[bool]-or-not$durable.hostAgentHealth.authenticated-or$durable.hostAgentHealth.ok-isnot[bool]-or-not$durable.hostAgentHealth.ok-or(Get-Date)-ge$deadline){throw 'Bounded maintenance validation did not establish current authenticated health.'}
-            if([string]$health.status-cne'PASS'){throw 'Reboot checkpoint/receipt validation did not pass.'}
-            $health=[ordered]@{status='PASS';receiptPath=[string]$health.receiptPath;hostName=[string]$durable.hostAgentHealth.hostName;hostId=[string]$durable.hostAgentHealth.hostId}
-            return [ordered]@{status='PASS';mode='DURABLE_REBOOT_RESUME_FALLBACK';driver=$DriverReport;guest=$durable;health=$health;authenticatedHealth=$true;checkpointConsumed=$true}
-        } catch { $lastError = $_.Exception.Message }
-        Start-Sleep -Seconds 3
-    } while ((Get-Date) -lt $deadline)
-    $processEvidence = $null
-    $cleanupEvidence = $null
-    if ($candidatePid -gt 0 -and $candidateSessionId -ge 0) {
-        try {
-            $processEvidence = Invoke-Command -Session $Session -ScriptBlock {
+            $sample = Invoke-Command -Session $Session -ScriptBlock {
                 param($processId,$sessionId,$expectedPath)
+                # Preserve the bounded read-error record when completion removes
+                # the product checkpoint between the existence check and the
+                # file read; do not leak a remoting non-terminating error into
+                # the lifecycle observer.
+                $ErrorActionPreference='Stop'
                 $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
                 $ids = [System.Collections.Generic.HashSet[int]]::new()
-                [void]$ids.Add($processId)
+                if ($processId -gt 0) { [void]$ids.Add($processId) }
                 do {
                     $before = $ids.Count
                     foreach ($row in $all) { if ($ids.Contains([int]$row.ParentProcessId)) { [void]$ids.Add([int]$row.ProcessId) } }
                 } while ($ids.Count -gt $before)
-                $target = @($all | Where-Object { $ids.Contains([int]$_.ProcessId) } | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine,SessionId)
                 $root = $all | Where-Object { [int]$_.ProcessId -eq $processId } | Select-Object -First 1
-                $sessionMatch = $false
-                try { $sessionMatch = [int](Get-Process -Id $processId -ErrorAction Stop).SessionId -eq $sessionId } catch { }
-                $pathMatch = $null -ne $root -and -not [string]::IsNullOrWhiteSpace($expectedPath) -and [string]$root.ExecutablePath -ieq $expectedPath
-                [ordered]@{candidatePid=$processId;expectedSessionId=$sessionId;expectedPath=$expectedPath;candidatePresent=($null -ne $root);sessionMatch=$sessionMatch;pathMatch=$pathMatch;processTree=$target}
-            } -ArgumentList $candidatePid,$candidateSessionId,$expectedCandidatePath
-        } catch { $processEvidence = [ordered]@{captureError=$_.Exception.Message} }
-        try {
-            $cleanupEvidence = Invoke-Command -Session $Session -ScriptBlock {
-                param($processId,$sessionId,$expectedPath)
-                $row = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
-                $sessionMatch = $false
-                try { $sessionMatch = [int](Get-Process -Id $processId -ErrorAction Stop).SessionId -eq $sessionId } catch { }
-                $pathMatch = $null -ne $row -and -not [string]::IsNullOrWhiteSpace($expectedPath) -and [string]$row.ExecutablePath -ieq $expectedPath
-                if ($row -and $sessionMatch -and $pathMatch) { Stop-Process -Id $processId -Force -ErrorAction Stop; [ordered]@{attempted=$true;stopped=$true;pid=$processId;sessionMatch=$sessionMatch;pathMatch=$pathMatch} }
-                else { [ordered]@{attempted=$false;stopped=$false;pid=$processId;present=($null -ne $row);sessionMatch=$sessionMatch;pathMatch=$pathMatch} }
-            } -ArgumentList $candidatePid,$candidateSessionId,$expectedCandidatePath
-        } catch { $cleanupEvidence = [ordered]@{cleanupError=$_.Exception.Message} }
-    } else {
-        $cleanupEvidence = [ordered]@{attempted=$false;reason='No exact candidate PID and session identity was present in the driver report.'}
-    }
-    $details = [ordered]@{lastError=$lastError;observationSeconds=$observationSeconds;observationPath=$observationPath;observationSamples=@($observationSamples);processEvidence=$processEvidence;cleanupEvidence=$cleanupEvidence} | ConvertTo-Json -Depth 12 -Compress
-    throw "WPF window disappeared and durable reboot-resume completion did not become verifiable within the bounded fallback window: $details"
-}
-
-function Invoke-DevFleetTailscaleOAuthCredentialCleanup {
-    param([Parameter(Mandatory)][psobject]$Context,[AllowNull()][System.Management.Automation.Runspaces.PSSession]$Session)
-    $cleanupSession=$Session
-    $ownsCleanupSession=$false
-    try {
-        if(-not $cleanupSession -or [string]$cleanupSession.State -ceq 'Closed'){$cleanupSession=Connect-DevFleetGuest -VmId ([guid][string]$Context.vmId);$ownsCleanupSession=$true}
-        if(-not $cleanupSession){throw 'No exact E2E session was available for OAuth credential cleanup.'}
-        $cleanupResult=Remove-StagedTailscaleOAuthCredential -Session $cleanupSession
-        if([string]$cleanupResult.status -cne 'PASS'){throw 'Remote OAuth credential cleanup returned a non-PASS result.'}
-    } catch {
-        if([string]$_.Exception.Message -match '^TAILSCALE_CREDENTIAL_CLEANUP_FAILED:'){throw}
-        throw "TAILSCALE_CREDENTIAL_CLEANUP_FAILED: $($_.Exception.Message)"
-    } finally {
-        if($ownsCleanupSession -and $cleanupSession){Remove-DevFleetGuestSession $cleanupSession -ErrorAction SilentlyContinue}
-    }
-}
-
-function Invoke-ActualWpfAction {
-    param([Parameter(Mandatory)][psobject]$Context,[Parameter(Mandatory)][string]$Action,[string]$Role='Primary / Desktop',[string]$EvidenceLabel,[ValidateSet('direct','initial','resume','fallback')][string]$LaunchMode='direct',[switch]$AllowMutation,[switch]$AllowRebootRequired,[switch]$UseDurableCompletionFallback,[switch]$DeferDurableCompletionFallback,[switch]$DeferOAuthCredentialCleanup,[switch]$ElevatedResume)
-    $candidate=Assert-ExactCandidate $Context
-    $session=$null;$sentinels=$null;$sentinelVerification=$null;$sentinelCleanup=$null;$oauthStage=$null;$oauthStageAttempted=$false
-    try {
-        $session=Connect-DevFleetGuest -VmId ([guid][string]$Context.vmId)
-        try{$interactiveState=Get-DevFleetE2EInteractiveDesktopState -Session $session;$interactiveProof=Assert-DevFleetE2EInteractiveDesktop -State $interactiveState}
-        catch{Remove-DevFleetGuestSession $session -ErrorAction SilentlyContinue;$session=$null;Ensure-FullReleaseInteractiveDesktop -VmId ([guid][string]$Context.vmId)|Out-Null;$session=Connect-DevFleetGuest -VmId ([guid][string]$Context.vmId);$interactiveState=Get-DevFleetE2EInteractiveDesktopState -Session $session;$interactiveProof=Assert-DevFleetE2EInteractiveDesktop -State $interactiveState}
-        if($AllowMutation -and $Context.config -and $Context.config.PSObject.Properties['Tailscale'] -and $Context.config.Tailscale.Authentication -and [string]$Context.config.Tailscale.Authentication.Provider -in @('OAuthClientSecretStore','OAuthAutomation','OAuthClientSecretDpapi')){
-            $oauthStageAttempted=$true
-            $Context|Add-Member -NotePropertyName oauthCredentialCleanupRequired -NotePropertyValue $true -Force
-            $workspaceFound=$false;$workspaceValue=Get-LifecycleProperty $Context 'workspaceRoot' ([ref]$workspaceFound);$workspacePath=if($workspaceFound -and $workspaceValue){(Resolve-Path -LiteralPath ([string]$workspaceValue)).Path}else{(Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path}
-            $productConfigPath=Join-Path $workspacePath 'source\config\devfleet.config.json'
-            if(-not(Test-Path -LiteralPath $productConfigPath -PathType Leaf)){throw 'TAILSCALE_CREDENTIAL_INVALID: product configuration is unavailable for deterministic E2E enrollment identities.'}
-            try{$productConfig=Get-Content -LiteralPath $productConfigPath -Raw|ConvertFrom-Json -ErrorAction Stop}catch{throw 'TAILSCALE_CREDENTIAL_INVALID: product configuration is unreadable for deterministic E2E enrollment identities.'}
-            $oauthStage=Stage-TailscaleOAuthCredential -Session $session -RunId ([string]$Context.runId) -Config $Context.config.Tailscale -ProductConfig $productConfig
-            if([string]$oauthStage.status -cne 'PASS' -or -not[bool]$oauthStage.staged){throw 'TAILSCALE_CREDENTIAL_INVALID: E2E OAuth credential staging did not complete.'}
-        }
-        $remoteRoot="C:\Users\Public\DevFleet-E2E\$($Context.runId)\$($Context.phaseId)"
-        $remoteExe=Join-Path $remoteRoot (Split-Path -Leaf $candidate.path)
-        $remoteDriver=Join-Path $remoteRoot 'Invoke-WpfUiAutomation.ps1'
-        $remoteContract=Join-Path $remoteRoot 'WpfLaunchContract.psm1'
-        $launchId=[guid]::NewGuid().ToString('N')
-        $remoteReport=Join-Path $remoteRoot "wpf-$launchId-terminal.json"
-        $remoteStarted=Join-Path $remoteRoot "wpf-$launchId-driver-bound.json"
-        $remoteCheckpoint=Join-Path $remoteRoot "wpf-$launchId-checkpoint.json"
-        $remoteWorkerResult=Join-Path $remoteRoot "wpf-$launchId-worker-terminal.json"
-        $remoteLaunchRequest=Join-Path $remoteRoot "wpf-$launchId-launch-request.json"
-        $safeEvidenceLabel=if([string]::IsNullOrWhiteSpace($EvidenceLabel)){"$($Context.phaseId)-$Action-$launchId"}else{$EvidenceLabel}
-        $safeEvidenceLabel=($safeEvidenceLabel -replace '[^A-Za-z0-9._-]','-')
-        $localEvidence=Join-Path ([string]$Context.runDir) ("$safeEvidenceLabel-wpf-evidence.json")
-        New-Item -ItemType Directory -Force -Path ([string]$Context.runDir)|Out-Null
-        Invoke-Command -Session $session -ScriptBlock {param($root)New-Item -ItemType Directory -Force -Path $root|Out-Null} -ArgumentList $remoteRoot
-        if($AllowMutation){$sentinels=New-GuestForeignSentinels -Session $session -RunId ([string]$Context.runId) -PhaseId ([string]$Context.phaseId)}
-        $stage=Get-StageIntegrity -LocalPath $candidate.path -Session $session -RemotePath $remoteExe
-        if(-not $stage.equal){throw 'Candidate stage hash differed on disposable guest.'}
-        $driverLocal=Join-Path $PSScriptRoot 'Invoke-WpfUiAutomation.ps1';$contractLocal=Join-Path $PSScriptRoot 'WpfLaunchContract.psm1'
-        $driverStage=Get-StageIntegrity -LocalPath $driverLocal -Session $session -RemotePath $remoteDriver
-        $contractStage=Get-StageIntegrity -LocalPath $contractLocal -Session $session -RemotePath $remoteContract
-        if(-not $driverStage.equal -or -not $contractStage.equal){throw 'WPF driver/contract stage hash differed on disposable guest.'}
-
-        $policy=Get-HarnessBudgetPolicy -Config $Context.config
-        $ownerSeconds=if($Role -match '(?i)Laptop'){[int]$policy.observerAbsoluteBudgetsSeconds.Laptop}else{[int]$policy.observerAbsoluteBudgetsSeconds.Desktop}
-        $ownerStart=(Get-Date).ToUniversalTime();$invocationStartFound=$false;$invocationStart=Get-LifecycleProperty $Context 'invocationStartUtc' ([ref]$invocationStartFound)
-        if($invocationStartFound -and $invocationStart){$ownerStart=ConvertTo-WpfUtcInstant $invocationStart}
-        $ownerDeadline=$ownerStart.AddSeconds($ownerSeconds)
-        $transactionFound=$false;$transactionValue=Get-LifecycleProperty $Context 'lifecycleTransactionId' ([ref]$transactionFound);$transactionId=if($transactionFound){[string]$transactionValue}else{''}
-        $launchSpec=New-WpfLaunchSpecification -DriverPath $remoteDriver -ExePath $remoteExe -Action $Action -Role $Role -OutputPath $remoteReport -StartedPath $remoteStarted -CheckpointPath $remoteCheckpoint -WorkerResultPath $remoteWorkerResult -LaunchRequestPath $remoteLaunchRequest -RunId ([string]$Context.runId) -LaunchId $launchId -TransactionId $transactionId -PayloadSha256 ([string]$Context.candidate.tar.sha256) -LaunchMode $LaunchMode -ExpectedInteractiveSessionId ([int]$interactiveProof.sessionId) -AllowMutation:$AllowMutation -AllowRebootRequired:$AllowRebootRequired -UseDurableCompletionFallback:$UseDurableCompletionFallback -ElevatedResume:$ElevatedResume -OwnerDeadlineUtc $ownerDeadline -SemanticNoProgressSeconds ([int]$policy.observerNoProgressBudgetSeconds) -DriverSha256 ([string]$driverStage.localSha256) -CandidateSha256 ([string]$candidate.sha256) -TaskExecutable 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -SkipPathValidation
-        $launchSpec | Add-Member -NotePropertyName contractModulePath -NotePropertyValue $remoteContract -Force
-        $launchSpec | Add-Member -NotePropertyName contractModuleSha256 -NotePropertyValue ([string]$contractStage.localSha256) -Force
-        $launchSpecJson=$launchSpec|ConvertTo-Json -Depth 24 -Compress
-        try {
-            $report=Invoke-Command -Session $session -ScriptBlock {
-                param($serializedSpec)
-                $spec=$serializedSpec|ConvertFrom-Json
-                function Get-Sha([string]$Path){$stream=[IO.File]::OpenRead($Path);try{$sha=[Security.Cryptography.SHA256]::Create();try{return([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}}finally{$stream.Dispose()}}
-                function Get-TextSha([string]$Value){$sha=[Security.Cryptography.SHA256]::Create();try{return([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value)))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}}
-                function Read-AtomicJson([string]$Path){return([IO.File]::ReadAllText($Path)|ConvertFrom-Json -ErrorAction Stop)}
-                function Resolve-TaskSid([string]$Account){$candidates=if($Account-notmatch'[\\@]'-and$env:COMPUTERNAME){@("$env:COMPUTERNAME\$Account",$Account)}else{@($Account)};foreach($candidateName in $candidates){try{return([Security.Principal.NTAccount]::new($candidateName)).Translate([Security.Principal.SecurityIdentifier]).Value}catch{}};throw "Scheduled-task principal did not resolve to a SID: $Account"}
-                function Write-Atomic([string]$Path,[object]$Value){$tmp="$Path.$([guid]::NewGuid().ToString('N')).tmp";try{[IO.File]::WriteAllText($tmp,(($Value|ConvertTo-Json -Depth 24)+[Environment]::NewLine),[Text.UTF8Encoding]::new($false));Move-Item -LiteralPath $tmp -Destination $Path -Force}finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}}
-                foreach($binding in @(@{path=[string]$spec.driverPath;hash=[string]$spec.driverSha256;name='driver'},@{path=[string]$spec.contractModulePath;hash=[string]$spec.contractModuleSha256;name='contract module'},@{path=[string]$spec.exePath;hash=[string]$spec.candidateSha256;name='candidate'})){if(-not(Test-Path -LiteralPath $binding.path -PathType Leaf)-or(Get-Sha $binding.path)-cne $binding.hash){throw "Remote WPF $($binding.name) binding failed before task registration."}}
-                Write-Atomic -Path ([string]$spec.launchRequestPath) -Value $spec
-                $taskName="DevFleet-E2E-UIA-$([string]$spec.launchId)";$taskStarted=$false
+                $processMeta = $null
                 try {
-                    if($env:USERNAME -cne 'E2EAdmin'){throw 'WPF driver launch reached a non-E2EAdmin PowerShell Direct identity.'}
-                    $taskAction=New-ScheduledTaskAction -Execute ([string]$spec.taskExecutable) -Argument ([string]$spec.taskArguments)
-                    $taskPrincipal=New-ScheduledTaskPrincipal -UserId ([string]$spec.taskPrincipalUserId) -LogonType Interactive -RunLevel Highest
-                    $remaining=[Math]::Max(120,[int]([datetimeoffset]::Parse([string]$spec.boundaryDeadlineUtc).UtcDateTime-(Get-Date).ToUniversalTime()).TotalSeconds+60)
-                    $taskSettings=New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Seconds $remaining) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-                    Register-ScheduledTask -TaskName $taskName -Action $taskAction -Principal $taskPrincipal -Settings $taskSettings -Force|Out-Null
-                    $registered=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
-                    $actualActions=@($registered.Actions)
-                    $taskBindingReason='';$expectedSid='';$requestedSid='';$actualSid=''
-                    try{$expectedSid=Resolve-TaskSid ([string]$spec.taskPrincipalUserId);$requestedSid=Resolve-TaskSid ([string]$taskPrincipal.UserId);$actualSid=Resolve-TaskSid ([string]$registered.Principal.UserId)}catch{$taskBindingReason="principal SID resolution failed: $($_.Exception.Message)"}
-                    $requestedLogonType=-1;$actualLogonType=-1;$requestedRunLevel=-1;$actualRunLevel=-1
-                    try{$requestedLogonType=[Convert]::ToInt32($taskPrincipal.LogonType,[Globalization.CultureInfo]::InvariantCulture)}catch{};try{$actualLogonType=[Convert]::ToInt32($registered.Principal.LogonType,[Globalization.CultureInfo]::InvariantCulture)}catch{};try{$requestedRunLevel=[Convert]::ToInt32($taskPrincipal.RunLevel,[Globalization.CultureInfo]::InvariantCulture)}catch{};try{$actualRunLevel=[Convert]::ToInt32($registered.Principal.RunLevel,[Globalization.CultureInfo]::InvariantCulture)}catch{}
-                    $expectedExecute=[Environment]::ExpandEnvironmentVariables([string]$spec.taskExecutable);$actualExecute=if($actualActions.Count-eq 1){[Environment]::ExpandEnvironmentVariables([string]$actualActions[0].Execute)}else{''}
-                    $taskBindingEvidence=[ordered]@{actionCount=$actualActions.Count;requestedExecute=$expectedExecute;registeredExecute=$actualExecute;argumentsMatched=($actualActions.Count-eq 1-and[string]::Equals([string]$actualActions[0].Arguments,[string]$spec.taskArguments,[StringComparison]::Ordinal));expectedUserId=[string]$spec.taskPrincipalUserId;requestedUserId=[string]$taskPrincipal.UserId;registeredUserId=[string]$registered.Principal.UserId;principalSidSha256=if($actualSid){Get-TextSha $actualSid}else{''};requestedLogonTypeValue=$requestedLogonType;registeredLogonTypeValue=$actualLogonType;requestedRunLevelValue=$requestedRunLevel;registeredRunLevelValue=$actualRunLevel;verifiedBeforeStart=$false}
-                    if(-not$taskBindingReason){if($actualActions.Count-ne 1){$taskBindingReason='registered task action count diverged'}else{try{$expectedExecute=[IO.Path]::GetFullPath($expectedExecute);$actualExecute=[IO.Path]::GetFullPath($actualExecute)}catch{$taskBindingReason='registered task executable path was malformed'}}}
-                    if(-not$taskBindingReason-and-not[string]::Equals($actualExecute,$expectedExecute,[StringComparison]::OrdinalIgnoreCase)){$taskBindingReason='registered task executable identity diverged'}
-                    if(-not$taskBindingReason-and-not[string]::Equals([string]$actualActions[0].Arguments,[string]$spec.taskArguments,[StringComparison]::Ordinal)){$taskBindingReason='registered task arguments diverged'}
-                    if(-not$taskBindingReason-and($expectedSid-cne$requestedSid-or$expectedSid-cne$actualSid)){$taskBindingReason='registered task principal SID diverged'}
-                    if(-not$taskBindingReason-and($requestedLogonType-ne[int]$spec.taskLogonTypeValue-or$actualLogonType-ne[int]$spec.taskLogonTypeValue)){$taskBindingReason='registered task logon type diverged'}
-                    if(-not$taskBindingReason-and($requestedRunLevel-ne[int]$spec.taskRunLevelValue-or$actualRunLevel-ne[int]$spec.taskRunLevelValue)){$taskBindingReason='registered task run level diverged'}
-                    if($taskBindingReason){
-                        $failure=[ordered]@{schemaVersion=2;contract='devfleet-wpf-terminal-v2';status='OBSERVER_FAILURE';terminal=$true;completionVerified=$false;failureClass='REGISTERED_TASK_BINDING_MISMATCH';error="Registered WPF task diverged from the immutable launch request before product mutation: $taskBindingReason";runId=[string]$spec.runId;launchId=[string]$spec.launchId;transactionId=[string]$spec.transactionId;payloadSha256=[string]$spec.payloadSha256;candidateSha256=[string]$spec.candidateSha256;sequence=1;phase='TASK_BINDING_VALIDATION';lastDurableStep='LAUNCH_REQUESTED';deadlineUtc=[string]$spec.boundaryDeadlineUtc;cleanupDisposition='RELINQUISH_LIFECYCLE_OWNER';taskBinding=$taskBindingEvidence;timestampUtc=(Get-Date).ToUniversalTime().ToString('o')}
-                        Write-Atomic -Path ([string]$spec.outputPath) -Value $failure
-                        throw $failure.error
-                    }
-                    $taskBindingEvidence.verifiedBeforeStart=$true
-                    Start-ScheduledTask -TaskName $taskName;$taskStarted=$true
-                    $deadline=[datetimeoffset]::Parse([string]$spec.boundaryDeadlineUtc).UtcDateTime
-                    while(-not(Test-Path -LiteralPath $spec.outputPath -PathType Leaf)-and(Get-Date).ToUniversalTime()-lt $deadline){Start-Sleep -Seconds 1}
-                    if(-not(Test-Path -LiteralPath $spec.outputPath -PathType Leaf)){
-                        $last=$null;try{if(Test-Path -LiteralPath $spec.checkpointPath -PathType Leaf){$last=Read-AtomicJson $spec.checkpointPath}}catch{}
-                        $seq=1;if($last -and $last.sequence){$seq=[int]$last.sequence+1}
-                        $failure=[ordered]@{schemaVersion=2;contract='devfleet-wpf-terminal-v2';status='OBSERVER_FAILURE';terminal=$true;completionVerified=$false;failureClass='SUPERVISOR_REPORT_DEADLINE';error='Scheduled WPF supervisor did not publish a terminal report within the finite inherited boundary.';runId=[string]$spec.runId;launchId=[string]$spec.launchId;transactionId=[string]$spec.transactionId;payloadSha256=[string]$spec.payloadSha256;candidateSha256=[string]$spec.candidateSha256;sequence=$seq;phase='REMOTE_TASK_SUPERVISOR';lastDurableStep=if($last){[string]$last.phase}else{'LAUNCH_REQUESTED'};deadlineUtc=[string]$spec.boundaryDeadlineUtc;cleanupDisposition='RELINQUISH_LIFECYCLE_OWNER';timestampUtc=(Get-Date).ToUniversalTime().ToString('o')}
-                        Write-Atomic -Path ([string]$spec.outputPath) -Value $failure
-                        if($taskStarted){Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue}
-                    }
-                    $result=Read-AtomicJson $spec.outputPath
-                    $result|Add-Member -NotePropertyName taskPrincipal -NotePropertyValue ([string]$spec.taskPrincipalUserId) -Force
-                    $result|Add-Member -NotePropertyName taskBinding -NotePropertyValue $taskBindingEvidence -Force
-                    $result|Add-Member -NotePropertyName registeredTaskAction -NotePropertyValue ([ordered]@{execute=[string]$actualActions[0].Execute;arguments=[string]$actualActions[0].Arguments;verifiedBeforeStart=$true}) -Force
-                    try {
-                        $operatingSystem=Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
-                        $result|Add-Member -NotePropertyName bootIdentity -NotePropertyValue ([ordered]@{status='PASS';computerName=[string]$env:COMPUTERNAME;lastBootUpTimeUtc=$operatingSystem.LastBootUpTime.ToUniversalTime().ToString('o');observedUtc=(Get-Date).ToUniversalTime().ToString('o')}) -Force
-                    } catch {
-                        $result|Add-Member -NotePropertyName bootIdentity -NotePropertyValue ([ordered]@{status='OBSERVATION_FAILED';error=$_.Exception.Message;observedUtc=(Get-Date).ToUniversalTime().ToString('o')}) -Force
-                    }
-                    return $result
-                } finally {
-                    if($taskStarted){$settleDeadline=(Get-Date).AddSeconds(15);do{$task=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue;if(-not $task -or [string]$task.State -ne 'Running'){break};Start-Sleep -Milliseconds 500}while((Get-Date)-lt $settleDeadline)}
-                    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+                    $p = Get-Process -Id $processId -ErrorAction Stop
+                    $processMeta = [ordered]@{hasExited=$false;responding=[bool]$p.Responding;mainWindowHandle=[int64]$p.MainWindowHandle;cpuSeconds=[double]$p.TotalProcessorTime.TotalSeconds;workingSetBytes=[int64]$p.WorkingSet64;threadCount=[int]$p.Threads.Count;handleCount=[int]$p.HandleCount;startTime=$p.StartTime.ToUniversalTime().ToString('o')}
+                } catch { $processMeta = [ordered]@{hasExited=$true} }
+                $checkpointPath = 'C:\ProgramData\M-TechLabs\DevFleet\Installer\resume-checkpoint.json'
+                $checkpoint = $null
+                if (Test-Path -LiteralPath $checkpointPath -PathType Leaf) {
+                    try { $v = Get-Content -LiteralPath $checkpointPath -Raw | ConvertFrom-Json; $checkpoint = [ordered]@{state=$v.state;action=$v.action;transactionId=$v.transactionId;payloadSha256=$v.payloadSha256;checkpointGeneration=$v.checkpointGeneration;completedStages=$v.completedStages;resumeStage=$v.resumeStage;createdUtc=$v.createdUtc;lastWriteUtc=(Get-Item -LiteralPath $checkpointPath).LastWriteTimeUtc.ToString('o')} } catch { $checkpoint = [ordered]@{readError=$_.Exception.Message} }
                 }
-            } -ArgumentList $launchSpecJson
-        } catch {
-            foreach($remotePath in @($remoteReport,$remoteStarted,$remoteCheckpoint,$remoteWorkerResult,$remoteLaunchRequest)){try{Copy-Item -FromSession $session -LiteralPath $remotePath -Destination (Join-Path ([string]$Context.runDir) (Split-Path -Leaf $remotePath)) -Force -ErrorAction Stop}catch{}}
-            throw "Remote WPF action $Action failed at the identity-bound task boundary: $($_.Exception.Message); evidenceLocal=$localEvidence"
-        }
-        if(-not $report){throw "Remote WPF action $Action returned no result; evidenceLocal=$localEvidence"}
-        foreach($remotePath in @($remoteReport,$remoteStarted,$remoteCheckpoint,$remoteWorkerResult,$remoteLaunchRequest)){try{Copy-Item -FromSession $session -LiteralPath $remotePath -Destination (Join-Path ([string]$Context.runDir) (Split-Path -Leaf $remotePath)) -Force -ErrorAction Stop}catch{}}
-        $bindingReason='';if(-not(Test-WpfTerminalReport -Report $report -Specification $launchSpec -Reason ([ref]$bindingReason))){
-            $sequenceFound=$false;$rejectedSequenceValue=Get-LifecycleProperty $report 'sequence' ([ref]$sequenceFound);$rejectedSequence=0;if($sequenceFound){[void][int]::TryParse([string]$rejectedSequenceValue,[ref]$rejectedSequence)}
-            $lastStepFound=$false;$rejectedLastStep=Get-LifecycleProperty $report 'lastDurableStep' ([ref]$lastStepFound)
-            $parentFailure=[ordered]@{schemaVersion=2;contract='devfleet-wpf-terminal-v2';status='OBSERVER_FAILURE';terminal=$true;completionVerified=$false;failureClass='PARENT_REPORT_VALIDATION_FAILURE';error="Remote WPF report failed launch identity validation: $bindingReason";runId=[string]$launchSpec.runId;launchId=[string]$launchSpec.launchId;transactionId=[string]$launchSpec.transactionId;payloadSha256=[string]$launchSpec.payloadSha256;candidateSha256=[string]$launchSpec.candidateSha256;sequence=([Math]::Max(0,$rejectedSequence)+1);phase='PARENT_REPORT_VALIDATION';lastDurableStep=if($lastStepFound -and $rejectedLastStep){[string]$rejectedLastStep}else{'REMOTE_REPORT_RECEIVED'};deadlineUtc=[string]$launchSpec.boundaryDeadlineUtc;cleanupDisposition='RELINQUISH_LIFECYCLE_OWNER';rejectedReportFile=(Split-Path -Leaf $remoteReport);timestampUtc=(Get-Date).ToUniversalTime().ToString('o')}
-            [IO.File]::WriteAllText($localEvidence,(($parentFailure|ConvertTo-Json -Depth 24)+[Environment]::NewLine),[Text.UTF8Encoding]::new($false))
-            throw "$($parentFailure.error); evidenceLocal=$localEvidence"
-        }
-        $report|Add-Member -NotePropertyName evidenceLabel -NotePropertyValue $safeEvidenceLabel -Force
-        $report|Add-Member -NotePropertyName phaseId -NotePropertyValue ([string]$Context.phaseId) -Force
-        $report|Add-Member -NotePropertyName candidatePath -NotePropertyValue ([string]$candidate.path) -Force
-        $report|Add-Member -NotePropertyName interactiveSessionId -NotePropertyValue ([int]$interactiveProof.sessionId) -Force
-        $report|Add-Member -NotePropertyName evidenceProvenance -NotePropertyValue 'identity-bound WPF launch request / isolated UIA worker / terminal supervisor' -Force
-        [IO.File]::WriteAllText($localEvidence,(($report|ConvertTo-Json -Depth 24)+[Environment]::NewLine),[Text.UTF8Encoding]::new($false))
-        $reportStatus=[string]$report.status
-        if($reportStatus -in @('PASS','REBOOT_REQUIRED','DURABLE_PENDING','OBSERVER_HANDOFF')){
-            foreach($identity in @($report.driverIdentity,$report.candidateIdentity)){if(-not $identity -or -not $identity.present -or [string]$identity.domain -cne 'DEVFLEET-E2E-01' -or [string]$identity.user -cne 'E2EAdmin' -or [int]$identity.sessionId -ne [int]$interactiveProof.sessionId -or [int]$identity.sessionId -eq 0){throw 'WPF launch acknowledgement did not preserve exact E2EAdmin interactive identity.'}}
-            if(-not [string]$report.processStartTime){throw 'WPF launch acknowledgement did not preserve the exact candidate process start time.'}
-            if(-not $report.bootIdentity -or [string]$report.bootIdentity.status -ne 'PASS' -or -not [string]$report.bootIdentity.lastBootUpTimeUtc){throw 'WPF launch acknowledgement did not preserve the exact guest boot identity.'}
-        }
-        if(-not $DeferDurableCompletionFallback -and $reportStatus -eq 'OBSERVER_HANDOFF'){$fallback=Invoke-RebootResumeWpfFallback -Context $Context -Session $session -DriverReport $report;$report=[pscustomobject]@{status='PASS';action=$Action;role=$Role;candidateSha256=[string]$candidate.sha256;processId=$report.processId;completionVerified=$true;mutationInvoked=$true;fallback=$fallback};$reportStatus='PASS'}
-        $accepted=@('PASS');if($AllowRebootRequired){$accepted+='REBOOT_REQUIRED'};if($DeferDurableCompletionFallback){$accepted+='OBSERVER_HANDOFF'}
-        if($reportStatus -notin $accepted){$failure=Get-WpfFailureDescriptor -Report $report;throw "Real WPF action did not pass for ${Action}: status=$reportStatus; class=$([string]$failure.failureClass); error=$([string]$failure.error); evidenceLocal=$localEvidence"}
-        if($sentinels){$sentinelVerification=Test-GuestForeignSentinels -Session $session -Sentinels $sentinels}
-        $overallStatus=switch($reportStatus){'REBOOT_REQUIRED'{'REAL E2E REBOOT REQUIRED';break}'OBSERVER_HANDOFF'{'REAL E2E OBSERVER HANDOFF';break}default{'REAL E2E PASS'}}
-        return [ordered]@{status=$overallStatus;phase=$Context.phaseId;action=$Action;role=$Role;candidate=$candidate;stage=$stage;driverStage=$driverStage;contractStage=$contractStage;guest=$report;evidencePath=$localEvidence;remoteEvidencePath=$remoteReport;evidenceLabel=$safeEvidenceLabel;mutationAllowed=[bool]$AllowMutation;foreignSentinels=$sentinelVerification;launchId=$launchId;oauthStaging=$oauthStage}
-    } finally {
-        if($oauthStageAttempted -and -not $DeferOAuthCredentialCleanup){Invoke-DevFleetTailscaleOAuthCredentialCleanup -Context $Context -Session $session|Out-Null}
-        if($session -and $sentinels){$sentinelCleanup=Remove-GuestForeignSentinels -Session $session -Sentinels $sentinels};if($session){Remove-DevFleetGuestSession $session -ErrorAction SilentlyContinue}
-    }
-}
-
-function Invoke-PrimaryRolePhase {
-    param([Parameter(Mandatory)][string]$ContextJson)
-    $context = Read-PhaseContext $ContextJson
-    $result = Invoke-ActualWpfAction -Context $context -Action 'Diagnostics' -Role 'Primary / Desktop' -AllowMutation:$false
-    if ([string]$result.guest.role -ne 'Primary / Desktop') { throw 'Primary phase did not verify the exact Primary / Desktop role.' }
-    if ([bool]$result.guest.mutationInvoked) { throw 'Primary phase diagnostics unexpectedly invoked a mutation.' }
-    return [ordered]@{ status='REAL E2E PASS'; phase=$context.phaseId; contract='primary-role-diagnostics'; candidate=$result.candidate; role=$result.role; guest=$result.guest; evidencePath=$result.evidencePath }
-}
-
-function Invoke-SurrogateDisposablePhase {
-    param([Parameter(Mandatory)][psobject]$Context)
-    $result = Invoke-SupportedFreshInstallLifecycle -Context $Context -Role 'Laptop / Surrogate' -CompleteLifecycle
-    if ([string]$result.guest.role -ne 'Laptop / Surrogate') { throw 'Disposable surrogate phase did not verify the Laptop / Surrogate role.' }
-    if (-not [bool]$result.guest.mutationInvoked) { throw 'Disposable surrogate phase did not invoke the real mutation.' }
-    if ([string]$result.status -ne 'REAL E2E PASS' -or -not [bool]$result.guest.completionVerified) {
-        throw "SURROGATE-DISPOSABLE requires genuine final lifecycle PASS; observed $($result.status)."
-    }
-    return [ordered]@{status='REAL E2E PASS';phase='SURROGATE-DISPOSABLE';contract='disposable-laptop-surrogate-real-wpf-install';product=$result;candidate=$result.candidate;role=$result.role;guest=$result.guest;evidencePath=$result.evidencePath;physicalSurfaceTouched=$false;testKitEligibility='EVIDENCE INPUT ONLY - RECONCILE DECIDES'}
-}
-
-function Invoke-TailscalePolicyPhase {
-    param([Parameter(Mandatory)][psobject]$Context)
-    $candidate=Assert-ExactCandidate $Context
-    $configuredMode=[string]$Context.config.Tailscale.Mode
-    if([string]$Context.phaseId -eq 'TAILSCALE-AUTH') {
-        $session=$null
-        try {
-            $session=Connect-DevFleetGuest -VmId ([guid][string]$Context.vmId)
-            $tailscaleConfig=$Context.config.Tailscale|ConvertTo-Json -Depth 16|ConvertFrom-Json
-            $authConfig=$tailscaleConfig.Authentication
-            $provider=if($authConfig.PSObject.Properties['Provider']){[string]$authConfig.Provider}else{''}
-            if($provider-in @('OAuthClientSecretStore','OAuthAutomation','OAuthClientSecretDpapi')){
-                $authConfig|Add-Member -NotePropertyName Hostname -NotePropertyValue (Get-TailscaleE2EHostname -RunId ([string]$Context.runId) -Role 'windows') -Force
-            }
-            $tailscaleWaitSeconds=if($tailscaleConfig.PSObject.Properties['PollTimeoutSeconds'] -and [int]$tailscaleConfig.PollTimeoutSeconds -gt 0){[int]$tailscaleConfig.PollTimeoutSeconds}else{120}
-            $tailscaleOwnerDeadline=[datetime]::UtcNow.AddSeconds($tailscaleWaitSeconds+30)
-            $auth=Invoke-TailscaleAuthentication -Session $session -Config $tailscaleConfig -OwnerDeadlineUtc $tailscaleOwnerDeadline
-            if(-not [bool]$auth.authenticationAttempted -and [bool]$auth.userActionRequired) { Write-TailscaleOAuthActionRequired; throw "USER ACTION REQUIRED - TAILSCALE-AUTH: $([string]$auth.reason)." }
-            Assert-TailscaleAuthenticationResult -Result $auth | Out-Null
-            $productConfigPath=Join-Path ((Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path) 'source\config\devfleet.config.json'
-            if(-not(Test-Path -LiteralPath $productConfigPath -PathType Leaf)){throw 'TAILSCALE_CONTROL_PLANE_OFFLINE: product configuration is unavailable for readiness endpoint discovery.'}
-            $productConfig=Get-Content -LiteralPath $productConfigPath -Raw|ConvertFrom-Json -ErrorAction Stop
-            $expectedPeer=Get-TailscaleE2EHostname -RunId ([string]$Context.runId) -Role 'primary'
-            $servicePort=[int]$productConfig.Network.PortalPort
-            $servicePath='/healthz'
-            $expectedNode=if($provider-in @('OAuthClientSecretStore','OAuthAutomation','OAuthClientSecretDpapi')){Get-TailscaleE2EHostname -RunId ([string]$Context.runId) -Role 'windows'}else{[string]$Context.config.Tailscale.ExpectedGuestNodePattern}
-            $expectedTag=if($authConfig.PSObject.Properties['Tag']){[string]$authConfig.Tag}else{''}
-            $readiness=Get-TailscaleReadiness -Session $session -ExpectedNodePattern $expectedNode -ExpectedTag $expectedTag -ExpectedPeer $expectedPeer -ServicePort $servicePort -ServicePath $servicePath -OwnerDeadlineUtc $tailscaleOwnerDeadline
-            if(-not [bool]$readiness.ready){throw "$([string]$readiness.failureClass): TAILSCALE-AUTH structured readiness did not pass."}
-            return [ordered]@{status='REAL E2E PASS';phase=[string]$Context.phaseId;contract=if($provider-in @('OAuthClientSecretStore','OAuthAutomation','OAuthClientSecretDpapi')){'oauth-client-secret-provider-with-layered-readiness'}else{'auth-key-fallback-provider-with-layered-readiness'};configuredMode=$configuredMode;candidate=$candidate;guest=$readiness.layer2;readiness=$readiness;authenticationAttempted=[bool]$auth.authenticationAttempted;authenticationSucceeded=[bool]$auth.authenticationSucceeded;authProvider=$provider;expectedPeer=$expectedPeer;servicePort=$servicePort;servicePath=$servicePath;credentialsStoredInEvidence=$false;userActionRequired=$false}
-        }finally{if($session){Remove-DevFleetGuestSession $session -ErrorAction SilentlyContinue}}
-    }
-    if($configuredMode -ne 'Deferred'){throw 'USER ACTION REQUIRED - configured Tailscale policy requires the official interactive authentication boundary.'}
-    $session=$null
-    try{
-        $session=Connect-DevFleetGuest -VmId ([guid][string]$Context.vmId)
-        $status=Get-TailscaleGuestStatus -Session $session -ExpectedNodePattern ([string]$Context.config.Tailscale.ExpectedGuestNodePattern)
-        if([bool]$status.online -or -not[bool]$status.needsLogin){throw 'Deferred Tailscale policy expected an installed but unauthenticated guest.'}
-        if([string]::IsNullOrWhiteSpace([string]$status.version) -or [string]$status.version -match 'not recognized|not found'){throw 'Deferred Tailscale policy could not verify the installed Tailscale client.'}
-        return [ordered]@{status='REAL E2E PASS';phase=[string]$Context.phaseId;contract=if([string]$Context.phaseId -eq 'TAILSCALE-DEFERRED'){'installed-client-deferred-no-auth'}else{'authentication-explicitly-not-run-by-supported-deferred-policy'};configuredMode=$configuredMode;candidate=$candidate;guest=$status;authenticationAttempted=$false;credentialsStoredInEvidence=$false;userActionRequired=$false}
-    }finally{if($session){Remove-DevFleetGuestSession $session -ErrorAction SilentlyContinue}}
-}
-
-function ConvertTo-LfShellText([string]$Text) {
-    if ($null -eq $Text) { return '' }
-    return $Text.Replace("`r`n", "`n").Replace("`r", "`n")
-}
-
-function Invoke-LinuxBootstrapPhase {
-    param([Parameter(Mandatory)][string]$ContextJson)
-    $context = Read-PhaseContext $ContextJson
-    $candidate = Assert-ExactCandidate $context
-    $tarPath = [string]$context.candidate.tar.path
-    if (-not (Test-Path -LiteralPath $tarPath -PathType Leaf)) { throw "Linux phase TAR is missing: $tarPath" }
-    $tarHash = (Get-FileHash -LiteralPath $tarPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($tarHash -ne [string]$context.candidate.tar.sha256) { throw 'Linux phase TAR hash differs from the exact candidate tuple.' }
-    $aiBundle = $null
-    $aiBundleFound=$false;$aiBundleValue=Get-LifecycleProperty $context 'aiAuditZip' ([ref]$aiBundleFound);if ($aiBundleFound -and $aiBundleValue) {
-        $aiPathFound=$false;$aiPathValue=Get-LifecycleProperty $aiBundleValue 'path' ([ref]$aiPathFound);$aiHashFound=$false;$aiHashValue=Get-LifecycleProperty $aiBundleValue 'sha256' ([ref]$aiHashFound);$aiBundlePath = [string]$aiPathValue
-        $expectedAiBundleHash = ([string]$aiHashValue).ToLowerInvariant()
-        if (-not (Test-Path -LiteralPath $aiBundlePath -PathType Leaf)) { throw "Focused Linux AI audit bundle is missing: $aiBundlePath" }
-        if ($expectedAiBundleHash -notmatch '^[0-9a-f]{64}$') { throw 'Focused Linux AI audit bundle is missing an exact SHA-256 identity.' }
-        $actualAiBundleHash = (Get-FileHash -LiteralPath $aiBundlePath -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($actualAiBundleHash -ne $expectedAiBundleHash) { throw 'Focused Linux AI audit bundle hash differs from the supplied exact identity.' }
-        $aiBundle = [ordered]@{path=(Resolve-Path -LiteralPath $aiBundlePath).Path;sha256=$actualAiBundleHash;bytes=(Get-Item -LiteralPath $aiBundlePath).Length}
-    }
-    if ([string]$context.vmName -notlike 'DevFleet-E2E-*') { throw 'LINUX phase requires an ownership-scoped disposable L1.' }
-    if ($env:COMPUTERNAME -notmatch '^MULATTOTechBOX$|^MULATTOTECHBOX$' -or $env:COMPUTERNAME -match 'SURFACE') { throw 'LINUX phase is not running on the approved MULATTOTECHBOX host.' }
-    $l1 = Get-VM -Id ([guid][string]$context.vmId) -ErrorAction Stop
-    if ($l1.Name -cne [string]$context.vmName) { throw 'LINUX phase disposable L1 identity/name mismatch.' }
-    $vmProcessor = Get-VMProcessor -VM $l1 -ErrorAction Stop
-    if (-not [bool]$vmProcessor.ExposeVirtualizationExtensions) { throw 'Disposable L1 does not expose nested virtualization.' }
-    $nested = $context.config.NestedLinux
-    if (-not $nested) { throw 'E2E config is missing the NestedLinux resource policy.' }
-    $l2Name = [string]$nested.Name
-    $l2Image = [string]$nested.UbuntuImage
-    $l2Cpus = [int]$nested.Cpus
-    $l2Memory = [string]$nested.Memory
-    $l2Disk = [string]$nested.Disk
-    $budgetPolicy = Get-HarnessBudgetPolicy -Config $context.config
-    $l2BootstrapTimeout = [int]$budgetPolicy.operationMaximumsSeconds.guestBootstrap
-    if ($l2Name -notlike 'DevFleet-E2E-*' -or $l2Name -eq ([string]$context.vmName)) { throw 'Nested Linux identity is outside the disposable E2E namespace.' }
-    if ($l2Cpus -lt 1 -or $l2BootstrapTimeout -lt 1) { throw 'Nested Linux resource policy contains an invalid positive integer.' }
-    # Each FullRelease phase restores its declared checkpoint independently.
-    # The clean checkpoint intentionally has no product prerequisites, so the
-    # Linux phase must exercise the candidate's real install path in this same
-    # phase before asking the installed L1 to provide Multipass.
-    $productInstall = Invoke-SupportedFreshInstallLifecycle -Context $context -Role 'Primary / Desktop' -CompleteLifecycle
-    if ([string]$productInstall.status -ne 'REAL E2E PASS' -or -not [bool]$productInstall.guest.completionVerified) {
-        throw "LINUX requires a genuine supported FreshInstall lifecycle PASS before Multipass; observed $($productInstall.status)."
-    }
-    $bootstrapTransactionId = [string]$productInstall.transactionId
-    $bootstrapPayloadSha256 = [string]$context.candidate.tar.sha256
-    $bootstrapPackageVersion = [string]$context.candidate.releaseVersion
-    $bootstrapNodeRole = 'surrogate'
-    if ($bootstrapTransactionId -notmatch '^[0-9a-fA-F]{32}$' -or
-        $bootstrapPayloadSha256 -notmatch '^[0-9a-fA-F]{64}$' -or
-        $bootstrapPackageVersion -notmatch '^\d+\.\d+\.\d+$') {
-        throw 'LINUX product lifecycle did not return an exact bootstrap transaction, payload, or package identity.'
-    }
-    # The supported Desktop lifecycle leaves its exact product Multipass child
-    # running after completion. A fixed 16 GiB nested L1 cannot safely allocate
-    # that product child and the independent 4 GiB Linux L2 at the same time.
-    # Quiesce only the candidate-bound product identity after its completion
-    # authority has passed; never infer ownership from the harness L2 name.
-    $productComputeName = Get-DevFleetProductComputeInstanceName -Context $context -Role 'Primary / Desktop'
-    if ($productComputeName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$' -or $productComputeName -eq $l2Name -or $productComputeName -like 'DevFleet-E2E-*') {
-        throw 'LINUX product compute identity is malformed or overlaps the disposable L2 namespace.'
-    }
-    $session = $null
-    try {
-        $session = Connect-DevFleetGuest -VmId ([guid][string]$context.vmId)
-        $remoteRoot = "C:\Users\Public\DevFleet-E2E\$($context.runId)\$($context.phaseId)"
-        $remoteTar = Join-Path $remoteRoot (Split-Path -Leaf $tarPath)
-        Invoke-Command -Session $session -ScriptBlock { param($root) New-Item -ItemType Directory -Force -Path $root | Out-Null } -ArgumentList $remoteRoot
-        $stage = Get-StageIntegrity -LocalPath $tarPath -Session $session -RemotePath $remoteTar
-        if (-not $stage.equal) { throw 'Exact candidate TAR did not survive host-to-L1 staging.' }
-        $remoteAiBundle = $null
-        $aiBundleStage = $null
-        if ($aiBundle) {
-            $remoteAiBundle = Join-Path $remoteRoot (Split-Path -Leaf ([string]$aiBundle.path))
-            $aiBundleStage = Get-StageIntegrity -LocalPath ([string]$aiBundle.path) -Session $session -RemotePath $remoteAiBundle
-            if (-not $aiBundleStage.equal -or ([string]$aiBundleStage.remoteSha256).ToLowerInvariant() -ne [string]$aiBundle.sha256) { throw 'Exact AI audit ZIP did not survive host-to-L1 staging.' }
-        }
-        $secretJson = [ordered]@{
-            NodeName=$l2Name; NodeRole='surrogate'; FriendlyName='DevFleet E2E Linux'; PortalPort=8787
-            DeploymentId=("e2e-$($context.runId)"); NodeId=([guid]::NewGuid().ToString()); CoordinatorNodeId=''
-            ProtocolV
+                $consumedRoot = 'C:\ProgramData\M-TechLabs\DevFleet\Installer\resume-consumed'
+                $receipts = @()
+                if (Test-Path -LiteralPath $consumedRoot) { $receipts = @(Get-ChildItem -LiteralPath $consumedRoot -Filter '*.json' -File -ErrorAction SilentlyContinue | Select-Object Name,Length,LastWriteTimeUtc) }
+                $installPath = 'C:\ProgramData\M-TechLabs\DevFleet\Installer\install-state.json'
+                $ownershipPath = 'C:\ProgramData\DevFleetHostAgent\integration-ownership.json'
+                [ordered]@{timestampUtc=(Get-Date).ToUniversalTime().ToString('o');candidate=$processMeta;candidateRow=if($root){[ordered]@{processId=$root.ProcessId;parentProcessId=$root.ParentProcessId;executablePath=$root.ExecutablePath;commandLine=$root.CommandLine;sessionId=$root.SessionId}}else{$null};processTree=@($all | Where-Object { $ids.Contains([int]$_.ProcessId) } | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine,SessionId);checkpoint=$checkpoint;checkpointPresent=(Test-Path -LiteralPath $checkpointPath -PathType Leaf);receiptFiles=$receipts;installStatePresent=(Test-Path -LiteralPath $installPath -PathType Leaf);installStateLastWriteUtc=if(Test-Path -LiteralPath $installPath){(Get-Item

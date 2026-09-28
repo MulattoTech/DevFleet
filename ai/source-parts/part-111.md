@@ -1,681 +1,718 @@
 # DevFleet source part 111
 
 Full-source UTF-8 byte interval [5115000, 5161500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 97c7f2efe1fb5f3820a0ae9649b0b1c99963274a8767e678bc1eb9c9b36c7c8d
+Payload SHA-256: 57a1a2e4d26cd0ef2b2e580d6925d1e0bc60d373d40c4bbed1026362d46a077a
 
 <!-- BEGIN SOURCE SLICE -->
-ing stays in-process; callers retain its ownership.
-    $secure = if ($null -eq $Passphrase) { Read-Host 'Enter a strong passphrase for this transfer bundle' -AsSecureString } else { $Passphrase }
-    $password = Convert-SecureStringToBundlePassword $secure
-    if ($password.Length -lt 12) { throw 'Bundle passphrase must be at least 12 characters.' }
-    $iterations = 600000
-    $salt = [byte[]]::new(16); [Security.Cryptography.RandomNumberGenerator]::Fill($salt)
-    $nonce = [byte[]]::new(12); [Security.Cryptography.RandomNumberGenerator]::Fill($nonce)
-    $zipPath = "$OutputPath.zip.tmp"
-    $key = $null; $plain = $null; $cipher = $null; $tag = $null
-    try {
-        if (Test-Path $OutputPath) { Remove-Item $OutputPath -Force }
-        if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-        [IO.Compression.ZipFile]::CreateFromDirectory($SourceDirectory, $zipPath, [IO.Compression.CompressionLevel]::Optimal, $false)
-        $plain = [IO.File]::ReadAllBytes($zipPath)
-        $header = [byte[]]::new(40)
-        [Array]::Copy([Text.Encoding]::ASCII.GetBytes('DFENV001'), 0, $header, 0, 8)
-        [Array]::Copy([BitConverter]::GetBytes([uint32]$iterations), 0, $header, 8, 4)
-        [Array]::Copy($salt, 0, $header, 12, 16); [Array]::Copy($nonce, 0, $header, 28, 12)
-        $kdf = [Security.Cryptography.Rfc2898DeriveBytes]::new($password, $salt, $iterations, [Security.Cryptography.HashAlgorithmName]::SHA256)
-        try { $key = $kdf.GetBytes(32) } finally { $kdf.Dispose() }
-        $cipher = [byte[]]::new($plain.Length); $tag = [byte[]]::new(16)
-        $aes = [Security.Cryptography.AesGcm]::new($key, 16)
-        try { $aes.Encrypt($nonce, $plain, $cipher, $tag, $header) } finally { $aes.Dispose() }
-        $stream = [IO.File]::Open($OutputPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-        try { $stream.Write($header,0,$header.Length); $stream.Write([BitConverter]::GetBytes([int64]$cipher.Length),0,8); $stream.Write($cipher,0,$cipher.Length); $stream.Write($tag,0,$tag.Length); $stream.Flush($true) } finally { $stream.Dispose() }
-    } finally {
-        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-        if ($plain) { [Array]::Clear($plain,0,$plain.Length) }; if ($cipher) { [Array]::Clear($cipher,0,$cipher.Length) }; if ($key) { [Array]::Clear($key,0,$key.Length) }; $password=$null
-    }
+notmatch '^\d+$' }).Count -gt 0) { continue }
+            $candidate = Join-Path $root 'winget.exe'
+            if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+            $candidateInfo = Get-Item -LiteralPath $candidate -Force -ErrorAction Stop
+            if (($candidateInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            $result.Add([pscustomobject]@{ Path = [IO.Path]::GetFullPath($candidate); Root = $root })
+        }
+        return @($result | Sort-Object Path -Unique)
+    } catch { return @() }
 }
 
-function Expand-EncryptedBundle {
-    param(
-        [Parameter(Mandatory)][string]$BundlePath,
-        [Parameter(Mandatory)][string]$Destination,
-        [Security.SecureString]$Passphrase
-    )
-    $secure = if ($null -eq $Passphrase) { Read-Host 'Enter the transfer-bundle passphrase' -AsSecureString } else { $Passphrase }
-    $password = Convert-SecureStringToBundlePassword $secure
-    $raw = $null; $key = $null; $plain = $null; $zipPath = "$BundlePath.zip.tmp"
+function Test-TrustedExecutableCandidate {
+    param([Parameter(Mandatory)][string]$Path,[Parameter()][object]$Dependency)
     try {
-        $raw = [IO.File]::ReadAllBytes($BundlePath)
-        if ($raw.Length -lt 72) { throw 'Encrypted bundle is truncated.' }
-        $header = [byte[]]::new(40); [Array]::Copy($raw,0,$header,0,40)
-        if ([Text.Encoding]::ASCII.GetString($header,0,8) -ne 'DFENV001') { throw 'Unsupported encrypted bundle format.' }
-        $iterations = [BitConverter]::ToUInt32($header,8); if ($iterations -lt 100000 -or $iterations -gt 2000000) { throw 'Encrypted bundle KDF parameters are invalid.' }
-        $salt = [byte[]]::new(16); $nonce = [byte[]]::new(12); [Array]::Copy($header,12,$salt,0,16); [Array]::Copy($header,28,$nonce,0,12)
-        $length = [BitConverter]::ToInt64($raw,40); if ($length -lt 1 -or $length -gt 1073741824 -or $raw.Length -ne 48+$length+16) { throw 'Encrypted bundle ciphertext length is invalid.' }
-        $cipher = [byte[]]::new([int]$length); $tag = [byte[]]::new(16); [Array]::Copy($raw,48,$cipher,0,$cipher.Length); [Array]::Copy($raw,48+$cipher.Length,$tag,0,16)
-        $kdf = [Security.Cryptography.Rfc2898DeriveBytes]::new($password, $salt, [int]$iterations, [Security.Cryptography.HashAlgorithmName]::SHA256)
-        try { $key = $kdf.GetBytes(32) } finally { $kdf.Dispose() }
-        $plain = [byte[]]::new($cipher.Length); $aes = [Security.Cryptography.AesGcm]::new($key,16)
-        try { $aes.Decrypt($nonce,$cipher,$tag,$plain,$header) } finally { $aes.Dispose() }
-        [IO.File]::WriteAllBytes($zipPath,$plain); New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-        [IO.Compression.ZipFile]::ExtractToDirectory($zipPath,$Destination,$true)
-    } finally {
-        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-        if ($raw) { [Array]::Clear($raw,0,$raw.Length) }; if ($plain) { [Array]::Clear($plain,0,$plain.Length) }; if ($key) { [Array]::Clear($key,0,$key.Length) }; $password=$null
-    }
-}
-
-function New-DesktopShortcut {
-    param([string]$Name,[string]$Target,[string]$Arguments,[string]$WorkingDirectory,[string]$IconLocation='shell32.dll,13')
-    $desktop = [Environment]::GetFolderPath('Desktop')
-    $path = Join-Path $desktop "$Name.lnk"
-    $shell = New-Object -ComObject WScript.Shell
-    $sc = $shell.CreateShortcut($path)
-    $sc.TargetPath = $Target
-    $sc.Arguments = $Arguments
-    $sc.WorkingDirectory = $WorkingDirectory
-    $sc.IconLocation = $IconLocation
-    $sc.Save()
-}
-
-function Write-StageMarker {
-    param(
-        [Parameter(Mandatory)][string]$Name,
-        [AllowNull()][object]$Transaction
-    )
-    $path = Join-Path (Get-DevFleetStateRoot) "stage-$Name.complete"
-    if(-not $Transaction){$Transaction=Get-ActiveDevFleetTransaction}
-    if (-not $transaction) { throw 'Cannot write an unbound stage marker without an active DevFleet transaction.' }
-    $preparedUtcText = ConvertTo-DevFleetPreparedUtcText $transaction.preparedUtc
-    if(([string]$transaction.role).Trim() -notin @('Laptop','Desktop') -or
-        ([string]$transaction.action).Trim() -notin @('FreshInstall','Repair','CleanReinstall','LocalUpdate') -or
-        ([string]$transaction.transactionId).Trim() -notmatch '^[0-9a-fA-F]{32}$' -or
-        ([string]$transaction.payloadSha256).Trim() -notmatch '^[0-9a-fA-F]{64}$' -or
-        $preparedUtcText -notmatch 'T') { throw 'Cannot write a malformed or unbound stage marker transaction.' }
-    $value=[ordered]@{ transactionId = [string]$transaction.transactionId; payloadSha256 = [string]$transaction.payloadSha256; action = [string]$transaction.action; role = [string]$transaction.role; stage = "stage-$Name"; completedUtc = (Get-Date).ToUniversalTime().ToString('o') }
-    $temporary=Join-Path (Split-Path -Parent $path) ('.'+[IO.Path]::GetFileName($path)+'.'+[guid]::NewGuid().ToString('N')+'.tmp')
-    $stream=$null
-    try {
-        $bytes=[Text.UTF8Encoding]::new($false).GetBytes(($value|ConvertTo-Json -Compress))
-        $stream=[IO.File]::Open($temporary,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-        $stream.Write($bytes,0,$bytes.Length);$stream.Flush($true);$stream.Dispose();$stream=$null
-        [IO.File]::Move($temporary,$path,$true)
-    } finally {
-        if($stream){$stream.Dispose()}
-        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
-    }
-}
-function Test-StageMarker {
-    param([string]$Name)
-    $path = Join-Path (Get-DevFleetStateRoot) "stage-$Name.complete"
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
-    $transaction = Get-ActiveDevFleetTransaction
-    if (-not $transaction) { return $false }
-    try {
-        $marker = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-        return [string]$marker.transactionId -eq [string]$transaction.transactionId -and [string]$marker.payloadSha256 -eq [string]$transaction.payloadSha256 -and [string]$marker.action -eq [string]$transaction.action -and [string]$marker.role -eq [string]$transaction.role -and [string]$marker.stage -eq "stage-$Name"
+        if ([string]$Path -match '(?i)(^|[\\/])\.\.?([\\/]|$)') { return $false }
+        $full = [IO.Path]::GetFullPath($Path)
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { return $false }
+        if ([IO.Path]::GetExtension($full).ToLowerInvariant() -in @('.cmd','.bat') -and $Dependency) { return $false }
+        $trustedRoot = $null
+        if ([IO.Path]::GetFileName($full).Equals('winget.exe',[StringComparison]::OrdinalIgnoreCase)) {
+            $wingetCandidates = @(Get-TrustedWingetPackageCandidates | Where-Object { $_.Path.Equals($full,[StringComparison]::OrdinalIgnoreCase) })
+            if ($wingetCandidates.Count -ne 1) { return $false }
+            $trustedRoot = [string]$wingetCandidates[0].Root
+        } else { $trustedRoot = Get-TrustedSystemRootForExecutable $full }
+        if ([string]::IsNullOrWhiteSpace($trustedRoot)) { return $false }
+        $rootInfo = Get-Item -LiteralPath $trustedRoot -Force -ErrorAction Stop
+        if (($rootInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+        $fileInfo = Get-Item -LiteralPath $full -Force -ErrorAction Stop
+        if (($fileInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+        foreach($entry in @((Get-Acl -LiteralPath $full -ErrorAction Stop).Access)) {
+            if($entry.AccessControlType -eq 'Allow' -and (Test-BroadUntrustedPrincipal ([string]$entry.IdentityReference.Value)) -and (Test-PrimitiveMutationRights ([Security.AccessControl.FileSystemRights]$entry.FileSystemRights))){return $false}
+        }
+        $cursor = [IO.DirectoryInfo]::new([IO.Path]::GetDirectoryName($full))
+        $reachedRoot = $false
+        while($cursor){
+            if(($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){return $false}
+            foreach($entry in @((Get-Acl -LiteralPath $cursor.FullName -ErrorAction Stop).Access)) {
+                if($entry.AccessControlType -eq 'Allow' -and (Test-BroadUntrustedPrincipal ([string]$entry.IdentityReference.Value)) -and (Test-PrimitiveMutationRights ([Security.AccessControl.FileSystemRights]$entry.FileSystemRights))){return $false}
+            }
+            if($cursor.FullName.TrimEnd('\').Equals($trustedRoot.TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)){ $reachedRoot = $true; break }
+            $cursor=$cursor.Parent
+        }
+        if (-not $reachedRoot) { return $false }
+        $policy=if($null -ne $Dependency){$Dependency.installerAuthenticityPolicy}else{$null}
+        $exact=@(if($null -ne $policy){$policy.allowedSignerSubjectsExact})
+        $signature=Get-AuthenticodeSignature -LiteralPath $full
+        $installedTrust = if($null -ne $policy -and $null -ne $policy.PSObject.Properties['installedExecutableTrust']){[string]$policy.installedExecutableTrust}else{''}
+        $allowUnsignedInstalled = $installedTrust -eq 'signed-installer-locked-path' -and $signature.Status -eq 'NotSigned'
+        if($signature.Status -ne 'Valid' -and -not $allowUnsignedInstalled){return $false}
+        if($signature.Status -eq 'Valid' -and @($exact).Count -gt 0 -and -not (Test-ExactSignerIdentity ([string]$signature.SignerCertificate.Subject) $exact)){return $false}
+        if(@($exact).Count -eq 0 -and $null -ne $policy -and @($policy.allowedSignerPatterns).Count -gt 0){return $false}
+        return $true
     } catch { return $false }
 }
 
-
-function Get-OrCreateDevFleetSshKey {
-    param([datetime]$DeadlineUtc = [datetime]::MinValue)
-    $sshDir = Join-Path $env:USERPROFILE '.ssh'
-    New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
-    $key = Join-Path $sshDir 'devfleet_ed25519'
-    if (-not (Test-Path $key)) {
-        $sshKeygen = @(
-            (Join-Path $env:WINDIR 'System32\OpenSSH\ssh-keygen.exe'),
-            (Join-Path $env:ProgramFiles 'OpenSSH\ssh-keygen.exe')
-        ) | Where-Object { $_ -and (Test-TrustedExecutableCandidate $_) } | Select-Object -First 1
-        if (-not $sshKeygen) { throw 'OpenSSH Client/ssh-keygen is required.' }
-        $null = Invoke-External $sshKeygen @('-t','ed25519','-a','100','-N','','-C',"devfleet-$env:COMPUTERNAME",'-f',$key) -DeadlineUtc $DeadlineUtc
-        & icacls.exe $key /inheritance:r /grant:r "${env:USERNAME}:(R,W)" | Out-Null
-    }
-    return $key
+function Normalize-SignerIdentity {
+    param([Parameter(Mandatory)][string]$Subject)
+    try { return (([Security.Cryptography.X509Certificates.X500DistinguishedName]::new($Subject)).Format($false) -replace '\s','').ToUpperInvariant() }
+    catch { return ($Subject -replace '\s','').ToUpperInvariant() }
+}
+function Test-ExactSignerIdentity {
+    param([Parameter(Mandatory)][string]$Subject,[Parameter(Mandatory)][string[]]$Expected)
+    $actual=Normalize-SignerIdentity $Subject
+    return @($Expected | Where-Object { (Normalize-SignerIdentity ([string]$_)) -ceq $actual }).Count -gt 0
 }
 
-function Add-LocalSshKeyToInstance {
-    param([Parameter(Mandatory)][string]$InstanceName,[string]$PublicKeyPath)
+function Get-TrustedDependencyCandidates {
+    param([Parameter(Mandatory)]$Dependency)
+    $paths = [Collections.Generic.List[string]]::new()
+    foreach ($probe in @($Dependency.executableProbes)) {
+        $pathEntries = ([Environment]::GetEnvironmentVariable('PATH') -split [IO.Path]::PathSeparator) | Where-Object { $_ }
+        foreach ($entry in $pathEntries) {
+            $candidate = Join-Path $entry.Trim('"') $probe
+            if ((Test-Path -LiteralPath $candidate) -and (Test-TrustedExecutableCandidate $candidate -Dependency $Dependency)) { $paths.Add([IO.Path]::GetFullPath($candidate)) }
+        }
+        foreach ($hive in @('HKLM:')) {
+            foreach ($subkey in @("SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\$probe", "SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\$probe")) {
+                $key = Get-Item -LiteralPath (Join-Path $hive $subkey) -ErrorAction SilentlyContinue
+                $value = if ($key) { $key.GetValue('') } else { $null }
+                $candidate = if ($value) { ([string]$value).Trim('"') } else { $null }
+                if ($candidate -and (Test-TrustedExecutableCandidate $candidate -Dependency $Dependency)) { $paths.Add([IO.Path]::GetFullPath($candidate)) }
+            }
+        }
+    }
+    foreach ($location in @($Dependency.knownVendorInstallLocations)) {
+        $expanded = Expand-DependencyLocation $location
+        if ((Test-Path -LiteralPath $expanded) -and (Test-TrustedExecutableCandidate $expanded -Dependency $Dependency)) { $paths.Add([IO.Path]::GetFullPath($expanded)) }
+    }
+    return $paths | Select-Object -Unique
+}
+
+function Get-DependencyStatus {
+    param(
+        [Parameter(Mandatory)]$Dependency,
+        [int]$ProbeTimeoutSeconds = (Get-DevFleetOperationMaximumSeconds 'dependencyProbe'),
+        [datetime]$DeadlineUtc = [datetime]::MinValue
+    )
+    if($ProbeTimeoutSeconds -le 0){throw 'Dependency probe timeout must be positive.'}
+    $probeDeadline=[datetime]::UtcNow.AddSeconds($ProbeTimeoutSeconds)
+    if($DeadlineUtc -gt [datetime]::MinValue -and $DeadlineUtc.ToUniversalTime() -lt $probeDeadline){$probeDeadline=$DeadlineUtc.ToUniversalTime()}
     $deadlineContext=Get-DevFleetDeadlineContext
-    $componentDeadline=[DateTime]::UtcNow.AddSeconds((Get-DevFleetOperationMaximumSeconds 'sshAndMarker'))
-    if($deadlineContext -and ([datetime]$deadlineContext.StageDeadlineUtc -lt $componentDeadline)){$componentDeadline=[datetime]$deadlineContext.StageDeadlineUtc}
-    if (-not $PublicKeyPath) { $PublicKeyPath = "$(Get-OrCreateDevFleetSshKey -DeadlineUtc $componentDeadline).pub" }
-    if (-not (Test-Path $PublicKeyPath)) { throw "Public key not found: $PublicKeyPath" }
-    $mp = Get-MultipassExe
-    Invoke-External $mp @('transfer',$PublicKeyPath,"${InstanceName}:/tmp/devfleet-client.pub") -DeadlineUtc $componentDeadline
-    $remote = 'install -d -o devrunner -g devrunner -m 0700 /home/devrunner/.ssh; touch /home/devrunner/.ssh/authorized_keys; key=$(cat /tmp/devfleet-client.pub); grep -qxF "$key" /home/devrunner/.ssh/authorized_keys || echo "$key" >> /home/devrunner/.ssh/authorized_keys; chown devrunner:devrunner /home/devrunner/.ssh/authorized_keys; chmod 0600 /home/devrunner/.ssh/authorized_keys; rm -f /tmp/devfleet-client.pub'
-    Invoke-External $mp @('exec',$InstanceName,'--','sudo','bash','-lc',$remote) -DeadlineUtc $componentDeadline
-}
-
-function New-DevFleetSnapshotSafe {
-    param([Parameter(Mandatory)][string]$InstanceName,[Parameter(Mandatory)][string]$SnapshotName)
-    Assert-MultipassIsolation -InstanceNames @($InstanceName)
-    $mp = Get-MultipassExe
-    $raw = Invoke-External $mp @('info',$InstanceName,'--format','json') -Capture
-    $info = $raw | ConvertFrom-Json
-    $property = $info.info.PSObject.Properties[$InstanceName]
-    if (-not $property) { throw "Multipass instance not found: $InstanceName" }
-    $state = [string]$property.Value.state
-    $wasRunning = $state -eq 'Running'
-    if ($wasRunning) { Invoke-External $mp @('stop',$InstanceName) }
-    try { Invoke-External $mp @('snapshot',$InstanceName,'--name',$SnapshotName) }
-    finally { if ($wasRunning) { Invoke-External $mp @('start',$InstanceName) } }
-    return $SnapshotName
-}
-
-Export-ModuleMember -Function *
-
-```
-
-
-## FILE: source/windows/DevFleet.Tailscale.psm1
-
-SHA256: b64b38830684a097fa8e1e60440f37894ce4b25e765016172ffb6a899bcf6afd | Bytes: 65434 | Git mode: 100644
-
-```
-Set-StrictMode -Version Latest
-# Reuse Common: forcing a nested reload removes its exports from existing callers.
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1')
-
-function Get-DevFleetTailscaleAuthenticationUri {
-    param([string]$Text)
-    $uris=@(@(foreach($match in [regex]::Matches($Text,'https?://[^\s<>"'']+')){
-        $uri=$null
-        if([uri]::TryCreate($match.Value,[UriKind]::Absolute,[ref]$uri)-and$uri.Scheme-ceq'https'-and$uri.Host-ieq'login.tailscale.com'-and$uri.IsDefaultPort-and-not$uri.UserInfo-and$uri.AbsolutePath-match'^/a/[A-Za-z0-9_-]+$'-and-not$uri.Query-and-not$uri.Fragment){$uri.AbsoluteUri}
-    })|Sort-Object -Unique)
-    if($uris.Count-ne1){return $null}
-    return [uri]$uris[0]
-}
-
-$script:DevFleetTailscalePairingEventSequence = 0
-
-function ConvertTo-DevFleetTailscaleSafeIdentity {
-    param([AllowNull()][object]$Value)
-    $text = [string]$Value
-    if ($text -match '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { return $text }
-    return ''
-}
-
-function Get-DevFleetTailscaleStatusSummary {
-    param([string]$StatusJson, [string]$ExpectedHostname)
-    $summary = [ordered]@{
-        statusClass = 'MALFORMED'
-        authenticated = $false
-        privateIpv4Observed = $false
-        selfHostname = ''
-        nodeIdentityMatch = $null
+    if($deadlineContext -and ([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime() -lt $probeDeadline){$probeDeadline=([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime()}
+    $args = @($Dependency.versionProbe.arguments)
+    $first = $null
+    foreach ($path in (Get-TrustedDependencyCandidates $Dependency)) {
+        $remaining=[int][math]::Floor(($probeDeadline-[datetime]::UtcNow).TotalSeconds)
+        if($remaining -le 0){
+            if($null -eq $first){$first=[pscustomobject]@{Status='Broken';Path=$path;Version=$null;Detail='Trusted executable was found but its bounded version probe deadline expired.'}}
+            break
+        }
+        try {
+            $output=Invoke-External -FilePath $path -ArgumentList $args -Capture -TimeoutSeconds ([math]::Min($ProbeTimeoutSeconds,$remaining)) -DeadlineUtc $probeDeadline
+            $exit=0
+        } catch {
+            if($null -eq $first){$first=[pscustomobject]@{Status='Broken';Path=$path;Version=$null;Detail='Trusted executable was found but its bounded version probe failed.'}}
+            continue
+        }
+        $match = if ($Dependency.versionProbe.regex) { [regex]::Match($output, [string]$Dependency.versionProbe.regex) } else { $null }
+        if ($exit -ne 0 -or -not $match -or -not $match.Success) {
+            if ($null -eq $first) { $first = [pscustomobject]@{ Status='Broken'; Path=$path; Version=$null; Detail='Trusted executable was found but version probe failed.' } }
+            continue
+        }
+        $version = [Version]$match.Groups[1].Value
+        $minimum = [Version]$Dependency.minimumSupportedVersion
+        $status = if ($version -lt $minimum) { 'Outdated' } elseif ($null -ne $Dependency.maximumMajor -and $version.Major -gt [int]$Dependency.maximumMajor) { 'Unsupported-Major' } else { 'Compatible' }
+        $result = [pscustomobject]@{ Status=$status; Path=$path; Version=$version; Detail="Resolved trusted executable $path; version $version" }
+        if ($status -eq 'Compatible') { return $result }
+        if ($null -eq $first) { $first = $result }
     }
-    try {
-        $status = $StatusJson | ConvertFrom-Json -ErrorAction Stop
-        $backendProperty = $status.PSObject.Properties['BackendState']
-        $backend = if ($backendProperty) { [string]$backendProperty.Value } else { '' }
-        $selfProperty = $status.PSObject.Properties['Self']
-        if ($selfProperty -and $selfProperty.Value) {
-            $self = $selfProperty.Value
-            $hostProperty = $self.PSObject.Properties['HostName']
-            $dnsProperty = $self.PSObject.Properties['DNSName']
-            $rawIdentity = if ($hostProperty) { [string]$hostProperty.Value } elseif ($dnsProperty) { [string]$dnsProperty.Value } else { '' }
-            $summary.selfHostname = ConvertTo-DevFleetTailscaleSafeIdentity $rawIdentity
-            if ($summary.selfHostname) { $summary.nodeIdentityMatch = $summary.selfHostname -ieq $ExpectedHostname }
-        }
-        if ($backend -ne 'Running') {
-            $summary.statusClass = if ($backend) { 'BACKEND_' + (($backend -replace '[^A-Za-z0-9]', '_').ToUpperInvariant()) } else { 'BACKEND_STATE_MISSING' }
-            return [pscustomobject]$summary
-        }
-        $ipProperty = $status.PSObject.Properties['TailscaleIPs']
-        foreach ($address in @(if ($ipProperty) { $ipProperty.Value } else { @() })) {
-            $parsed = $null
-            if ([Net.IPAddress]::TryParse([string]$address, [ref]$parsed) -and $parsed.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork) {
-                $bytes = $parsed.GetAddressBytes()
-                if ($bytes[0] -eq 100 -and $bytes[1] -ge 64 -and $bytes[1] -le 127) {
-                    $summary.authenticated = $true
-                    $summary.privateIpv4Observed = $true
-                    $summary.statusClass = 'RUNNING_PRIVATE_IPV4'
-                    return [pscustomobject]$summary
-                }
-            }
-        }
-        $summary.statusClass = 'RUNNING_NO_PRIVATE_IPV4'
-    } catch { }
-    return [pscustomobject]$summary
+    if ($null -ne $first) { return $first }
+    return [pscustomobject]@{ Status='Missing'; Path=''; Version=$null; Detail='No trusted machine executable, HKLM App Path, or vendor location matched.' }
 }
 
-function Get-DevFleetTailscalePairingFailureClass {
-    param([string]$Message)
-    $text = [string]$Message
-    if ($text -match '(?i)owning (stage )?deadline|stage time remains') { return 'OWNER_DEADLINE_EXPIRED' }
-    if ($text -match '(?i)timed out|timeout') { return 'COMMAND_TIMEOUT' }
-    if ($text -match '(?i)unable to start|start external|not found') { return 'COMMAND_START_FAILED' }
-    return 'COMMAND_FAILED'
+function Wait-DevFleetDependencyStatus {
+    param(
+        [Parameter(Mandatory)]$Dependency,
+        [datetime]$DeadlineUtc = [datetime]::MinValue,
+        [ValidateRange(1,10)][int]$MaximumAttempts = 3,
+        [scriptblock]$StatusProvider,
+        [scriptblock]$ClockProvider,
+        [scriptblock]$SleepProvider
+    )
+    $now={if($ClockProvider){[datetime](& $ClockProvider)}else{[datetime]::UtcNow}}
+    $sleep={param([double]$Seconds)if($SleepProvider){& $SleepProvider $Seconds}else{Start-Sleep -Milliseconds ([int][math]::Ceiling($Seconds*1000))}}
+    $start=(& $now).ToUniversalTime()
+    $deadline=if($DeadlineUtc -gt [datetime]::MinValue){$DeadlineUtc.ToUniversalTime()}else{$start.AddSeconds((Get-DevFleetOperationMaximumSeconds 'dependencyProbe'))}
+    $deadlineContext=Get-DevFleetDeadlineContext
+    if($deadlineContext -and ([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime() -lt $deadline){$deadline=([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime()}
+    $last=$null
+    for($attempt=1;$attempt -le $MaximumAttempts;$attempt++){
+        $remainingSeconds=[int][math]::Floor(($deadline-(& $now).ToUniversalTime()).TotalSeconds)
+        if($remainingSeconds -le 0){break}
+        $attemptsRemaining=$MaximumAttempts-$attempt+1
+        $probeTimeout=[math]::Max(1,[math]::Min(20,[int][math]::Floor($remainingSeconds/$attemptsRemaining)))
+        try {
+            $last=if($StatusProvider){& $StatusProvider $Dependency $deadline $probeTimeout}else{Get-DependencyStatus -Dependency $Dependency -ProbeTimeoutSeconds $probeTimeout -DeadlineUtc $deadline}
+        } catch {
+            $last=[pscustomobject]@{Status='Broken';Path='';Version=$null;Detail='Bounded dependency status provider failed.'}
+        }
+        if($last -and [string]$last.Status -cne 'Broken'){return $last}
+        if($attempt -ge $MaximumAttempts){break}
+        $remainingAfter=[math]::Floor(($deadline-(& $now).ToUniversalTime()).TotalSeconds)
+        if($remainingAfter -le 0){break}
+        & $sleep ([math]::Min(1,$remainingAfter))
+    }
+    if($last){return $last}
+    return [pscustomobject]@{Status='Broken';Path='';Version=$null;Detail='Dependency status deadline expired before a bounded probe completed.'}
 }
 
-function Write-DevFleetTailscalePairingEvent {
-    [CmdletBinding()]
-    param([string]$Path, [Parameter(Mandatory)][hashtable]$Event)
-    if ([string]::IsNullOrWhiteSpace($Path)) { return }
-    try {
-        $fullPath = [IO.Path]::GetFullPath($Path)
-        $parent = Split-Path -Parent $fullPath
-        if ([string]::IsNullOrWhiteSpace($parent)) { return }
-        if (-not (Test-Path -LiteralPath $parent -PathType Container)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-        $parentItem = Get-Item -LiteralPath $parent -Force -ErrorAction Stop
-        if (($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return }
-        if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
-            $fileItem = Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop
-            if (($fileItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return }
-        }
-        $allowed = @(
-            'schemaVersion','eventSequence','eventClass','timestampUtc','runId','transactionId','payloadSha256',
-            'stage','targetKind','targetRole','instanceName','requestedHostname','ownerDeadlineUtc',
-            'ownerProcessId','ownerSessionId','environmentUserInteractive','elevated',
-            'command','commandOutcome','commandOutputClass','exitCode','uriValidated','browserLaunchRequested',
-            'browserLaunchApiAccepted','browserProcessObserved','browserProcessId','browserProcessSessionId',
-            'browserSessionMatchesOwner','browserVisibility','statusClass','authenticated','authenticatedState',
-            'authenticatedStateTransition','selfHostname','nodeIdentityMatch','pollCount','lastStatusClass','failureClass',
-            'authProvider','expectedTag','enrollmentMode','expectedPeer','servicePort','servicePath','serviceState',
-            'authenticationAttempted','authenticationSucceeded','mutation','expectedTagMatch','selfOnline','hasTailscaleIp',
-            'blockingHealthError','tailnetLockStatus','tailnetLockObserved','serviceLayer','peerLayer','endpointLayer',
-            'credentialAvailable','credentialSource','serviceRecoveryCount','rebootRequired','boundary'
-        )
-        $record = [ordered]@{}
-        foreach ($name in $allowed) {
-            if ($Event.ContainsKey($name)) { $record[$name] = ConvertTo-DevFleetTailscaleSafeEvidenceValue -Value $Event[$name] -Name $name }
-        }
-        $line = ($record | ConvertTo-Json -Compress -Depth 8) + [Environment]::NewLine
-        $bytes = [Text.UTF8Encoding]::new($false).GetBytes($line)
-        $stream = [IO.FileStream]::new($fullPath, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::Read)
-        try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
-    } catch { }
+function Get-DevFleetDependencyProbeAttemptLimit {
+    param([Parameter(Mandatory)]$Dependency)
+    # Multipass may still be bringing its daemon/backend online immediately
+    # after a restored Windows checkpoint. Give only that proven transient gate
+    # five additional bounded probes; the existing dependencyProbe deadline,
+    # trusted-path checks, version policy, and fail-closed result handling stay
+    # unchanged.
+    if ([string]$Dependency.id -ceq 'multipass') { return 8 }
+    return 3
 }
 
-function Get-DevFleetAuthenticatedTailscaleIPv4 {
-    param([string]$StatusJson)
-    try {
-        $status=$StatusJson|ConvertFrom-Json -ErrorAction Stop
-        if([string]$status.BackendState-cne'Running'){return $null}
-        foreach($address in @($status.TailscaleIPs)){
-            $parsed=$null
-            if([Net.IPAddress]::TryParse([string]$address,[ref]$parsed)-and$parsed.AddressFamily-eq[Net.Sockets.AddressFamily]::InterNetwork){
-                $bytes=$parsed.GetAddressBytes()
-                if($bytes[0]-eq100-and$bytes[1]-ge64-and$bytes[1]-le127){return $parsed.ToString()}
-            }
-        }
-    } catch {}
+
+function Get-TailscaleExe {
+    foreach ($candidate in @(
+        (Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Tailscale\tailscale.exe')
+    )) { if ($candidate -and (Test-TrustedExecutableCandidate $candidate)) { return $candidate } }
+    throw 'Tailscale is not installed in a trusted machine location.'
+}
+
+function Get-VsCodeCli {
+    param([switch]$AllowPerUser)
+    foreach ($candidate in @(
+        (Join-Path $env:ProgramFiles 'Microsoft VS Code\bin\code.cmd'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft VS Code\bin\code.cmd')
+    )) { if ($candidate -and (Test-TrustedExecutableCandidate $candidate)) { return $candidate } }
+    if ($AllowPerUser) {
+        $user = Join-Path $env:LOCALAPPDATA 'Programs\Microsoft VS Code\bin\code.cmd'
+        if ($user -and (Test-Path -LiteralPath $user -PathType Leaf) -and -not ((Get-Item -LiteralPath $user -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $user }
+    }
     return $null
 }
 
-function Get-DevFleetTailscaleOAuthSecretPath {
-    Join-Path (Join-Path (Get-DevFleetStateRoot) 'secrets') 'tailscale-oauth-client.secret'
-}
-
-function Get-DevFleetTailscaleEnrollmentProfilePath {
-    Join-Path (Join-Path (Get-DevFleetStateRoot) 'secrets') 'tailscale-enrollment-profile.json'
-}
-
-function ConvertTo-DevFleetTailscaleSafeOutput {
-    param([AllowNull()][object]$Value)
-    if ($null -eq $Value) { return '' }
-    $text = [string]$Value
-    if ([string]::IsNullOrEmpty($text)) { return '' }
-    # Keep command diagnostics useful without allowing a caller to leak a
-    # forgotten bearer, OAuth, auth-key, or API credential into evidence.
-    $text = [regex]::Replace($text, '(?i)tskey-[A-Za-z0-9._~+/=-]+', '<redacted-tskey>')
-    $text = [regex]::Replace($text, '(?i)(Bearer\s+)[A-Za-z0-9._~+/=-]+', '$1<redacted-token>')
-    $text = [regex]::Replace($text, '(?i)(\b(?:oauth|client-secret|client_secret|access-token|access_token|api-token|api_token|auth-key|auth_key|token|secret)\b\s*[:=]\s*)[^\s,;]+', '$1<redacted-secret>')
-    return $text
-}
-
-function ConvertTo-DevFleetTailscaleSafeEvidenceValue {
-    param([AllowNull()][object]$Value,[int]$Depth=0,[string]$Name='')
-    if ($Depth -gt 4) { return '<redacted-depth>' }
-    if ($Name -match '(?i)(?:secret|password|token|auth.?key|authorization|bearer|credential)') { return '<redacted-secret>' }
-    if ($null -eq $Value) { return $null }
-    if ($Value -is [string]) { return ConvertTo-DevFleetTailscaleSafeOutput $Value }
-    if ($Value -is [bool] -or $Value -is [int] -or $Value -is [long] -or $Value -is [double] -or $Value -is [decimal]) { return $Value }
-    if ($Value -is [System.Collections.IDictionary]) {
-        $record=[ordered]@{}
-        foreach($key in $Value.Keys){$record[[string]$key]=ConvertTo-DevFleetTailscaleSafeEvidenceValue -Value $Value[$key] -Depth ($Depth+1) -Name ([string]$key)}
-        return $record
-    }
-    if ($Value -is [System.Collections.IEnumerable] -and -not ($Value -is [string])) {
-        return @($Value | ForEach-Object { ConvertTo-DevFleetTailscaleSafeEvidenceValue -Value $_ -Depth ($Depth+1) -Name $Name })
-    }
-    $properties=@($Value.PSObject.Properties)
-    if ($properties.Count -gt 0) {
-        $record=[ordered]@{}
-        foreach($property in $properties){$record[[string]$property.Name]=ConvertTo-DevFleetTailscaleSafeEvidenceValue -Value $property.Value -Depth ($Depth+1) -Name ([string]$property.Name)}
-        return $record
-    }
-    return ConvertTo-DevFleetTailscaleSafeOutput $Value
-}
-
-function Set-DevFleetTailscaleProtectedFileAcl {
-    param([Parameter(Mandatory)][string]$Path)
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().User
-    $security = [Security.AccessControl.FileSecurity]::new()
-    $security.SetAccessRuleProtection($true, $false)
-    $security.SetOwner($identity)
-    foreach ($rule in @(
-        [Security.AccessControl.FileSystemAccessRule]::new('BUILTIN\Administrators','FullControl','Allow'),
-        [Security.AccessControl.FileSystemAccessRule]::new('NT AUTHORITY\SYSTEM','FullControl','Allow'),
-        [Security.AccessControl.FileSystemAccessRule]::new($identity,'FullControl','Allow')
-    )) { $security.AddAccessRule($rule) | Out-Null }
-    Set-Acl -LiteralPath $Path -AclObject $security -ErrorAction Stop
-}
-
-function Set-DevFleetTailscaleOAuthClientSecret {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][securestring]$Secret)
-    $path = Get-DevFleetTailscaleOAuthSecretPath
-    $parent = Split-Path -Parent $path
-    New-Item -ItemType Directory -Path $parent -Force | Out-Null
-    $bstr = [IntPtr]::Zero
-    $plain = $null
-    $temporary = "$path.$([guid]::NewGuid().ToString('N')).tmp"
-    try {
-        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secret)
-        $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-        if ([string]::IsNullOrWhiteSpace($plain) -or $plain.IndexOfAny([char[]]"`0`r`n") -ge 0 -or $plain.Length -gt 2048) { throw 'Tailscale OAuth client secret is empty or malformed.' }
-        # Create and ACL the temporary file before writing credential bytes.
-        [IO.File]::WriteAllText($temporary, '', [Text.UTF8Encoding]::new($false))
-        Set-DevFleetTailscaleProtectedFileAcl -Path $temporary
-        [IO.File]::WriteAllText($temporary, $plain + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
-        Move-Item -LiteralPath $temporary -Destination $path -Force
-        Set-DevFleetTailscaleProtectedFileAcl -Path $path
-        Protect-DevFleetStateAcl
-        return $path
-    } finally {
-        if ($bstr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-        $plain = $null
-        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
-    }
-}
-
-function Get-DevFleetTailscaleOAuthClientSecret {
-    $path = Get-DevFleetTailscaleOAuthSecretPath
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
-    $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
-    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'TAILSCALE_CREDENTIAL_INVALID: OAuth credential path is a reparse point.' }
-    $value = (Get-Content -LiteralPath $path -Raw -ErrorAction Stop).Trim()
-    if ([string]::IsNullOrWhiteSpace($value) -or $value.IndexOfAny([char[]]"`0`r`n") -ge 0 -or $value.Length -gt 2048) { throw 'TAILSCALE_CREDENTIAL_INVALID: OAuth client secret file is malformed.' }
-    return $value
-}
-
-function Get-DevFleetTailscaleEnrollmentProfile {
-    param([string]$Path='')
-    $default = [ordered]@{ mode='persistent'; tag='tag:devfleet'; ephemeral=$false; preauthorized=$true; hostName=''; guestHostnames=@{} }
-    $path = if($Path){$Path}else{Get-DevFleetTailscaleEnrollmentProfilePath}
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return [pscustomobject]$default }
-    try {
-        $value = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        $mode = [string]$value.mode
-        $tag = [string]$value.tag
-        if ($mode -notin @('persistent','e2e') -or $tag -notin @('tag:devfleet','tag:devfleet-e2e')) { throw 'profile mode or tag is not allowlisted' }
-        $ephemeral = [bool]$value.ephemeral
-        $preauthorized = [bool]$value.preauthorized
-        if ($mode -eq 'e2e' -and (-not $ephemeral -or $tag -cne 'tag:devfleet-e2e')) { throw 'E2E profile must be ephemeral and use tag:devfleet-e2e' }
-        if ($mode -eq 'persistent' -and ($ephemeral -or $tag -cne 'tag:devfleet')) { throw 'persistent profile must be non-ephemeral and use tag:devfleet' }
-        $hostName = [string]$value.hostName
-        if ($hostName -and $hostName -notmatch '^[A-Za-z0-9][A-Za-z0-9-]{0,62}$') { throw 'profile hostName is malformed' }
-        $guestHostnames = @{}
-        if ($value.PSObject.Properties['guestHostnames'] -and $value.guestHostnames) {
-            foreach ($property in @($value.guestHostnames.PSObject.Properties)) {
-                if ([string]$property.Name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$' -or [string]$property.Value -notmatch '^[A-Za-z0-9][A-Za-z0-9-]{0,62}$') { throw 'profile guest hostname is malformed' }
-                $guestHostnames[[string]$property.Name] = [string]$property.Value
-            }
-        }
-        return [pscustomobject][ordered]@{ mode=$mode; tag=$tag; ephemeral=$ephemeral; preauthorized=$preauthorized; hostName=$hostName; guestHostnames=$guestHostnames }
-    } catch { throw "TAILSCALE_CREDENTIAL_INVALID: enrollment profile is invalid: $($_.Exception.Message)" }
-}
-
-function Resolve-DevFleetTailscaleProfileHostname {
-    param([Parameter(Mandatory)][psobject]$Profile,[Parameter(Mandatory)][string]$RequestedHostname,[string]$InstanceName)
-    $hostname = $RequestedHostname
-    $hostNameProperty = $Profile.PSObject.Properties['hostName']
-    $guestHostnamesProperty = $Profile.PSObject.Properties['guestHostnames']
-    $profileHostName = if ($hostNameProperty) { [string]$hostNameProperty.Value } else { '' }
-    $guestHostnames = if ($guestHostnamesProperty) { $guestHostnamesProperty.Value } else { $null }
-    if ([string]$Profile.mode -ceq 'e2e') {
-        if (-not $InstanceName -and $profileHostName) { $hostname = $profileHostName }
-        elseif ($InstanceName -and $guestHostnames) {
-            $mapped = $null
-            if ($guestHostnames -is [hashtable]) {
-                if ($guestHostnames.ContainsKey($InstanceName)) { $mapped = $guestHostnames[$InstanceName] }
-            } else {
-                $property = $guestHostnames.PSObject.Properties[$InstanceName]
-                if ($property) { $mapped = $property.Value }
-            }
-            if ($null -ne $mapped -and [string]$mapped) { $hostname = [string]$mapped }
-        }
-    }
-    return $hostname
-}
-
-function Get-DevFleetTailscaleEnrollmentOptions {
-    param([Parameter(Mandatory)][string]$RequestedHostname,[string]$InstanceName,[string]$TargetRole)
-    $profile = Get-DevFleetTailscaleEnrollmentProfile
-    $hostname = Resolve-DevFleetTailscaleProfileHostname -Profile $profile -RequestedHostname $RequestedHostname -InstanceName $InstanceName
-    if ($hostname -notmatch '^[A-Za-z0-9][A-Za-z0-9-]{0,62}$') { throw 'TAILSCALE_CREDENTIAL_INVALID: resolved Tailscale hostname is malformed.' }
-    $credential = $null
-    try { $credential = Get-DevFleetTailscaleOAuthClientSecret } catch { throw }
-    if ([string]::IsNullOrWhiteSpace($credential)) { throw 'TAILSCALE_CREDENTIAL_MISSING: configure the protected Tailscale OAuth client secret before authentication.' }
-    [pscustomobject][ordered]@{
-        mode=[string]$profile.mode; tag=[string]$profile.tag; ephemeral=[bool]$profile.ephemeral; preauthorized=[bool]$profile.preauthorized
-        hostname=$hostname; targetRole=if($TargetRole){$TargetRole}else{''}; instanceName=if($InstanceName){$InstanceName}else{''}; secret=$credential
-        credentialSource='protected-local-file'
-    }
-}
-
-function Get-DevFleetTailscaleReadiness {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$StatusJson,[Parameter(Mandatory)][string]$ExpectedHostname,[string]$ExpectedTag,[string]$PreferencesJson)
-    $result = [ordered]@{
-        schemaVersion=1; ready=$false; statusClass='MALFORMED'; failureClass='TAILSCALE_HEALTH_ERROR'; backendState=''; authenticated=$false; selfOnline=$false
-        hasTailscaleIp=$false; tailscaleIpv4=''; selfHostname=''; nodeIdentityMatch=$null; expectedTag=if($ExpectedTag){$ExpectedTag}else{''}; tags=@(); expectedTagMatch=$null
-        blockingHealthError=$false; preferenceObserved=$false; serviceLayer='NOT_CHECKED'; peerLayer='NOT_CHECKED'; endpointLayer='NOT_CHECKED'
-    }
-    try {
-        $status = $StatusJson | ConvertFrom-Json -ErrorAction Stop
-        $result.backendState = [string]$status.BackendState
-        $self = $status.Self
-        if ($self) {
-            $rawName = if ($self.PSObject.Properties['HostName']) { [string]$self.HostName } elseif ($self.PSObject.Properties['DNSName']) { [string]$self.DNSName } else { '' }
-            $result.selfHostname = ConvertTo-DevFleetTailscaleSafeIdentity $rawName
-            $result.selfOnline = if ($self.PSObject.Properties['Online']) { [bool]$self.Online } else { $false }
-            if ($result.selfHostname) { $result.nodeIdentityMatch = $result.selfHostname -ieq $ExpectedHostname }
-            if ($self.PSObject.Properties['Tags'] -and $self.Tags) { $result.tags=@($self.Tags | ForEach-Object { ConvertTo-DevFleetTailscaleSafeOutput $_ } | Where-Object { $_ }) }
-        }
-        if ($PreferencesJson) {
-            try {
-                $preferences=$PreferencesJson|ConvertFrom-Json -ErrorAction Stop
-                if ($preferences.PSObject.Properties['AdvertiseTags']) {
-                    $result.preferenceObserved=$true
-                    $result.tags=@($preferences.AdvertiseTags | ForEach-Object { [string]$_ } | Where-Object { $_ -match '^tag:[A-Za-z0-9][A-Za-z0-9_-]*$' })
-                }
-            } catch { }
-        }
-        $health = @()
-        if ($status.PSObject.Properties['Health'] -and $status.Health) { $health=@($status.Health | ForEach-Object { [string]$_ } | Where-Object { $_ -and $_ -notmatch '^(?i)ok$' }) }
-        $result.blockingHealthError = $health.Count -gt 0
-        foreach ($address in @($status.TailscaleIPs)) {
-            $parsed=$null
-            if ([Net.IPAddress]::TryParse([string]$address,[ref]$parsed) -and $parsed.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork) {
-                $bytes=$parsed.GetAddressBytes()
-                if ($bytes[0] -eq 100 -and $bytes[1] -ge 64 -and $bytes[1] -le 127) { $result.hasTailscaleIp=$true; $result.tailscaleIpv4=$parsed.ToString(); break }
-            }
-        }
-        $result.authenticated = $result.backendState -eq 'Running' -and $result.selfOnline -and $result.hasTailscaleIp
-        if ($ExpectedTag) { $result.expectedTagMatch = $result.tags -contains $ExpectedTag }
-        if ($result.backendState -in @('NeedsLogin','NoState')) { $result.statusClass='NEEDS_LOGIN';$result.failureClass='TAILSCALE_NEEDS_LOGIN' }
-        elseif (-not $result.backendState -or $result.backendState -in @('Stopped','Starting','Stopping')) { $result.statusClass='CONTROL_PLANE_OFFLINE';$result.failureClass='TAILSCALE_CONTROL_PLANE_OFFLINE' }
-        elseif ($result.blockingHealthError) { $result.statusClass='HEALTH_ERROR';$result.failureClass='TAILSCALE_HEALTH_ERROR' }
-        elseif (-not $result.hasTailscaleIp) { $result.statusClass='NO_IP';$result.failureClass='TAILSCALE_NO_IP' }
-        elseif (-not $result.selfOnline) { $result.statusClass='OFFLINE';$result.failureClass='TAILSCALE_CONTROL_PLANE_OFFLINE' }
-        elseif ($result.nodeIdentityMatch -ne $true) { $result.statusClass='WRONG_IDENTITY';$result.failureClass='TAILSCALE_WRONG_TAG' }
-        elseif ($ExpectedTag -and $result.expectedTagMatch -ne $true) { $result.statusClass='WRONG_TAG';$result.failureClass='TAILSCALE_WRONG_TAG' }
-        else { $result.statusClass='READY';$result.failureClass='';$result.ready=$true }
-    } catch { $result.statusClass='MALFORMED';$result.failureClass='TAILSCALE_HEALTH_ERROR' }
-    [pscustomobject]$result
-}
-
-function Invoke-DevFleetTailscalePeerAndEndpointReadiness {
-    param(
-        [Parameter(Mandatory)][psobject]$Readiness,
-        [string]$ExpectedPeer,
-        [int]$ServicePort,
-        [string]$ServicePath,
-        [Parameter(Mandatory)][scriptblock]$TailscaleInvoker,
-        [string]$FilePath,
-        [string]$InstanceName,
-        [scriptblock]$EndpointInvoker,
-        [datetime]$DeadlineUtc=[datetime]::UtcNow.AddSeconds(30)
-    )
-    if ($ExpectedPeer) {
-        # Reobserve transient peer convergence inside the original ten-second
-        # command budget. Neither retries nor backoff extend the owner deadline
-        # or consume its existing five-second terminalization reserve.
-        $peerDeadlineUtc=[datetime]::UtcNow.AddSeconds(10)
-        $ownerPeerDeadlineUtc=$DeadlineUtc.ToUniversalTime().AddSeconds(-5)
-        if ($ownerPeerDeadlineUtc -lt $peerDeadlineUtc) { $peerDeadlineUtc=$ownerPeerDeadlineUtc }
-        $Readiness.peerLayer='FAIL';$Readiness.endpointLayer=if($ServicePort){'BLOCKED_BY_PEER'}else{'NOT_CONFIGURED'};$Readiness.failureClass='TAILSCALE_PEER_UNREACHABLE';$Readiness.ready=$false
-        for ($peerAttempt=1; $peerAttempt -le 3; $peerAttempt++) {
-            $remaining=[int][math]::Floor(($peerDeadlineUtc-[datetime]::UtcNow).TotalSeconds)
-            if ($remaining -le 0) { break }
-            $pingSeconds=[math]::Min(5,$remaining)
-            $peerResult = & $TailscaleInvoker @('ping','--tsmp','--c=1',("--timeout=${pingSeconds}s"),'--until-direct=false',$ExpectedPeer) $remaining
-            if ($peerResult -is [string]) { $peerResult=[pscustomobject]@{exitCode=0;output=[string]$peerResult} }
-            $peerOutput=ConvertTo-DevFleetTailscaleSafeOutput ([string]$peerResult.output)
-            if ([int]$peerResult.exitCode -eq 0) {
-                if ([datetime]::UtcNow -le $peerDeadlineUtc) { $Readiness.peerLayer='PASS' }
-                break
-            }
-            if ($peerOutput -match '(?i)acl|denied|not permitted') { $Readiness.failureClass='TAILSCALE_ACL_BLOCKED';break }
-            if ([int]$peerResult.exitCode -eq 124 -or $peerAttempt -ge 3) { break }
-            $remainingMilliseconds=[math]::Floor(($peerDeadlineUtc-[datetime]::UtcNow).TotalMilliseconds)
-            if ($remainingMilliseconds -le 1000) { break }
-            Start-Sleep -Milliseconds ([int][math]::Min(1000,($remainingMilliseconds-1000)))
-        }
-        if ($Readiness.peerLayer -ne 'PASS') { return $Readiness }
-    } elseif ($ServicePort) {
-        $Readiness.peerLayer='BLOCKED_NO_PEER';$Readiness.endpointLayer='BLOCKED_NO_PEER';$Readiness.failureClass='DEVFLEET_SERVICE_UNREACHABLE_OVER_TAILSCALE';$Readiness.ready=$false;return $Readiness
-    }
-    if ($ServicePort) {
-        $uri="http://${ExpectedPeer}:$ServicePort$ServicePath"
-        $endpointResult=$null
-        if ($EndpointInvoker) {
-            $endpointResult=& $EndpointInvoker $ExpectedPeer $ServicePort $ServicePath
-            if ($endpointResult -is [string]) { $endpointResult=[pscustomobject]@{exitCode=0;output=[string]$endpointResult} }
-        } elseif ($InstanceName) {
-            $remaining=[int][math]::Floor(($DeadlineUtc.ToUniversalTime()-[datetime]::UtcNow).TotalSeconds)-2
-            if ($remaining -le 0) { $endpointResult=[pscustomobject]@{exitCode=124;output='owner deadline expired'} }
-            else {
-                try {$output=Invoke-External -FilePath $FilePath -ArgumentList @('exec',$InstanceName,'--','curl','--fail','--silent','--show-error','--max-time','10',$uri) -Capture -AllowedExitCodes @(0) -TimeoutSeconds ([math]::Min(10,$remaining)) -DeadlineUtc $DeadlineUtc;$endpointResult=[pscustomobject]@{exitCode=0;output=$output}}
-                catch {$endpointResult=[pscustomobject]@{exitCode=if($_.Exception.Message -match '(?i)deadline|timed out|timeout'){124}else{1};output=$_.Exception.Message}}
-            }
-        } else {
-            try {Invoke-WebRequest -UseBasicParsing -Uri $uri -TimeoutSec 10 -ErrorAction Stop|Out-Null;$endpointResult=[pscustomobject]@{exitCode=0;output=''}}catch{$endpointResult=[pscustomobject]@{exitCode=if($_.Exception.Message -match '(?i)deadline|timed out|timeout'){124}else{1};output=$_.Exception.Message}}
-        }
-        if ([int]$endpointResult.exitCode -ne 0) {$Readiness.endpointLayer='FAIL';$Readiness.failureClass='DEVFLEET_SERVICE_UNREACHABLE_OVER_TAILSCALE';$Readiness.ready=$false;return $Readiness}
-        $Readiness.endpointLayer='PASS'
-    }
-    $Readiness.ready=$true;$Readiness.failureClass='';return $Readiness
-}
-
-function ConvertTo-DevFleetTailscaleNativeArguments {
-    param(
-        [string]$InstanceName,
-        [Parameter(Mandatory)][ValidateSet('Tailscale','System')][string]$CommandKind,
-        [Parameter(Mandatory)][string[]]$Arguments
-    )
-    if (-not $InstanceName) { return @($Arguments) }
-    $prefix = @('exec', $InstanceName, '--', 'sudo')
-    if ($CommandKind -ceq 'Tailscale') { $prefix += 'tailscale' }
-    return @($prefix + $Arguments)
-}
-
-function Invoke-DevFleetTailscaleOAuthPairing {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$FilePath,
-        [string]$InstanceName,
-        [Parameter(Mandatory)][string]$Hostname,
-        [Parameter(Mandatory)][datetime]$DeadlineUtc,
-        [string]$EvidencePath = '',
-        [string]$RunId = '',
-        [string]$TransactionId = '',
-        [string]$PayloadSha256 = '',
-        [string]$StageName = 'tailscale',
-        [string]$TargetRole = '',
-        [string]$ExpectedPeer = '',
-        [ValidateRange(0,65535)][int]$ServicePort = 0,
-        [string]$ServicePath = '/healthz',
-         [scriptblock]$CommandInvoker,
-         [scriptblock]$EndpointInvoker,
-         [scriptblock]$EnrollmentProfileProvider,
-         [scriptblock]$EnrollmentOptionsProvider,
-         [scriptblock]$TailnetLockProvider,
-         [scriptblock]$ServiceStateProvider,
-         [scriptblock]$ServiceStartProvider,
-         [scriptblock]$PendingRebootProvider
-    )
-    if ($Hostname -notmatch '^[A-Za-z0-9][A-Za-z0-9-]{0,62}$' -or ($InstanceName -and $InstanceName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$')) { throw 'Tailscale pairing target identity is invalid.' }
-    if ($ExpectedPeer -and $ExpectedPeer -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$|^(?:100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3})$') { throw 'Tailscale expected peer identity is invalid.' }
-    if ($ServicePort -and $ServicePath -notmatch '^/[A-Za-z0-9._~!$&''()*+,;=:@%/-]{0,255}$') { throw 'DevFleet service readiness path is invalid.' }
-    if (-not $TransactionId) { try { $TransactionId = [string](Get-ActiveDevFleetTransaction).transactionId } catch { } }
-    if (-not $PayloadSha256) { try { $PayloadSha256 = [string](Get-ActiveDevFleetTransaction).payloadSha256 } catch { } }
-    if ($TransactionId -notmatch '^[0-9a-fA-F]{32}$') { $TransactionId = '' }
-    if ($PayloadSha256 -notmatch '^[0-9a-fA-F]{64}$') { $PayloadSha256 = '' }
-    $safeRunId = if ($RunId) { $RunId } else { [string]$env:DEVFLEET_RUN_ID }
-    if ($safeRunId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { $safeRunId = '' }
-    $safeStage=ConvertTo-DevFleetTailscaleSafeIdentity $StageName;$safeRole=ConvertTo-DevFleetTailscaleSafeIdentity $TargetRole;$safeInstance=ConvertTo-DevFleetTailscaleSafeIdentity $InstanceName
-    $ownerSessionId=0;try{$ownerSessionId=[Diagnostics.Process]::GetCurrentProcess().SessionId}catch{}
-    $elevated=$false;try{$elevated=[bool](Test-Administrator)}catch{}
-    $targetKind=if($InstanceName){'guest'}else{'windows'}
-    $eventContext=@{schemaVersion=1;runId=$safeRunId;transactionId=$TransactionId;payloadSha256=$PayloadSha256;stage=$safeStage;targetKind=$targetKind;targetRole=$safeRole;instanceName=$safeInstance;requestedHostname=$Hostname;ownerDeadlineUtc=$DeadlineUtc.ToUniversalTime().ToString('o');ownerProcessId=$PID;ownerSessionId=$ownerSessionId;environmentUserInteractive=[Environment]::UserInteractive;elevated=$elevated;authProvider='OAuthClientSecret';expectedTag='';enrollmentMode='';expectedPeer=if($ExpectedPeer){$ExpectedPeer}else{''};servicePort=$ServicePort;servicePath=if($ServicePath){$ServicePath}else{''}}
-    $writeEvent={param([string]$Class,[hashtable]$Extra=@{});$script:DevFleetTailscalePairingEventSequence++;$event=@{};foreach($key in $eventContext.Keys){$event[$key]=$eventContext[$key]};$event.schemaVersion=1;$event.eventSequence=$script:DevFleetTailscalePairingEventSequence;$event.eventClass=$Class;$event.timestampUtc=[datetime]::UtcNow.ToString('o');foreach($key in $Extra.Keys){$event[$key]=$Extra[$key]};Write-DevFleetTailscalePairingEvent -Path $EvidencePath -Event $event}
-    $context=Get-DevFleetDeadlineContext;if($context-and([datetime]$context.StageDeadlineUtc).ToUniversalTime()-lt$DeadlineUtc){$DeadlineUtc=([datetime]$context.StageDeadlineUtc).ToUniversalTime()};$eventContext.ownerDeadlineUtc=$DeadlineUtc.ToUniversalTime().ToString('o')
-    $authenticationAttempted=$false;$serviceStartCount=0
-    $checkPendingReboot={param([string]$Boundary)
-        if(-not $PendingRebootProvider){return}
-        if([bool](& $PendingRebootProvider)){
-            &$writeEvent 'REBOOT_REQUIRED_DURING_TAILSCALE' @{authenticatedState='NOT_READY';authenticationAttempted=[bool]$authenticationAttempted;rebootRequired=$true;boundary=$Boundary}
-            throw "DEVFLEET_REBOOT_REQUIRED: Windows servicing requires a reboot at the $Boundary boundary."
-        }
-    }
-    &$writeEvent 'OAUTH_PAIRING_STARTED' @{authenticatedState='NOT_OBSERVED';authenticationAttempted=$false}
-    &$checkPendingReboot 'stage-entry'
-    $invoke={param([string[]]$Arguments,[int]$MaximumSeconds=20)
-        $verb=[string]$Arguments[0];$remaining=[int][math]::Floor(($DeadlineUtc-[datetime]::UtcNow).TotalSeconds)-5
-        if($remaining-le0){&$writeEvent 'COMMAND_BLOCKED_DEADLINE' @{command=$verb;commandOutcome='BLOCKED';failureClass='OWNER_DEADLINE_EXPIRED'};throw 'Tailscale OAuth pairing exceeded the owning stage deadline.'}
-        $limit=[math]::Min($MaximumSeconds,$remaining);$commandKind=if($verb-ceq'systemctl'){'System'}else{'Tailscale'};$native=ConvertTo-DevFleetTailscaleNativeArguments -InstanceName $InstanceName -CommandKind $commandKind -Arguments $Arguments
-        &$writeEvent 'COMMAND_STARTED' @{command=$verb;commandOutcome='STARTED'}
+function Get-MultipassExe {
+    # Multipass is intentionally allowed to be unsigned after installation only
+    # when the canonical dependency policy binds it to a signed installer and a
+    # locked machine path.  Resolve through that same policy as Ensure-Dependency
+    # so runtime helpers cannot reject a legitimate install (or invent a weaker
+    # trust rule of their own).
+    $packageRoot = Get-DevFleetPackageRoot
+    $manifest = Get-CanonicalDependencyManifest -PackageRoot $packageRoot
+    $dependency = @($manifest.dependencies | Where-Object id -eq 'multipass' | Select-Object -First 1)
+    if (-not $dependency) { throw 'Canonical Multipass dependency policy is missing.' }
+    $cachedVariable=Get-Variable -Scope Script -Name DevFleetMultipassResolution -ErrorAction SilentlyContinue
+    if($cachedVariable -and $cachedVariable.Value){
+        $cached=$cachedVariable.Value
         try {
-            if($CommandInvoker){$response=&$CommandInvoker $Arguments;if($response -is [string]){$response=[pscustomobject]@{exitCode=0;output=[string]$response}};if(-not $response){throw 'command invoker returned no response'};$output=[string]$response.output;$exitCode=[int]$response.exitCode}
-            else{try{$output=Invoke-External -FilePath $FilePath -ArgumentList $native -Capture -AllowedExitCodes @(0) -TimeoutSeconds $limit -DeadlineUtc $DeadlineUtc;$exitCode=0}catch{$output=$_.Exception.Message;$exitCode=if($output -match '(?i)deadline|timed out|timeout'){124}else{1}}}
-             $outputClass=if($verb-ceq'up'){if($exitCode-eq0){'ENROLLMENT_ACCEPTED'}else{'ENROLLMENT_REJECTED'}}else{ConvertTo-DevFleetTailscaleSafeOutput ($output|Select-Object -First 1)}
-             &$writeEvent 'COMMAND_COMPLETED' @{command=$verb;commandOutcome=if($exitCode-eq0){'COMPLETED'}else{'FAILED'};commandOutputClass=$outputClass;exitCode=$exitCode}
-             &$checkPendingReboot ("command:$verb")
-             return [pscustomobject]@{exitCode=$exitCode;output=$output}
-        } catch {if([string]$_.Exception.Message -notmatch '^DEVFLEET_REBOOT_REQUIRED:'){&$writeEvent 'COMMAND_FAILED' @{command=$verb;commandOutcome='FAILED';failureClass='COMMAND_FAILED'}};throw}
+            if((Test-TrustedExecutableCandidate ([string]$cached.Path) -Dependency $dependency) -and (Get-FileHash -LiteralPath ([string]$cached.Path) -Algorithm SHA256).Hash.ToLowerInvariant() -ceq [string]$cached.Sha256){return [string]$cached.Path}
+        } catch {}
+        $script:DevFleetMultipassResolution=$null
     }
-    $serviceState='RUNNING'
+    $deadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetOperationMaximumSeconds 'dependencyProbe'))
+    $deadlineContext=Get-DevFleetDeadlineContext
+    if($deadlineContext -and ([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime() -lt $deadline){$deadline=([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime()}
+    $status = Wait-DevFleetDependencyStatus -Dependency $dependency -DeadlineUtc $deadline -MaximumAttempts (Get-DevFleetDependencyProbeAttemptLimit -Dependency $dependency)
+    if ($status.Status -eq 'Compatible' -and $status.Path) {
+        $script:DevFleetMultipassResolution=[pscustomobject]@{Path=[string]$status.Path;Sha256=(Get-FileHash -LiteralPath ([string]$status.Path) -Algorithm SHA256).Hash.ToLowerInvariant();Version=[string]$status.Version}
+        return [string]$status.Path
+    }
+    throw "Multipass is not installed in a trusted machine location or compatible state: $($status.Status)."
+}
+
+
+function Assert-MultipassIsolation {
+    param([string[]]$InstanceNames = @())
+    $mp = Get-MultipassExe
+    $setting = Invoke-External $mp @('get','local.privileged-mounts') -Capture
+    if ($setting.Trim().ToLowerInvariant() -ne 'false') {
+        throw 'Multipass host mounts are not disabled. Run: multipass set local.privileged-mounts=false'
+    }
+    foreach ($name in $InstanceNames) {
+        if (-not $name -or -not (Test-MultipassInstance $name)) { continue }
+        $raw = Invoke-External $mp @('info',$name,'--format','json') -Capture
+        $data = $raw | ConvertFrom-Json
+        $prop = $data.info.PSObject.Properties[$name]
+        if (-not $prop) { throw "Multipass info did not contain instance $name." }
+        $info = $prop.Value
+        if ($info.PSObject.Properties.Name -contains 'mounts' -and $null -ne $info.mounts) {
+            $mountCount = 0
+            if ($info.mounts -is [System.Array]) {
+                $mountCount = @($info.mounts).Count
+            } elseif ($info.mounts -is [string]) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$info.mounts)) { $mountCount = 1 }
+            } else {
+                $mountCount = @($info.mounts.PSObject.Properties).Count
+            }
+            if ($mountCount -gt 0) { throw "$name has one or more host mounts. Remove them before using DevFleet." }
+        }
+    }
+}
+
+function Get-MultipassInstances {
+    $mp = Get-MultipassExe
+    $raw = Invoke-External $mp @('list','--format','json') -Capture
+    if (-not $raw) { return @() }
+    $data = $raw | ConvertFrom-Json
+    @($data.list)
+}
+
+function Test-MultipassInstance { param([string]$Name) [bool](Get-MultipassInstances | Where-Object name -eq $Name) }
+
+function Wait-MultipassReady {
+    param([string]$Name,[int]$TimeoutSeconds=600,[datetime]$DeadlineUtc=[datetime]::MinValue)
+    $mp = Get-MultipassExe
+    if($TimeoutSeconds -le 0){throw 'Multipass readiness timeout must be positive.'}
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $context = Get-DevFleetDeadlineContext
+    if($DeadlineUtc -gt [datetime]::MinValue -and $DeadlineUtc.ToUniversalTime() -lt $deadline){$deadline=$DeadlineUtc.ToUniversalTime()}
+    elseif($context -and [datetime]$context.StageDeadlineUtc -lt $deadline){$deadline=[datetime]$context.StageDeadlineUtc.ToUniversalTime()}
+    $attempt=0
+    while([DateTime]::UtcNow -lt $deadline) {
+        $attempt++
+        $out = $null
+        try {
+            # Probe without --wait so the outer deadline remains authoritative. Newer
+            # cloud-init versions expose JSON; older versions use the normalized text
+            # fallback below. Exit code 2 is not itself a readiness result.
+            $remaining=[int][math]::Floor(($deadline-[DateTime]::UtcNow).TotalSeconds)
+            if($remaining -le 0){break}
+            $out = Invoke-External $mp @('exec',$Name,'--','bash','-lc','cloud-init status --format=json 2>&1 || cloud-init status 2>&1') -Capture -IgnoreExitCode -TimeoutSeconds ([math]::Min(900,$remaining)) -DeadlineUtc $deadline
+        } catch {
+            $remaining=[math]::Max(0,($deadline-[DateTime]::UtcNow).TotalSeconds)
+            Write-Verbose "Multipass readiness probe $attempt failed for $Name; retrying with $([math]::Round($remaining,1)) seconds remaining."
+            if($remaining -le 0){break}
+            Start-Sleep -Milliseconds ([int][math]::Min(5000,[math]::Max(100,$remaining*1000)))
+            continue
+        }
+        $normalized=[regex]::Replace([string]$out,'\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\a]*(?:\a|\x1B\\))','')
+        $normalized=$normalized -replace '[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]',''
+        $state=$null
+        try {
+            $structured=$normalized.Trim() | ConvertFrom-Json
+            if($structured -and $structured.PSObject.Properties.Name -contains 'status'){$state=[string]$structured.status}
+            if($structured -and $structured.PSObject.Properties.Name -contains 'extended_status' -and [string]$structured.extended_status -match '(?i)error|degraded|fail'){$state='error'}
+        } catch { }
+        if(-not $state){
+            if($normalized -match '(?im)^\s*status:\s*done\s*$'){$state='done'}
+            elseif($normalized -match '(?im)^\s*status:\s*(error|degraded|failed)\s*$'){$state='error'}
+            elseif($normalized -match '(?im)^\s*status:\s*(running|pending|not\s+started)\s*$'){$state='running'}
+        }
+        if($state -eq 'done'){return}
+        if($state -eq 'error'){throw "cloud-init failed in $Name`n$normalized"}
+        $remaining=[math]::Max(0,($deadline-[DateTime]::UtcNow).TotalSeconds)
+        $summary=($normalized -replace '\s+',' ')
+        if($summary.Length -gt 240){$summary=$summary.Substring([math]::Max(0,$summary.Length-240))}
+        Write-Verbose "Multipass readiness probe $attempt for $Name returned: $summary; $([math]::Round($remaining,1)) seconds remaining."
+        if($remaining -le 0){break}
+        Start-Sleep -Milliseconds ([int][math]::Min(5000,[math]::Max(100,$remaining*1000)))
+    }
+    throw "Instance $Name did not become ready within $TimeoutSeconds seconds."
+}
+
+function Invoke-MultipassInventoryWithBoundedRetry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][scriptblock]$InventoryScript,
+        [datetime]$DeadlineUtc = [datetime]::MinValue,
+        [ValidateRange(1,5)][int]$MaximumAttempts = 3
+    )
+    $deadline = if ($DeadlineUtc -gt [datetime]::MinValue) { $DeadlineUtc.ToUniversalTime() } else { [datetime]::UtcNow.AddSeconds(60) }
+    $lastError = $null
+    for ($attempt = 1; $attempt -le $MaximumAttempts; $attempt++) {
+        $remaining = [int][math]::Floor(($deadline - [datetime]::UtcNow).TotalSeconds)
+        if ($remaining -le 0) { break }
+        $attemptsRemaining = $MaximumAttempts - $attempt + 1
+        $probeTimeout = [math]::Max(1, [math]::Min(60, [int][math]::Floor($remaining / $attemptsRemaining)))
+        try {
+            return @(& $InventoryScript $probeTimeout)
+        } catch {
+            $lastError = $_.Exception
+        }
+        $remainingAfter = [math]::Floor(($deadline - [datetime]::UtcNow).TotalSeconds)
+        if ($attempt -lt $MaximumAttempts -and $remainingAfter -gt 0) {
+            Start-Sleep -Seconds ([int][math]::Min(1, $remainingAfter))
+        }
+    }
+    if ($lastError) { throw "Multipass inventory retry exhausted: $($lastError.Message)" }
+    throw 'Multipass inventory retry exhausted before a bounded probe completed.'
+}
+
+function Invoke-DevFleetMultipassControlPlaneRecovery {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Reason,
+        [Parameter(Mandatory)][string]$MultipassPath,
+        [Parameter(Mandatory)][datetime]$OwnerDeadlineUtc,
+        [scriptblock]$ServiceLookupProvider = { Get-CimInstance Win32_Service -Filter "Name='Multipass'" -ErrorAction Stop },
+        [scriptblock]$ServiceControlProvider = { param($Action) $sc=Join-Path $env:SystemRoot 'System32\sc.exe'; if(-not(Test-Path -LiteralPath $sc -PathType Leaf)){throw 'Trusted Windows service controller is missing.'}; & $sc $Action Multipass 2>&1 | Out-Null },
+        [scriptblock]$DaemonLookupProvider = { param($Id) Get-Process -Id $Id -ErrorAction Stop },
+        [scriptblock]$DaemonStopProvider = { param($Id) Stop-Process -Id $Id -Force -ErrorAction Stop },
+        [scriptblock]$ClockProvider = { [datetime]::UtcNow },
+        [scriptblock]$SleepProvider = { param($Milliseconds) Start-Sleep -Milliseconds $Milliseconds }
+    )
+    if ([string]::IsNullOrWhiteSpace($Reason)) { throw 'Multipass control-plane recovery requires a failure reason.' }
+    $deadline = $OwnerDeadlineUtc.ToUniversalTime()
+    if ([datetime](& $ClockProvider) -ge $deadline) { throw 'Multipass control-plane recovery owner deadline is already exhausted.' }
+    $expectedDaemon = Join-Path (Split-Path -Parent $MultipassPath) 'multipassd.exe'
+    $services = @(& $ServiceLookupProvider)
+    if ($services.Count -ne 1) { throw "Expected exactly one Multipass service; found $($services.Count)." }
+    $service = $services[0]
+    if ([string]$service.Name -cne 'Multipass') { throw 'Multipass service lookup returned the wrong service identity.' }
+    $serviceCommand = [Environment]::ExpandEnvironmentVariables([string]$service.PathName)
+    if ($serviceCommand -notmatch [regex]::Escape($expectedDaemon)) { throw 'Multipass service executable does not match the trusted installation.' }
+    if ([string]$service.StartName -notin @('LocalSystem','NT AUTHORITY\SYSTEM')) { throw 'Multipass service identity is not LocalSystem.' }
+
+    $stateBefore = [string]$service.State
+    $initialDaemonPid = [int]$service.ProcessId
+    $forced = $false
+    if ($stateBefore -ne 'Stopped') { & $ServiceControlProvider 'stop' }
+    $stopDeadline = ([datetime](& $ClockProvider)).AddSeconds(20)
+    if ($deadline -lt $stopDeadline) { $stopDeadline = $deadline }
+    do {
+        $services = @(& $ServiceLookupProvider)
+        if ($services.Count -ne 1) { throw "Expected exactly one Multipass service during stop; found $($services.Count)." }
+        $service = $services[0]
+        if ([string]$service.State -eq 'Stopped') { break }
+        & $SleepProvider 250
+    } while ([datetime](& $ClockProvider) -lt $stopDeadline)
+
+    if ([string]$service.State -ne 'Stopped') {
+        $daemonPid = [int]$service.ProcessId
+        if ($daemonPid -le 0) { $daemonPid = $initialDaemonPid }
+        if ($daemonPid -le 0) { throw "Multipass service remained $([string]$service.State) without an exact daemon PID." }
+        $daemon = & $DaemonLookupProvider $daemonPid
+        if ([string]$daemon.ProcessName -cne 'multipassd') { throw 'Multipass service PID did not identify the exact multipassd process.' }
+        $daemonPath = ''
+        try { $daemonPath = [string]$daemon.Path } catch { }
+        if (-not [string]::IsNullOrWhiteSpace($daemonPath) -and [IO.Path]::GetFullPath($daemonPath) -cne [IO.Path]::GetFullPath($expectedDaemon)) {
+            throw 'Multipass daemon PID resolved outside the trusted installation.'
+        }
+        & $DaemonStopProvider $daemonPid
+        $forced = $true
+        $forcedDeadline = ([datetime](& $ClockProvider)).AddSeconds(10)
+        if ($deadline -lt $forcedDeadline) { $forcedDeadline = $deadline }
+        do {
+            & $SleepProvider 250
+            $services = @(& $ServiceLookupProvider)
+            if ($services.Count -ne 1) { throw "Expected exactly one Multipass service after daemon termination; found $($services.Count)." }
+            $service = $services[0]
+        } while ([string]$service.State -ne 'Stopped' -and [datetime](& $ClockProvider) -lt $forcedDeadline)
+        if ([string]$service.State -ne 'Stopped') { throw "Multipass service did not reach Stopped after exact daemon termination; state=$([string]$service.State)." }
+    }
+
+    if ([datetime](& $ClockProvider) -ge $deadline) { throw 'Multipass control-plane recovery exhausted its owner deadline before restart.' }
+    & $ServiceControlProvider 'start'
+    $startDeadline = ([datetime](& $ClockProvider)).AddSeconds(45)
+    if ($deadline -lt $startDeadline) { $startDeadline = $deadline }
+    do {
+        $services = @(& $ServiceLookupProvider)
+        if ($services.Count -ne 1) { throw "Expected exactly one Multipass service during start; found $($services.Count)." }
+        $service = $services[0]
+        if ([string]$service.State -eq 'Running') { break }
+        & $SleepProvider 250
+    } while ([datetime](& $ClockProvider) -lt $startDeadline)
+    if ([string]$service.State -ne 'Running') { throw "Multipass service did not return to Running before its owner deadline; state=$([string]$service.State)." }
+
+    return [pscustomobject]@{
+        status = 'PASS'
+        service = 'Multipass'
+        reason = $Reason
+        stateBefore = $stateBefore
+        stateAfter = [string]$service.State
+        forcedDaemonTermination = $forced
+        trustedDaemonPath = $expectedDaemon
+        ownerDeadlineUtc = $deadline.ToString('o')
+    }
+}
+
+function Invoke-MultipassLaunchWithReadinessRecovery {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$InstanceName,
+        [Parameter(Mandatory)][string[]]$LaunchArguments,
+        [Parameter(Mandatory)][int]$ReadinessTimeoutSeconds,
+        [int]$LaunchTimeoutSeconds = 900,
+        [datetime]$DeadlineUtc = [datetime]::MinValue,
+        [scriptblock]$OnInstanceEstablished,
+        [scriptblock]$ControlPlaneRecoveryProvider
+    )
+    if ($InstanceName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { throw 'Multipass launch recovery instance identity is malformed.' }
+    $launchArgs = @($LaunchArguments | ForEach-Object { [string]$_ })
+    if ($launchArgs.Count -lt 2 -or $launchArgs[0] -cne 'launch') { throw 'Multipass launch recovery requires a launch argument vector.' }
+    $nameIndex = [Array]::IndexOf([string[]]$launchArgs, '--name')
+    if ($nameIndex -lt 0 -or $nameIndex + 1 -ge $launchArgs.Count -or [string]$launchArgs[$nameIndex + 1] -cne $InstanceName) {
+        throw 'Multipass launch recovery refused an argument vector that is not bound to the exact instance name.'
+    }
+    if ($ReadinessTimeoutSeconds -le 0 -or $LaunchTimeoutSeconds -le 0) { throw 'Multipass launch and readiness deadlines must be positive.' }
+
+    $mp = Get-MultipassExe
+    $inventory = {
+        param([int]$TimeoutSeconds)
+        $raw = Invoke-External -FilePath $mp -ArgumentList @('list','--format','json') -Capture -TimeoutSeconds $TimeoutSeconds -DeadlineUtc $DeadlineUtc
+        try {
+            $parsed = $raw | ConvertFrom-Json
+            return @($parsed.list)
+        } catch {
+            throw 'Multipass inventory returned malformed JSON during fresh-instance recovery.'
+        }
+    }
+    # This helper is only for the fresh-launch branch. Existing DevFleet
+    # instances use their separate backup-preserving refresh path below; a
+    # second inventory check prevents a recovery command from being aimed at a
+    # pre-existing instance if the caller's earlier snapshot was stale.
+    # Reserve a finite recovery slice inside the existing compute/vault stage
+    # budget. The normal 900-second operation maximum therefore leaves 600
+    # seconds for the initial launch and 300 seconds for one exact recovery.
+    $recoveryBudgetSeconds = 300
+    $supervisorGraceSeconds = 30
+    $minimumOperationSeconds = 60
+    if (@($launchArgs | Where-Object { $_ -ieq '--timeout' -or $_ -imatch '^--timeout=' }).Count -gt 0) {
+        throw 'Multipass launch recovery rejects caller-supplied --timeout so the inner operation and supervisor deadlines remain separated.'
+    }
+    $before = @(Invoke-MultipassInventoryWithBoundedRetry -InventoryScript $inventory -DeadlineUtc $DeadlineUtc -MaximumAttempts 3 | Where-Object { [string]$_.name -ceq $InstanceName })
+    if ($before.Count -ne 0) { throw "Fresh Multipass launch recovery refused existing instance $InstanceName." }
+    $launchBudgetRemaining = $LaunchTimeoutSeconds
+    if ($DeadlineUtc -gt [datetime]::MinValue) {
+        $launchBudgetRemaining = [math]::Min($launchBudgetRemaining, [int][math]::Floor(($DeadlineUtc.ToUniversalTime() - [datetime]::UtcNow).TotalSeconds))
+    }
+    $minimumEnvelopeSeconds = $recoveryBudgetSeconds + $supervisorGraceSeconds + $minimumOperationSeconds
+    if ($launchBudgetRemaining -lt $minimumEnvelopeSeconds) {
+        throw "Multipass launch recovery requires at least $minimumEnvelopeSeconds seconds of remaining bounded stage time; only $launchBudgetRemaining remain."
+    }
+    $launchAttemptSeconds = [Math]::Min(600, $launchBudgetRemaining - $recoveryBudgetSeconds - $supervisorGraceSeconds)
+    $launchSupervisorSeconds = $launchAttemptSeconds + $supervisorGraceSeconds
+    $tail = if ($launchArgs.Count -gt 1) { @($launchArgs[1..($launchArgs.Count - 1)]) } else { @() }
+    $launchArgs = @('launch','--timeout',[string]$launchAttemptSeconds) + $tail
+
+    $launchSucceeded = $false
+    $launchError = $null
     try {
-        if($ServiceStateProvider){$serviceState=[string](& $ServiceStateProvider)}elseif($InstanceName){$serviceState=[string]((&$invoke @('systemctl','is-active','tailscaled') 10).output).Trim()}else{$service=Get-Service -Name Tailscale -ErrorAction SilentlyContinue;if(-not $service){&$writeEvent 'OAUTH_PAIRING_FAILED' @{failureClass='TAILSCALE_NOT_INSTALLED'};throw 'TAILSCALE_NOT_INSTALLED: Tailscale service is absent.'};$serviceState=[string]$service.Status}
-        &$checkPendingReboot 'service-check'
-        if($serviceState -match '(?i)Stopped|Inactive|Deactivated|Failed'){
-            $serviceStartCount++
-            if($ServiceStartProvider){& $ServiceStartProvider|Out-Null}elseif($InstanceName){$startResult=&$invoke @('systemctl','start','tailscaled') 30;if([int]$startResult.exitCode-ne0){throw 'TAILSCALE_SERVICE_STOPPED: tailscaled could not be started.'}}else{Start-Service -Name Tailscale -ErrorAction Stop}
-            $serviceState='RUNNING';&$checkPendingReboot 'service-start'
+        Invoke-External -FilePath $mp -ArgumentList $launchArgs -TimeoutSeconds $launchSupervisorSeconds -DeadlineUtc $DeadlineUtc
+        $launchSucceeded = $true
+    } catch {
+        $launchError = $_.Exception.Message
+    }
+
+    if ($launchSucceeded) {
+        if ($OnInstanceEstablished) { & $OnInstanceEstablished ([pscustomobject]@{ recovery = 'none'; launchTimedOut = $false }) }
+        Wait-MultipassReady -Name $InstanceName -TimeoutSeconds $ReadinessTimeoutSeconds -DeadlineUtc $DeadlineUtc
+        return [pscustomobject]@{ instanceName = $InstanceName; launchTimedOut = $false; recovery = 'none'; ready = $true }
+    }
+
+    # Multipass can leave the exact new Hyper-V VM running after its client
+    # launch operation times out, while the management IP/SSH path is absent.
+    # Confirm one exact post-launch instance before any recovery and surface the
+    # original launch error if the instance was never established.
+    $recoveryDeadlineUtc = [datetime]::UtcNow.AddSeconds($recoveryBudgetSeconds)
+    if ($DeadlineUtc -gt [datetime]::MinValue -and $DeadlineUtc.ToUniversalTime() -lt $recoveryDeadlineUtc) {
+        $recoveryDeadlineUtc = $DeadlineUtc.ToUniversalTime()
+    }
+    $controlPlaneRecovery = $null
+    $postLaunchProbeDeadline = [datetime]::UtcNow.AddSeconds(60)
+    if ($recoveryDeadlineUtc -lt $postLaunchProbeDeadline) { $postLaunchProbeDeadline = $recoveryDeadlineUtc }
+    try {
+        $after = @(Invoke-MultipassInventoryWithBoundedRetry -InventoryScript $inventory -DeadlineUtc $postLaunchProbeDeadline -MaximumAttempts 1 | Where-Object { [string]$_.name -ceq $InstanceName })
+    } catch {
+        $postLaunchInventoryError = $_.Exception.Message
+        if ($postLaunchInventoryError -notmatch '(?i)(timed out|cannot connect|connection|socket|failed with exit code)') {
+            throw "Multipass launch failed after bounded fresh-instance inventory recovery. Original launch error: $launchError. Post-launch inventory error: $postLaunchInventoryError"
         }
-        if($serviceState -notmatch '(?i)Running|Active|RUNNING'){
-            &$writeEvent 'OAUTH_PAIRING_FAILED' @{failureClass='TAILSCALE_SERVICE_STOPPED';serviceState=ConvertTo-DevFleetTailscaleSafeOutput $serviceState};throw 'TAILSCALE_SERVICE_STOPPED: Tailscale service is not running.'
+        $recoveryInvoker = if ($ControlPlaneRecoveryProvider) { $ControlPlaneRecoveryProvider } else { ${function:Invoke-DevFleetMultipassControlPlaneRecovery} }
+        try {
+            $controlPlaneRecovery = & $recoveryInvoker 'POST_LAUNCH_INVENTORY_TRANSPORT_FAILURE' $mp $recoveryDeadlineUtc
+            if (-not $controlPlaneRecovery -or [string]$controlPlaneRecovery.status -cne 'PASS') { throw 'Multipass service recovery did not return PASS.' }
+        } catch {
+            throw "Multipass launch failed and exact control-plane recovery failed. Original launch error: $launchError. Post-launch inventory error: $postLaunchInventoryError. Control-plane recovery error: $($_.Exception.Message)"
         }
-        # Peer enumeration can remain blocked while the local node has already
-        # authenticated. Self/backend readiness is sufficient for this layer;
-        # the expected peer is verified separately with bounded tailscale ping.
-        $statusResult=&$invoke @('status','--json','--peers=false') 20
-        $preferencesResult=&$invoke @('debug','prefs') 10
-        if([int]$statusResult.exitCode -ne 0){&$writeEvent 'OAUTH_PAIRING_FAILED' @{failureClass='TAILSCALE_CONTROL_PLANE_OFFLINE';command='status';exitCode=[int]$statusResult.exitCode;authenticationAttempted=$false};throw 'TAILSCALE_CONTROL_PLANE_OFFLINE: Tailscale status command failed.'}
-        if([int]$preferencesResult.exitCode -ne 0){&$writeEvent 'OAUTH_PAIRING_FAILED' @{failureClass='TAILSCALE_HEALTH_ERROR';command='debug-prefs';exitCode=[int]$preferencesResult.exitCode;authenticationAttempted=$false};throw 'TAILSCALE_HEALTH_ERROR: Tailscale preference inspection failed.'}
-        $lock=if($TailnetLockProvider){& $TailnetLockProvider}else{Get-DevFleetTailscaleTailnetLockState -FilePath $FilePath -InstanceName $InstanceName -DeadlineUtc $DeadlineUtc -Com
+        $remainingAfterControlPlaneRecovery = [int][math]::Floor(($recoveryDeadlineUtc - [datetime]::UtcNow).TotalSeconds)
+        $instanceRecoveryReserveSeconds = $minimumOperationSeconds + $supervisorGraceSeconds
+        if ($remainingAfterControlPlaneRecovery -le $instanceRecoveryReserveSeconds) {
+            throw "Multipass launch failed and exact control-plane recovery left insufficient time for exact-instance recovery. Original launch error: $launchError. Post-launch inventory error: $postLaunchInventoryError"
+        }
+        $inventoryReprobeSeconds = [math]::Min(60, $remainingAfterControlPlaneRecovery - $instanceRecoveryReserveSeconds)
+        $inventoryReprobeDeadline = [datetime]::UtcNow.AddSeconds($inventoryReprobeSeconds)
+        if ($recoveryDeadlineUtc -lt $inventoryReprobeDeadline) { $inventoryReprobeDeadline = $recoveryDeadlineUtc }
+        try {
+            $after = @(Invoke-MultipassInventoryWithBoundedRetry -InventoryScript $inventory -DeadlineUtc $inventoryReprobeDeadline -MaximumAttempts 1 | Where-Object { [string]$_.name -ceq $InstanceName })
+        } catch {
+            throw "Multipass launch failed and inventory remained unavailable after exact control-plane recovery. Original launch error: $launchError. Initial inventory error: $postLaunchInventoryError. Re-probe error: $($_.Exception.Message)"
+        }
+    }
+    if ($after.Count -ne 1) {
+        throw "Multipass launch failed without establishing exactly one $InstanceName instance: $launchError"
+    }
+    if ($OnInstanceEstablished) { & $OnInstanceEstablished ([pscustomobject]@{ recovery = $(if($controlPlaneRecovery){'control-plane-recovered-pending-instance-recovery'}else{'pending'}); launchTimedOut = $true; controlPlaneRecovery = $controlPlaneRecovery }) }
+
+    try {
+        # The instance is known to be newly established by this invocation, so
+        # one graceful exact stop/start is safe and does not touch any existing
+        # deployment or unrelated VM. Both calls inherit the owning deadline.
+        $remainingRecoverySeconds = [int][math]::Floor(($recoveryDeadlineUtc - [datetime]::UtcNow).TotalSeconds)
+        $startMinimumSeconds = $minimumOperationSeconds + $supervisorGraceSeconds
+        if ($remainingRecoverySeconds -lt $startMinimumSeconds) {
+            throw "Multipass launch timed out and bounded fresh-instance recovery has insufficient remaining time for stop/start. Original launch error: $launchError"
+        }
+        $stopTimeoutSeconds = [math]::Min(120, $remainingRecoverySeconds - $startMinimumSeconds)
+        Invoke-External -FilePath $mp -ArgumentList @('stop',$InstanceName) -TimeoutSeconds $stopTimeoutSeconds -DeadlineUtc $recoveryDeadlineUtc
+        $remainingAfterStopSeconds = [int][math]::Floor(($recoveryDeadlineUtc - [datetime]::UtcNow).TotalSeconds)
+        if ($remainingAfterStopSeconds -lt $startMinimumSeconds) {
+            throw "Multipass launch timed out and bounded fresh-instance recovery exhausted its stop budget. Original launch error: $launchError"
+        }
+        $startInnerSeconds = [math]::Min(150, $remainingAfterStopSeconds - $supervisorGraceSeconds)
+        $startSupervisorSeconds = $startInnerSeconds + $supervisorGraceSeconds
+        Invoke-External -FilePath $mp -ArgumentList @('start','--timeout',[string]$startInnerSeconds,$InstanceName) -TimeoutSeconds $startSupervisorSeconds -DeadlineUtc $recoveryDeadlineUtc
+    } catch {
+        if ($_.Exception.Message -match 'Original launch error:') { throw }
+        throw "Multipass launch timed out and bounded fresh-instance recovery failed for ${InstanceName}. Original launch error: $launchError. Recovery error: $($_.Exception.Message)"
+    }
+    Wait-MultipassReady -Name $InstanceName -TimeoutSeconds $ReadinessTimeoutSeconds -DeadlineUtc $DeadlineUtc
+    return [pscustomobject]@{ instanceName = $InstanceName; launchTimedOut = $true; recovery = $(if($controlPlaneRecovery){'multipass-service-and-instance-stop-start'}else{'multipass-stop-start'}); controlPlaneRecovery = $controlPlaneRecovery; ready = $true }
+}
+
+function Get-InstanceIPv4 {
+    param([string]$Name,[switch]$PreferTailscale)
+    $mp = Get-MultipassExe
+    if ($PreferTailscale) {
+        $ts = Invoke-External $mp @('exec',$Name,'--','bash','-lc','tailscale ip -4 2>/dev/null | head -n1') -Capture -IgnoreExitCode
+        $tsIp = @($ts -split "`r?`n") | Where-Object { $_ -match '^100\.' } | Select-Object -First 1
+        if ($tsIp) { return $tsIp.Trim() }
+    }
+    $raw = Invoke-External $mp @('info',$Name,'--format','json') -Capture
+    $obj = $raw | ConvertFrom-Json
+    $prop = $obj.info.PSObject.Properties[$Name]
+    if (-not $prop) { throw "Multipass info did not contain instance $Name." }
+    $ips = @($prop.Value.ipv4) | Where-Object { $_ }
+    $preferred = $ips | Where-Object { $_ -notmatch '^(127\.|169\.254\.)' -and $_ -notmatch '^172\.' } | Select-Object -First 1
+    if ($preferred) { return $preferred }
+    $ips | Where-Object { $_ -notmatch '^(127\.|169\.254\.)' } | Select-Object -First 1
+}
+
+function Test-PendingRebootState {
+    param(
+        [bool]$CbsPending,
+        [bool]$WindowsUpdatePending,
+        [AllowNull()][object[]]$PendingFileRenameOperations
+    )
+    if ($CbsPending -or $WindowsUpdatePending) { return $true }
+    $meaningful = @($PendingFileRenameOperations | Where-Object {
+        -not [string]::IsNullOrWhiteSpace([string]$_)
+    })
+    $meaningful.Count -gt 0
+}
+
+function Get-DevFleetPendingRebootSnapshot {
+    $cbsPending = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
+    $windowsUpdatePending = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+    $session = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue
+    # An if-expression can unwrap a singleton array during assignment. Keep
+    # the pending-rename inventory explicitly array-shaped before reading
+    # Count so one pending pair remains a valid scalar-safe collection.
+    $raw = @()
+    if ($null -ne $session) { $raw = @($session.PendingFileRenameOperations) }
+    $pairs = [Collections.Generic.List[string]]::new()
+    for ($i = 0; $i -lt $raw.Count; $i += 2) {
+        $source = [string]$raw[$i]
+        $destination = if ($i + 1 -lt $raw.Count) { [string]$raw[$i + 1] } else { '' }
+        if ($source -or $destination) { [void]$pairs.Add("$source`n$destination") }
+    }
+    [pscustomobject]@{
+        CbsPending = [bool]$cbsPending
+        WindowsUpdatePending = [bool]$windowsUpdatePending
+        PendingPairs = [string[]]$pairs
+    }
+}
+
+function Set-DevFleetPendingRebootBaseline {
+    param([switch]$ResumedTransaction)
+    $global:DevFleetPendingRebootBaseline = if ($ResumedTransaction) { Get-DevFleetPendingRebootSnapshot } else { $null }
+    return $global:DevFleetPendingRebootBaseline
+}
+
+function Test-PendingReboot {
+    $current = Get-DevFleetPendingRebootSnapshot
+    $baselineVariable = Get-Variable -Name DevFleetPendingRebootBaseline -Scope Global -ErrorAction SilentlyContinue
+    $baseline = if ($baselineVariable) { $baselineVariable.Value } else { $null }
+    if ($baseline) {
+        if ([bool]$current.CbsPending -and -not [bool]$baseline.CbsPending) { return $true }
+        if ([bool]$current.WindowsUpdatePending -and -not [bool]$baseline.WindowsUpdatePending) { return $true }
+        return @($current.PendingPairs | Where-Object { @($baseline.PendingPairs) -notcontains $_ }).Count -gt 0
+    }
+    return Test-PendingRebootState -CbsPending:$current.CbsPending -WindowsUpdatePending:$current.WindowsUpdatePending -PendingFileRenameOperations $current.PendingPairs
+}
+
+function Install-WingetPackage {
+    param([Parameter(Mandatory)][string]$Id,[switch]$Upgrade)
+    $health = Get-WingetHealth
+    if ($health.Status -ne 'Healthy') { throw "WinGet is not healthy ($($health.Status)); use repair or official vendor fallback." }
+    $common = @('--id',$Id,'--exact','--source','winget','--accept-package-agreements','--accept-source-agreements','--silent','--disable-interactivity')
+    if ($Upgrade) {
+        Invoke-External -FilePath $health.Path -ArgumentList (@('upgrade') + $common) -TimeoutSeconds 600 -AllowedExitCodes @(0,-1978335189) | Out-Null
+    } else {
+        Invoke-External -FilePath $health.Path -ArgumentList (@('install') + $common) -TimeoutSeconds 600 -AllowedExitCodes @(0,-1978335189) | Out-Null
+    }
+}
+
+function Get-WingetHealth {
+    $candidates = @(Get-TrustedWingetPackageCandidates)
+    if($candidates.Count -eq 0){ return [pscustomobject]@{ Status='Missing'; Path=''; Version=''; Detail='No exact physical Microsoft.DesktopAppInstaller x64 package with winget.exe was found.' } }
+    if($candidates.Count -ne 1){ return [pscustomobject]@{ Status='Broken'; Path=''; Version=''; Detail='WinGet package identity was ambiguous; exactly one physical package is required.' } }
+    $wingetPath = [string]$candidates[0].Path
+    if(-not (Test-TrustedExecutableCandidate $wingetPath)){ return [pscustomobject]@{ Status='Missing'; Path=''; Version=''; Detail='The physical WinGet package failed trusted-root or ACL validation.' } }
+    try { $versionText = Invoke-External -FilePath $wingetPath -ArgumentList @('--version') -TimeoutSeconds 60 -Capture }
+    catch { return [pscustomobject]@{ Status='Broken'; Path=$wingetPath; Version=''; Detail="winget --version could not start: $($_.Exception.Message)" } }
+    $version = ([regex]::Match($versionText, '(?<!\d)(\d+\.\d+(?:\.\d+){0,2})')).Groups[1].Value
+    try { Invoke-External -FilePath $wingetPath -ArgumentList @('source','list','--disable-interactivity') -TimeoutSeconds 60 | Out-Null }
+    catch { return [pscustomobject]@{ Status='Broken'; Path=$wingetPath; Version=$version; Detail="winget source list could not start: $($_.Exception.Message)" } }
+    try { Invoke-External -FilePath $wingetPath -ArgumentList @('search','--id','Microsoft.PowerShell','--exact','--source','winget','--disable-interactivity') -TimeoutSeconds 60 | Out-Null }
+    catch { return [pscustomobject]@{ Status='Broken'; Path=$wingetPath; Version=$version; Detail="winget package search could not start: $($_.Exception.Message)" } }
+    return [pscustomobject]@{ Status='Healthy'; Path=$wingetPath; Version=$version; Detail='version, source list, and package search succeeded.' }
+}
+
+function Repair-Winget {
+    $repair = 'Install-PackageProvider -Name NuGet -Force | Out-Null; Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery | Out-Null; Repair-WinGetPackageManager -Force -Latest'
+    $powershell=Get-DevFleetPowerShell
+    Invoke-External -FilePath $powershell -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',$repair) -TimeoutSeconds 600 | Out-Null
+    $health = Get-WingetHealth
+    if ($health.Status -ne 'Healthy') { throw "WinGet remained unhealthy after repair: $($health.Status)" }
+    return $health
+}
+
+function Get-AuthenticityStrategy {
+    param([Parameter(Mandatory)]$Policy)
+    if ($Policy.PSObject.Properties.Name -contains 'strategy' -and $Policy.strategy) { return [string]$Policy.strategy }
+    return 'Authenticode'
+}
+
+function Test-FileSha256 {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Expected)
+    if ($Expected -notmatch '^[0-9a-fA-F]{64}$') { throw "Expected vendor release digest is not a SHA-256 value for $([IO.Path]::GetFileName($Path))." }
+    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    if (-not $actual.Equals($Expected, [StringComparison]::OrdinalIgnoreCase)) { throw "Vendor release SHA-256 mismatch for $([IO.Path]::GetFileName($Path)): expected $Expected, got $actual." }
+    return $actual.ToLowerInvariant()
+}
+
+function Test-OfficialSigner {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)]$Policy)
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    $strategy = Get-AuthenticityStrategy $Policy
+    if ($strategy -eq 'VendorReleaseSha256') { throw "VendorReleaseSha256 requires release metadata digest validation, not Authenticode, for $([IO.Path]::GetFileName($Path))." }
+    if ($signature.Status -ne 'Valid' -and $strategy -eq 'Authenticode') { throw "Authenticode verification failed for $([IO.Path]::GetFileName($Path)): $($signature.Status)" }
+    if ($signature.Status -ne 'Valid' -and $strategy -eq 'AuthenticodeOrVendorReleaseSha256') { throw "AuthenticodeOrVendorReleaseSha256 requires a valid fallback digest for $([IO.Path]::GetFileName($Path))." }
+    $exact=@($Policy.allowedSignerSubjectsExact)
+    if(@($exact).Count -gt 0 -and -not (Test-ExactSignerIdentity ([str

@@ -1,1213 +1,1109 @@
 # DevFleet source part 070
 
 Full-source UTF-8 byte interval [3208500, 3255000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 1f4cf821e6b91edd7fab21719eccdacc000eb254df01ec736b8f33973693b07e
+Payload SHA-256: 9ace568a47140e969e69c7d8c4ba08c6d77a51839fb61bac35d9d6a83327fcac
 
 <!-- BEGIN SOURCE SLICE -->
-"lease_expires_at"))):
-                continue
-            return str(data.get("id"))
-    return None
-
-
-def submit_operation(
-    kind: str,
-    project: str,
-    func: Callable[[OperationContext], Any],
-    *,
-    project_id: str = "",
-    runtime_id: str = "",
-    idempotency_key: str = "",
-    host_id: str | None = None,
-) -> str:
-    SETTINGS.operations.mkdir(parents=True, exist_ok=True)
-    reconcile_operations()
-    with _LOCK:
-        existing = _find_idempotent(idempotency_key)
-        if existing:
-            return existing
-        op_id = f"{kind.lower().replace('_', '-')}-{secrets.token_hex(6)}"
-        record = {
-            "id": op_id,
-            "operation_id": op_id,
-            "kind": kind,
-            "operation_type": kind,
-            "project": project,
-            "project_id": project_id,
-            "host_id": host_id or SETTINGS.host_id,
-            "runtime_id": runtime_id,
-            "idempotency_key": idempotency_key,
-            "state": "queued",
-            "current_step": "queued",
-            "progress": 0,
-            "message": "Queued",
-            "created_at": now_iso(),
-            "started_at": None,
-            "updated_at": now_iso(),
-            "completed_at": None,
-            "log": [],
-            "recovery_metadata": {"resume_policy": "reconcile-before-retry"},
-            "worker_instance_id": _WORKER_INSTANCE_ID,
-            "operation_generation": 1,
-            "lease_expires_at": None,
-            "queued_deadline_at": (datetime.now(timezone.utc) + timedelta(seconds=_QUEUED_SECONDS)).isoformat(),
-            "last_progress_at": now_iso(),
-            "recovery_required": False,
+NGS.workspaces, slug)
+    meta = _require_owned_project_for_mutation(slug)
+    capabilities = project_capabilities(slug, meta)
+    if not capabilities["can_query_live_metrics"]:
+        return {
+            "ok": True,
+            "project": meta,
+            "capabilities": capabilities,
+            "runtime": {
+                "status": "unavailable",
+                "reason": capabilities["status_reason"],
+                "live_metrics": "unavailable",
+            },
+            "health": {
+                "status": "not-checked",
+                "reason": (
+                    "environment stopped"
+                    if capabilities["lifecycle_state"] == "stopped"
+                    else capabilities["status_reason"]
+                ),
+            },
         }
-        atomic_json(_path(op_id), record)
+    return {
+        "ok": True,
+        "project": meta,
+        "capabilities": capabilities,
+        "runtime": inspect_runtime(slug),
+        "health": runtime_health(slug),
+    }
 
-    if not _ADMISSION.acquire(blocking=False):
-        update_operation(
-            op_id,
-            state="failed",
-            current_step="capacity",
-            message="DevFleet is busy processing the maximum number of lifecycle operations; retry shortly.",
-            error="operation_capacity",
-            completed_at=now_iso(),
-            lease_expires_at=None,
+
+@app.get("/api/projects/{slug}/capabilities", dependencies=[Depends(check_api)])
+def api_project_capabilities(slug: str):
+    metadata = _require_owned_project_for_mutation(slug)
+    return {"ok": True, "capabilities": project_capabilities(slug, metadata)}
+
+
+@app.get("/api/projects/{slug}/workspace", dependencies=[Depends(check_api)])
+def api_project_workspace(slug: str):
+    _require_owned_project_for_mutation(slug)
+    return open_workspace(slug)
+
+
+@app.get("/api/projects/{slug}/logs", dependencies=[Depends(check_api)])
+def api_project_logs(slug: str, tail: int = 150):
+    metadata = _require_owned_project_for_mutation(slug)
+    capabilities = project_capabilities(slug, metadata)
+    if not capabilities["can_query_logs"]:
+        raise HTTPException(
+            409,
+            f"Logs unavailable: {capabilities['status_reason'] or 'environment is not ready.'}",
         )
-        return op_id
+    bounded = max(1, min(int(tail), 500))
+    return {
+        "ok": True,
+        "slug": slug,
+        "tail": bounded,
+        "logs": project_logs(slug, tail=bounded),
+    }
 
-    lock_key = f"project:{project.lower()}" if project else f"operation:{kind.lower()}"
 
-    def runner() -> None:
-        def admit_if_still_queued() -> bool:
-            with _LOCK:
-                data = _load(op_id)
-                if data.get("state") != "queued":
-                    return False
-                if _queued_expired(data):
-                    update_operation(op_id, state="interrupted", current_step="reconciliation-required", message="Queued operation expired before execution capacity became available.", recovery_required=True, completed_at=now_iso(), queued_deadline_at=None)
-                    return False
-                return True
+@app.get("/ui/projects/{slug}/backups")
+def ui_project_backups(request: Request, slug: str):
+    ui(request)
+    _require_owned_project_for_mutation(slug)
+    return JSONResponse({"ok": True, "backups": list_backups(slug)})
 
-        if not admit_if_still_queued():
-            _ADMISSION.release()
-            return
-        with _LOCK:
-            project_lock = _ACTIVE_LOCKS.setdefault(lock_key, threading.Lock())
-        acquired = project_lock.acquire(blocking=False)
-        if not acquired:
-            update_operation(op_id, state="failed", current_step="locked", message="Another lifecycle operation is already active for this project.", error="operation_locked")
-            _ADMISSION.release()
-            return
-        if not admit_if_still_queued():
-            project_lock.release()
-            _ADMISSION.release()
-            return
-        heartbeat_stop = threading.Event()
-        heartbeat_thread: threading.Thread | None = None
-        try:
-            update_operation(op_id, state="running", current_step="starting", progress=1, message="Started", started_at=now_iso(), worker_instance_id=_WORKER_INSTANCE_ID, lease_expires_at=_lease_until(), queued_deadline_at=None, last_progress_at=now_iso())
-            heartbeat_thread = threading.Thread(target=_operation_heartbeat, args=(op_id, heartbeat_stop), name=f"devfleet-heartbeat-{op_id}", daemon=True)
-            heartbeat_thread.start()
-            result = func(OperationContext(op_id))
-            update_operation(op_id, state="completed", current_step="completed", progress=100, message="Completed", result=str(result)[-12000:], completed_at=now_iso(), lease_expires_at=None, last_progress_at=now_iso())
-        except Exception as exc:  # the durable record is the recovery boundary
-            message=str(exc)
-            update_operation(op_id, state="failed", current_step="failed", message=message, friendly_error=message, recovery_actions=["Review the operation details.", "Re-check runtime and backup status before retrying."], error=traceback.format_exc()[-12000:], completed_at=now_iso(), lease_expires_at=None, last_progress_at=now_iso())
-        finally:
-            heartbeat_stop.set()
-            if heartbeat_thread is not None and heartbeat_thread is not threading.current_thread():
-                heartbeat_thread.join(timeout=max(1, _HEARTBEAT_INTERVAL_SECONDS))
-            project_lock.release()
-            _ADMISSION.release()
 
+@app.get("/api/projects/{slug}/backups", dependencies=[Depends(check_api)])
+def api_project_backups(slug: str):
+    _require_owned_project_for_mutation(slug)
+    return {"ok": True, "backups": list_backups(slug)}
+
+
+@app.get("/api/projects/{slug}/environment", dependencies=[Depends(check_api)])
+def api_project_environment(slug: str):
+    _require_owned_project_for_mutation(slug)
+    detected = detect_runtime(slug)
+    capacity = {}
     try:
-        _EXECUTOR.submit(runner)
-    except Exception:
-        _ADMISSION.release()
-        raise
-    return op_id
+        capacity = get_host_capacity()
+    except Exception as exc:
+        capacity = {"ok": False, "status": "unavailable", "error": str(exc)[-500:]}
+    nodes = []
+    for node in cluster_status().get("nodes", []):
+        nodes.append(
+            {
+                "id": node.get("id"),
+                "name": node.get("friendly_name") or node.get("id"),
+                "status": node.get("status"),
+                "reachable": bool(node.get("reachable")),
+                "selectable": bool(
+                    node.get("destination_selectable", node.get("reachable"))
+                ),
+                "reason": node.get("error", ""),
+            }
+        )
+    return {
+        "ok": True,
+        "project": detected,
+        "detected_runtime": detected,
+        "runtime_options": RUNTIME_ISOLATIONS,
+        "resource_profiles": {
+            name: profile.__dict__ for name, profile in RESOURCE_PROFILES.items()
+        },
+        "capacity": capacity,
+        "nodes": nodes,
+        "workspace_preserved_by_default": True,
+    }
 
 
-def get_operation(op_id: str) -> dict[str, Any]:
-    reconcile_operations()
-    return _load(op_id)
+@app.get("/api/projects/{slug}/preflight", dependencies=[Depends(check_api)])
+def api_project_preflight(
+    slug: str,
+    runtime_isolation: str = "",
+    resource_profile: str = "",
+    custom_cpus: str = "",
+    custom_ram_gb: str = "",
+    custom_disk_gb: str = "",
+    pid_mode: str = "private",
+    pid_limit: str = "4096",
+):
+    return _preflight(
+        slug,
+        runtime_isolation,
+        resource_profile,
+        custom_cpus,
+        custom_ram_gb,
+        custom_disk_gb,
+        pid_mode,
+        pid_limit,
+    )
 
 
-def list_operations(limit: int = 50) -> list[dict[str, Any]]:
-    SETTINGS.operations.mkdir(parents=True, exist_ok=True)
-    reconcile_operations()
-    out: list[dict[str, Any]] = []
-    for path in sorted(SETTINGS.operations.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True)[: max(1, min(int(limit), 200))]:
+@app.get("/ui/projects/{slug}/preflight")
+def ui_project_preflight(
+    request: Request,
+    slug: str,
+    runtime_isolation: str = "",
+    resource_profile: str = "",
+    custom_cpus: str = "",
+    custom_ram_gb: str = "",
+    custom_disk_gb: str = "",
+    pid_mode: str = "private",
+    pid_limit: str = "4096",
+):
+    ui(request)
+    try:
+        return JSONResponse(
+            _preflight(
+                slug,
+                runtime_isolation,
+                resource_profile,
+                custom_cpus,
+                custom_ram_gb,
+                custom_disk_gb,
+                pid_mode,
+                pid_limit,
+            )
+        )
+    except FileNotFoundError:
+        raise HTTPException(404, "Project not found.")
+
+
+@app.post("/api/projects/{slug}/environment", dependencies=[Depends(check_api)])
+def api_project_environment_assign(slug: str, payload: dict | None = None):
+    payload = payload or {}
+    if not payload.get("wizard_confirmed"):
+        raise HTTPException(400, "Final wizard confirmation is required.")
+    _require_owned_project_for_mutation(slug, allow_legacy_migration=True)
+    runtime_isolation = str(payload.get("runtime_isolation") or "container")
+    resource_profile = str(payload.get("resource_profile") or "")
+    resource_limits = (
+        payload.get("resource_limits")
+        if isinstance(payload.get("resource_limits"), dict)
+        else None
+    )
+    selected = resource_limits or {}
+    preflight = _preflight(
+        slug,
+        runtime_isolation,
+        resource_profile,
+        str(selected.get("cpus", "")),
+        str(selected.get("memory_gb", "")),
+        str(selected.get("disk_gb", "")),
+        str(selected.get("pid_mode", "private")),
+        str(selected.get("pids", "4096")),
+    )
+    if not preflight["migration_ready"]:
+        raise HTTPException(
+            409,
+            "Environment preflight is not ready: " + "; ".join(preflight["blockers"]),
+        )
+    op = submit_operation(
+        "runtime-adoption",
+        slug,
+        lambda ctx: assign_project_runtime(
+            slug,
+            runtime_isolation,
+            resource_profile,
+            resource_limits,
+            operation_context=ctx,
+        ),
+        idempotency_key=f'runtime-adoption:{slug}:{runtime_isolation}:{resource_profile or "current"}',
+    )
+    return JSONResponse(
+        {"ok": True, "operation_id": op, "message": "Environment assignment queued."},
+        status_code=202,
+    )
+
+
+@app.post("/api/projects/create", dependencies=[Depends(check_api)])
+def api_create(payload: dict):
+    defaults = {
+        "slug": "", "display_name": "", "template": "generic", "git_url": "",
+        "language": "", "framework": "", "scale": "small", "intent": "prototype",
+        "testing_level": "standard", "profile": "", "resource_profile": "",
+        "resource_limits": None, "runtime_isolation": "", "use_ollama": True,
+        "worktree_source": "", "worktree_branch": "", "project_kind": "",
+    }
+    values = {key: payload.get(key, default) for key, default in defaults.items()}
+    slug = validate_slug(str(values["slug"]))
+    supplied = str(payload.get("idempotency_key") or "").strip()
+    if supplied and not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", supplied):
+        raise HTTPException(400, "Idempotency key must be 1-128 safe identifier characters.")
+
+    def task(ctx):
+        return create_project(**values, operation_context=ctx)
+
+    operation_id = submit_operation("create", slug, task, idempotency_key=f"project-create:{slug}:{supplied or 'default'}")
+    return JSONResponse({"ok": True, "accepted": True, "operation_id": operation_id, "operation_url": f"/api/operations/{operation_id}"}, status_code=202)
+
+
+@app.post("/api/transfers/receive", dependencies=[Depends(check_api)])
+def api_receive_transfer(payload: dict):
+    try:
+        slug = validate_slug(str(payload.get("slug") or ""))
+        project_id = validate_project_id(str(payload.get("project_id") or ""))
+        deployment_id = validate_project_id(
+            str(payload.get("deployment_id") or "")
+        )
+    except ValueError as exc:
+        raise HTTPException(400, "Transfer identity is invalid.") from exc
+    source_host_id = str(payload.get("source_host_id") or "")
+    destination_host_id = str(payload.get("destination_host_id") or "")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", source_host_id):
+        raise HTTPException(400, "Transfer source host identity is invalid.")
+    if destination_host_id != SETTINGS.host_id:
+        raise HTTPException(409, "Transfer destination host identity does not match this node.")
+    if deployment_id != str(SETTINGS.deployment_id or ""):
+        raise HTTPException(409, "Transfer deployment identity does not match this node.")
+    if (
+        str(payload.get("confirm_slug") or "") != slug
+        or str(payload.get("confirm_phrase") or "") != f"RECEIVE TRANSFER {slug}"
+    ):
+        raise HTTPException(400, "Receive transfer requires exact confirmation.")
+
+    def task(ctx):
+        ctx.update(10, "Validating transfer destination ownership")
+        result = receive_transferred_project(
+            slug,
+            project_id,
+            deployment_id,
+            source_host_id,
+            destination_host_id,
+        )
+        ctx.update(90, "Transfer restored and rebound to this node")
+        return result
+
+    operation_id = submit_operation(
+        "receive-transfer",
+        slug,
+        task,
+        project_id=project_id,
+        idempotency_key=(
+            f"receive-transfer:{slug}:{project_id}:{deployment_id}:"
+            f"{source_host_id}:{destination_host_id}"
+        ),
+        host_id=SETTINGS.host_id,
+    )
+    return JSONResponse(
+        {
+            "ok": True,
+            "accepted": True,
+            "operation_id": operation_id,
+            "operation_url": f"/api/operations/{operation_id}",
+        },
+        status_code=202,
+    )
+
+
+@app.post("/api/transfers/activate", dependencies=[Depends(check_api)])
+def api_activate_transfer(payload: dict):
+    try:
+        slug = validate_slug(str(payload.get("slug") or ""))
+        project_id = validate_project_id(str(payload.get("project_id") or ""))
+        deployment_id = validate_project_id(
+            str(payload.get("deployment_id") or "")
+        )
+    except ValueError as exc:
+        raise HTTPException(400, "Transfer identity is invalid.") from exc
+    source_host_id = str(payload.get("source_host_id") or "")
+    destination_host_id = str(payload.get("destination_host_id") or "")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", source_host_id):
+        raise HTTPException(400, "Transfer source host identity is invalid.")
+    if destination_host_id != SETTINGS.host_id or source_host_id == destination_host_id:
+        raise HTTPException(
+            409, "Transfer destination host identity does not match this node."
+        )
+    if deployment_id != str(SETTINGS.deployment_id or ""):
+        raise HTTPException(409, "Transfer deployment identity does not match this node.")
+    if (
+        str(payload.get("confirm_slug") or "") != slug
+        or str(payload.get("confirm_phrase") or "")
+        != f"ACTIVATE TRANSFER {slug}"
+    ):
+        raise HTTPException(400, "Transfer activation requires exact confirmation.")
+
+    def task(ctx):
+        ctx.update(10, "Validating pending transfer authority")
+        result = activate_transferred_project(
+            slug,
+            project_id,
+            deployment_id,
+            source_host_id,
+            destination_host_id,
+        )
+        ctx.update(95, "Transfer activated and project started")
+        return result
+
+    operation_id = submit_operation(
+        "activate-transfer",
+        slug,
+        task,
+        project_id=project_id,
+        idempotency_key=(
+            f"activate-transfer:{slug}:{project_id}:{deployment_id}:"
+            f"{source_host_id}:{destination_host_id}"
+        ),
+        host_id=SETTINGS.host_id,
+    )
+    return JSONResponse(
+        {
+            "ok": True,
+            "accepted": True,
+            "operation_id": operation_id,
+            "operation_url": f"/api/operations/{operation_id}",
+        },
+        status_code=202,
+    )
+
+
+@app.post("/api/projects/{slug}/{action}", dependencies=[Depends(check_api)])
+def api_action(request: Request, slug: str, action: str, payload: dict | None = None):
+    payload = payload or {}
+    if action not in PROJECT_ACTIONS:
+        raise HTTPException(404, "Unknown action")
+    project = safe_child(SETTINGS.workspaces, slug)
+    if not project.is_dir() or project.is_symlink():
+        raise HTTPException(404, "Project not found.")
+    metadata = _require_owned_project_for_mutation(slug)
+    capabilities = project_capabilities(slug, metadata)
+    if (
+        action
+        in {
+            "restart",
+            "runtime-health",
+            "bootstrap",
+            "health",
+            "test",
+            "codexpro",
+            "logs",
+        }
+        and not capabilities["can_run_runtime_action"]
+    ):
+        raise HTTPException(
+            409,
+            f"Runtime action unavailable: {capabilities['status_reason'] or 'environment is not ready.'}",
+        )
+    if action == "quarantine" and not payload.get("confirm_quarantine"):
+        raise HTTPException(400, "Quarantine requires explicit acknowledgement.")
+    if action == "destroy" and (
+        payload.get("confirm_slug") != slug
+        or payload.get("confirm_phrase") != f"DESTROY {slug}"
+    ):
+        raise HTTPException(400, "Permanent destruction requires exact confirmation.")
+    if action == "restore-backup" and (not payload.get("confirm_restore") or not payload.get("backup_id")):
+        raise HTTPException(400, "Backup restore requires an identified backup and explicit confirmation.")
+    if action == "restore-vault":
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                out.append(data)
-        except (OSError, json.JSONDecodeError):
-            continue
-    return out
-
-
-# Reconcile durable records when this process becomes the new operation owner.
-reconcile_operations()
+            canonical = _canonical_restore_requested(payload)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        payload["canonical"] = canonical
+        if canonical and (
+            str(payload.get("confirm_slug") or "") != slug
+            or str(payload.get("confirm_phrase") or "")
+            != f"RESTORE CANONICAL {slug}"
+        ):
+            raise HTTPException(
+                400, "Canonical Vault restore requires exact confirmation."
+            )
+        if canonical:
+            raise HTTPException(
+                409,
+                "Standalone canonical Vault restore is disabled; use restore-copy or guided ownership transfer.",
+            )
+    task = _project_action_task(slug, action, payload)
+    if action in PROJECT_READ_ONLY_ACTIONS:
+        return {"ok": True, "output": task(None)}
+    idempotency_key = _action_idempotency_key(slug, action, payload, request.headers.get("X-Idempotency-Key", ""))
+    operation_id = submit_operation(
+        action,
+        slug,
+        task,
+        project_id=str(metadata.get("project_id") or ""),
+        runtime_id=str(metadata.get("runtime_id") or ""),
+        idempotency_key=idempotency_key,
+        host_id=str(metadata.get("host_id") or SETTINGS.host_id),
+    )
+    return JSONResponse({"ok": True, "accepted": True, "operation_id": operation_id, "operation_url": f"/api/operations/{operation_id}"}, status_code=202)
 
 ```
 
 
-## FILE: source/app/devfleet/profiles.py
+## FILE: source/app/devfleet/metadata_io.py
 
-SHA256: 1cd0b8e2b31ac2ff724837205ac8f83d2ee6cb0916a679512f543b8557f2dcc5 | Bytes: 646 | Git mode: 100644
+SHA256: 188ee5ed02c51d802e85cfa75a1017e9fc2c5a897a51083ba4a09bd564afd290 | Bytes: 22797 | Git mode: 100644
 
 ```
+"""Read and replace project metadata through a stable filesystem identity.
+
+Linux is the deployed target. Its directory-relative, no-follow operations are
+the authoritative contract. Windows compatibility pins directories against
+rename with native handles, but is not evidence of the POSIX security contract.
+This module intentionally has no application settings or third-party imports.
+"""
 from __future__ import annotations
+
+import contextlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
 from dataclasses import dataclass
+from typing import Any
+import uuid
+
+
+# Compute this before tests wrap os.open to inject deterministic substitutions.
+POSIX_FD_HARDENING = (
+    os.name == "posix"
+    and all(hasattr(os, flag) for flag in ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK"))
+    and all(fn in os.supports_dir_fd for fn in (os.open, os.stat, os.mkdir, os.unlink, os.rename, os.link))
+    and os.stat in os.supports_follow_symlinks
+)
+_Identity = tuple[int, int, int]
+_Version = tuple[int, int, int, int, int, int, int]
+
+
+class MetadataSafetyError(ValueError):
+    """The observed metadata object no longer has its authorized identity."""
+
 
 @dataclass(frozen=True)
-class DevelopmentProfile:
-    name:str; block_hardening:bool; allow_tailnet:bool; allow_devices:bool; allow_privileged:bool; shared_caches:bool
+class MetadataBinding:
+    workspace: str
+    directory_lineage: tuple[tuple[str, _Identity], ...]
+    file_identity: _Identity | None
+    file_version: _Version | None
+    posix: bool
 
-PROFILES={
- 'strict':DevelopmentProfile('strict',True,False,False,False,False),
- 'balanced':DevelopmentProfile('balanced',False,True,False,False,True),
- 'fast':DevelopmentProfile('fast',False,True,True,True,True),
-}
-def get_profile(name:str)->DevelopmentProfile:
-    key=(name or 'strict').lower()
-    if key not in PROFILES: raise ValueError(f'Unknown development profile: {key}')
-    return PROFILES[key]
+    def same_directory_lineage(self, other: MetadataBinding) -> bool:
+        return (
+            isinstance(other, MetadataBinding)
+            and self.workspace == other.workspace
+            and self.directory_lineage == other.directory_lineage
+            and self.posix == other.posix
+        )
+
+
+@dataclass(frozen=True)
+class MetadataRecord:
+    value: Any
+    raw: bytes
+    binding: MetadataBinding
+
+
+def enable_inherited_backup_read(fd: int, *, parent: Path | int, directory: bool = False) -> None:
+    """Retain only an already-inherited backup grant on a newly created inode.
+
+    Creating atomic files as 0600 (or metadata directories as 0700) masks named
+    default ACL entries. Reactivate read/traverse for the configured backup UID,
+    not write, while preserving every other principal's previous effective access.
+    No ACL or no backup grant means the object remains private. Call only on the
+    pinned descriptor of an unpublished file or a directory just created here.
+    """
+    if sys.platform != "linux":
+        return
+    import errno
+    import pwd
+    import struct
+
+    try:
+        backup_uid = pwd.getpwnam("devfleet-backup").pw_uid
+    except KeyError:
+        return
+    try:
+        raw = os.getxattr(fd, "system.posix_acl_access")
+        # Ancestors are deliberately pinned with O_PATH (traverse-only), which
+        # fgetxattr rejects. The kernel's /proc/self/fd link retains that exact
+        # live directory identity without reopening an attacker-controlled path.
+        policy_target = f"/proc/self/fd/{parent}" if isinstance(parent, int) else parent
+        policy = os.getxattr(policy_target, "system.posix_acl_default")
+    except OSError as exc:
+        if exc.errno in (errno.ENODATA, errno.ENOTSUP, errno.EOPNOTSUPP):
+            return
+        raise
+    if len(raw) < 4 or (len(raw) - 4) % 8 or struct.unpack("<I", raw[:4])[0] != 2:
+        raise MetadataSafetyError("Inherited metadata ACL has an unsupported format.")
+    entries = list(struct.iter_unpack("<HHI", raw[4:]))
+    masks = [permissions for tag, permissions, _uid in entries if tag == 0x10]
+    grants = [permissions for tag, permissions, uid in entries
+              if tag == 0x02 and uid == backup_uid]
+    if not grants:
+        return
+    if len(masks) != 1 or len(grants) != 1 or any(permissions & ~7 for _, permissions, _ in entries):
+        raise MetadataSafetyError("Inherited metadata ACL is ambiguous.")
+    needed = 0x05 if directory else 0x04
+    if grants[0] & needed != needed:
+        return
+    # The parent's mask may itself deliberately deny an otherwise named grant.
+    # A raw inherited entry alone is not authorization to override that denial.
+    if len(policy) < 4 or (len(policy) - 4) % 8 or struct.unpack("<I", policy[:4])[0] != 2:
+        raise MetadataSafetyError("Default metadata ACL has an unsupported format.")
+    parent_entries = list(struct.iter_unpack("<HHI", policy[4:]))
+    parent_masks = [permissions for tag, permissions, _uid in parent_entries if tag == 0x10]
+    parent_grants = [permissions for tag, permissions, uid in parent_entries
+                     if tag == 0x02 and uid == backup_uid]
+    if not parent_grants:
+        return
+    if len(parent_masks) != 1 or len(parent_grants) != 1:
+        raise MetadataSafetyError("Default metadata ACL is ambiguous.")
+    if (parent_grants[0] & parent_masks[0] & needed) != needed:
+        return
+    mask = masks[0]
+    owner = os.fstat(fd)
+    owner_permissions = stat.S_IMODE(owner.st_mode) >> 6
+    # A named ACL entry for the inode's own publisher is not an unrelated
+    # principal: it already has the owner rights. Preserve its explicitly
+    # inherited grant so non-root restore does not erase publisher access when
+    # the restoring account becomes the inode owner. Parent policy still limits
+    # that grant; no other masked principal is reactivated.
+    publisher_access = next((permissions & owner_permissions & parent_masks[0]
+                             for tag, permissions, uid in parent_entries
+                             if tag == 0x02 and uid == owner.st_uid), 0)
+    updated = []
+    for tag, permissions, uid in entries:
+        if tag == 0x02 and uid == backup_uid:
+            permissions = needed
+        elif tag == 0x02 and uid == owner.st_uid:
+            permissions &= publisher_access
+        elif tag in (0x02, 0x04, 0x08):
+            # Widening the shared ACL mask must not revive another named user,
+            # the owning group, or a named group that mode 0600/0700 had denied.
+            permissions &= mask
+        elif tag == 0x10:
+            permissions = mask | needed | publisher_access
+        updated.append((tag, permissions, uid))
+    encoded = struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *entry) for entry in updated)
+    os.setxattr(fd, "system.posix_acl_access", encoded)
+
+
+def _identity(info: os.stat_result) -> _Identity:
+    return int(info.st_dev), int(info.st_ino), stat.S_IFMT(info.st_mode)
+
+
+def _version(info: os.stat_result) -> _Version:
+    return (*_identity(info), int(info.st_nlink), int(info.st_size),
+            int(info.st_mtime_ns), int(info.st_ctime_ns))
+
+
+def _require_kind(info: os.stat_result, kind: int) -> None:
+    if (
+        stat.S_IFMT(info.st_mode) != kind
+        or getattr(info, "st_file_attributes", 0) & 0x400  # Windows reparse point.
+    ):
+        raise MetadataSafetyError("Metadata path contains an alias or an unsupported object.")
+    if kind == stat.S_IFREG and info.st_nlink != 1:
+        raise MetadataSafetyError("Metadata file has an unexpected hard-link count.")
+
+
+def _lexical_workspace(project: Path) -> Path:
+    project = Path(project)
+    if ".." in project.parts:
+        raise MetadataSafetyError("Metadata workspace may not contain parent traversal.")
+    return Path(os.path.abspath(os.fspath(project)))
+
+
+def _pin_windows_directory(path: Path):
+    """Deny directory rename/deletion while compatibility I/O uses its pathname."""
+    import ctypes
+    from ctypes import wintypes
+
+    class FileInformation(ctypes.Structure):
+        _fields_ = [
+            ("attributes", wintypes.DWORD),
+            ("creation", wintypes.FILETIME),
+            ("access", wintypes.FILETIME),
+            ("write", wintypes.FILETIME),
+            ("volume", wintypes.DWORD),
+            ("size_high", wintypes.DWORD),
+            ("size_low", wintypes.DWORD),
+            ("links", wintypes.DWORD),
+            ("index_high", wintypes.DWORD),
+            ("index_low", wintypes.DWORD),
+        ]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.GetFileInformationByHandle.argtypes = [wintypes.HANDLE, ctypes.POINTER(FileInformation)]
+    kernel.GetFileInformationByHandle.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    # FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES; share read/write, deliberately
+    # omit FILE_SHARE_DELETE. Attribute-only handles do not enforce that denial.
+    # OPEN_EXISTING; BACKUP_SEMANTICS | OPEN_REPARSE_POINT.
+    handle = kernel.CreateFileW(str(path), 0x81, 0x3, None, 3, 0x02200000, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        info = FileInformation()
+        if not kernel.GetFileInformationByHandle(handle, ctypes.byref(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not info.attributes & 0x10 or info.attributes & 0x400:
+            raise MetadataSafetyError("Metadata parent is not a real directory.")
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
+    return lambda: kernel.CloseHandle(handle)
+
+
+class _MetadataLocation:
+    def __init__(self, project: Path, *, create_directory: bool = False):
+        self.project = _lexical_workspace(project)
+        self.directory = self.project / ".devfleet"
+        self._create_directory = create_directory
+        self._edges: list[tuple[Path, int | None, str, int | None, _Identity]] = []
+        self._windows_closers: list[Any] = []
+
+    def __enter__(self):
+        if not POSIX_FD_HARDENING and os.name != "nt":
+            raise MetadataSafetyError("Required descriptor-relative metadata primitives are unavailable.")
+        try:
+            parent_fd = None
+            current = Path(self.directory.anchor)
+            for index, name in enumerate(self.directory.parts):
+                created_here = False
+                current = Path(name) if index == 0 else current / name
+                try:
+                    observed = self._stat_directory(current, parent_fd, name)
+                except FileNotFoundError:
+                    if not self._create_directory or current != self.directory:
+                        raise
+                    try:
+                        if POSIX_FD_HARDENING:
+                            os.mkdir(name, 0o700, dir_fd=parent_fd)
+                        else:
+                            current.mkdir(mode=0o700)
+                        created_here = True
+                    except FileExistsError:
+                        pass
+                    observed = self._stat_directory(current, parent_fd, name)
+                _require_kind(observed, stat.S_IFDIR)
+                if POSIX_FD_HARDENING:
+                    # The backup identity may only traverse ancestors such as
+                    # /home/devrunner. O_PATH pins those without requiring list
+                    # permission; the metadata directory remains fsync-capable.
+                    access = os.O_RDONLY if current == self.directory else getattr(os, "O_PATH", os.O_RDONLY)
+                    flags = access | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+                    fd = os.open(name if parent_fd is not None else current, flags, dir_fd=parent_fd)
+                    self._edges.append((current, parent_fd, name, fd, _identity(observed)))
+                    actual = os.fstat(fd)
+                    _require_kind(actual, stat.S_IFDIR)
+                    if _identity(actual) != _identity(observed):
+                        raise MetadataSafetyError("Metadata directory changed before it could be opened.")
+                    if created_here:
+                        enable_inherited_backup_read(fd, parent=parent_fd, directory=True)
+                    parent_fd = fd
+                else:
+                    closer = _pin_windows_directory(current)
+                    self._windows_closers.append(closer)
+                    actual = os.lstat(current)
+                    _require_kind(actual, stat.S_IFDIR)
+                    if _identity(actual) != _identity(observed):
+                        raise MetadataSafetyError("Metadata directory changed before it could be pinned.")
+                    self._edges.append((current, None, name, None, _identity(actual)))
+            self.assert_directories()
+            return self
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
+
+    def __exit__(self, *_args):
+        for _path, _parent, _name, fd, _expected in reversed(self._edges):
+            if fd is not None:
+                os.close(fd)
+        self._edges.clear()
+        for closer in reversed(self._windows_closers):
+            closer()
+        self._windows_closers.clear()
+
+    @staticmethod
+    def _stat_directory(path: Path, parent_fd: int | None, name: str):
+        return (os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                if parent_fd is not None else os.lstat(path))
+
+    @property
+    def directory_fd(self) -> int | None:
+        return self._edges[-1][3]
+
+    def assert_directories(self) -> None:
+        for path, parent_fd, name, fd, expected in self._edges:
+            current = self._stat_directory(path, parent_fd, name)
+            _require_kind(current, stat.S_IFDIR)
+            if _identity(current) != expected or (fd is not None and _identity(os.fstat(fd)) != expected):
+                raise MetadataSafetyError("Metadata directory binding changed during the operation.")
+
+    def stat_file(self, name: str = "project.json") -> os.stat_result:
+        return (os.stat(name, dir_fd=self.directory_fd, follow_symlinks=False)
+                if POSIX_FD_HARDENING else os.lstat(self.directory / name))
+
+    def binding(self, file_info: os.stat_result | None) -> MetadataBinding:
+        return MetadataBinding(
+            os.path.normcase(str(self.project)),
+            tuple((os.path.normcase(str(path)), expected) for path, _parent, _name, _fd, expected in self._edges),
+            _identity(file_info) if file_info is not None else None,
+            _version(file_info) if file_info is not None else None,
+            POSIX_FD_HARDENING,
+        )
+
+    def assert_binding(self, expected: MetadataBinding) -> None:
+        self.assert_directories()
+        try:
+            current = self.stat_file()
+        except FileNotFoundError:
+            current = None
+        if current is not None:
+            _require_kind(current, stat.S_IFREG)
+        observed = self.binding(current)
+        if observed != expected:
+            raise MetadataSafetyError("Metadata identity or contents changed during the operation.")
+
+
+def read_project_metadata(project: Path) -> MetadataRecord:
+    with _MetadataLocation(project) as location:
+        observed = location.stat_file()
+        _require_kind(observed, stat.S_IFREG)
+        expected = location.binding(observed)
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0)
+        if POSIX_FD_HARDENING:
+            flags |= os.O_NOFOLLOW | os.O_NONBLOCK
+            fd = os.open("project.json", flags, dir_fd=location.directory_fd)
+        else:
+            fd = os.open(location.directory / "project.json", flags)
+        try:
+            actual = os.fstat(fd)
+            _require_kind(actual, stat.S_IFREG)
+            if _version(actual) != _version(observed):
+                raise MetadataSafetyError("Metadata file changed before it could be opened.")
+            with os.fdopen(fd, "rb", closefd=False) as handle:
+                raw = handle.read()
+            if _version(os.fstat(fd)) != _version(observed):
+                raise MetadataSafetyError("Metadata file changed while it was being read.")
+            location.assert_binding(expected)
+            value = json.loads(raw.decode("utf-8"))
+            location.assert_binding(expected)
+            if _version(os.fstat(fd)) != _version(observed):
+                raise MetadataSafetyError("Metadata file changed while it was being parsed.")
+            return MetadataRecord(value, raw, expected)
+        finally:
+            os.close(fd)
+
+
+def write_project_metadata(
+    project: Path, value: Any, *, expected: MetadataBinding | None = None,
+    create: bool = False,
+) -> MetadataBinding:
+    raw = (json.dumps(value, indent=2, sort_keys=True, default=str) + "\n").encode("utf-8")
+    return write_project_metadata_bytes(project, raw, expected=expected, create=create)
+
+
+def write_project_metadata_bytes(
+    project: Path, raw: bytes, *, expected: MetadataBinding | None = None,
+    create: bool = False,
+) -> MetadataBinding:
+    """Replace metadata inside pinned parents, preserving raw rollback bytes.
+
+    The prior binding is checked immediately before publication. Replacement is
+    not an inode compare-and-swap against a hostile writer of the same directory:
+    callers still serialize cooperating writers. Even a concurrent parent rename
+    cannot redirect the POSIX write into its replacement directory.
+    """
+    if not isinstance(raw, bytes):
+        raise TypeError("Metadata bytes must be bytes.")
+    with _MetadataLocation(project, create_directory=create) as location:
+        try:
+            current = location.stat_file()
+        except FileNotFoundError:
+            current = None
+        if current is not None:
+            _require_kind(current, stat.S_IFREG)
+        if expected is None:
+            if not create or current is not None:
+                raise MetadataSafetyError("Existing metadata writes require the prior identity binding.")
+            expected = location.binding(None)
+        location.assert_binding(expected)
+        temporary = f".project.json.{uuid.uuid4().hex}.tmp"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0)
+        fd = None
+        temporary_identity = None
+        try:
+            if POSIX_FD_HARDENING:
+                fd = os.open(temporary, flags | os.O_NOFOLLOW, 0o600, dir_fd=location.directory_fd)
+            else:
+                fd = os.open(location.directory / temporary, flags, 0o600)
+            _require_kind(os.fstat(fd), stat.S_IFREG)
+            temporary_identity = _identity(os.fstat(fd))
+            with os.fdopen(fd, "wb", closefd=False) as handle:
+                handle.write(raw)
+                handle.flush()
+                enable_inherited_backup_read(fd, parent=location.directory_fd)
+                os.fsync(fd)
+            written = os.fstat(fd)
+            _require_kind(written, stat.S_IFREG)
+            written_version = _version(written)
+            location.assert_binding(expected)
+            staged = location.stat_file(temporary)
+            _require_kind(staged, stat.S_IFREG)
+            if _version(staged) != written_version or _version(os.fstat(fd)) != written_version:
+                raise MetadataSafetyError("Metadata temporary file changed before replacement.")
+            if POSIX_FD_HARDENING:
+                if expected.file_identity is None:
+                    # Atomic first publication must not overwrite a file that
+                    # appeared after the absence check. Link only if absent,
+                    # then drop the temporary name before the regular-file check.
+                    os.link(temporary, "project.json", src_dir_fd=location.directory_fd,
+                            dst_dir_fd=location.directory_fd, follow_symlinks=False)
+                    os.unlink(temporary, dir_fd=location.directory_fd)
+                else:
+                    os.replace(temporary, "project.json", src_dir_fd=location.directory_fd,
+                               dst_dir_fd=location.directory_fd)
+                os.fsync(location.directory_fd)
+            else:
+                # CRT descriptors deny file deletion; parent directory handles
+                # remain pinned while the temporary file is closed and renamed.
+                os.close(fd)
+                fd = None
+                replace = os.rename if expected.file_identity is None else os.replace
+                replace(location.directory / temporary, location.directory / "project.json")
+            location.assert_directories()
+            committed = location.stat_file()
+            _require_kind(committed, stat.S_IFREG)
+            if _identity(committed) != temporary_identity:
+                raise MetadataSafetyError("Committed metadata does not match the written file.")
+            binding = location.binding(committed)
+            location.assert_binding(binding)
+            return binding
+        finally:
+            if fd is not None:
+                os.close(fd)
+            if temporary_identity is not None:
+                with contextlib.suppress(OSError):
+                    if _identity(location.stat_file(temporary)) == temporary_identity:
+                        if POSIX_FD_HARDENING:
+                            os.unlink(temporary, dir_fd=location.directory_fd)
+                        else:
+                            os.unlink(location.directory / temporary)
+
+
+def metadata_identity_matches(
+    value: Any, slug: str, project_id: str,
+    deployment_id: str | None = None, host_id: str | None = None,
+) -> bool:
+    if not isinstance(value, dict) or isinstance(value.get("schema_version"), bool):
+        return False
+    try:
+        schema = int(value.get("schema_version"))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return bool(
+        schema >= 3
+        and value.get("managed_by") == "devfleet"
+        and value.get("slug") == slug
+        and (value.get("identity") if value.get("identity") is not None else slug) == slug
+        and value.get("project_id") == project_id
+        and (deployment_id is None or value.get("deployment_id") == deployment_id)
+        and (host_id is None or value.get("host_id") == host_id)
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if len(args) not in {4, 5, 6} or args[0] != "--identity":
+        return 2
+    _action, workspace, slug, project_id, *optional = args
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,62}", slug) or not re.fullmatch(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", project_id
+    ):
+        return 2
+    try:
+        record = read_project_metadata(Path(workspace))
+        return 0 if metadata_identity_matches(record.value, slug, project_id, *optional) else 1
+    except (OSError, ValueError, UnicodeError):
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 
 ```
 
 
-## FILE: source/app/devfleet/projects.py
+## FILE: source/app/devfleet/node_registry.py
 
-SHA256: 6ff44e69f1eb4219d8ba2f0a4bc8416c11c7378ce3cdabfcb7f8e78ee33e272b | Bytes: 196892 | Git mode: 100644
+SHA256: ffd562d4c2685dacea1e183e708530ea4ccf04c20f19e2969d827190b286600b | Bytes: 5199 | Git mode: 100644
+
+```
+"""Durable Primary/Surrogate node identity registry without leader election."""
+from __future__ import annotations
+
+import json
+import uuid
+from pathlib import Path
+from typing import Any, Iterable
+
+from .core import SETTINGS, atomic_json, now_iso
+
+VALID_ROLES = {"primary", "surrogate", "server"}
+
+
+def _new_id() -> str:
+    return str(uuid.uuid4())
+
+
+class NodeRegistry:
+    def __init__(self, path: Path | None = None) -> None:
+        self.path = path or SETTINGS.runtime_root / "node-registry.json"
+
+    def _empty(self) -> dict[str, Any]:
+        return {"schema_version": 1, "deployment_id": "", "nodes": []}
+
+    def load(self) -> dict[str, Any]:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return self._empty()
+        if not isinstance(data, dict) or not isinstance(data.get("nodes", []), list):
+            raise ValueError("Node registry is invalid; refusing to infer identities.")
+        data.setdefault("schema_version", 1)
+        data.setdefault("deployment_id", "")
+        return data
+
+    def _save(self, data: dict[str, Any]) -> None:
+        if not data.get("deployment_id"):
+            raise ValueError("A deployment identity is required.")
+        atomic_json(self.path, data)
+
+    def ensure_local(self, *, node_name: str, node_role: str, friendly_name: str = "", deployment_id: str | None = None, coordinator_node_id: str | None = None, capabilities: Iterable[str] = ()) -> dict[str, Any]:
+        role = str(node_role or "").strip().lower()
+        if role not in VALID_ROLES:
+            raise ValueError(f"Unsupported node role: {node_role}")
+        data = self.load()
+        requested_deployment = str(deployment_id or data.get("deployment_id") or "").strip()
+        if not requested_deployment:
+            requested_deployment = _new_id()
+        if data.get("deployment_id") and data["deployment_id"] != requested_deployment:
+            raise ValueError("Deployment identity mismatch; refusing to create a second deployment.")
+        data["deployment_id"] = requested_deployment
+        name = str(node_name or "").strip()
+        if not name:
+            raise ValueError("Node name is required.")
+        existing = next((n for n in data["nodes"] if isinstance(n, dict) and n.get("node_name") == name), None)
+        if existing is not None:
+            if existing.get("node_role") != role or existing.get("deployment_id") != requested_deployment:
+                raise ValueError("Existing node identity conflicts with the requested role or deployment.")
+            existing.update({"friendly_name": friendly_name or existing.get("friendly_name") or name, "capabilities": sorted({str(x) for x in capabilities} | set(existing.get("capabilities") or [])), "coordinator_node_id": coordinator_node_id or existing.get("coordinator_node_id"), "last_seen": now_iso(), "connectivity": "online"})
+            self._save(data)
+            return dict(existing)
+        if role == "surrogate" and not coordinator_node_id:
+            raise ValueError("A Surrogate requires an explicit coordinator_node_id.")
+        node = {"deployment_id": requested_deployment, "node_id": _new_id(), "node_name": name, "friendly_name": friendly_name or name, "node_role": role, "capabilities": sorted({str(x) for x in capabilities}), "coordinator_node_id": coordinator_node_id if role == "surrogate" else None, "protocol_version": 1, "devfleet_version": "", "health": "unknown", "connectivity": "online", "last_seen": now_iso(), "failover_priority": 100, "compute_capacity": {}, "vault_capability": False, "storage_capacity": {}, "tailscale": {"node": "", "ipv4": "", "ipv6": ""}, "registration_state": "registered"}
+        data["nodes"].append(node)
+        self._save(data)
+        return dict(node)
+
+    def register(self, node: dict[str, Any]) -> dict[str, Any]:
+        required = ("deployment_id", "node_id", "node_name", "node_role")
+        if any(not str(node.get(key) or "").strip() for key in required):
+            raise ValueError("Node registration requires deployment, node, name, and role identities.")
+        role = str(node["node_role"]).lower()
+        if role not in VALID_ROLES:
+            raise ValueError("Unsupported node role.")
+        data = self.load()
+        if data.get("deployment_id") and data["deployment_id"] != node["deployment_id"]:
+            raise ValueError("Node belongs to a different deployment.")
+        data["deployment_id"] = node["deployment_id"]
+        existing = next((n for n in data["nodes"] if n.get("node_id") == node["node_id"]), None)
+        if existing is not None:
+            if any(existing.get(key) != node.get(key) for key in ("node_name", "node_role", "deployment_id")):
+                raise ValueError("Duplicate node ID has conflicting identity.")
+            existing.update(node)
+            existing["last_seen"] = now_iso()
+            self._save(data)
+            return dict(existing)
+        data["nodes"].append(dict(node))
+        self._save(data)
+        return dict(node)
+
+    def list_nodes(self) -> list[dict[str, Any]]:
+        return [dict(item) for item in self.load()["nodes"] if isinstance(item, dict)]
+
+```
+
+
+## FILE: source/app/devfleet/ollama.py
+
+SHA256: 5805e067353f237924b00fff0b0c595db779ccea061b7ad5e34186052dec0e6e | Bytes: 943 | Git mode: 100644
 
 ```
 from __future__ import annotations
-import base64, copy, errno, json, re, shutil, stat, time, uuid, hashlib, tarfile, os, contextlib
-from urllib.parse import quote
-from pathlib import Path
 from typing import Any
-from .core import (
-    SETTINGS,
-    atomic_bytes,
-    atomic_json,
-    atomic_text,
-    now_iso,
-    run,
-    safe_child,
-    validate_project_id,
-    validate_slug,
-)
-from .analyzer import analyze_project, has_blockers
-from .language_policy import TEMPLATES, recommend_template, template_metadata
-from .caches import cache_override
-from .leases import load_lease, update_lease, heartbeat_lease
-from .codexpro import codexpro_status
-from .resource_profiles import (
-    get_resource_profile,
-    resource_metadata,
-    resource_override_path,
-    ownership_override_path,
-    recommend_resource_profile,
-    recommend_runtime_isolation,
-    write_resource_override,
-    write_ownership_override,
-    validate_resource_limits,
-    custom_resource_metadata,
-    capacity_allows,
-    resolved_resource_metadata,
-)
-from .containers import container_ownership_labels
-from .host_control import (
-    destroy_project_vm,
-    get_host_capacity,
-    import_project_workspace,
-    sync_project_vm_ssh_alias,
-)
-from .runtime import VM_RUNTIME, VmRuntimeOperations, provider_for, runtime_metadata
-from .workspace_archives import (
-    create_workspace_archive,
-    inspect_workspace,
-    restore_workspace_archive,
-    validate_archive,
-    write_backup_manifest,
-)
-from .metadata_io import (
-    MetadataBinding,
-    MetadataSafetyError,
-    read_project_metadata,
-    write_project_metadata,
-    write_project_metadata_bytes,
-)
+import httpx
+from .core import SETTINGS
+def ollama_health(*,queue_probe:bool=False)->dict[str,Any]:
+ if not SETTINGS.ollama_base_url:return {'configured':False}
+ base=SETTINGS.ollama_base_url.rstrip('/')
+ try:
+  r=httpx.get(base+'/models',timeout=1.5);r.raise_for_status();models=r.json().get('data',[]);names=[str(x.get('id','')) for x in models]
+  out={'configured':True,'ok':True,'endpoint':base,'model':SETTINGS.ollama_model,'model_available':SETTINGS.ollama_model in names,'models':names[:20],'profile':SETTINGS.ollama_profile}
+  if queue_probe:
+   p=httpx.post(base+'/chat/completions',json={'model':SETTINGS.ollama_model,'messages':[{'role':'user','content':'Reply OK'}],'max_tokens':4},timeout=60);out['queue_response']=p.status_code
+  return out
+ except Exception as exc:return {'configured':True,'ok':False,'endpoint':base,'error':str(exc),'profile':SETTINGS.ollama_profile}
+
+```
 
 
-class _MetadataSnapshot(dict[str, Any]):
-    """Metadata mapping carrying the version observed before mutation."""
+## FILE: source/app/devfleet/operations.py
 
-    def __init__(
-        self,
-        value: dict[str, Any],
-        *,
-        binding: MetadataBinding | None = None,
-        raw: bytes = b"",
-    ):
-        super().__init__(value)
-        self._observed = copy.deepcopy(value)
-        self._metadata_binding = binding
-        self._metadata_raw = raw
+SHA256: d60334d923abed24439342e38ce4061e702b76a64813082718d29946e6832437 | Bytes: 12217 | Git mode: 100644
 
-TEMPLATE_ROOT = Path("/opt/devfleet/project-templates")
-GITHUB_URL_RE = re.compile(
-    r"^(?:https://github\.com/[^/\s]+/[^/\s]+(?:\.git)?|git@github\.com:[^/\s]+/[^/\s]+(?:\.git)?|ssh://git@github\.com/[^/\s]+/[^/\s]+(?:\.git)?)$"
-)
-BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")
-PROJECT_COMMAND_KEYS = (
-    "bootstrap_command",
-    "health_command",
-    "test_command",
-    "format_command",
-    "lint_command",
-    "start_command",
-    "stop_command",
-    "restart_command",
-    "rebuild_command",
-    "logs_command",
-    "codexpro_command",
-)
-VM_LIFECYCLE_COMMAND_KEYS = (
-    "start_command",
-    "stop_command",
-    "restart_command",
-    "rebuild_command",
-    "logs_command",
-)
-FINGERPRINT_POLICY_VERSION = 1
-FINGERPRINT_ALGORITHM = "sha256-relative-path-and-bytes-v1"
-IGNORED_FINGERPRINT_DIRS = {
-    "node_modules", ".next", "build", "dist", ".venv", "venv",
-    ".pytest_cache", "__pycache__", ".test-runtime",
-}
-@contextlib.contextmanager
-def _destructive_lock(slug: str):
-    """Serialize destructive lifecycle work across API workers/processes."""
-    root = (SETTINGS.runtime_root / "lifecycle-locks").resolve()
-    root.mkdir(parents=True, exist_ok=True)
-    path = root / f"{validate_slug(slug)}.lock"
-    handle = path.open("a+b")
-    lock_kind = "none"
+```
+"""Durable, bounded operation state with per-project serialization."""
+from __future__ import annotations
+
+import json
+import secrets
+import threading
+import time
+import traceback
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+from .core import SETTINGS, atomic_json, now_iso
+
+
+OP_ID_RE = r"^[a-z0-9][a-z0-9._-]{1,127}$"
+_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="devfleet-op")
+_ADMISSION = threading.BoundedSemaphore(2)
+_LOCK = threading.RLock()
+_ACTIVE_LOCKS: dict[str, threading.Lock] = {}
+_WORKER_INSTANCE_ID = secrets.token_hex(12)
+_LEASE_SECONDS = 45
+_QUEUED_SECONDS = 15
+_HEARTBEAT_INTERVAL_SECONDS = max(1, _LEASE_SECONDS // 3)
+
+
+def _lease_until() -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=_LEASE_SECONDS)).isoformat()
+
+
+def _lease_expired(value: Any) -> bool:
+    if not value:
+        return True
     try:
-        if handle.seek(0, os.SEEK_END) == 0:
-            handle.write(b"0")
-            handle.flush()
-        handle.seek(0)
-        try:
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            lock_kind = "fcntl"
-        except ImportError:
-            import msvcrt
-
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-            lock_kind = "msvcrt"
-        yield
-    finally:
-        if lock_kind == "fcntl":
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        elif lock_kind == "msvcrt":
-            import msvcrt
-
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        handle.close()
-
-
-@contextlib.contextmanager
-def project_transfer_lock(slug: str):
-    """Serialize one source-side ownership transfer with destructive work."""
-    with _destructive_lock(validate_slug(slug)):
-        yield
-
-
-def _source_state_fingerprint(project: Path, *, include_generated: bool = False) -> str:
-    """Hash source paths and bytes, excluding only DevFleet's mutable metadata."""
-    digest = hashlib.sha256()
-    for current, dirs, names in os.walk(project, topdown=True, followlinks=False):
-        if not include_generated:
-            dirs[:] = [d for d in dirs if d not in IGNORED_FINGERPRINT_DIRS]
-        dirs[:] = sorted(dirs)
-        for name in sorted(names):
-            path = Path(current) / name
-            rel = path.relative_to(project).as_posix()
-            if rel == ".devfleet/project.json":
-                continue
-            if path.is_symlink() or not path.is_file():
-                raise ValueError(
-                    f"Workspace changed to an unsupported entry during destructive preparation: {rel}"
-                )
-            digest.update(rel.encode())
-            digest.update(b"\0")
-            with path.open("rb") as handle:
-                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(chunk)
-            digest.update(b"\0")
-    return digest.hexdigest()
-
-
-def _safety_backup_fields(
-    result: dict[str, Any], meta: dict[str, Any]
-) -> tuple[str, str, str]:
-    runtime = result.get("runtime") if isinstance(result.get("runtime"), dict) else {}
-    backup_id = str(
-        result.get("backup_id")
-        or runtime.get("backup_id")
-        or meta.get("backup_id")
-        or ""
-    )
-    backup_sha = str(
-        result.get("backup_sha256")
-        or runtime.get("backup_sha256")
-        or meta.get("backup_sha256")
-        or ""
-    )
-    status = str(
-        result.get("backup_status")
-        or runtime.get("backup_status")
-        or meta.get("backup_status")
-        or ""
-    ).lower()
-    return backup_id, backup_sha, status
-
-
-def _assert_safety_binding_current(project: Path, binding: dict[str, Any]) -> None:
-    """Fail closed if workspace bytes or exact project identity drifted."""
-    policy = binding.get("fingerprint_policy")
-    if not isinstance(policy, dict) or int(policy.get("schema_version", 0)) != FINGERPRINT_POLICY_VERSION:
-        raise RuntimeError("Destructive deletion blocked: the safety fingerprint policy is missing or unsupported.")
-    if policy.get("algorithm") != FINGERPRINT_ALGORITHM:
-        raise RuntimeError("Destructive deletion blocked: the safety fingerprint algorithm is not recognized.")
-    include_generated = bool(policy.get("include_generated"))
-    expected_ignored = [] if include_generated else sorted(IGNORED_FINGERPRINT_DIRS)
-    if sorted(policy.get("ignored_directories") or []) != expected_ignored:
-        raise RuntimeError("Destructive deletion blocked: the recorded safety fingerprint policy is inconsistent.")
-    current = _source_state_fingerprint(project, include_generated=include_generated)
-    if current != str(binding.get("source_state_fingerprint") or ""):
-        raise RuntimeError(
-            "Destructive deletion blocked: workspace changed after the safety backup; no deletion was performed."
-        )
-    current_meta = load_meta(project)
-    for key in ("project_id", "runtime_id"):
-        expected = str(binding.get(key) or "")
-        if expected and str(current_meta.get(key) or "") != expected:
-            raise RuntimeError(
-                f"Destructive deletion blocked: {key} changed after the safety backup; no deletion was performed."
-            )
-
-
-_SAFE_COMPOSE_COMMANDS = {
-    "docker compose up -d --build",
-    "docker compose down --remove-orphans",
-    "docker compose restart",
-    "docker compose build && docker compose up -d",
-    "docker compose logs",
-}
-
-
-def metadata_path(project: Path) -> Path:
-    return project / ".devfleet/project.json"
-
-
-def _write_project_metadata(
-    project: Path,
-    value: dict[str, Any],
-    *,
-    expected: MetadataBinding | None = None,
-    create: bool = False,
-) -> MetadataBinding:
-    """Commit metadata through one identity-bound descriptor transaction."""
-    binding = expected or getattr(value, "_metadata_binding", None)
-    if binding is None and not create:
-        binding = read_project_metadata(project).binding
-    refreshed = write_project_metadata(
-        project, value, expected=binding, create=create
-    )
-    if isinstance(value, _MetadataSnapshot):
-        value._metadata_binding = refreshed
-        value._observed = copy.deepcopy(value)
-    return refreshed
-
-
-def _write_project_metadata_bytes(
-    project: Path,
-    raw: bytes,
-    *,
-    expected: MetadataBinding | None = None,
-) -> MetadataBinding:
-    binding = expected or read_project_metadata(project).binding
-    return write_project_metadata_bytes(project, raw, expected=binding)
-
-
-def _raw_meta(project: Path) -> dict[str, Any]:
-    try:
-        value = read_project_metadata(project).value
-        return value if isinstance(value, dict) else {}
-    except (OSError, ValueError, UnicodeError):
-        return {}
-
-
-def load_project_for_catalog(project: Path) -> dict[str, Any]:
-    """Load display metadata with recovery defaults; never grants mutation authority."""
-    record = None
-    try:
-        record = read_project_metadata(project)
-        data = record.value
-        data = data if isinstance(data, dict) else {}
-        if not data:
-            data = {}
-    except Exception:
-        data = {}
-    runtime_isolation = str(data.get("runtime_isolation") or "container")
-    runtime_type = str(data.get("runtime_type") or runtime_isolation)
-    resource_profile = str(
-        data.get("resource_profile") or data.get("project_scale") or "standard"
-    ).lower()
-    if resource_profile not in ("small", "standard", "large", "xlarge", "custom"):
-        resource_profile = "standard"
-    resource_limits = data.get("resource_limits")
-    if not isinstance(resource_limits, dict):
-        resource_limits = resource_metadata(
-            resource_profile,
-            runtime_type if runtime_type in ("container", "vm") else "container",
-        )
-    observed_resources = data.get("actual_runtime_resources") if isinstance(data.get("actual_runtime_resources"), dict) else (resource_limits if resource_profile == "custom" else None)
-    resource_state = resolved_resource_metadata(
-        resource_profile,
-        runtime_type if runtime_type in ("container", "vm") else "container",
-        actual_runtime_resources=observed_resources,
-    )
-    defaults = {
-        "schema_version": 3,
-        "project_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"devfleet:{project.name}")),
-        "slug": project.name,
-        "identity": project.name,
-        "display_name": project.name,
-        "template": "existing",
-        "profile": SETTINGS.development_profile,
-        "runtime_isolation": runtime_isolation,
-        "runtime_type": runtime_type,
-        "runtime_provider": (
-            "docker-compose" if runtime_isolation != "vm" else "multipass-host-agent"
-        ),
-        "runtime_status": "container-ready" if runtime_isolation != "vm" else "unknown",
-        "lifecycle_status": "ready",
-        "provisioning_status": "ready" if runtime_isolation != "vm" else "unknown",
-        "health_status": "unknown",
-        "health_scope": "not-checked",
-        "workspace_location": str(project),
-        "host_id": SETTINGS.node_name,
-        "runtime_id": "",
-        "gpu_enabled": False,
-        "backup_status": "not-verified",
-        "quarantine_state": "active",
-        "last_error": "",
-        "last_operation_id": "",
-        "resource_profile": resource_profile,
-        "resource_limits": resource_limits,
-        "requested_resource_profile": resource_state["requested_profile"],
-        "resolved_resources": resource_state["resolved_resources"],
-        "actual_runtime_resources": resource_state["actual_runtime_resources"],
-        "resource_policy_version": resource_state["policy_version"],
-        "resource_drift": resource_state["resource_drift"],
-        "resource_drift_status": resource_state["resource_drift_status"],
-    }
-    for key, value in defaults.items():
-        data.setdefault(key, value)
-    return _MetadataSnapshot(
-        data,
-        binding=record.binding if record is not None else None,
-        raw=record.raw if record is not None else b"",
-    )
-
-
-def load_meta(project: Path) -> dict[str, Any]:
-    """Compatibility alias for read-only/catalog callers.
-
-    Dangerous operations must call load_authoritative_project_identity_for_mutation
-    instead.  Keeping this alias makes the boundary explicit at call sites while
-    preserving the existing catalog API.
-    """
-    return load_project_for_catalog(project)
-
-
-def _vault_recovery_workspace_path(project: Path) -> str:
-    """Return the normalized lexical workspace name, without following aliases."""
-    return str(Path(os.path.abspath(os.fspath(project))))
-
-
-_GENERATED_VAULT_RECOVERY_NAME_RE = re.compile(
-    r"[a-z0-9][a-z0-9._-]{1,27}-recovered-"
-    r"[0-9]{8}-[0-9]{6}-[0-9a-f]{8}\Z"
-)
-
-
-def _is_generated_vault_recovery_name(value: str) -> bool:
-    """Match only the exact bounded namespace emitted by the Vault restorer."""
-    return _GENERATED_VAULT_RECOVERY_NAME_RE.fullmatch(str(value or "")) is not None
-
-
-def _vault_recovery_marker_path(project: Path) -> Path:
-    project_path = _vault_recovery_workspace_path(project)
-    digest = hashlib.sha256(project_path.encode("utf-8")).hexdigest()
-    return SETTINGS.runtime_root / "vault-recovery-copies" / f"{digest}.json"
-
-
-def _record_vault_recovery_copy(
-    project: Path, *, source_slug: str, source_project_id: str
-) -> None:
-    """Persist recovery-only authority outside the developer-writable workspace."""
-    project = Path(_vault_recovery_workspace_path(project))
-    workspace_root = Path(os.path.abspath(os.fspath(SETTINGS.workspaces.resolve())))
-    if project.parent != workspace_root or validate_slug(project.name) != project.name:
-        raise RuntimeError("Vault recovery authority path is outside the workspace root.")
-    marker_path = _vault_recovery_marker_path(project)
-    marker_root = marker_path.parent
-    marker_root.mkdir(parents=True, mode=0o750, exist_ok=True)
-    if marker_root.is_symlink() or not marker_root.is_dir():
-        raise RuntimeError("Vault recovery authority root is unsafe.")
-    atomic_json(
-        marker_path,
-        {
-            "schema_version": 1,
-            "workspace_path": _vault_recovery_workspace_path(project),
-            "workspace_name": project.name,
-            "source_slug": validate_slug(source_slug),
-            "source_project_id": validate_project_id(source_project_id),
-            "created_at": now_iso(),
-        },
-    )
-
-
-def _vault_recovery_copy_marker(
-    project: Path, *, source_project_id: str
-) -> dict[str, Any] | None:
-    marker_path = _vault_recovery_marker_path(project)
-    if not marker_path.exists():
-        return None
-    if marker_path.is_symlink() or not marker_path.is_file():
-        raise ValueError("Mutation denied: Vault recovery authority is malformed.")
-    try:
-        marker = json.loads(marker_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(
-            "Mutation denied: Vault recovery authority is malformed."
-        ) from exc
-    if (
-        not isinstance(marker, dict)
-        or marker.get("schema_version") != 1
-        or marker.get("workspace_path") != _vault_recovery_workspace_path(project)
-        or marker.get("workspace_name") != project.name
-        or marker.get("source_project_id") != source_project_id
-    ):
-        raise ValueError("Mutation denied: Vault recovery authority is malformed.")
-    return marker
-
-
-def _transfer_pending_marker_path(project: Path) -> Path:
-    workspace_path = str(Path(project).absolute())
-    digest = hashlib.sha256(workspace_path.encode("utf-8")).hexdigest()
-    return SETTINGS.runtime_root / "transfer-pending" / f"{digest}.json"
-
-
-def _transfer_pending_marker(
-    project: Path, *, project_id: str
-) -> dict[str, Any] | None:
-    marker_path = _transfer_pending_marker_path(project)
-    if not marker_path.exists():
-        return None
-    if marker_path.is_symlink() or not marker_path.is_file():
-        raise ValueError("Mutation denied: transfer authority is malformed.")
-    try:
-        marker = json.loads(marker_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError("Mutation denied: transfer authority is malformed.") from exc
-    workspace_path = str(Path(project).absolute())
-    if (
-        not isinstance(marker, dict)
-        or marker.get("schema_version") != 1
-        or marker.get("workspace_path") != workspace_path
-        or marker.get("workspace_name") != Path(project).name
-        or marker.get("project_id") != project_id
-        or not re.fullmatch(
-            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
-            str(marker.get("deployment_id") or ""),
-        )
-        or not re.fullmatch(
-            r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}",
-            str(marker.get("source_host_id") or ""),
-        )
-        or not re.fullmatch(
-            r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}",
-            str(marker.get("destination_host_id") or ""),
-        )
-        or marker.get("source_host_id") == marker.get("destination_host_id")
-    ):
-        raise ValueError("Mutation denied: transfer authority is malformed.")
-    return marker
-
-
-def _record_transfer_pending(
-    project: Path,
-    *,
-    project_id: str,
-    deployment_id: str,
-    source_host_id: str,
-    destination_host_id: str,
-) -> dict[str, Any]:
-    marker_path = _transfer_pending_marker_path(project)
-    marker_root = marker_path.parent
-    marker_root.mkdir(parents=True, mode=0o750, exist_ok=True)
-    if marker_root.is_symlink() or not marker_root.is_dir():
-        raise RuntimeError("Transfer authority root is unsafe.")
-    marker = {
-        "schema_version": 1,
-        "workspace_path": str(Path(project).absolute()),
-        "workspace_name": Path(project).name,
-        "project_id": validate_project_id(project_id),
-        "deployment_id": validate_project_id(deployment_id),
-        "source_host_id": source_host_id,
-        "destination_host_id": destination_host_id,
-        "state": "pending-source-finalization",
-        "created_at": now_iso(),
-    }
-    if (
-        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", source_host_id)
-        or not re.fullmatch(
-            r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", destination_host_id
-        )
-        or source_host_id == destination_host_id
-    ):
-        raise ValueError("Transfer host identity is invalid.")
-    atomic_json(marker_path, marker)
-    if _transfer_pending_marker(project, project_id=project_id) != marker:
-        raise RuntimeError("Transfer authority marker was not durable.")
-    return marker
-
-
-def _remove_transfer_pending(project: Path, expected: dict[str, Any]) -> None:
-    current = _transfer_pending_marker(
-        project, project_id=str(expected.get("project_id") or "")
-    )
-    for key in (
-        "workspace_path",
-        "workspace_name",
-        "project_id",
-        "deployment_id",
-        "source_host_id",
-        "destination_host_id",
-        "state",
-    ):
-        if current is None or current.get(key) != expected.get(key):
-            raise RuntimeError("Transfer authority marker changed before removal.")
-    marker_path = _transfer_pending_marker_path(project)
-    marker_path.unlink()
-    if marker_path.exists() or marker_path.is_symlink():
-        raise RuntimeError("Transfer authority marker removal was not durable.")
-
-
-def load_authoritative_project_identity_for_mutation(
-    project: Path,
-    *,
-    require_runtime: bool = False,
-    allow_legacy_migration: bool = False,
-    allow_pending_transfer: bool = False,
-    allow_retired_transfer: bool = False,
-) -> dict[str, Any]:
-    """Return only a persisted DevFleet ownership record suitable for mutation.
-
-    A directory under the workspace root is not evidence of DevFleet ownership.
-    Missing, malformed, incomplete, or mismatched metadata fails closed and never
-    receives the catalog loader's synthesized defaults.
-    """
-    project = Path(project)
-    if not project.is_dir() or project.is_symlink():
-        raise ValueError("Mutation requires a real project workspace directory.")
-    try:
-        record = read_project_metadata(project)
-        value = record.value
-    except FileNotFoundError as exc:
-        raise ValueError(
-            "Mutation denied: persisted DevFleet ownership metadata is missing."
-        ) from exc
-    except MetadataSafetyError as exc:
-        raise ValueError(
-            "Mutation denied: persisted DevFleet ownership metadata is missing."
-        ) from exc
-    except (OSError, ValueError, UnicodeError) as exc:
-        raise ValueError(
-            "Mutation denied: project ownership metadata is malformed."
-        ) from exc
-    if not isinstance(value, dict):
-        raise ValueError(
-            "Mutation denied: project ownership metadata must be a JSON object."
-        )
-    try:
-        schema = int(value.get("schema_version"))
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "Mutation denied: project ownership schema/version is missing."
-        ) from exc
-    legacy = (
-        schema == 2
-        and allow_legacy_migration
-        and str(value.get("managed_by") or "").strip().lower() == "devfleet"
-        and str(value.get("identity") or "").strip()
-        == str(value.get("slug") or "").strip()
-    )
-    if schema < 3 and not legacy:
-        raise ValueError(
-            "Mutation denied: project ownership schema/version is unsupported."
-        )
-    if not legacy and str(value.get("managed_by") or "").strip().lower() != "devfleet":
-        raise ValueError(
-            "Mutation denied: project is not explicitly marked as DevFleet-owned."
-        )
-    slug = str(value.get("slug") or "").strip()
-    if not slug or slug != project.name or validate_slug(slug) != slug:
-        raise ValueError(
-            "Mutation denied: persisted project slug does not bind to the workspace path."
-        )
-    identity = str(value.get("identity") or slug).strip()
-    if not identity or identity != slug or validate_slug(identity) != identity:
-        raise ValueError(
-            "Mutation denied: persisted project identity does not bind to the workspace path."
-        )
-    project_id = str(value.get("project_id") or "").strip()
-    if not re.fullmatch(r"[0-9a-fA-F-]{16,128}", project_id):
-        raise ValueError(
-            "Mutation denied: persisted project ID is missing or malformed."
-        )
-    pending_marker = _transfer_pending_marker(project, project_id=project_id)
-    persisted_pending_transfer = (
-        str(value.get("transfer_state") or "") == "pending-source-finalization"
-        or str(value.get("lifecycle_status") or "")
-        == "ownership-transfer-pending"
-    )
-    if (
-        pending_marker is not None or persisted_pending_transfer
-    ) and not allow_pending_transfer:
-        raise ValueError(
-            "Mutation denied: ownership transfer awaits source finalization."
-        )
-    if (
-        str(value.get("transfer_state") or "") == "source-retired"
-        and not allow_retired_transfer
-    ):
-        raise ValueError(
-            "Mutation denied: project ownership was transferred to another node."
-        )
-    recovery_marker = _vault_recovery_copy_marker(
-        project, source_project_id=project_id
-    )
-    if recovery_marker is None and _is_generated_vault_recovery_name(project.name):
-        raise ValueError(
-            "Mutation denied: reserved Vault recovery namespace requires control-owned recovery authority."
-        )
-    if recovery_marker is not None:
-        raise ValueError(
-            "Mutation denied: recovered Vault copies require explicit adoption."
-        )
-    provider = str(value.get("runtime_provider") or "").strip().lower()
-    if provider not in {
-        "docker-compose",
-        "multipass-host-agent",
-        "multipass",
-        "virtualbox",
-    }:
-        raise ValueError(
-            "Mutation denied: persisted runtime provider is missing or unsupported."
-        )
-    runtime_id = str(value.get("runtime_id") or "").strip()
-    if require_runtime and not runtime_id:
-        raise ValueError("Mutation denied: persisted runtime identity is missing.")
-    if runtime_id and (
-        len(runtime_id) > 128
-        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", runtime_id)
-    ):
-        raise ValueError("Mutation denied: persisted runtime identity is malformed.")
-    if not str(value.get("host_id") or "").strip():
-        raise ValueError(
-            "Mutation denied: persisted deployment/node ownership is missing."
-        )
-    return _MetadataSnapshot(value, binding=record.binding, raw=record.raw)
-
-
-def _commit_project_metadata(project: Path, candidate: dict[str, Any]) -> None:
-    """Commit only changes made since the caller's read under the project lock."""
-    project = Path(os.path.abspath(os.fspath(project)))
-    slug = validate_slug(project.name)
-    observed = getattr(candidate, "_observed", None)
-    with _destructive_lock(f"metadata-{slug}"):
-        latest = load_authoritative_project_identity_for_mutation(project)
-        if isinstance(observed, dict):
-            sentinel = object()
-            for key in set(observed) | set(candidate):
-                before = observed.get(key, sentinel)
-                after = candidate.get(key, sentinel)
-                if before == after:
-                    continue
-                if key in candidate:
-                    latest[key] = copy.deepcopy(candidate[key])
-                else:
-                    latest.pop(key, None)
-        else:
-            latest.update(copy.deepcopy(candidate))
-        latest["updated_at"] = now_iso()
-        _write_project_metadata(project, latest)
-
-
-def commit_project_metadata(project: Path, candidate: dict[str, Any]) -> None:
-    """Public identity-bound metadata commit for API modules."""
-    _commit_project_metadata(project, candidate)
-
-
-@contextlib.contextmanager
-def project_metadata_transaction(project: Path):
-    """Serialize read-modify-write metadata updates across API processes."""
-    project = Path(os.path.abspath(os.fspath(project)))
-    slug = validate_slug(project.name)
-    with _destructive_lock(f"metadata-{slug}"):
-        meta = load_authoritative_project_identity_for_mutation(project)
-        yield meta
-        meta["updated_at"] = now_iso()
-        _write_project_metadata(project, meta)
-
-
-def workspace_readiness(
-    slug: str, metadata: dict[str, Any] | None = None
-) -> dict[str, Any]:
-    """Return the single readiness contract used by UI and workspace launch."""
-    meta = metadata or load_meta(safe_child(SETTINGS.workspaces, slug))
-    provider = provider_for(meta)
-    state = str(
-        meta.get("lifecycle_status") or meta.get("runtime_status") or "unknown"
-    ).lower()
-    path = str(meta.get("workspace_path") or f"/home/devrunner/workspaces/{slug}")
-    if not provider.is_vm:
-        # Container application lifecycle and code-workspace lifecycle are separate.
-        # The workspace is reached through the managed primary compute SSH target;
-        # stopped Compose services must not make the code workspace appear absent.
-        alias = str(
-            meta.get("workspace_ssh_alias")
-            or meta.get("ssh_alias")
-            or SETTINGS.node_name
-            or "devfleet-primary"
-        )
-        host = str(
-            meta.get("workspace_host")
-            or meta.get("host_id")
-            or SETTINGS.node_name
-            or "devfleet-primary"
-        )
-        provisioned = bool(meta.get("workspace_provisioned", bool(path)))
-        accessible = bool(meta.get("workspace_accessible", True))
-        ready = bool(path and alias and host and provisioned and accessible)
-        reason = (
-            ""
-            if ready
-            else (
-                "Container workspace is not accessible from the primary compute host."
-                if not accessible
-                else "Container workspace has not been provisioned."
-            )
-        )
-        return {
-            "ready": ready,
-            "status": "ready" if ready else "not-ready",
-            "state": state,
-            "reason": reason,
-            "runtime_address": host,
-            "ssh_alias": alias,
-            "workspace_path": path,
-            "host_key_pinned": bool(
-                meta.get("ssh_host_key_pinned", meta.get("host_key_pinned", False))
-            ),
-            "authenticated_connection": bool(
-                meta.get(
-                    "ssh_authenticated", meta.get("authenticated_connection", False)
-                )
-            ),
-            "validated": ready,
-            "workspace_provisioned": provisioned,
-            "application_running": state == "running",
-        }
-    if state == "stopped":
-        reason = "Not ready — VM is stopped."
-    elif state in {"starting", "provisioning", "restarting", "stopping"}:
-        reason = f"Waiting — VM is {state}."
-    else:
-        reason = "Not ready — SSH readiness is being reconciled."
-    address = str(meta.get("runtime_address") or "")
-    alias = str(meta.get("ssh_alias") or "")
-    pinned = bool(meta.get("ssh_host_key_pinned", meta.get("host_key_pinned", False)))
-    authenticated = bool(
-        meta.get("ssh_authenticated", meta.get("authenticated_connection", False))
-    )
-    validated = bool(meta.get("ssh_validation_passed", meta.get("validated", False)))
-    provisioned = bool(meta.get("workspace_provisioned", False))
-    ready = state == "running" and bool(
-        address and alias and pinned and authenticated and validated and provisioned
-    )
-    if ready:
-        reason = ""
-    elif (
-        state == "running"
-        and address
-        and alias
-        and pinned
-        and authenticated
-        and validated
-        and not provisioned
-    ):
-        reason = "Not ready — workspace path has not been verified."
-    return {
-        "ready": ready,
-        "status": "ready" if ready else "not-ready",
-        "state": state,
-        "reason": reason,
-        "runtime_address": address,
-        "ssh_alias": alias,
-        "workspace_path": path,
-        "host_key_pinned": pinned,
-        "authenticated_connection": authenticated,
-        "validated": validated,
-        "workspace_provisioned": provisioned,
-    }
-
-
-def project_capabilities(
-    slug: str, metadata: dict[str, Any] | None = None
-) -> dict[str, Any]:
-    """Return the server-authoritative, metadata-only project availability model.
-
-    This function must never inspect, start, or contact a runtime.  Ordinary page
-    rendering uses it to decide whether a live request is allowed at all.
-    """
-    meta = metadata or load_meta(safe_child(SETTINGS.workspaces, slug))
-    readiness = workspace_readiness(slug, meta)
-    provider = provider_for(meta)
-    raw_state = (
-        str(meta.get("lifecycle_status") or meta.get("runtime_status") or "unknown")
-        .strip()
-        .lower()
-    )
-    aliases = {
-        "ready": "running",
-        "healthy": "running",
-        "container-ready": "running",
-        "offline": "unreachable",
-        "failed": "error",
-    }
-    state = aliases.get(raw_state, raw_state)
-    transitioning = state in {"starting", "stopping", "restarting", "provisioning"}
-    running_state = state == "running"
-    stopped_state = state == "stopped"
-    reachable = running_state and (
-        not provider.is_vm or bool(meta.get("runtime_address"))
-    )
-    live = bool(running_state and reachable and not transitioning)
-    return {
-        "lifecycle_state": state,
-        "runtime_provider": provider.name,
-        "runtime_reachable": reachable,
-        "runtime_transitioning": transitioning,
-        "ssh_ready": (
-            bool(readiness.get("ready"))
-            if provider.is_vm
-            else bool(readiness.get("ready"))
-        ),
-        "application_health_available": live,
-        "logs_available": live,
-        "live_metrics_available": live,
-        "workspace_open_available": bool(readiness.get("ready")),
-        "can_start": stopped_state or state in {"error", "unreachable", "unknown"},
-        "can_stop": running_state or state == "starting",
-        "can_restart": live,
-        "can_query_live_metrics": live,
-        "can_query_application_health": live,
-        "can_query_logs": live,
-        "can_open_workspace": bool(readiness.get("ready")),
-        "can_run_runtime_tests": live,
-        "can_run_runtime_action": live,
-        "status_reason": (
-            "Environment stopped."
-            if stopped_state
-            else (
-                f"Environment {state}."
-                if transitioning
-                else "Runtime is unreachable." if state == "unreachable" else ""
-            )
-        ),
-    }
-
-
-def _record_vm_readiness(
-    meta: dict[str, Any],
-    result: dict[str, Any] | None = None,
-    *,
-    workspace_provisioned: bool | None = None,
-) -> None:
-    result = result if isinstance(result, dict) else {}
-    for target, source in (
-        ("runtime_id", "runtime_id"),
-        ("runtime_address", "address"),
-        ("ssh_alias", "ssh_alias"),
-    ):
-        value = result.get(source)
-        if value is not None and str(value):
-            meta[target] = str(value)
-    if "host_key_pinned" in result:
-        meta["ssh_host_key_pinned"] = bool(result.get("host_key_pinned"))
-    if "authenticated_connection" in result:
-        meta["ssh_authenticated"] = bool(result.get("authenticated_connection"))
-    if "validated" in result:
-        meta["ssh_validation_passed"] = bool(result.get("validated"))
-    if workspace_provisioned is not None:
-        meta["workspace_provisioned"] = bool(workspace_provisioned)
-    if meta.get("runtime_address"):
-        meta["workspace_host"] = str(meta["runtime_address"])
-    meta["workspace_readiness_checked_at"] = now_iso()
-    meta["workspace_readiness"] = workspace_readiness(str(meta.get("slug") or ""), meta)
-
-
-def _json_object(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-        return value if isinstance(value, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
-def _safe_vm_command(command: str) -> bool:
-    cmd = str(command or "")
-    hook_allowed = bool(
-        re.fullmatch(
-            r"\./\.devfleet/(bootstrap|health-check|smoke-test|codexpro-bootstrap)\.sh",
-            cmd,
-        )
-    )
-    compose_allowed = cmd in _SAFE_COMPOSE_COMMANDS
-    forbidden = bool(
-        re.search(r"[\r\n`$<>]", cmd)
-        or re.search(
-            r"(?i)(^|\s)(sudo|su|shutdown|reboot|poweroff|systemctl|service|multipass)(\s|$)",
-            cmd,
-        )
-        or re.search(r"(?i)(rm\s+-rf|docker\s+(run|exec)|curl\s+|wget\s+)", cmd)
-    )
-    return 0 < len(cmd) <= 512 and (hook_allowed or compose_allowed) and not forbidden
-
-
-def project_command_readiness(
-    project: Path, metadata: dict[str, Any] | None = None
-) -> dict[str, Any]:
-    """Resolve only fixed trusted command keys for legacy project metadata.
-
-    Explicit project values win.  A missing key may fall back first to the copied
-    project template and then to the canonical package template identified by the
-    project's template id.  Every resolved value must still pass the Host Agent's
-    fixed command allowlist.
-    """
-    raw = metadata if isinstance(metadata, dict) else _raw_meta(project)
-    local_template = _json_object(project / ".devfleet/template.json")
-    template_id = str(raw.get("template") or local_template.get("id") or "").strip()
-    canonical_template: dict[str, Any] = {}
-    if template_id and re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,62}", template_id):
-        candidate = TEMPLATE_ROOT / template_id / ".devfleet/template.json"
-        if candidate.is_file() and not candidate.is_symlink():
-            canonical_template = _json_object(candidate)
-    nested = raw.get("commands") if isinstance(raw.get("commands"), dict) else {}
-    resolved: dict[str, str] = {}
-    sources: dict[str, str] = {}
-    invalid: dict[str, str] = {}
-    for key in PROJECT_COMMAND_KEYS:
-        present = False
-        value: Any = ""
-        source = ""
-        if key in raw:
-            present = True
-            value = raw.get(key)
-            source = "project.json"
-        elif key in nested:
-            present = True
-            value = nested.get(key)
-            source = "project.json.commands"
-        elif key in local_template:
-            present = True
-            value = local_template.get(key)
-            source = "project-template"
-        elif key in canonical_template:
-            present = True
-            value = canonical_template.get(key)
-            source = f"canonical-template:{template_id}"
-        if not present or value is None or not str(value).strip():
-            continue
-        command = str(value).strip()
-        if not _safe_vm_command(command):
-            invalid[key] = source or "unknown"
-            continue
-        resolved[key] = command
-        sources[key] = source
-    missing = [key for key in VM_LIFECYCLE_COMMAND_KEYS if key not in resolved]
-    invalid_required = {
-        key: invalid[key] for key in VM_LIFECYCLE_COMMAND_KEYS if key in invalid
-    }
-    return {
-        "ready": not missing and not invalid_required,
-        "resolved_commands": resolved,
-        "sources": sources,
-        "required_commands": list(VM_LIFECYCLE_COMMAND_KEYS),
-        "missing_required": missing,
-        "invalid_required": invalid_required,
-        "invalid_commands": invalid,
-        "template_id": template_id,
-    }
-
-
-def detect_runtime(slug: str) -> dict[str, Any]:
-    project = safe_child(SETTINGS.workspaces, slug)
-    if not project.is_dir():
-        raise FileNotFoundError(slug)
-    raw = _raw_meta(project)
-    meta = load_meta(project)
-    explicit = any(
-        key in raw
-        for key in (
-            "runtime_isolation",
-            "runtime_type",
-            "runtime_provider",
-            "resource_profile",
-            "resource_limits",
-        )
-    )
-    provider = provider_for(meta)
-    return {
-        "runtime_isolation": provider.runtime_type,
-        "runtime_type": provider.runtime_type,
-        "runtime_provider": provider.name,
-        "resource_profile": str(meta.get("resource_profile") or "standard"),
-        "resource_limits": meta.get("resource_limits")
-        or resource_metadata(
-            str(meta.get("resource_profile") or "standard"), provider.runtime_type
-        ),
-        "source": "metadata" if explicit else "inferred-from-existing-workspace",
-        "workspace": str(project),
-        "runtime_id": str(meta.get("runtime_id") or ""),
-        "host_id": str(meta.get("host_id") or SETTINGS.node_name),
-        "lifecycle_status": str(meta.get("lifecycle_status") or "unknown"),
-        "provisioning_status": str(meta.get("provisioning_status") or "unknown"),
-        "health_status": str(meta.get("health_status") or "unknown"),
-    }
-
-
-def project_identity(slug: str) -> str:
-    project = safe_child(SETTINGS.workspaces, slug)
-    if not project.is_dir():
-        raise FileNotFoundError(slug)
-    meta = load_meta(project)
-    return validate_slug(str(
+        timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return timestamp <= datetime.now(timezone.utc)
+
+
+def _queued_expired(data: di

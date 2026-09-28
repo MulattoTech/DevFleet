@@ -1,1132 +1,1041 @@
 # DevFleet source part 096
 
 Full-source UTF-8 byte interval [4417500, 4464000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 6d8f0fe2c5e5c284e5c9b21f52c3d4828573d3542aa4357483389a4b863a8c87
+Payload SHA-256: a3f6d908ed6ef9d99cf27cf0d035483deb299119d578dd7ae0f70a92b9257eb4
 
 <!-- BEGIN SOURCE SLICE -->
-mponent, kind):
-    victim = {"workspace": workspace, "directory": workspace / ".devfleet",
-              "file": workspace / ".devfleet/project.json"}[component]
-    replacement = tmp_path / "replacement"
-    if victim.is_dir():
-        shutil.copytree(victim, replacement)
-    else:
-        replacement.write_bytes(victim.read_bytes())
-    sentinel = (replacement / ".devfleet/project.json" if component == "workspace"
-                else replacement / "project.json" if component == "directory" else replacement)
-    sentinel_bytes = sentinel.read_bytes()
-    retained = tmp_path / "retained"
-
-    def substitute():
-        victim.rename(retained)
-        if kind == "symlink":
-            victim.symlink_to(replacement, target_is_directory=component != "file")
-        else:
-            replacement.rename(victim)
-
-    def assert_replacement_unchanged():
-        current = sentinel if kind == "symlink" else (
-            victim / ".devfleet/project.json" if component == "workspace"
-            else victim / "project.json" if component == "directory" else victim
-        )
-        assert current.read_bytes() == sentinel_bytes
-
-    return victim, retained, substitute, assert_replacement_unchanged
+ey_helpers_bind_identity_verify_and_preserve_rollback_state():
+    compute = (ROOT / "linux/devfleet-rotate-compute-secrets").read_text(encoding="utf-8")
+    vault = (ROOT / "linux/devfleet-rotate-vault-secrets").read_text(encoding="utf-8")
+    assert "/etc/devfleet/node-identity.json" in compute
+    assert "deployment_id" in compute and "node_id" in compute
+    assert "X-DevFleet-Token" in compute and "/api/status" in compute
+    assert 'MODE == rollback' in compute
+    assert "/etc/devfleet-vault-identity.json" in vault
+    assert "deployment_id" in vault and "node_id" in vault
+    assert "htpasswd -iv" in vault
+    assert 'MODE == rollback' in vault
+    assert "rest_password" not in " ".join(line for line in vault.splitlines() if line.startswith("printf '{"))
 
 
-@POSIX_ONLY
-@pytest.mark.parametrize("component", ["workspace", "directory", "file"])
-@pytest.mark.parametrize("kind", ["symlink", "inode"])
-def test_read_rejects_substitution_between_stat_and_open(
-    workspace, tmp_path, monkeypatch, component, kind,
-):
-    victim, _retained, substitute, assert_unchanged = _prepare_substitution(
-        workspace, tmp_path, component, kind
-    )
-    original_open = metadata_io.os.open
-    swapped = False
-
-    def raced_open(path, flags, mode=0o777, *, dir_fd=None):
-        nonlocal swapped
-        if not swapped and dir_fd is not None and os.fspath(path) == victim.name:
-            substitute()
-            swapped = True
-        return original_open(path, flags, mode, dir_fd=dir_fd)
-
-    monkeypatch.setattr(metadata_io.os, "open", raced_open)
-    with pytest.raises((metadata_io.MetadataSafetyError, OSError)):
-        metadata_io.read_project_metadata(workspace)
-    assert swapped
-    assert_unchanged()
+def test_missing_or_corrupt_existing_secrets_never_silently_regenerate():
+    common = (ROOT / "windows/DevFleet.Common.psm1").read_text(encoding="utf-8")
+    missing_guard = "if (Test-ExistingDeploymentState) { throw 'SECRET RECOVERY REQUIRED: host secrets are missing"
+    corrupt_guard = "if (Test-ExistingDeploymentState) { throw 'SECRET RECOVERY REQUIRED: host secrets are corrupt"
+    assert missing_guard in common
+    assert corrupt_guard in common
+    assert "Test-DevFleetSecretRecord" in common
 
 
-@POSIX_ONLY
-@pytest.mark.parametrize("component", ["workspace", "directory", "file"])
-@pytest.mark.parametrize("kind", ["symlink", "inode"])
-def test_read_rechecks_binding_after_held_fd_parsing(
-    workspace, tmp_path, monkeypatch, component, kind,
-):
-    _victim, _retained, substitute, assert_unchanged = _prepare_substitution(
-        workspace, tmp_path, component, kind
-    )
-    original_loads = metadata_io.json.loads
-
-    def raced_loads(raw, *args, **kwargs):
-        value = original_loads(raw, *args, **kwargs)
-        substitute()
-        return value
-
-    monkeypatch.setattr(metadata_io.json, "loads", raced_loads)
-    with pytest.raises((metadata_io.MetadataSafetyError, OSError)):
-        metadata_io.read_project_metadata(workspace)
-    assert_unchanged()
-
-
-@POSIX_ONLY
-@pytest.mark.parametrize("component", ["workspace", "directory", "file"])
-@pytest.mark.parametrize("kind", ["symlink", "inode"])
-def test_writer_rejects_post_read_substitution(
-    workspace, tmp_path, component, kind,
-):
-    original = metadata_io.read_project_metadata(workspace)
-    _victim, _retained, substitute, assert_unchanged = _prepare_substitution(
-        workspace, tmp_path, component, kind
-    )
-    substitute()
-    with pytest.raises((metadata_io.MetadataSafetyError, OSError)):
-        metadata_io.write_project_metadata(workspace, {"changed": True}, expected=original.binding)
-    assert_unchanged()
-
-
-@POSIX_ONLY
-@pytest.mark.parametrize("kind", ["symlink", "inode"])
-def test_atomic_writer_cannot_redirect_to_a_swapped_parent(
-    workspace, tmp_path, monkeypatch, kind,
-):
-    original = metadata_io.read_project_metadata(workspace)
-    _victim, retained, substitute, assert_unchanged = _prepare_substitution(
-        workspace, tmp_path, "directory", kind
-    )
-    original_replace = metadata_io.os.replace
-    swapped = False
-
-    def raced_replace(source, target, *, src_dir_fd=None, dst_dir_fd=None):
-        nonlocal swapped
-        assert src_dir_fd is not None and src_dir_fd == dst_dir_fd
-        substitute()
-        swapped = True
-        return original_replace(source, target, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
-
-    monkeypatch.setattr(metadata_io.os, "replace", raced_replace)
-    with pytest.raises((metadata_io.MetadataSafetyError, OSError)):
-        metadata_io.write_project_metadata(workspace, {"changed": True}, expected=original.binding)
-    assert swapped
-    assert_unchanged()
-    assert json.loads((retained / "project.json").read_bytes()) == {"changed": True}
-    assert list(retained.glob(".project.json.*.tmp")) == []
-
-
-@POSIX_ONLY
-@pytest.mark.parametrize("kind", ["symlink", "inode"])
-def test_writer_aborts_before_commit_when_parent_changes_during_temp_creation(
-    workspace, tmp_path, monkeypatch, kind,
-):
-    original = metadata_io.read_project_metadata(workspace)
-    _victim, retained, substitute, assert_unchanged = _prepare_substitution(
-        workspace, tmp_path, "directory", kind
-    )
-    original_open = metadata_io.os.open
-    swapped = False
-
-    def raced_open(path, flags, mode=0o777, *, dir_fd=None):
-        nonlocal swapped
-        if not swapped and dir_fd is not None and os.fspath(path).startswith(".project.json."):
-            substitute()
-            swapped = True
-        return original_open(path, flags, mode, dir_fd=dir_fd)
-
-    monkeypatch.setattr(metadata_io.os, "open", raced_open)
-    with pytest.raises((metadata_io.MetadataSafetyError, OSError)):
-        metadata_io.write_project_metadata(workspace, {"changed": True}, expected=original.binding)
-    assert swapped
-    assert_unchanged()
-    assert (retained / "project.json").read_bytes() == original.raw
-    assert list(retained.glob(".project.json.*.tmp")) == []
-
-
-@POSIX_ONLY
-def test_raced_fifo_open_is_nonblocking_and_rejected(workspace, tmp_path, monkeypatch):
-    if not hasattr(os, "mkfifo"):
-        pytest.skip("FIFO creation primitive is unavailable")
-    original_open = metadata_io.os.open
-    victim = workspace / ".devfleet/project.json"
-    swapped = False
-
-    def raced_open(path, flags, mode=0o777, *, dir_fd=None):
-        nonlocal swapped
-        if not swapped and dir_fd is not None and path == "project.json":
-            # Assert before calling open so a regression fails instead of hanging pytest.
-            assert flags & os.O_NONBLOCK
-            victim.rename(tmp_path / "retained")
-            os.mkfifo(victim)
-            swapped = True
-        return original_open(path, flags, mode, dir_fd=dir_fd)
-
-    monkeypatch.setattr(metadata_io.os, "open", raced_open)
-    with pytest.raises(metadata_io.MetadataSafetyError):
-        metadata_io.read_project_metadata(workspace)
-    assert swapped
-
-
-@POSIX_ONLY
-def test_hardlinked_metadata_is_rejected(workspace, tmp_path):
-    os.link(workspace / ".devfleet/project.json", tmp_path / "metadata-alias")
-    with pytest.raises(metadata_io.MetadataSafetyError, match="hard-link"):
-        metadata_io.read_project_metadata(workspace)
-
-
-@POSIX_ONLY
-def test_ancestor_descriptors_preserve_traverse_only_access(workspace, monkeypatch):
-    if not hasattr(os, "O_PATH"):
-        pytest.skip("traverse-only O_PATH directory descriptors are unavailable")
-    original_open = metadata_io.os.open
-    seen = False
-
-    def traversal_only_open(path, flags, mode=0o777, *, dir_fd=None):
-        nonlocal seen
-        if dir_fd is not None and path == workspace.name:
-            # Enforce the backup account's traverse-only ancestor contract even
-            # when this regression is run by a privileged Linux test account.
-            assert flags & os.O_PATH
-            seen = True
-        return original_open(path, flags, mode, dir_fd=dir_fd)
-
-    monkeypatch.setattr(metadata_io.os, "open", traversal_only_open)
-    assert metadata_io.read_project_metadata(workspace).value["project_id"] == PROJECT_ID
-    assert seen
-
-
-@POSIX_ONLY
-def test_temp_hardlink_is_rejected_before_replacing_metadata(workspace, tmp_path, monkeypatch):
-    original = metadata_io.read_project_metadata(workspace)
-    original_stat = metadata_io.os.stat
-    raced = False
-
-    def raced_stat(path, *, dir_fd=None, follow_symlinks=True):
-        nonlocal raced
-        if not raced and dir_fd is not None and os.fspath(path).startswith(".project.json."):
-            os.link(path, tmp_path / "temporary-alias", src_dir_fd=dir_fd,
-                    follow_symlinks=False)
-            raced = True
-        return original_stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
-
-    monkeypatch.setattr(metadata_io.os, "stat", raced_stat)
-    with pytest.raises(metadata_io.MetadataSafetyError, match="hard-link"):
-        metadata_io.write_project_metadata(workspace, {"changed": True}, expected=original.binding)
-    assert raced
-    assert (workspace / ".devfleet/project.json").read_bytes() == original.raw
-    assert list((workspace / ".devfleet").glob(".project.json.*.tmp")) == []
+def test_cluster_join_persists_deployment_binding_for_future_rekey():
+    complete = (ROOT / "windows/Complete-Cluster.ps1").read_text(encoding="utf-8")
+    assert "$hostIdentity.deployment_id=[string]$primaryNode.deployment_id" in complete
+    assert "$vaultIdentity.deployment_id=[string]$primaryNode.deployment_id" in complete
+    assert "/etc/devfleet-vault-identity.json" in complete
 
 ```
 
 
-## FILE: source/tests/test_migration_integration.py
+## FILE: source/tests/test_hardening8_systemd_contract.py
 
-SHA256: 1d6a93dd189f54371d54ac9b3639a415b9b29995c95e1a3f2ae422f8a1fc12b7 | Bytes: 4241 | Git mode: 100644
+SHA256: 785ff9fe6ec7a77292fe410d5a25dc9eb500c1c19288f35449fd4118d3986fdc | Bytes: 2282 | Git mode: 100644
 
 ```
-from __future__ import annotations
-
 import json
-import os
-import shutil
-import subprocess
 from pathlib import Path
-
-import pytest
 
 
 ROOT = Path(__file__).parents[1]
-MIGRATE = ROOT / "windows" / "Migrate-Config.ps1"
-PWSH = shutil.which("pwsh")
-PWSH_REQUIRED = os.environ.get("DEVFLEET_REQUIRE_PWSH_TESTS") == "1"
-if PWSH_REQUIRED and PWSH is None:
-    raise RuntimeError(
-        "BLOCKED — required PowerShell release-test prerequisite pwsh is unavailable"
-    )
-requires_pwsh = pytest.mark.skipif(
-    PWSH is None,
-    reason="SKIP — platform prerequisite: pwsh is unavailable",
-)
 
 
-def _run(config: Path, *extra: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [str(PWSH), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(MIGRATE), "-ConfigPath", str(config), "-OutputPath", str(config), *extra],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
+def test_control_service_writable_paths_derive_from_canonical_contract():
+    contract = json.loads((ROOT / "app/systemd/mutable-paths.json").read_text(encoding="utf-8"))
+    service = (ROOT / "app/systemd/devfleet.service").read_text(encoding="utf-8")
+    backup_service = (ROOT / "app/systemd/devfleet-backup.service").read_text(encoding="utf-8")
+    bootstrap = (ROOT / "linux/bootstrap-compute.sh").read_text(encoding="utf-8")
 
-
-def _legacy_config() -> dict:
-    return {
-        "SchemaVersion": 1,
-        "PackageVersion": "1.0.0",
-        "Primary": {"InstanceName": "DevFleet-E2E-primary"},
-        "Failover": {"InstanceName": "DevFleet-E2E-failover"},
-        "Vault": {"InstanceName": "DevFleet-E2E-vault"},
-        "Development": {"Profile": "balanced"},
-        "Docker": {"PrimaryMode": "rootful", "FailoverMode": "rootful"},
+    assert contract == {
+        "schema_version": 1,
+        "workspace": "/home/devrunner/workspaces",
+        "quarantine": "/home/devrunner/.devfleet-quarantine",
+        "transaction_root": "/home/devrunner/workspaces/.devfleet-transactions",
     }
-
-
-def test_shipped_fresh_install_uses_supported_unprivileged_modes():
-    defaults = json.loads((ROOT / "config" / "devfleet.config.json").read_text(encoding="utf-8"))
-    assert defaults["Docker"]["PrimaryMode"] == "rootless"
-    assert defaults["Docker"]["FailoverMode"] == "rootless"
-    assert defaults["Docker"]["RootfulModeAcknowledged"] is False
-
-
-@requires_pwsh
-def test_schema2_migration_preserves_explicit_docker_modes(tmp_path: Path):
-    existing = _legacy_config()
-    existing["SchemaVersion"] = 2
-    existing["Docker"]["RootfulModeAcknowledged"] = True
-    config = tmp_path / "devfleet.config.json"
-    config.write_text(json.dumps(existing), encoding="utf-8")
-    result = _run(config, "-Confirm:$false")
-    assert result.returncode == 0, result.stderr
-    migrated = json.loads(config.read_text(encoding="utf-8"))
-    assert migrated["Docker"]["PrimaryMode"] == "rootful"
-    assert migrated["Docker"]["FailoverMode"] == "rootful"
-    assert migrated["Docker"]["RootfulModeAcknowledged"] is True
-
-
-@requires_pwsh
-def test_supported_schema_migrates_in_place_and_preserves_identity(tmp_path: Path):
-    config = tmp_path / "devfleet.config.json"
-    config.write_text(json.dumps(_legacy_config()), encoding="utf-8")
-    result = _run(config, "-Confirm:$false")
-    assert result.returncode == 0, result.stderr
-    migrated = json.loads(config.read_text(encoding="utf-8"))
-    assert migrated["SchemaVersion"] == 2
-    assert migrated["PackageVersion"] == "1.1.0"
-    assert migrated["Primary"]["InstanceName"] == "DevFleet-E2E-primary"
-    assert migrated["Failover"]["InstanceName"] == "DevFleet-E2E-failover"
-    assert migrated["Vault"]["InstanceName"] == "DevFleet-E2E-vault"
-    assert migrated["Development"]["Profile"] == "strict"
-    assert migrated["Docker"]["PrimaryMode"] == "rootless"
-
-
-@requires_pwsh
-def test_preview_and_malformed_migration_are_non_destructive(tmp_path: Path):
-    config = tmp_path / "devfleet.config.json"
-    original = json.dumps(_legacy_config(), indent=2)
-    config.write_text(original, encoding="utf-8")
-    preview = _run(config, "-PreviewOnly")
-    assert preview.returncode == 0, preview.stderr
-    assert config.read_text(encoding="utf-8") == original
-    assert list(tmp_path.glob("devfleet-v1.1.0-migration-preview-*.json"))
-
-    config.write_text("{not-json", encoding="utf-8")
-    failed = _run(config, "-Confirm:$false")
-    assert failed.returncode != 0
-    assert config.read_text(encoding="utf-8") == "{not-json"
-
-
-def test_upgrade_script_orders_backup_and_snapshot_before_provisioning():
-    upgrade = (ROOT / "Upgrade-DevFleet.ps1").read_text(encoding="utf-8")
-    assert upgrade.index("upgrade-backups") < upgrade.index("New-DevFleetSnapshotSafe")
-    assert upgrade.index("New-DevFleetSnapshotSafe") < upgrade.index("02-Provision-ComputeNode.ps1")
-    assert "Protect-DevFleetStateAcl" in upgrade
+    assert "ProtectSystem=strict" in service
+    assert "ProtectHome=read-only" in service
+    assert "User=devfleet-control" in service
+    assert "Group=devfleet-control" in service
+    assert "ReadWritePaths=__WORKSPACES__ __QUARANTINE__ __TRANSACTION_ROOT__ /var/lib/devfleet /var/cache/devfleet" in service
+    assert "/home/devrunner" not in service.replace("__WORKSPACES__", "").replace("__QUARANTINE__", "")
+    assert "ReadOnlyPaths=__WORKSPACES__ __QUARANTINE__" in backup_service
+    assert 'MUTABLE_PATH_CONTRACT="$PAYLOAD/app/systemd/mutable-paths.json"' in bootstrap
+    assert 'WORKSPACES=$(jq -er ".workspace" "$MUTABLE_PATH_CONTRACT")' in bootstrap
+    assert 'QUARANTINE=$(jq -er ".quarantine" "$MUTABLE_PATH_CONTRACT")' in bootstrap
+    assert 'TRANSACTION_ROOT=$(jq -er ".transaction_root" "$MUTABLE_PATH_CONTRACT")' in bootstrap
+    assert '[[ $TRANSACTION_ROOT == "$WORKSPACES/.devfleet-transactions" ]]' in bootstrap
+    assert 'install -d -o root -g devfleet-control -m 0750 "$WORKSPACES" "$QUARANTINE"' in bootstrap
+    assert 'install -d -o devfleet-control -g devfleet-control -m 0700 "$TRANSACTION_ROOT"' in bootstrap
+    assert 'chown -R devrunner:devrunner /home/devrunner/.config "$WORKSPACES"' not in bootstrap
+    assert '--arg workspaces "$WORKSPACES" --arg quarantine "$QUARANTINE"' in bootstrap
+    assert "__WORKSPACES__" in bootstrap and "__QUARANTINE__" in bootstrap
+    assert "/etc/devfleet" not in next(line for line in service.splitlines() if line.startswith("ReadWritePaths="))
 
 ```
 
 
-## FILE: source/tests/test_network_policy.py
+## FILE: source/tests/test_hardening8_windows_integrations.py
 
-SHA256: ae80d2cdaa7f48f283367ab50a4f96c4939a540f098929bee2d69bd0cc4ff836 | Bytes: 1349 | Git mode: 100644
-
-```
-from types import SimpleNamespace
-
-import pytest
-
-from devfleet import core, main
-
-
-def test_tailscale_network_policy_allows_loopback_and_tailnet_only(monkeypatch):
-    settings = SimpleNamespace(require_tailscale=True, public_binding_allowed=False, tailnet_cidr="100.64.0.0/10")
-    monkeypatch.setattr(core, "SETTINGS", settings)
-    assert core.client_allowed_by_network("127.0.0.1") is True
-    assert core.client_allowed_by_network("100.100.20.4") is True
-    assert core.client_allowed_by_network("192.168.1.25") is False
-    assert core.client_allowed_by_network("10.0.0.2") is False
-    assert core.client_allowed_by_network("not-an-ip") is False
-
-
-def test_public_binding_policy_is_explicit_opt_in(monkeypatch):
-    settings = SimpleNamespace(require_tailscale=True, public_binding_allowed=True, tailnet_cidr="100.64.0.0/10")
-    monkeypatch.setattr(core, "SETTINGS", settings)
-    assert core.client_allowed_by_network("192.168.1.25") is True
-
-
-def test_login_csrf_generation_requires_request():
-    with pytest.raises(ValueError, match="request-bound session"):
-        main.ui_csrf_token()
-
-
-def test_login_csrf_cookie_is_http_only_and_server_rendered():
-    source = (main.__file__ and __import__("pathlib").Path(main.__file__).read_text(encoding="utf-8"))
-    assert "httponly=True" in source
-    assert "httponly=False" not in source
-
-```
-
-
-## FILE: source/tests/test_node_registry.py
-
-SHA256: 20b6f1d35bec5b55649482f1fdd28fba68f2a2a5a7a33b6cc4a68aabfd3f695f | Bytes: 1980 | Git mode: 100644
-
-```
-from __future__ import annotations
-
-import pytest
-
-from devfleet.node_registry import NodeRegistry
-
-
-def test_primary_and_multiple_surrogates_share_deployment_but_keep_unique_ids(tmp_path):
-    registry = NodeRegistry(tmp_path / "nodes.json")
-    primary = registry.ensure_local(node_name="primary", node_role="primary", capabilities=("primary-control",))
-    first = registry.ensure_local(node_name="surface-a", node_role="surrogate", deployment_id=primary["deployment_id"], coordinator_node_id=primary["node_id"], capabilities=("failover", "vault"))
-    second = registry.ensure_local(node_name="surface-b", node_role="surrogate", deployment_id=primary["deployment_id"], coordinator_node_id=primary["node_id"], capabilities=("compute",))
-    assert primary["deployment_id"] == first["deployment_id"] == second["deployment_id"]
-    assert len({primary["node_id"], first["node_id"], second["node_id"]}) == 3
-    assert first["node_role"] == second["node_role"] == "surrogate"
-
-
-def test_surrogate_requires_coordinator_and_does_not_create_second_deployment(tmp_path):
-    registry = NodeRegistry(tmp_path / "nodes.json")
-    with pytest.raises(ValueError, match="coordinator"):
-        registry.ensure_local(node_name="surface", node_role="surrogate")
-    primary = registry.ensure_local(node_name="primary", node_role="primary")
-    with pytest.raises(ValueError, match="Deployment identity mismatch"):
-        registry.ensure_local(node_name="surface", node_role="surrogate", deployment_id="different", coordinator_node_id=primary["node_id"])
-
-
-def test_duplicate_registration_is_idempotent_and_conflict_fails_closed(tmp_path):
-    registry = NodeRegistry(tmp_path / "nodes.json")
-    primary = registry.ensure_local(node_name="primary", node_role="primary")
-    again = registry.register(primary)
-    assert again["node_id"] == primary["node_id"]
-    with pytest.raises(ValueError, match="conflicting identity"):
-        registry.register({**primary, "node_role": "surrogate"})
-
-```
-
-
-## FILE: source/tests/test_ollama.py
-
-SHA256: ca9a7739053062da4e2085d89055277aacce1b1763debf0efacc5926c01f531b | Bytes: 1331 | Git mode: 100644
-
-```
-import json
-from pathlib import Path
-ROOT=Path(__file__).resolve().parents[1]
-def test_profiles_and_scripts():
- p=json.loads((ROOT/'config/ollama-profiles.json').read_text());assert set(p)=={'stable-interactive','large-context','parallel-agents'};assert 'OLLAMA_NUM_PARALLEL' in p['parallel-agents']['Environment']
-def test_no_invented_gpu_variables():
- t=(ROOT/'windows/Configure-Ollama.ps1').read_text();assert 'ROCM' not in t and 'HIP_' not in t and 'VULKAN' not in t
-def test_shipping_config_does_not_hardcode_a_developer_ollama_host():assert '192.168.1.243:11434/v1' not in (ROOT/'config/devfleet.config.json').read_text()
-
-def test_health_check_uses_openai_compatible_models_endpoint(monkeypatch):
- from devfleet import ollama
- class Response:
-  status_code=200
-  def raise_for_status(self):pass
-  def json(self):return {'data':[{'id':'test-model'}]}
- seen=[]
- monkeypatch.setattr(ollama.httpx,'get',lambda url,timeout:(seen.append(url) or Response()))
- result=ollama.ollama_health()
- assert result['ok'] and result['model_available'] and seen[0].endswith('/v1/models')
-
-def test_windows_configuration_prefers_magicdns_and_tailnet_scoped_firewall():
- t=(ROOT/'windows/Configure-Ollama.ps1').read_text()
- assert 'Self.DNSName' in t and '100.64.0.0/10' in t
- assert '0.0.0.0' in t and 'Wildcard Ollama binding is refused' in t
-
-```
-
-
-## FILE: source/tests/test_operations_leases.py
-
-SHA256: e4d54f47f0354e6f314c5f7c0515249aba022b743192ba8e82ba0e378542a8d0 | Bytes: 1446 | Git mode: 100644
-
-```
-import time
-from pathlib import Path
-from devfleet import operations
-from devfleet.operations import submit_operation,get_operation
-from devfleet.leases import update_lease
-def test_operation_progress():
- op=submit_operation('x','demo',lambda ctx:(ctx.update(50,'half'),'ok')[1])
- for _ in range(50):
-  data=get_operation(op)
-  if data['state'] in {'completed','failed'}:break
-  time.sleep(.02)
- assert data['state']=='completed' and data['progress']==100
-def test_lease_fields(tmp_path,monkeypatch):
- p=tmp_path/'demo';(p/'.devfleet').mkdir(parents=True);(p/'.devfleet/project.json').write_text('{"identity":"demo"}');monkeypatch.setattr('devfleet.leases._git',lambda p:('abc',True));d=update_lease(p,active=True);assert d['project_identity']=='demo' and d['active'] and d['git_commit']=='abc' and d['working_tree_dirty']
-
-
-def test_background_heartbeat_keeps_long_operation_owned(monkeypatch):
- monkeypatch.setattr(operations, '_LEASE_SECONDS', 0.12)
- monkeypatch.setattr(operations, '_HEARTBEAT_INTERVAL_SECONDS', 0.03)
- def slow(_ctx):
-  time.sleep(0.24)
-  return 'done'
- op=submit_operation('heartbeat-test','heartbeat-demo',slow)
- time.sleep(0.17)
- mid=get_operation(op)
- assert mid['state']=='running'
- assert mid.get('heartbeat_at')
- assert not operations._lease_expired(mid.get('lease_expires_at'))
- for _ in range(50):
-  data=get_operation(op)
-  if data['state']=='completed': break
-  time.sleep(.02)
- assert data['state']=='completed'
-
-```
-
-
-## FILE: source/tests/test_package_structure.py
-
-SHA256: e1b5312e7c28c0c54ccdf1a7d4b23c700f65bb15c436ccf0f0ef82258fcf17a0 | Bytes: 663 | Git mode: 100644
-
-```
-import json
-from pathlib import Path
-ROOT=Path(__file__).resolve().parents[1]
-def test_schema_and_names():
- c=json.loads((ROOT/'config/devfleet.config.json').read_text());assert c['SchemaVersion']==2 and c['Primary']['InstanceName']=='devfleet-primary' and c['Primary']['FriendlyName']=='CodexDevVM'
-def test_required_docs():
- for n in range(14):assert list((ROOT/'docs').glob(f'{n:02d}-*.md'))
-def test_original_ids_preserved():assert all((ROOT/'templates'/x).is_dir() for x in ('generic','python','node'))
-def test_no_baseline_file_removed():
- baseline=(ROOT/'BASELINE-v1.0.0-FILES.txt').read_text().splitlines();assert all((ROOT/x).exists() for x in baseline)
-
-```
-
-
-## FILE: source/tests/test_packaging_hygiene.py
-
-SHA256: 69352da5f3ec0cfdf73a8a6deff2c6afc7a3068a01cdb1bd1aff0b8327e73af0 | Bytes: 903 | Git mode: 100644
+SHA256: 4d7f62f7b1950263e5a069faca8fdedb2fec42afc45e7125c13f49dc1e0fb522 | Bytes: 2763 | Git mode: 100644
 
 ```
 from pathlib import Path
-import re
 
 
 ROOT = Path(__file__).parents[1]
+REPO = ROOT.parent
 
 
-def test_current_operational_docs_do_not_use_stale_release_examples():
-    current_docs = [
-        ROOT / "README-FIRST.md",
-        ROOT.parent / "installer-source/BUILD-INSTRUCTIONS.md",
-        ROOT.parent / "installer-source/BUILDING.md",
-        ROOT.parent / "installer-source/CLEAN-ROOM-INSTALL.md",
-        ROOT.parent / "installer-source/RELEASING.md",
-    ]
-    stale = (r"(?<![0-9])v?1\.2\.1(?![0-9])", r"(?<![0-9])v?1\.2\.9(?![0-9])", r"(?<![0-9])v?1\.2\.12(?![0-9])")
-    for path in current_docs:
-        text = path.read_text(encoding="utf-8").lower()
-        assert not any(re.search(value, text) for value in stale), path
+def test_host_agent_install_has_ledger_bound_exact_windows_integrations():
+    install = (ROOT / "windows/Install-DevFleet-HostAgent.ps1").read_text(encoding="utf-8")
+    removal = (ROOT / "windows/Remove-DevFleet-OwnedIntegrations.ps1").read_text(encoding="utf-8")
+    ownership = (ROOT / "windows/DevFleet-WindowsIntegrationOwnership.psm1").read_text(encoding="utf-8")
+
+    assert "DevFleet Host Agent 8790*" not in install
+    assert "Get-NetFirewallRule -DisplayName 'DevFleet Host Agent" not in install
+    assert "-AdoptLegacyDevFleetIntegrations" in install
+    assert "WINDOWS INTEGRATION OWNERSHIP CONFLICT" in install
+    assert "InstallationGeneration" in install
+    assert "ScheduledTasks=@($taskBinding)" in install
+    assert "FirewallRules=@($firewallBindings)" in install
+    assert "Services=@()" in install
+    assert "Assert-DevFleetTaskBinding" in install
+    assert "Assert-DevFleetFirewallBinding" in install
+    assert "Remove-NetFirewallRule -DisplayName" not in removal
+    assert "Get-NetFirewallRule -Name" in removal
+    assert "Assert-DevFleetServiceBinding" in removal
+    assert "Stop-Service -Name" in removal and "Stop-Service -Name ([string]$binding.Name) -Force" not in removal
+    assert "Assert-DevFleetExactFields" in ownership
 
 
-def test_installer_source_packaging_excludes_pytest_cache():
-    builder = (ROOT / "tools/Build-InstallerSourceZip.ps1").read_text(encoding="utf-8")
-    assert "\\.pytest_cache" in builder
+def test_installer_cleanup_requires_extended_ownership_ledger():
+    services = (REPO / "installer-source/DevFleet.Setup/Services/InstallerServices.cs").read_text(encoding="utf-8")
+    lifecycle = (REPO / "installer-source/DevFleet.Setup/Services/InstallerLifecycle.cs").read_text(encoding="utf-8")
 
-```
-
-
-## FILE: source/tests/test_pairing_passphrase_contract.py
-
-SHA256: f7fda6b02b77ac84c8ad43838a34c13b75820b7130daa55411d7c2816cd24306 | Bytes: 3233 | Git mode: 100644
-
-```
-"""The unattended pairing seam must never turn a passphrase into transport text."""
-from pathlib import Path
-import re
+    assert "List<OwnedWindowsIntegration> WindowsIntegrations" in services
+    assert "WindowsIntegrationOwnershipPath" in services
+    assert "InstallationGeneration" in services
+    assert "same-name foreign resources were preserved" in lifecycle
+    assert "Remove-DevFleet-OwnedIntegrations.ps1" in lifecycle
+    assert "Get-ScheduledTask -TaskName 'DevFleet Host Agent'" not in lifecycle
+    assert "Remove-NetFirewallRule -DisplayName" not in lifecycle
+    assert "sc.exe delete DevFleetHostAgent" not in lifecycle
 
 
-ROOT = Path(__file__).resolve().parents[1]
-COMMON = (ROOT / "windows" / "DevFleet.Common.psm1").read_text(encoding="utf-8")
-
-
-def bundle_function(name):
-    start = COMMON.index(f"function {name} {{")
-    end = COMMON.index("\nfunction ", start + 1)
-    return COMMON[start:end]
-
-
-def test_bundle_helpers_accept_securestring_without_a_plaintext_transport():
-    for name in ("New-EncryptedBundle", "Expand-EncryptedBundle"):
-        body = bundle_function(name)
-        assert "[Security.SecureString]$Passphrase" in body
-        assert "$null -eq $Passphrase" in body
-        assert "Read-Host" in body and "-AsSecureString" in body
-        assert "else { $Passphrase }" in body
-        assert "$env:" not in body
-        assert not re.search(r"(?:ArgumentList|Arguments|StandardInput).*\$(?:password|Passphrase)", body, re.I)
-        assert not re.search(r"(?:Write-Host|Write-Output|Write-Warning|Set-Content|WriteAllText).*\$(?:password|Passphrase)", body, re.I)
-        assert "$password=$null" in body
-
-
-def test_desktop_export_forwards_securestring_and_retains_unconfigured_deferral():
-    source = (ROOT / "windows" / "10-Export-Desktop-Pairing.ps1").read_text(encoding="utf-8")
-    assert "[Security.SecureString]$BundlePassphrase" in source
-    assert re.search(r"if\s*\(\$NonInteractive\s+-and\s+\$null\s+-eq\s+\$BundlePassphrase\)", source)
-    assert "New-EncryptedBundle -SourceDirectory $dir -OutputPath $out -Passphrase $BundlePassphrase" in source
-    assert "finally{Remove-Item $dir" in source
-    assert "Convert-SecureStringToBundlePassword" not in source
-
-
-def test_complete_cluster_forwards_securestring_inside_existing_cleanup_scope():
-    source = (ROOT / "windows" / "Complete-Cluster.ps1").read_text(encoding="utf-8")
-    assert "[Security.SecureString]$BundlePassphrase" in source
-    assert re.search(r"try\s*\{\s*Expand-EncryptedBundle .* -Passphrase \$BundlePassphrase", source)
-    assert "Primary invitation metadata is incomplete." in source
-    assert "Vault legacy adoption identity does not match the exact local cluster/credential binding." in source
-    assert "finally {\n Remove-Item $dest" in source
-    assert "Convert-SecureStringToBundlePassword" not in source
-
-
-def test_authenticated_bundle_format_and_rejection_guards_are_unchanged():
-    create = bundle_function("New-EncryptedBundle")
-    expand = bundle_function("Expand-EncryptedBundle")
-    assert "$iterations = 600000" in create and "DFENV001" in create
-    assert "$aes.Encrypt($nonce, $plain, $cipher, $tag, $header)" in create
-    for message in (
-        "Encrypted bundle is truncated.",
-        "Unsupported encrypted bundle format.",
-        "Encrypted bundle KDF parameters are invalid.",
-        "Encrypted bundle ciphertext length is invalid.",
-    ):
-        assert message in expand
-    assert "$aes.Decrypt($nonce,$cipher,$tag,$plain,$header)" in expand
-    assert expand.index("$aes.Decrypt(") < expand.index("ExtractToDirectory")
-    assert "Remove-Item $zipPath -Force -ErrorAction SilentlyContinue" in create
-    assert "Remove-Item $zipPath -Force -ErrorAction SilentlyContinue" in expand
+def test_authenticated_protocol_accepts_empty_get_and_response_bodies_without_relaxing_auth():
+    protocol = (ROOT / "windows/DevFleet-HostAgentProtocol.psm1").read_text(encoding="utf-8")
+    assert "[AllowEmptyCollection()][byte[]]$Body" in protocol
+    assert "New-HostAgentRequestAuthentication $Method $path $bodyBytes $Key $ExpectedHost" in protocol
+    assert "Test-HostAgentResponseAuthentication $Method $path $status $responseBody $Key $ExpectedHost" in protocol
+    assert "X-DevFleet-Host-Expected" in protocol
+    assert "CryptographicOperations]::FixedTimeEquals" in protocol
 
 ```
 
 
-## FILE: source/tests/test_posix_zip_writer.py
+## FILE: source/tests/test_hardening9_filesystem_identity.py
 
-SHA256: 6462892dce04a296322461f1046aa5e87ed72923caff2fad024f04cbdb42fff2 | Bytes: 1182 | Git mode: 100644
-
-```
-import json
-import zipfile
-
-from source.tools.write_posix_zip import write_zip
-
-
-def test_zip_writer_marks_unix_origin_and_preserves_contract_modes(tmp_path):
-    stage = tmp_path / "stage"
-    (stage / "source" / "bin").mkdir(parents=True)
-    (stage / "source" / "bin" / "run.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-    (stage / "source" / "README.md").write_text("readme\n", encoding="utf-8")
-    modes = stage / "SOURCE-MODES.json"
-    modes.write_text(
-        json.dumps(
-            [
-                {"path": "source/README.md", "posixMode": 420},
-                {"path": "source/bin/run.sh", "posixMode": 493},
-            ]
-        ),
-        encoding="utf-8",
-    )
-    output = tmp_path / "audit.zip"
-    write_zip(stage, output, modes)
-
-    with zipfile.ZipFile(output) as archive:
-        entries = {item.filename: item for item in archive.infolist()}
-    assert entries["source/README.md"].create_system == 3
-    assert entries["source/README.md"].external_attr >> 16 & 0o777 == 0o644
-    assert entries["source/bin/run.sh"].create_system == 3
-    assert entries["source/bin/run.sh"].external_attr >> 16 & 0o777 == 0o755
-    assert "source/" not in entries
-
-```
-
-
-## FILE: source/tests/test_profiles.py
-
-SHA256: c2b6c38df7c926f5b7e7151be4f2089786a023849ffd9a0a5d5cc0de2e42156c | Bytes: 195 | Git mode: 100644
-
-```
-from devfleet.profiles import get_profile
-def test_profiles():
- assert get_profile('strict').block_hardening;assert get_profile('balanced').allow_tailnet;assert get_profile('fast').allow_devices
-
-```
-
-
-## FILE: source/tests/test_project_safety.py
-
-SHA256: eaa01b1294d8f5a0e4b4b4debc59a7cf540305716a90b71dbdfeb9e08fa41187 | Bytes: 673 | Git mode: 100644
-
-```
-from pathlib import Path
-ROOT=Path(__file__).resolve().parents[1]
-def test_backup_before_quarantine_code_order():
- t=(ROOT/'app/devfleet/projects.py').read_text();section=t[t.index('def quarantine_project'):t.index('def list_quarantine')];assert section.index('backup_project')<section.index('project.rename')
-def test_restore_canonical_quarantines_old_copy():
- t=(ROOT/'linux/devfleet-restore-project').read_text();assert 'transfer-replaced-' in t and '--canonical' in t
-def test_docker_switch_never_migrates_or_deletes_store():
- t=(ROOT/'linux/devfleet-switch-docker-mode').read_text();assert 'Stores were not migrated or deleted' in t and 'docker system prune' not in t
-
-```
-
-
-## FILE: source/tests/test_release_fingerprint.py
-
-SHA256: c828417c604b08df30002a8af2a26a1070fbdf112b1e7e80dfd8635c883c6dd3 | Bytes: 6392 | Git mode: 100644
+SHA256: 9d3a2b7a6fb5c0172eff50e8b184e7a1c03cc55f084841d71652ef9d9f02e5b3 | Bytes: 6850 | Git mode: 100644
 
 ```
 import json
 import os
-from pathlib import Path
 import shutil
-
-from tools.release_fingerprint import build_fingerprint
-
-
-def test_shipping_fingerprint_changes_for_shipping_mutation(tmp_path: Path):
-    source = tmp_path / "source"
-    installer = tmp_path / "installer"
-    source.mkdir()
-    installer.mkdir()
-    (source / "VERSION").write_text("1.2.13\n", encoding="utf-8")
-    (source / "payload.sh").write_text("echo one\n", encoding="utf-8")
-    (installer / "INSTALLER_VERSION").write_text("1.4.1\n", encoding="utf-8")
-    first = build_fingerprint(source, installer)
-    (source / "payload.sh").write_text("echo two\n", encoding="utf-8")
-    second = build_fingerprint(source, installer)
-    assert first["releaseFingerprintId"] != second["releaseFingerprintId"]
-
-
-def test_nonshipping_harness_is_outside_shipping_fingerprint(tmp_path: Path):
-    source = tmp_path / "source"
-    installer = tmp_path / "installer"
-    automation = tmp_path / "automation"
-    source.mkdir()
-    installer.mkdir()
-    automation.mkdir()
-    (source / "VERSION").write_text("1.2.13\n", encoding="utf-8")
-    (installer / "INSTALLER_VERSION").write_text("1.4.1\n", encoding="utf-8")
-    first = build_fingerprint(source, installer)
-    (automation / "harness.ps1").write_text("Write-Output pass\n", encoding="utf-8")
-    second = build_fingerprint(source, installer)
-    assert first["releaseFingerprintId"] == second["releaseFingerprintId"]
-    assert first["toolingFingerprint"]["toolingFingerprintId"] != second["toolingFingerprint"]["toolingFingerprintId"]
-
-
-def test_fingerprint_json_is_machine_readable(tmp_path: Path):
-    source = tmp_path / "source"
-    installer = tmp_path / "installer"
-    source.mkdir()
-    installer.mkdir()
-    (source / "VERSION").write_text("1.2.13\n", encoding="utf-8")
-    (installer / "INSTALLER_VERSION").write_text("1.4.1\n", encoding="utf-8")
-    result = build_fingerprint(source, installer)
-    assert result["schemaVersion"] == 2
-    assert len(result["releaseFingerprintId"]) == 64
-    assert json.loads(json.dumps(result))["devfleetVersion"] == "1.2.13"
-
-
-def _tree(root: Path) -> tuple[Path, Path, Path]:
-    source = root / "source"
-    installer = root / "installer"
-    outputs = root / "outputs"
-    (source / "templates/demo/.devfleet").mkdir(parents=True)
-    installer.mkdir()
-    outputs.mkdir()
-    (source / "VERSION").write_text("1.2.13\n", encoding="utf-8")
-    (source / "payload.txt").write_text("same bytes\n", encoding="utf-8")
-    (source / "templates/demo/.devfleet/template.json").write_text('{"bootstrap_command":"./.devfleet/run.sh"}\n', encoding="utf-8")
-    (source / "templates/demo/.devfleet/run.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    (installer / "INSTALLER_VERSION").write_text("1.4.1\n", encoding="utf-8")
-    artifact = outputs / "candidate.bin"
-    artifact.write_bytes(b"candidate")
-    return source, installer, artifact
-
-
-def test_schema_v2_is_relocation_invariant_and_has_no_absolute_artifact_path(tmp_path: Path):
-    source_a, installer_a, artifact_a = _tree(tmp_path / "checkout-a")
-    shutil.copytree(tmp_path / "checkout-a", tmp_path / "different absolute checkout")
-    source_b = tmp_path / "different absolute checkout/source"
-    installer_b = tmp_path / "different absolute checkout/installer"
-    artifact_b = tmp_path / "different absolute checkout/outputs/candidate.bin"
-    first = build_fingerprint(source_a, installer_a, {"exe": artifact_a})
-    second = build_fingerprint(source_b, installer_b, {"exe": artifact_b})
-    assert first["releaseFingerprintId"] == second["releaseFingerprintId"]
-    assert first["artifacts"] == [{"name": "exe", "bytes": 9, "sha256": first["artifacts"][0]["sha256"]}]
-    assert "path" not in first["artifacts"][0]
-
-
-def test_checkout_mode_noise_does_not_change_canonical_shipping_identity(tmp_path: Path):
-    source, installer, artifact = _tree(tmp_path / "checkout")
-    first = build_fingerprint(source, installer, {"tar": artifact})
-    for path in (source / "payload.txt", source / "templates/demo/.devfleet/run.sh"):
-        os.chmod(path, 0o755 if not (path.stat().st_mode & 0o111) else 0o644)
-    second = build_fingerprint(source, installer, {"tar": artifact})
-    assert first["releaseFingerprintId"] == second["releaseFingerprintId"]
-
-
-def test_executable_contract_change_is_detected_but_non_executable_mode_noise_is_not(tmp_path: Path):
-    source, installer, _ = _tree(tmp_path / "checkout")
-    run = "templates/demo/.devfleet/run.sh"
-    contracted = build_fingerprint(source, installer, source_executable_paths={run})
-    non_executable = build_fingerprint(source, installer, source_executable_paths=set())
-    assert contracted["releaseFingerprintId"] != non_executable["releaseFingerprintId"]
-    run_entry = next(item for item in contracted["shippingInputs"] if item["root"] == "source" and item["path"] == run)
-    assert run_entry["mode"] == "0755"
-
-
-def test_artifact_byte_mutation_changes_release_id(tmp_path: Path):
-    source, installer, artifact = _tree(tmp_path / "checkout")
-    first = build_fingerprint(source, installer, {"exe": artifact})
-    artifact.write_bytes(b"changed candidate")
-    second = build_fingerprint(source, installer, {"exe": artifact})
-    assert first["releaseFingerprintId"] != second["releaseFingerprintId"]
-
-
-def test_release_pipeline_atomically_emits_current_tooling_schema_v2():
-    script = (Path(__file__).parents[2] / "installer-source/Build-Release.ps1").read_text(encoding="utf-8")
-    assert "releaseFingerprintSchemaVersion=2" in script
-    assert "tooling-fingerprint-current.json" in script
-    assert "Move-Item -LiteralPath $currentToolingTemporary" in script
-    assert "toolingInputs=$fingerprintObject.toolingFingerprint.toolingInputs" in script
-    assert "artifacts=$artifactRows" in script
-
-
-def test_release_pipeline_binds_shipping_identity_into_authority_metadata():
-    script = (Path(__file__).parents[2] / "installer-source/Build-Release.ps1").read_text(encoding="utf-8")
-    assert "shippingInputIdentity=$candidateIdentity.candidateShippingInputIdentity" in script
-    assert "candidateShippingInputIdentity=$candidateIdentity.candidateShippingInputIdentity" in script
-    assert "shipping_input_identity=$candidateIdentity.candidateShippingInputIdentity" in script
-    assert "candidate_shipping_input_identity=$candidateIdentity.candidateShippingInputIdentity" in script
-
-```
-
-
-## FILE: source/tests/test_release_reproducibility.py
-
-SHA256: f4af5c9897f923c4579ad5b5ede734d64067968ff58622b1bd25be24dccef66c | Bytes: 3256 | Git mode: 100644
-
-```
-from __future__ import annotations
-
-import hashlib
 import stat
 import subprocess
 import sys
-import tarfile
 import zipfile
+from pathlib import Path
+
+import pytest
+
+from devfleet import workspace_archives
+sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
+from build_release import portable_metadata
+
+
+ROOT = Path(__file__).parents[1]
+
+
+def test_compute_venv_isolated_and_hash_bound():
+    source = (ROOT / "linux/bootstrap-compute.sh").read_text(encoding="utf-8")
+    assert "python3 -m venv --system-site-packages" not in source
+    assert "python3 -m venv /opt/devfleet/venv" in source
+    assert "--require-hashes" in source
+    assert "runtime package origin is outside the DevFleet venv" in source
+
+
+def test_portable_metadata_rebuilds_release_identity_without_heuristic_replacement(tmp_path: Path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "VERSION").write_text("1.2.13\n", encoding="utf-8")
+    (source / "payload.txt").write_text("payload\n", encoding="utf-8")
+    nested = tmp_path / "devfleet-v1.2.13.tar.gz"
+    nested.write_bytes(b"tar")
+    entries = [
+        ("README.md", b"old v1.2.1"),
+        ("CLEAN-ROOM-VERIFICATION.md", b"python tools/verify_package.py --archive devfleet-v1.2.9.tar.gz"),
+        ("historical-note.txt", b"historical v1.2.9 reference"),
+    ]
+    rebuilt = dict(portable_metadata(entries, "1.2.13", nested, source))
+    assert b"DevFleet Safe Remote Development v1.2.13" in rebuilt["README.md"]
+    assert b"python source/tools/verify_package.py --archive devfleet-v1.2.13.tar.gz" in rebuilt["CLEAN-ROOM-VERIFICATION.md"]
+    assert rebuilt["historical-note.txt"] == b"historical v1.2.9 reference"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="descriptor-relative regression requires Linux/POSIX")
+def test_archive_regular_to_symlink_substitution_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".devfleet").mkdir()
+    (workspace / ".devfleet" / "project.json").write_text("{}", encoding="utf-8")
+    victim = workspace / "payload.txt"
+    victim.write_text("authorized", encoding="utf-8")
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("OUTSIDE-SECRET", encoding="utf-8")
+    original_open = workspace_archives.os.open
+    swapped = False
+
+    def swap_before_open(path, flags, mode=0o777, *, dir_fd=None):
+        nonlocal swapped
+        if not swapped and path == "payload.txt" and dir_fd is not None:
+            victim.unlink()
+            os.symlink(outside, victim)
+            swapped = True
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(workspace_archives.os, "open", swap_before_open)
+    with pytest.raises(ValueError):
+        workspace_archives.create_workspace_archive(workspace, "demo", tmp_path / "backup.tar.gz")
+    assert outside.read_text(encoding="utf-8") == "OUTSIDE-SECRET"
+    assert not (tmp_path / "backup.tar.gz").exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="descriptor-relative regression requires Linux/POSIX")
+def test_archive_regular_to_different_inode_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".devfleet").mkdir()
+    (workspace / ".devfleet" / "project.json").write_text("{}", encoding="utf-8")
+    victim = workspace / "payload.txt"
+    victim.write_text("authorized", encoding="utf-8")
+    replacement = tmp_path / "replacement.txt"
+    replacement.write_text("replacement", encoding="utf-8")
+    original_open = workspace_archives.os.open
+    swapped = False
+
+    def swap_before_open(path, flags, mode=0o777, *, dir_fd=None):
+        nonlocal swapped
+        if not swapped and path == "payload.txt" and dir_fd is not None:
+            victim.unlink()
+            replacement.rename(victim)
+            swapped = True
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(workspace_archives.os, "open", swap_before_open)
+    with pytest.raises(ValueError):
+        workspace_archives.create_workspace_archive(workspace, "demo", tmp_path / "backup.tar.gz")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="descriptor-relative regression requires Linux/POSIX")
+def test_restore_staging_substitution_never_touches_outside_sentinel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / ".devfleet").mkdir()
+    (source / ".devfleet" / "project.json").write_text("{}", encoding="utf-8")
+    archive = tmp_path / "backup.tar.gz"
+    workspace_archives.create_workspace_archive(source, "demo", archive)
+    destination = tmp_path / "demo"
+    destination.mkdir()
+    (destination / "old.txt").write_text("old", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "SENTINEL"
+    sentinel.write_text("keep", encoding="utf-8")
+    original_atomic_json = workspace_archives.atomic_json
+    swapped = False
+
+    def journal_then_swap(path: Path, value: dict):
+        nonlocal swapped
+        original_atomic_json(path, value)
+        if not swapped and value.get("phase") == "PREPARED":
+            staging = Path(value["staging_root"])
+            staging.rename(tmp_path / "detached-stage")
+            os.symlink(outside, staging, target_is_directory=True)
+            swapped = True
+
+    monkeypatch.setattr(workspace_archives, "atomic_json", journal_then_swap)
+    with pytest.raises((RuntimeError, ValueError)):
+        workspace_archives.restore_workspace_archive(archive, destination, "demo")
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="standard unzip mode test requires POSIX")
+def test_standard_unzip_restores_contract_modes(tmp_path: Path):
+    unzip = shutil.which("unzip")
+    if not unzip:
+        pytest.skip("standard unzip is unavailable")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "VERSION").write_text("1.2.13\n", encoding="utf-8")
+    nested = tmp_path / "devfleet-v1.2.13.tar.gz"
+    nested.write_bytes(b"tar")
+    data = dict(portable_metadata([], "1.2.13", nested, source))
+    archive = tmp_path / "portable.zip"
+    with zipfile.ZipFile(archive, "w") as handle:
+        for name, content in data.items():
+            info = zipfile.ZipInfo(name)
+            info.create_system = 3
+            mode = 0o755 if name == "source/VERSION" else 0o644
+            info.external_attr = (stat.S_IFREG | mode) << 16
+            handle.writestr(info, content)
+    extracted = tmp_path / "extracted"
+    extracted.mkdir()
+    subprocess.run([unzip, "-q", str(archive), "-d", str(extracted)], check=True)
+    assert stat.S_IMODE((extracted / "source/VERSION").stat().st_mode) == 0o755
+    assert stat.S_IMODE((extracted / "README.md").stat().st_mode) == 0o644
+
+```
+
+
+## FILE: source/tests/test_host_agent_idle_polling.py
+
+SHA256: bb42499c40a9c1fb9567090f96312700047ce6c5208440df86557d349137205a | Bytes: 338 | Git mode: 100644
+
+```
 from pathlib import Path
 
 
 ROOT = Path(__file__).parents[1]
-BUILDER = ROOT / "tools" / "build_release.py"
-sys.path.insert(0, str(ROOT / "tools"))
-from build_release import files
 
 
-FIXTURE_FILES = {
-    "VERSION": b"1.2.13\n",
-    "Zeta.txt": b"upper\n",
-    "alpha.txt": b"lower\n",
-    "app/Cafe.txt": b"ascii\n",
-    "app/caf\u00e9.txt": b"unicode\n",
-}
-
-
-def _source(root: Path, names: list[str]) -> Path:
-    root.mkdir()
-    for name in names:
-        path = root / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(FIXTURE_FILES[name])
-    return root
-
-
-def _build(source: Path, old_portable: Path, output: Path, cwd: Path) -> tuple[Path, Path]:
-    output.mkdir()
-    subprocess.run(
-        [
-            sys.executable,
-            str(BUILDER),
-            "--source",
-            str(source),
-            "--old-portable",
-            str(old_portable),
-            "--output-dir",
-            str(output),
-        ],
-        cwd=cwd,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return (
-        output / "devfleet-v1.2.13.tar.gz",
-        output / "DevFleet-v1.2.13-Portable-Codebase-Verified-r1.zip",
-    )
-
-
-def test_files_use_canonical_utf8_posix_order_independent_of_creation_order(tmp_path: Path):
-    names = list(FIXTURE_FILES)
-    first = _source(tmp_path / "first", names)
-    second = _source(tmp_path / "second", list(reversed(names)))
-    expected = sorted(names, key=lambda name: name.encode("utf-8"))
-    assert [path.relative_to(first).as_posix() for path in files(first)] == expected
-    assert [path.relative_to(second).as_posix() for path in files(second)] == expected
-
-
-def test_two_clean_room_builds_are_byte_identical_with_normalized_metadata(tmp_path: Path):
-    names = list(FIXTURE_FILES)
-    first = _source(tmp_path / "source-one", names)
-    second = _source(tmp_path / "source-two", list(reversed(names)))
-    old_portable = tmp_path / "old-portable.zip"
-    with zipfile.ZipFile(old_portable, "w") as archive:
-        archive.writestr("historical-note.txt", b"preserved\n")
-
-    first_tar, first_zip = _build(first, old_portable, tmp_path / "output-one", tmp_path)
-    second_tar, second_zip = _build(second, old_portable, tmp_path / "output-two", tmp_path / "source-two")
-    assert first_tar.read_bytes() == second_tar.read_bytes()
-    assert first_zip.read_bytes() == second_zip.read_bytes()
-    assert hashlib.sha256(first_tar.read_bytes()).digest() == hashlib.sha256(second_tar.read_bytes()).digest()
-    assert hashlib.sha256(first_zip.read_bytes()).digest() == hashlib.sha256(second_zip.read_bytes()).digest()
-
-    with tarfile.open(first_tar, "r:gz") as archive:
-        for member in archive.getmembers():
-            assert member.mtime == 0
-            assert member.uid == member.gid == 0
-            assert member.mode in {0o644, 0o755}
-    with zipfile.ZipFile(first_zip) as archive:
-        for member in archive.infolist():
-            assert member.date_time == (1980, 1, 1, 0, 0, 0)
-            assert member.create_system == 3
-            assert stat.S_IMODE(member.external_attr >> 16) in {0o644, 0o755}
+def test_host_agent_uses_adaptive_idle_polling():
+    source = (ROOT / "windows/DevFleet-HostAgent.ps1").read_text(encoding="utf-8")
+    assert "$pollMilliseconds=if($jobs.Count -gt 0){20}else{200}" in source
+    assert "Start-Sleep -Milliseconds $pollMilliseconds" in source
 
 ```
 
 
-## FILE: source/tests/test_remediation_contract.py
+## FILE: source/tests/test_host_agent_integration.py
 
-SHA256: de0445f35b1c084cd557e7edede914adf0282aa5931dc47fc6dcf86fc00bcdad | Bytes: 6905 | Git mode: 100644
+SHA256: 83eba1dc0ef71d3db5def5f1dd72969b96dbd6c763819fedb60e9432ac4eb9af | Bytes: 3987 | Git mode: 100644
+
+```
+from __future__ import annotations
+
+import hmac
+import json
+import threading
+from dataclasses import replace
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import pytest
+
+from devfleet import host_control
+from devfleet.host_control import build_request_auth, build_response_auth
+
+
+KEY = "integration-only-host-agent-key"
+HOST = "DISPOSABLE-HOST"
+
+
+class _HostAgentHandler(BaseHTTPRequestHandler):
+    server_version = "DevFleetTestHostAgent/1.0"
+
+    def log_message(self, *_args):
+        return
+
+    def _body(self) -> bytes:
+        size = int(self.headers.get("Content-Length", "0"))
+        return self.rfile.read(size) if size else b""
+
+    def _send_json(self, status: int, payload: dict[str, object], *, signed: bool = True) -> None:
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        if signed:
+            signature = build_response_auth(
+                self.command,
+                self.path,
+                status,
+                body,
+                KEY,
+                HOST,
+                timestamp=self.headers["X-DevFleet-Host-Timestamp"],
+                nonce=self.headers["X-DevFleet-Host-Nonce"],
+            )
+            self.send_header("X-DevFleet-Host-Response-Signature", signature)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _check_request(self, body: bytes) -> bool:
+        provided = self.headers.get("X-DevFleet-Host-Signature", "")
+        expected = build_request_auth(
+            self.command,
+            self.path,
+            body,
+            KEY,
+            HOST,
+            timestamp=int(self.headers.get("X-DevFleet-Host-Timestamp", "0")),
+            nonce=self.headers.get("X-DevFleet-Host-Nonce", ""),
+        )["X-DevFleet-Host-Signature"]
+        return bool(self.headers.get("X-DevFleet-Host-Expected") == HOST and hmac.compare_digest(provided, expected))
+
+    def _dispatch(self) -> None:
+        body = self._body()
+        if not self._check_request(body):
+            self._send_json(401, {"ok": False, "error": "request authentication failed"}, signed=False)
+            return
+        if self.path == "/healthz":
+            self._send_json(200, {"ok": True, "host_name": HOST, "agent_version": "1.2.13"})
+        elif self.path == "/v1/host/capacity":
+            self._send_json(200, {"ok": True, "host_name": HOST, "capacity": {"allocatable_cpus": 8}})
+        elif self.path.endswith("/project-health"):
+            self._send_json(500, {"ok": False, "error": "disposable worker failure"})
+        else:
+            self._send_json(404, {"ok": False, "error": "not found"})
+
+    def do_GET(self):  # noqa: N802
+        self._dispatch()
+
+    def do_POST(self):  # noqa: N802
+        self._dispatch()
+
+
+@pytest.fixture
+def disposable_host_agent(monkeypatch):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _HostAgentHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    original = host_control.SETTINGS
+    monkeypatch.setattr(
+        host_control,
+        "SETTINGS",
+        replace(
+            original,
+            host_control_enabled=True,
+            host_control_url=f"http://127.0.0.1:{server.server_port}",
+            host_control_token=KEY,
+            expected_host_name=HOST,
+        ),
+    )
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_python_client_exercises_real_local_host_agent_contract(disposable_host_agent):
+    assert host_control.host_control_status()["status"] == "healthy"
+    assert host_control.get_host_capacity()["capacity"]["allocatable_cpus"] == 8
+    with pytest.raises(RuntimeError, match="500"):
+        host_control.host_control_request("project-health", {"slug": "demo"}, runtime_id="runtime-demo")
+
+```
+
+
+## FILE: source/tests/test_host_safe_architecture.py
+
+SHA256: bed644c01d6b81ece6eaf76db5199df20b9e1892c026b7b6fee0e98b2f8c6a7f | Bytes: 7239 | Git mode: 100644
 
 ```
 from pathlib import Path
 from types import SimpleNamespace
+import threading
+import time
+
+from devfleet import core, host_control, operations
+from devfleet.resource_profiles import (
+    HostResourcePolicy,
+    adaptive_host_thresholds,
+    capacity_allows,
+    evaluate_host_memory_admission,
+    get_resource_profile,
+    validate_resource_limits,
+)
+from devfleet.runtime import ProjectRuntimeProvider, VM_PROVIDER, runtime_metadata
+
+
+def test_vm_profiles_are_bounded_and_gpu_free():
+    policy = HostResourcePolicy()
+    for name in ("small", "standard", "large", "xlarge"):
+        profile = get_resource_profile(name)
+        limits = validate_resource_limits(profile.limits("vm"), runtime_type="vm", policy=policy)
+        assert limits["cpus"] <= policy.max_project_cpus
+        assert limits["memory_gb"] <= policy.max_project_memory_gb
+        assert limits["disk_gb"] <= policy.max_project_disk_gb
+        assert runtime_metadata(VM_PROVIDER, status="ready")["gpu_enabled"] is False
+
+
+def test_capacity_gate_fails_closed_when_any_required_dimension_is_short():
+    allowed, _ = capacity_allows({"allocatable_cpus": 2, "allocatable_memory_gb": 4, "allocatable_disk_gb": 40}, {"cpus": 2, "memory_gb": 4, "disk_gb": 40})
+    blocked, reason = capacity_allows({"allocatable_cpus": 1, "allocatable_memory_gb": 4, "allocatable_disk_gb": 40}, {"cpus": 2, "memory_gb": 4, "disk_gb": 40})
+    assert allowed is True
+    assert blocked is False
+    assert "CPU" in reason
+
+
+def test_adaptive_memory_policy_uses_physical_and_commit_headroom():
+    assert adaptive_host_thresholds(16, 64).physical_floor_gb == 8
+    assert adaptive_host_thresholds(128, 128).physical_floor_gb == 12.8
+    result = evaluate_host_memory_admission(
+        usable_physical_gb=64,
+        available_physical_gb=24,
+        commit_limit_gb=64,
+        committed_gb=36,
+        projected_allocation_gb=4,
+    )
+    assert result["start_safe"] is True
+    assert result["physical_floor_gb"] == 8
+    assert result["commit_headroom_floor_gb"] == 16
+    blocked = evaluate_host_memory_admission(
+        usable_physical_gb=64,
+        available_physical_gb=24,
+        commit_limit_gb=64,
+        committed_gb=50,
+        projected_allocation_gb=4,
+    )
+    assert blocked["start_safe"] is False
+    assert blocked["projected_commit_headroom_gb"] < blocked["commit_headroom_floor_gb"]
+
+
+def test_adaptive_memory_policy_matrix_covers_representative_host_sizes_and_pressure():
+    expected_floors = {16: 8.0, 32: 8.0, 64: 8.0, 128: 12.8}
+    for installed, floor in expected_floors.items():
+        assert adaptive_host_thresholds(installed, installed * 1.25).physical_floor_gb == floor
+
+    cases = [
+        ("high available low commit", dict(usable_physical_gb=64, available_physical_gb=40, commit_limit_gb=80, committed_gb=20, projected_allocation_gb=8), True),
+        ("low available high commit", dict(usable_physical_gb=64, available_physical_gb=9, commit_limit_gb=80, committed_gb=65, projected_allocation_gb=8), False),
+        ("adequate physical inadequate commit", dict(usable_physical_gb=64, available_physical_gb=30, commit_limit_gb=80, committed_gb=67, projected_allocation_gb=1), False),
+        ("VM heavy host", dict(usable_physical_gb=32, available_physical_gb=12, commit_limit_gb=40, committed_gb=25, projected_allocation_gb=2), False),
+        ("desktop heavy host", dict(usable_physical_gb=128, available_physical_gb=20, commit_limit_gb=160, committed_gb=40, projected_allocation_gb=4), True),
+        ("resource exhaustion event", dict(usable_physical_gb=64, available_physical_gb=40, commit_limit_gb=80, committed_gb=20, projected_allocation_gb=4, resource_exhaustion=True), False),
+    ]
+    for _name, values, expected in cases:
+        assert evaluate_host_memory_admission(**values)["start_safe"] is expected
+
+
+def test_vm_request_is_gpu_free_and_uses_project_identity(monkeypatch):
+    captured = {}
+
+    def fake_request(operation, payload):
+        captured["operation"] = operation
+        captured["payload"] = payload
+        return {"ok": True}
+
+    monkeypatch.setattr(host_control, "host_control_request", fake_request)
+    result = host_control.ensure_project_vm("example-project", {"cpus": 1, "memory_gb": 2, "disk_gb": 20, "pids": 512}, project_id="12345678-1234-1234-1234-123456789012")
+    assert result["ok"] is True
+    assert captured["operation"] == "ensure"
+    assert captured["payload"]["gpu"] is False
+    assert captured["payload"]["gpu_passthrough"] is False
+    assert captured["payload"]["slug"] == "example-project"
+
+
+def test_operation_idempotency_returns_existing_queued_operation(tmp_path, monkeypatch):
+    fake_settings = SimpleNamespace(operations=tmp_path / "operations", host_id="MULATTOTECHBOX")
+    monkeypatch.setattr(operations, "SETTINGS", fake_settings)
+    gate = threading.Event()
+    def work(ctx):
+        gate.wait(2)
+        return "ok"
+    first = operations.submit_operation("create", "example-project", work, idempotency_key="create:example-project:v1")
+    second = operations.submit_operation("create", "example-project", lambda ctx: "should-not-run", idempotency_key="create:example-project:v1")
+    assert first == second
+    gate.set()
+    deadline = time.time() + 2
+    while time.time() < deadline and operations.get_operation(first)["state"] not in {"completed", "failed"}:
+        time.sleep(0.01)
+    assert operations.get_operation(first)["state"] == "completed"
+
+
+def test_atomic_text_retries_transient_windows_replace_denial(tmp_path, monkeypatch):
+    target = tmp_path / "atomic.txt"
+    original_replace = core.os.replace
+    attempts = 0
+
+    class TransientWindowsSharingError(PermissionError):
+        winerror = 5
+
+    def transient_replace(source, destination):
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise TransientWindowsSharingError("transient sharing denial")
+        original_replace(source, destination)
+
+    monkeypatch.setattr(core.os, "replace", transient_replace)
+    core.atomic_text(target, "complete\n")
+    assert attempts == 3
+    assert target.read_text(encoding="utf-8") == "complete\n"
+
+
+def test_host_agent_has_narrow_authenticated_gpu_free_boundary():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "windows" / "DevFleet-HostAgent.ps1").read_text(encoding="utf-8")
+    assert "X-DevFleet-Host-Signature" in script
+    assert "SeenRequestNonces" in script
+    assert "X-DevFleet-Host-Token" not in script
+    assert "Global\\DevFleetHostAgent-Provisioning" in script
+    assert "gpu_enabled=$false" in script
+    assert "gpu_passthrough=$false" in script.lower()
+    assert "Invoke-Expression" not in script
+    assert "Start-Process" not in script
+    assert "Restart-Computer" not in script
+
+
+def test_installer_host_agent_client_uses_request_mac_not_bearer_token():
+    root = Path(__file__).resolve().parents[2]
+    source = (root / "installer-source" / "DevFleet.Setup" / "Services" / "InstallerLifecycle.cs").read_text(encoding="utf-8")
+    assert "X-DevFleet-Host-Token" not in source
+    assert "X-DevFleet-Host-Signature" in source
+    assert "X-DevFleet-Host-Nonce" in source
+    assert "X-DevFleet-Host-Timestamp" in source
+    assert "AddRequestAuthentication" in source
+
+```
+
+
+## FILE: source/tests/test_host_transport.py
+
+SHA256: 1afeb36061b7f8dc92233be15f77b8f6269d00177aa0511665c1d6132b0d0f36 | Bytes: 3548 | Git mode: 100644
+
+```
+from __future__ import annotations
 
 import pytest
 
-from devfleet.runtime import CONTAINER_PROVIDER, VM_PROVIDER, provider_for
-from devfleet import host_control, workspace_archives
-from devfleet.version import __version__
-from devfleet.workspace_archives import create_workspace_archive, inspect_workspace, validate_archive, write_backup_manifest, restore_workspace_archive
+from devfleet.host_control import build_request_auth, build_response_auth, validate_backup_reference, verify_response_auth
 
 
-def test_version_and_provider_contract():
-    root = Path(__file__).resolve().parents[1]
-    expected = (root / "VERSION").read_text(encoding="utf-8").strip()
-    assert expected == "1.2.13"
-    assert __version__ == expected
-    assert provider_for({}) == CONTAINER_PROVIDER
-    assert provider_for({"runtime_provider": "multipass"}) == VM_PROVIDER
-    assert provider_for({"runtime_isolation": "vm", "runtime_provider": "docker-compose"}) == VM_PROVIDER
+def test_host_transport_mac_binds_method_path_body_host_and_nonce():
+    first = build_request_auth("POST", "/v1/project-vms/x/start", b'{"x":1}', "key-a", "HOST-A", timestamp=1_700_000_000, nonce="nonce-a")
+    same = build_request_auth("POST", "/v1/project-vms/x/start", b'{"x":1}', "key-a", "HOST-A", timestamp=1_700_000_000, nonce="nonce-a")
+    assert first == same
+    assert first["X-DevFleet-Host-Signature"] != build_request_auth("POST", "/v1/project-vms/x/start", b'{"x":2}', "key-a", "HOST-A", timestamp=1_700_000_000, nonce="nonce-a")["X-DevFleet-Host-Signature"]
+    assert first["X-DevFleet-Host-Signature"] != build_request_auth("POST", "/v1/project-vms/x/start", b'{"x":1}', "key-b", "HOST-A", timestamp=1_700_000_000, nonce="nonce-a")["X-DevFleet-Host-Signature"]
+    assert first["X-DevFleet-Host-Signature"] != build_request_auth("POST", "/v1/project-vms/x/start", b'{"x":1}', "key-a", "HOST-B", timestamp=1_700_000_000, nonce="nonce-a")["X-DevFleet-Host-Signature"]
 
 
-def test_workspace_archive_is_reopenable_and_identity_bound(tmp_path: Path):
-    workspace = tmp_path / "demo-project"
-    (workspace / ".devfleet").mkdir(parents=True)
-    (workspace / ".devfleet" / "project.json").write_text('{"project_id":"123"}\n', encoding="utf-8")
-    (workspace / "README.md").write_text("hello\n", encoding="utf-8")
-    inspection = inspect_workspace(workspace)
-    assert inspection["safe_for_archive"] is True
-    archive = tmp_path / "backups" / "demo-project.tar.gz"
-    result = create_workspace_archive(workspace, "demo-project", archive)
-    assert result["verified"] is True
-    assert validate_archive(archive, "demo-project")["archive_sha256"] == result["archive_sha256"]
-    manifest = write_backup_manifest(tmp_path / "backups" / "demo-project-1", slug="demo-project", project_id="123", runtime={"provider": "docker-compose"}, archive=result)
-    assert manifest["verification"]["status"] == "verified"
-
-
-def test_workspace_archive_rejects_symbolic_links_when_supported(tmp_path: Path):
-    workspace = tmp_path / "demo-project"
-    (workspace / ".devfleet").mkdir(parents=True)
-    (workspace / ".devfleet" / "project.json").write_text("{}\n", encoding="utf-8")
-    link = workspace / "link"
-    try:
-        link.symlink_to(workspace / ".devfleet" / "project.json")
-    except (OSError, NotImplementedError):
-        return
-    assert inspect_workspace(workspace)["safe_for_archive"] is False
-
-
-def test_workspace_restore_refuses_cross_filesystem_promotion(tmp_path: Path, monkeypatch):
-    workspace = tmp_path / "demo-project"
-    (workspace / ".devfleet").mkdir(parents=True)
-    (workspace / ".devfleet" / "project.json").write_text("{}\n", encoding="utf-8")
-    archive = tmp_path / "demo-project.tar.gz"
-    create_workspace_archive(workspace, "demo-project", archive)
-    if workspace_archives.POSIX_FD_HARDENING:
-        original_open = workspace_archives._open_verified_child
-
-        def different_filesystem(parent_fd, name, expected_type):
-            fd, result = original_open(parent_fd, name, expected_type)
-            if name == "demo-project":
-                result = SimpleNamespace(st_dev=int(result.st_dev) + 1, st_ino=result.st_ino, st_mode=result.st_mode)
-            return fd, result
-
-        monkeypatch.setattr(workspace_archives, "_open_verified_child", different_filesystem)
-    else:
-        monkeypatch.setattr("devfleet.workspace_archives._assert_same_filesystem", lambda *_: (_ for _ in ()).throw(ValueError("different filesystems")))
-    with pytest.raises(ValueError, match="different filesystems"):
-        restore_workspace_archive(archive, tmp_path / "destination", "demo-project")
-
-
-def test_workspace_archive_excludes_generated_directories(tmp_path: Path):
-    workspace = tmp_path / "demo-project"
-    (workspace / ".devfleet").mkdir(parents=True)
-    (workspace / ".devfleet" / "project.json").write_text("{}\n", encoding="utf-8")
-    (workspace / "node_modules" / "package").mkdir(parents=True)
-    (workspace / "node_modules" / "package" / "generated.js").write_text("generated\n", encoding="utf-8")
-    (workspace / "README.md").write_text("kept\n", encoding="utf-8")
-    inspection = inspect_workspace(workspace)
-    assert inspection["generated_dirs"] == ["node_modules"]
-    archive = tmp_path / "backups" / "demo-project.tar.gz"
-    create_workspace_archive(workspace, "demo-project", archive)
-    import tarfile
-    with tarfile.open(archive, "r:gz") as handle:
-        names = handle.getnames()
-    assert "demo-project/README.md" in names
-    assert not any(name.startswith("demo-project/node_modules/") for name in names)
-
-
-def test_host_agent_contract_has_verified_archive_and_fixed_project_commands():
-    root = Path(__file__).resolve().parents[1]
-    script = (root / "windows" / "DevFleet-HostAgent.ps1").read_text(encoding="utf-8")
-    assert "$script:AgentVersion = '2.5.0'" in script
-    assert "function Export-ProjectWorkspaceToSource" in script
-    assert "archive_sha256" in script
-    assert "manifestPath" in script
-    assert "Invoke-ProjectCommand" in script
-    assert "Invoke-Expression" not in script
-
-
-def test_project_vm_operations_use_fixed_routes_and_bound_log_tail(monkeypatch):
-    captured = {}
-
-    def fake_request(operation, payload, *, runtime_id=""):
-        captured.update(operation=operation, payload=payload, runtime_id=runtime_id)
-        return {"ok": True, "host_name": "MULATTOTECHBOX"}
-
-    monkeypatch.setattr(host_control, "host_control_request", fake_request)
-    result = host_control.project_vm_operation(
-        "demo-project",
-        "project-logs",
-        runtime_id="devfleet-project-demo-project",
-        project_id="12345678-1234-1234-1234-123456789012",
-        tail=9999,
+def test_host_transport_response_mac_is_bound_to_request_and_body():
+    body = b'{"ok":true,"runtime_id":"runtime-a"}'
+    signature = build_response_auth(
+        "POST", "/v1/project-vms/runtime-a/inspect", 200, body, "key-a", "HOST-A",
+        timestamp="1700000000", nonce="nonce-a",
     )
-    assert result["ok"] is True
-    assert captured["operation"] == "project-logs"
-    assert captured["runtime_id"] == "devfleet-project-demo-project"
-    assert captured["payload"]["tail"] == 500
-
-
-def test_permanent_vm_destroy_requires_artifact_identity():
-    with pytest.raises(ValueError, match="identified, hashed"):
-        host_control.destroy_project_vm(
-            "demo-project",
-            "demo-project",
-            "DESTROY demo-project",
-            runtime_id="devfleet-project-demo-project",
-            project_id="12345678-1234-1234-1234-123456789012",
+    verify_response_auth(
+        "POST", "/v1/project-vms/runtime-a/inspect", 200, body, "key-a", "HOST-A",
+        timestamp="1700000000", nonce="nonce-a", provided=signature,
+    )
+    with pytest.raises(RuntimeError, match="response authentication"):
+        verify_response_auth(
+            "POST", "/v1/project-vms/runtime-a/inspect", 200,
+            b'{"ok":false,"runtime_id":"attacker"}', "key-a", "HOST-A",
+            timestamp="1700000000", nonce="nonce-a", provided=signature,
+        )
+    with pytest.raises(RuntimeError, match="response authentication"):
+        verify_response_auth(
+            "POST", "/v1/project-vms/runtime-a/inspect", 200, body, "key-a", "HOST-A",
+            timestamp="1700000000", nonce="nonce-b", provided=signature,
         )
 
 
-def test_dashboard_has_bounded_logs_and_read_only_preflight_routes():
-    root = Path(__file__).resolve().parents[1]
-    main = (root / "app" / "devfleet" / "main.py").read_text(encoding="utf-8")
-    assert any(marker in main for marker in ("@app.get('/api/projects/{slug}/logs'", '@app.get("/api/projects/{slug}/logs"'))
-    assert any(marker in main for marker in ("max(1,min(int(tail),500))", "max(1, min(int(tail), 500))"))
-    assert any(marker in main for marker in ("@app.get('/api/projects/{slug}/preflight'", '@app.get("/api/projects/{slug}/preflight"'))
-    assert any(marker in main for marker in ("'migration_would_be_performed':False", "'migration_would_be_performed': False", '"migration_would_be_performed": False'))
+def test_hostagent_backup_reference_is_opaque_and_identity_bound():
+    reference = {
+        "provider": "multipass-host-agent",
+        "backup_id": "demo-20260818-abc123",
+        "project_id": "11111111-1111-1111-1111-111111111111",
+        "slug": "demo",
+        "runtime_id": "devfleet-project-demo",
+        "host_id": "MULATTOTECHBOX",
+        "archive_sha256": "a" * 64,
+        "archive_bytes": 42,
+        "manifest_sha256": "b" * 64,
+        "created_at": "2026-08-18T00:00:00Z",
+        "consistency_level": "quiesced",
+    }
+    checked = validate_backup_reference(reference, project_id=reference["project_id"], slug="demo", runtime_id=reference["runtime_id"], host_id=reference["host_id"])
+    assert "archive_path" not in checked
+    old_provider = {**reference, "backup_path": r"C:\ProgramData\DevFleetHostAgent\backups\demo.tar.gz"}
+    with pytest.raises(RuntimeError, match="provider-local backup path"):
+        validate_backup_reference(old_provider, project_id=reference["project_id"], slug="demo", runtime_id=reference["runtime_id"], host_id=reference["host_id"])
+    with pytest.raises(RuntimeError, match="does not match"):
+        validate_backup_reference(reference, project_id=reference["project_id"], slug="foreign", runtime_id=reference["runtime_id"], host_id=reference["host_id"])
 
 ```
 
 
-## FILE: source/tests/test_request_admission.py
+## FILE: source/tests/test_installed_dependency_authenticity.py
 
-SHA256: 084475db61c654d14637f96eaec248355c9f4c7d1c7e9c160835f622d62a66fc | Bytes: 6459 | Git mode: 100644
+SHA256: a096005c7bb6023e7242ea56517338137f4e8a516ab901bd37786afeffee1bf5 | Bytes: 4606 | Git mode: 100644
 
 ```
-import asyncio
-import dataclasses
+from pathlib import Path
 import json
 
-import httpx
-from fastapi.testclient import TestClient
 
-from devfleet import core, main
-from devfleet.request_guards import API_BODY_LIMIT
+ROOT = Path(__file__).resolve().parents[1]
 
 
-async def _asgi_post(
-    path,
-    chunks,
-    *,
-    token=None,
-    content_length=None,
-    peer="100.64.0.5",
-    slow=False,
-):
-    headers = [(b"content-type", b"application/json")]
-    if token is not None:
-        headers.append((b"x-devfleet-token", token.encode("ascii")))
-    if content_length is not None:
-        headers.append((b"content-length", str(content_length).encode("ascii")))
-    messages = [
-        {"type": "http.request", "body": chunk, "more_body": index < len(chunks) - 1}
-        for index, chunk in enumerate(chunks)
-    ]
-    sent = []
-    consumed = 0
+def test_powershell_dependency_probe_authenticates_before_version_execution():
+    source = (ROOT / "windows" / "DevFleet.Common.psm1").read_text(encoding="utf-8")
+    assert "Get-AuthenticodeSignature" in source
+    assert "while($cursor)" in source
+    assert "ReparsePoint" in source
+    assert "allowedSignerSubjectsExact" in source
+    assert "Legacy substring signer policy is rejected" in source
+    assert "Get-TrustedDependencyCandidates $Dependency" in source
+    assert "if($signature.Status -ne 'Valid' -and -not $allowUnsignedInstalled)" in source
+    assert "Get-Acl -LiteralPath $full" in source
+    assert "if(@($exact).Count -gt 0" in source
+    assert "$policy=if($null -ne $Dependency){$Dependency.installerAuthenticityPolicy}else{$null}" in source
+    assert "PSObject.Properties['installedExecutableTrust']" in source
 
-    async def receive():
-        nonlocal consumed
-        if slow:
-            await asyncio.sleep(0)
-        if messages:
-            message = messages.pop(0)
-            consumed += len(message.get("body", b""))
-            return message
-        return {"type": "http.disconnect"}
 
-    async def send(message):
-        sent.append(message)
+def test_canonical_dependency_policies_do_not_use_substring_signer_authority():
+    for relative in ("dependencies.json",):
+        for path in (ROOT / relative, ROOT.parent / "installer-source" / "DevFleet.Setup" / relative):
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            policies = [item["installerAuthenticityPolicy"] for item in manifest["dependencies"]]
+            assert all("allowedSignerPatterns" not in policy for policy in policies)
+            assert all(policy.get("strategy") == "VendorReleaseSha256" or policy.get("allowedSignerSubjectsExact") for policy in policies)
+            multipass = next(item for item in manifest["dependencies"] if item["id"] == "multipass")
+            assert multipass["installerAuthenticityPolicy"]["installedExecutableTrust"] == "signed-installer-locked-path"
 
-    scope = {
-        "type": "http",
-        "asgi": {"version": "3.0", "spec_version": "2.
+
+def test_multipass_runtime_resolution_reuses_canonical_dependency_policy():
+    source = (ROOT / "windows" / "DevFleet.Common.psm1").read_text(encoding="utf-8")
+    start = source.index("function Get-MultipassExe")
+    end = source.index("function Assert-MultipassIsolation", start)
+    resolver = source[start:end]
+    assert "Get-CanonicalDependencyManifest -PackageRoot $packageRoot" in resolver
+    assert "Where-Object id -eq 'multipass'" in resolver
+    assert "Wait-DevFleetDependencyStatus -Dependency $dependency" in resolver
+    assert "Test-TrustedExecutableCandidate ([string]$cached.Path) -Dependency $dependency" in resolver
+    assert "Get-FileHash -LiteralPath ([string]$cached.Path) -Algorithm SHA256" in resolver
+    assert "Status -eq 'Compatible'" in resolver
+    # The resolver must never fall back to the generic no-policy trust check.
+    assert "Test-TrustedExecutableCandidate $candidate" not in resolver
+
+
+def test_csharp_dependency_probe_authenticates_before_reading_version():
+    source = (ROOT.parent / "installer-source" / "DevFleet.Setup" / "Services" / "InstallerLifecycle.cs").read_text(encoding="utf-8")
+    assert "IsTrustedInstalledDependency(candidate, dependency)" in source
+    assert "ReadAuthenticodeSubject" in source
+    assert "AllowedSignerSubjectsExact" in source
+    assert "Legacy substring signer policy is rejected" in source
+    assert source.index("IsTrustedInstalledDependency(candidate, dependency)") < source.index("ReadVersion(candidate, dependency)")
+    assert "DirectoryInfo(Path.GetDirectoryName(full)!)" in source
+    assert "InstalledExecutableTrust" in source
+    assert "signed-installer-locked-path" in source
+    assert "Microsoft.DesktopAppInstaller" in source
+    assert "8wekyb3d8bbwe" in source
+
+
+def test_secret_bearing_archive_arguments_are_not_created():
+    source = (ROOT / "windows" / "DevFleet.Common.psm1").read_text(encoding="utf-8")
+    assert "-p$password" not in source
+    assert "New-EncryptedBundle" in source
+    assert "Expand-EncryptedBundle" in source
+    assert "DFENV001" in source
+    assert "AesGcm" in source
+
+
+def test_external_process_wrapper_has_timeout_tree_kill_and_bounded_diagnostics():
+    source = (ROOT / "windows" / "DevFleet.Common.psm1").read_text(encoding="utf-8")
+    assert "TimeoutSeconds" in source
+    assert "$process.Kill($true)" in source
+    assert "MaxDiagnosticChars" in source
+    assert "EvidenceLogPath" in source
+
+
+def test_windows_powershell_common_module_has_no_powershell_7_null_coalescing_operator():
+    source = (ROOT / "windows" / "DevFleet.Common.psm1").read_text(encoding="utf-8")
+    assert "??" not in source
+    assert "Add-Type -AssemblyName System.Net.Http" in source
+    assert "[System.Net.Http.HttpClientHandler]::new()" in source
+    assert "[System.Net.Http.HttpClient]::new($handler)" in source
+
+```
+
+
+## FILE: source/tests/test_installer_self_cleanup.py
+
+SHA256: 966731a830d6a62ca9fa6d366ae88252a4c8d60f28fbe645221e35dc6a10ce25 | Bytes: 648 | Git mode: 100644
+
+```
+from pathlib import Path
+
+
+ROOT = Path(__file__).parents[2]
+
+
+def test_installer_self_cleanup_uses_argument_bound_helper_without_cmd_shell():
+    source = (ROOT / "installer-source/DevFleet.Setup/Services/InstallerLifecycle.cs").read_text(encoding="utf-8")
+    method = source[source.index("private static void ScheduleSelfRemoval"):source.index("private static void RemoveExactRegistryEntry")]
+    assert ".cmd" not in method
+    assert "cmd.exe" not in method
+    assert "ArgumentList.Add" in method
+    assert "-LiteralPath $Target" in method
+    assert "ProcessWindowStyle.Hidden" in method
+    assert "Start-Sleep -Milliseconds 500" in method
+
+```
+
+
+## FILE: source/tests/test_language_templates.py
+
+SHA256: bf6448bdd5f7ee48208912fee44e08c99614c72f7ec036c9e4301a91d6cc60d7 | Bytes: 2062 | Git mode: 100644
+
+```
+import json
+from pathlib import Path
+from devfleet.language_policy import TEMPLATES,recommend_template
+from devfleet import analyzer, projects
+import yaml
+ROOT=Path(__file__).resolve().parents[1]
+CORE={'generic','python','python-fastapi','node','typescript-node','typescript-next','go-service','dotnet-service','java-spring','rust-service'}
+def test_legacy_and_new_templates_exist():
+ assert {'generic','python','node'}<=set(TEMPLATES);assert len(TEMPLATES)==20
+ for name in TEMPLATES:
+  d=ROOT/'templates'/name;assert (d/'compose.yaml').is_file();assert (d/'.devcontainer/devcontainer.json').is_file();assert (d/'.devfleet/codexpro-bootstrap.sh').is_file();assert (d/'README.md').is_file();assert (d/'docs/architecture.md').is_file()
+def test_core_metadata_commands():
+ for name in CORE:
+  data=json.loads((ROOT/'templates'/name/'.devfleet/template.json').read_text())
+  for key in ('bootstrap_command','format_command','lint_command','test_command','health_command'):assert data[key]
+def test_recommendations():assert recommend_template('python','fastapi')=='python-fastapi' and recommend_template('go')=='go-service'
+def test_language_metadata_documented():
+ for name in CORE:
+  assert 'Language:' in (ROOT/'templates'/name/'README.md').read_text();assert 'Rationale:' in (ROOT/'templates'/name/'docs/architecture.md').read_text()
+
+def test_generated_templates_satisfy_strict_security_contract(tmp_path,monkeypatch):
+ monkeypatch.setattr(projects,'TEMPLATE_ROOT',ROOT/'templates')
+ for name in TEMPLATES:
+  project=tmp_path/name
+  project.mkdir()
+  projects._copy_template(project,name)
+  compose=yaml.safe_load((project/'compose.yaml').read_text())
+  services=compose['services']
+  assert services
+  for service in services.values():
+   assert 'ALL' in [str(value).upper() for value in (service.get('cap_drop') or [])]
+   assert any('no-new-privileges:true' in str(value).lower() for value in (service.get('security_opt') or []))
+  findings=analyzer.analyze_project(project,'strict',force=True)
+  assert not analyzer.has_blockers(findings), (name, findings)
+
+```
+
+
+## FILE: source/tests/test_laptop_profile.py
+
+SHA256: a255b83381a5753c49b6029fdd6308ba0ac14d6a2a3774d0aa0dd2eaef0bcd3a | Bytes: 473 | Git mode: 100644
+
+```
+import pytest
+
+from devfleet.resource_profiles import LAPTOP_PROFILE_DEFAULT, laptop_surrogate_profile
+
+
+def test_laptop_default_is_conservative_5g_2g():
+    assert laptop_surrogate_profile() == LAPTOP_PROFILE_DEFAULT
+
+
+def test_laptop_lower_bound_fails_closed():
+    with pytest.raises(ValueError, match="below"):
+        laptop_surrogate_profile(failover_memory_gb=3)
+    with pytest.raises(ValueError, match="below"):
+        laptop_surrogate_profile(vault_memory_gb=1)
+
+```
+
+
+## FILE: source/tests/test_laptop_tailscale_bootstrap.py
+
+SHA256: 499afe9442a2d9944d4fe7fc1c363c3f28880c8702472d5c9d45c610aa1c509b | Bytes: 6219 | Git mode: 100644
+
+```
+"""Execute shipped shell boundaries with external services replaced by fixtures."""
+import json
+import re
+import subprocess
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+BASH = Path(r'C:\Program Files\Git\bin\bash.exe')
+
+
+def unix(path):
+    value = path.resolve().as_posix()
+    return '/' + value[0].lower() + value[2:] if value[1:3] == ':/' else value
+
+
+def cloud_client():
+    yaml = (ROOT / 'cloud-init/vault.yaml').read_text(encoding='utf-8-sig')
+    start = yaml.index('  - path: /usr/local/sbin/devfleet-install-vault-tailscale')
+    content = yaml.index('    content: |\n', start) + len('    content: |\n')
+    lines = []
+    for line in yaml[content:].splitlines():
+        if not line.startswith('      '):
+            break
+        lines.append(line[6:])
+    assert lines and lines[0] == '#!/usr/bin/env bash'
+    return '\n'.join(lines) + '\n'
+
+
+@pytest.mark.parametrize('case,expected', [('valid', 0), ('wrong-key', 4), ('extra-public-key', 4), ('download-failure', 22), ('apt-failure', 42), ('service-failure', 44)])
+def test_vault_client_installs_only_after_pinned_key_verification(tmp_path, case, expected):
+    assert BASH.is_file(), 'Use the existing Git for Windows Bash test runtime.'
+    fingerprint = json.loads((ROOT / 'linux/dependency-policy.json').read_text())['tailscale']['signingKeySha256Fingerprint']
+    assert re.fullmatch('[A-F0-9]{40}', fingerprint)
+    body = cloud_client().replace('__TAILSCALE_SIGNING_FINGERPRINT__', fingerprint)
+    paths = ['/etc/os-release', '/usr/share/keyrings/tailscale-archive-keyring.gpg', '/etc/apt/sources.list.d/tailscale.list']
+    for index, path in enumerate(paths):
+        body = body.replace(path, unix(tmp_path / str(index)))
+    (tmp_path / '0').write_text('ID=ubuntu\nVERSION_CODENAME=noble\n')
+    (tmp_path / 'tmp').mkdir()
+    preamble = r'''
+set -Eeuo pipefail
+cd "$1"
+export TMPDIR="$PWD/tmp"
+case_name="$2"
+fingerprint="$3"
+curl() { [[ "$case_name" != download-failure ]] || return 22; printf 'fixture public key' > "${@: -1}"; }
+gpg() { printf 'pub:::::::::\n'; if [[ "$case_name" == wrong-key ]]; then printf 'fpr:::::::::0000000000000000000000000000000000000000:\n'; else printf 'fpr:::::::::%s:\n' "$fingerprint"; fi; printf 'sub:::::::::\nfpr:::::::::1111111111111111111111111111111111111111:\n'; if [[ "$case_name" == extra-public-key ]]; then printf 'pub:::::::::\nfpr:::::::::2222222222222222222222222222222222222222:\n'; fi; }
+install() { printf 'verified-key-install\n' >> calls; cp -- "$3" "$4"; }
+apt-get() { printf 'apt %s\n' "$*" >> calls; [[ "$case_name" != apt-failure ]] || return 42; }
+systemctl() { printf 'service %s\n' "$*" >> calls; [[ "$case_name" != service-failure ]] || return 44; }
+'''
+    script = tmp_path / 'test.sh'
+    script.write_text(preamble + body, encoding='utf-8', newline='\n')
+    result = subprocess.run([str(BASH), '--noprofile', '--norc', unix(script), unix(tmp_path), case, fingerprint], capture_output=True, text=True, timeout=15)
+    assert result.returncode == expected, (result.returncode, result.stderr)
+    assert not list((tmp_path / 'tmp').iterdir()), 'Owned public-key temporary file was not cleaned.'
+    calls = (tmp_path / 'calls').read_text() if (tmp_path / 'calls').exists() else ''
+    if expected in (4, 22):
+        assert not calls and not (tmp_path / '1').exists() and not (tmp_path / '2').exists()
+    else:
+        assert calls.startswith('verified-key-install\napt update\n')
+    if expected == 0:
+        assert 'apt install -y tailscale\nservice enable --now tailscaled\n' in calls
+        assert 'signed-by=' in (tmp_path / '2').read_text()
+
+
+@pytest.mark.parametrize('address,authenticated', [('', False), ('100.64.1.2', True), ('100.127.255.255', True), ('100.1.1.2', False), ('100.128.1.2', False), ('100.64.256.1', False), ('192.168.1.2', False)])
+def test_vault_checks_start_daemon_before_authenticated_ip(tmp_path, address, authenticated):
+    text = (ROOT / 'linux/bootstrap-vault.sh').read_text()
+    start = text.index('begin_component tailscaleChecks ')
+    end = text.index('\ncomplete_component', start) + len('\ncomplete_component')
+    block = text[start:end]
+    preamble = r'''
+set -Eeuo pipefail
+cd "$1"
+address="$2"
+begin_component() { :; }
+complete_component() { printf completed > complete; }
+systemctl() { [[ "$*" == 'enable --now tailscaled' ]] || return 8; touch daemon; }
+run_bounded() { printf '%s\n' "$*" > bounded; "$@"; }
+tailscale() { test -f daemon || return 9; [[ -n "$address" ]] || return 1; printf '%s\n' "$address"; }
+'''
+    script = tmp_path / 'check.sh'
+    script.write_text(preamble + block + '\n', encoding='utf-8', newline='\n')
+    result = subprocess.run([str(BASH), '--noprofile', '--norc', unix(script), unix(tmp_path), address], capture_output=True, text=True, timeout=10)
+    assert (result.returncode == 0) == authenticated
+    assert (tmp_path / 'complete').exists() == authenticated
+    assert (tmp_path / 'daemon').exists()
+    assert (tmp_path / 'bounded').read_text().strip() == 'tailscale ip -4'
+
+
+def test_compute_and_vault_apply_the_same_single_primary_key_policy():
+    compute = (ROOT / 'linux/bootstrap-compute.sh').read_text()
+    pattern = r"awk -F: '(\$1==\"pub\"[^']+)'"
+    assert re.findall(pattern, compute) == re.findall(pattern, cloud_client())
+
+
+def test_cloud_init_and_provisioner_deliver_auth_before_vault_secret_bootstrap():
+    cloud = (ROOT / 'cloud-init/vault.yaml').read_text()
+    provisioner = (ROOT / 'windows/03-Provision-Vault.ps1').read_text()
+    assert '  - gnupg\n' in cloud
+    assert '[timeout, --signal=TERM, --kill-after=10s, 900s, /usr/local/sbin/devfleet-install-vault-tailscale]' in cloud
+    assert ".Replace('__TAILSCALE_SIGNING_FINGERPRINT__',$tailscaleFingerprint)" in provisioner
+    assert provisioner.index("'04-Connect-Tailscale.ps1'") < provisioner.index('$vaultSecrets=') < provisioner.index('Invoke-MultipassWithStandardInput')
+
+
+def test_deferred_laptop_rejects_before_loading_modules_or_initializing_state():
+    text = (ROOT / 'Install-DevFleet.ps1').read_text()
+    guard = text.index("if($Role-eq'Laptop'-and$DeferNetworkPairing)")
+    assert guard < text.index('Import-Module') < text.index('Initialize-DevFleetState')
+
+```
+
+
+## FILE: source/tests/test_metadata_io.py
+
+SHA256: f1bdba4aa4c2d6501bd193ed8d1a4f1ac9d3ea1988d57df5e7f55a0e69f626f9 | Bytes: 16739 | Git mode: 100644
+
+```
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+import pytest
+
+from devfleet import metadata_io
+
+
+POSIX_ONLY = pytest.mark.skipif(
+    not metadata_io.POSIX_FD_HARDENING,
+    reason="descriptor-relative no-follow primitives are unavailable",
+)
+PROJECT_ID = "12345678-1234-1234-1234-123456789abc"
+
+
+@pytest.fixture
+def workspace(tmp_path):
+    project = tmp_path / "metadata-project"
+    (project / ".devfleet").mkdir(parents=True)
+    value = {
+        "schema_version": 5,
+        "managed_by": "devfleet",
+        "slug": project.name,
+        "identity": project.name,
+        "project_id": PROJECT_ID,
+        "deployment_id": "deployment-one",
+        "host_id": "host-one",
+    }
+    (project / ".devfleet/project.json").write_bytes(
+        (json.dumps(value, indent=1) + "\n\n").encode("utf-8")
+    )
+    return project
+
+
+def test_read_write_and_exact_byte_rollback(workspace):
+    original = metadata_io.read_project_metadata(workspace)
+    assert original.value["project_id"] == PROJECT_ID
+    assert original.raw.endswith(b"\n\n")
+    assert original.binding.posix is metadata_io.POSIX_FD_HARDENING
+    changed = {**original.value, "lifecycle_status": "stopped"}
+    updated = metadata_io.write_project_metadata(workspace, changed, expected=original.binding)
+    assert updated.same_directory_lineage(original.binding)
+    assert updated.file_identity != original.binding.file_identity
+    assert metadata_io.read_project_metadata(workspace).value == changed
+    rolled_back = metad

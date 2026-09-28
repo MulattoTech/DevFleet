@@ -1,844 +1,673 @@
 # DevFleet source part 091
 
 Full-source UTF-8 byte interval [4185000, 4231500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 892bb74613ccb732ab249cbb251a95496389a9dbda86665cfa81f96b410f72f3
+Payload SHA-256: a4b7cc965c1aafdf73ee3643204f75b7a7b5402b65d656ce70f5b75d257d725e
 
 <!-- BEGIN SOURCE SLICE -->
-ing(1, $guestArgument.Length - 2).Replace("'\''", "'")
-    $bash = 'C:\Program Files\Git\bin\bash.exe'
-    if (-not (Test-Path -LiteralPath $bash -PathType Leaf)) { throw 'Existing Git for Windows bash is required for the guest script syntax fixture.' }
-    $guestSyntaxError = (& $bash --noprofile --norc -n -c $decodedGuestScript 2>&1 | Out-String).Trim()
-    $guestSyntaxPass = $LASTEXITCODE -eq 0
-}
-$expectedTransfer = $secret + '?ephemeral=true&preauthorized=true' + "`n"
-$pass = $result -and [bool]$result.authenticated -and [bool]$result.authenticationAttempted -and [int]$state.statusCalls -eq 2 -and @($state.transferInputs).Count -eq 1 -and (@($state.transferInputs)[0] -ceq $expectedTransfer) -and [bool]$state.consumeIgnoreExitCode -and $argumentText -notmatch [regex]::Escape($secret) -and $guestArgument -and $guestArgument -notmatch '[\r\n]' -and $guestArgument -match 'DEVFLEET_TAILSCALE_UP_EXIT=' -and $guestSyntaxPass
-$errorClass = if (-not $pass -and $errorText -match 'Shell scalar contains a forbidden control or newline character') { 'SHELL_SCALAR_REJECTION' } elseif ($errorText) { 'OTHER_FIXTURE_ERROR' } else { '' }
-[pscustomobject][ordered]@{
-    status = if ($pass) { 'PASS' } else { 'FAIL' }
-    authenticated = [bool]($result -and $result.authenticated)
-    authenticationAttempted = [bool]($result -and $result.authenticationAttempted)
-    statusCalls = [int]$state.statusCalls
-    externalCalls = @($state.calls).Count
-    transferCount = @($state.transferInputs).Count
-    guestCommandCaptured = [bool]$state.consume
-    outerExitMismatchHandled = [bool]$state.consumeIgnoreExitCode
-    guestCommandHasControl = [bool]($guestArgument -match '[\r\n]')
-    guestCommandSyntaxPass = $guestSyntaxPass
-    secretInArguments = [bool]($argumentText -match [regex]::Escape($secret))
-    errorClass = $errorClass
-} | ConvertTo-Json -Depth 4
-if (-not $pass) { exit 1 }
-
-```
-
-
-## FILE: source/tests/Test-TailscalePostEnrollmentStatusRetry.ps1
-
-SHA256: 31de50a4f3beea14044a09fcf7ae763d4b495226d6ebd40d916b1d3be12bf2a2 | Bytes: 10166 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([string]$WorkspaceRoot)
-
-$ErrorActionPreference = 'Stop'
-if (-not $WorkspaceRoot) { $WorkspaceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path }
-
-$sourceModule = Join-Path $WorkspaceRoot 'windows\DevFleet.Tailscale.psm1'
-$scratch = Join-Path ([IO.Path]::GetTempPath()) ('devfleet-tailscale-post-status-test-' + [guid]::NewGuid().ToString('N'))
-$passed = 0
-$failures = [System.Collections.Generic.List[string]]::new()
-
-function Check([bool]$Condition, [string]$Name) {
-    if ($Condition) { $script:passed++ } else { [void]$script:failures.Add($Name) }
-}
-
-function New-FixtureStatusJson {
-    param([bool]$Authenticated)
-    if ($Authenticated) {
-        [ordered]@{
-            BackendState = 'Running'
-            Self = [ordered]@{ HostName = 'fixture-node'; Online = $true; Tags = @('tag:devfleet-e2e') }
-            TailscaleIPs = @('100.64.1.2')
-            Health = @()
-        } | ConvertTo-Json -Depth 5 -Compress
-    } else {
-        [ordered]@{
-            BackendState = 'NeedsLogin'
-            Self = [ordered]@{ HostName = ''; Online = $false }
-            TailscaleIPs = @()
-            Health = @()
-        } | ConvertTo-Json -Depth 5 -Compress
-    }
-}
-
-function New-FixturePreferencesJson {
-    [ordered]@{ AdvertiseTags = @('tag:devfleet-e2e') } | ConvertTo-Json -Depth 3 -Compress
-}
-
-function New-FixtureInvoker {
-    param([Parameter(Mandatory)][hashtable]$State)
-    $statusJson = ${function:New-FixtureStatusJson}.GetNewClosure()
-    $preferencesJson = ${function:New-FixturePreferencesJson}.GetNewClosure()
-    $invoker = {
-        param([string[]]$Arguments)
-        $verb = [string]$Arguments[0]
-        [void]$State.commands.Add(($Arguments -join ' '))
-        switch ($verb) {
-            'status' {
-                $State.statusCalls = [int]$State.statusCalls + 1
-                if ([int]$State.authCalls -eq 0) {
-                    return [pscustomobject]@{ exitCode = 0; output = & $statusJson -Authenticated:$false }
-                }
-                $State.postStatusCalls = [int]$State.postStatusCalls + 1
-                if ([int]$State.postStatusCalls -le [int]$State.postStatusFailures) {
-                    if ([int]$State.statusFailureDelaySeconds -gt 0) { Start-Sleep -Seconds ([int]$State.statusFailureDelaySeconds) }
-                    return [pscustomobject]@{ exitCode = 7; output = '' }
-                }
-                return [pscustomobject]@{ exitCode = 0; output = & $statusJson -Authenticated:$true }
-            }
-            'debug' {
-                return [pscustomobject]@{ exitCode = 0; output = & $preferencesJson }
-            }
-            'up' {
-                $State.authCalls = [int]$State.authCalls + 1
-                return [pscustomobject]@{ exitCode = 0; output = 'fixture enrollment accepted' }
-            }
-            default { return [pscustomobject]@{ exitCode = 0; output = '' } }
-        }
-    }.GetNewClosure()
-    return $invoker
-}
-
-function Invoke-Fixture {
-    param([Parameter(Mandatory)][int]$PostStatusFailures, [Parameter(Mandatory)][string]$EvidencePath, [int]$StatusFailureDelaySeconds = 0)
-    $state = @{
-        authCalls = 0
-        statusCalls = 0
-        postStatusCalls = 0
-        postStatusFailures = $PostStatusFailures
-        statusFailureDelaySeconds = $StatusFailureDelaySeconds
-        commands = [System.Collections.Generic.List[string]]::new()
-    }
-    $profile = [pscustomobject]@{ mode = 'e2e'; tag = 'tag:devfleet-e2e'; ephemeral = $true; preauthorized = $true }
-    $optionsProvider = {
-        param([string]$RequestedHostname, [string]$InstanceName, [string]$TargetRole)
-        [pscustomobject]@{
-            mode = 'e2e'; tag = 'tag:devfleet-e2e'; ephemeral = $true; preauthorized = $true
-            hostname = $RequestedHostname; targetRole = $TargetRole; instanceName = $InstanceName
-            secret = 'fixture-oauth-client-secret'; credentialSource = 'fixture-only'
-        }
-    }
-    $result = $null
-    $errorText = ''
-    $started = [datetime]::UtcNow
-    try {
-        $result = Invoke-DevFleetTailscaleOAuthPairing `
-            -FilePath 'fixture-tailscale.exe' -InstanceName 'fixture-guest' -Hostname 'fixture-node' `
-            -DeadlineUtc ([datetime]::UtcNow.AddSeconds(180)) -EvidencePath $EvidencePath `
-            -RunId 'post-status-retry-fixture' -TransactionId '0123456789abcdef0123456789abcdef' `
-            -PayloadSha256 ('a' * 64) -StageName 'TAILSCALE-AUTH' -TargetRole 'Fixture' `
-            -CommandInvoker (New-FixtureInvoker -State $state) `
-            -EnrollmentProfileProvider { $profile } -EnrollmentOptionsProvider $optionsProvider `
-            -TailnetLockProvider { [pscustomobject]@{ status = 'DISABLED'; observed = $true; enabled = $false } } `
-            -ServiceStateProvider { 'Running' }
-    } catch { $errorText = [string]$_.Exception.Message }
-    $events = if (Test-Path -LiteralPath $EvidencePath -PathType Leaf) {
-        @(Get-Content -LiteralPath $EvidencePath | ForEach-Object { $_ | ConvertFrom-Json })
-    } else { @() }
-    [pscustomobject]@{
-        result = $result
-        error = $errorText
-        state = $state
-        events = $events
-        elapsedSeconds = ([datetime]::UtcNow - $started).TotalSeconds
-    }
-}
-
+-ItemType Directory -Path $probeRoot -Force | Out-Null
+        [IO.File]::WriteAllText($inputPath, ('X' * $InputLength), [Text.UTF8Encoding]::new($false))
+$runner = @'
+$ErrorActionPreference='Stop'
+$ModulePath=$env:DEVFLEET_TEST_MODULE
+$ShellPath=$env:DEVFLEET_TEST_SHELL
+$ChildCommand=$env:DEVFLEET_TEST_CHILD_COMMAND
+$InputPath=$env:DEVFLEET_TEST_INPUT_PATH
+$TimeoutSeconds=[int]$env:DEVFLEET_TEST_TIMEOUT_SECONDS
+Import-Module $ModulePath -Force
+$inputText=[IO.File]::ReadAllText($InputPath)
 try {
-    New-Item -ItemType Directory -Path $scratch -Force | Out-Null
-    Import-Module $sourceModule -Force
-
-    $transientEvidence = Join-Path $scratch 'transient.jsonl'
-    $transient = Invoke-Fixture -PostStatusFailures 1 -EvidencePath $transientEvidence
-    $transientRetries = @($transient.events | Where-Object { [string]$_.eventClass -ceq 'POST_ENROLLMENT_STATUS_RETRY' })
-    Check ($transient.result -and [bool]$transient.result.authenticated -and [int]$transient.state.authCalls -eq 1 -and [int]$transient.state.postStatusCalls -eq 2 -and [int]$transient.state.statusCalls -eq 3 -and $transientRetries.Count -eq 1 -and ($transient.commands -join ' ') -notmatch 'fixture-oauth-client-secret' -and @($transient.commands | Where-Object { $_ -match '(^|\s)status\s' -and $_ -notmatch '--peers=false' }).Count -eq 0) 'one transient post-enrollment status failure recovers with one bounded retry and one OAuth attempt using self-only status'
-
-    $extendedEvidence = Join-Path $scratch 'extended.jsonl'
-    $extended = Invoke-Fixture -PostStatusFailures 5 -EvidencePath $extendedEvidence
-    $extendedRetries = @($extended.events | Where-Object { [string]$_.eventClass -ceq 'POST_ENROLLMENT_STATUS_RETRY' })
-    Check ($extended.result -and [bool]$extended.result.authenticated -and [int]$extended.state.authCalls -eq 1 -and [int]$extended.state.postStatusCalls -eq 6 -and [int]$extended.state.statusCalls -eq 7 -and $extendedRetries.Count -eq 5 -and ($extended.commands -join ' ') -notmatch 'fixture-oauth-client-secret') 'extended post-enrollment control-plane convergence recovers within a finite retry window without repeating OAuth'
-
-    $timeoutEvidence = Join-Path $scratch 'timeout-convergence.jsonl'
-    $timeoutConvergence = Invoke-Fixture -PostStatusFailures 3 -StatusFailureDelaySeconds 10 -EvidencePath $timeoutEvidence
-    $timeoutRetries = @($timeoutConvergence.events | Where-Object { [string]$_.eventClass -ceq 'POST_ENROLLMENT_STATUS_RETRY' })
-    Check ($timeoutConvergence.result -and [bool]$timeoutConvergence.result.authenticated -and [int]$timeoutConvergence.state.authCalls -eq 1 -and [int]$timeoutConvergence.state.postStatusCalls -eq 4 -and [int]$timeoutConvergence.state.statusCalls -eq 5 -and $timeoutRetries.Count -eq 3 -and ($timeoutConvergence.commands -join ' ') -notmatch 'fixture-oauth-client-secret') 'three ten-second post-enrollment status timeouts still converge within the bounded wall-clock window without repeating OAuth'
-
-    $persistentEvidence = Join-Path $scratch 'persistent.jsonl'
-    $persistent = Invoke-Fixture -PostStatusFailures 99 -EvidencePath $persistentEvidence
-    $persistentRetries = @($persistent.events | Where-Object { [string]$_.eventClass -ceq 'POST_ENROLLMENT_STATUS_RETRY' })
-    Check (-not $persistent.result -and $persistent.error -match '^TAILSCALE_CONTROL_PLANE_OFFLINE' -and [int]$persistent.state.authCalls -eq 1 -and [int]$persistent.state.postStatusCalls -eq 8 -and [int]$persistent.state.statusCalls -eq 9 -and $persistentRetries.Count -eq 7 -and [double]$persistent.elapsedSeconds -lt 18) 'persistent post-enrollment status failure remains fail-closed within the expanded finite retry budget'
+    $result=Invoke-External -FilePath $ShellPath -ArgumentList @('-NoProfile','-NonInteractive','-Command',$ChildCommand) -TimeoutSeconds $TimeoutSeconds -StandardInputText $inputText -Capture
+    [Console]::Out.Write($result)
+    exit 0
 } catch {
-    [void]$failures.Add('unexpected post-enrollment status retry fixture exception')
-} finally {
-    if (Test-Path -LiteralPath $scratch -PathType Container) { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
+    [Console]::Error.Write($_.Exception.Message)
+    exit 91
 }
-
-$summary = [ordered]@{
-    status = if ($failures.Count -eq 0) { 'PASS' } else { 'FAIL' }
-    passed = $passed
-    failed = $failures.Count
-    failures = @($failures)
-    diagnostic = [ordered]@{
-        transient = if ($transient) { [ordered]@{ result = [bool]$transient.result; error = [string]$transient.error; authCalls = [int]$transient.state.authCalls; statusCalls = [int]$transient.state.statusCalls; postStatusCalls = [int]$transient.state.postStatusCalls; retryEvents = @($transient.events | Where-Object { [string]$_.eventClass -ceq 'POST_ENROLLMENT_STATUS_RETRY' }).Count } } else { $null }
-        extended = if ($extended) { [ordered]@{ result = [bool]$extended.result; error = [string]$extended.error; authCalls = [int]$extended.state.authCalls; statusCalls = [int]$extended.state.statusCalls; postStatusCalls = [int]$extended.state.postStatusCalls; retryEvents = @($extended.events | Where-Object { [string]$_.eventClass -ceq 'POST_ENROLLMENT_STATUS_RETRY' }).Count } } else { $null }
-        persistent = if ($persistent) { [ordered]@{ result = [bool]$persistent.result; error = [string]$persistent.error; authCalls = [int]$persistent.state.authCalls; statusCalls = [int]$persistent.state.statusCalls; postStatusCalls = [int]$persistent.state.postStatusCalls; retryEvents = @($persistent.events | Where-Object { [string]$_.eventClass -ceq 'POST_ENROLLMENT_STATUS_RETRY' }).Count } } else { $null }
+'@
+        [IO.File]::WriteAllText($runnerPath, $runner, [Text.UTF8Encoding]::new($false))
+        $psi = [Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = $pwsh
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.Arguments = "-NoProfile -File `"$runnerPath`""
+        $psi.EnvironmentVariables['DEVFLEET_TEST_MODULE'] = $modulePath
+        $psi.EnvironmentVariables['DEVFLEET_TEST_SHELL'] = $shell
+        $psi.EnvironmentVariables['DEVFLEET_TEST_CHILD_COMMAND'] = $ChildCommand
+        $psi.EnvironmentVariables['DEVFLEET_TEST_INPUT_PATH'] = $inputPath
+        $psi.EnvironmentVariables['DEVFLEET_TEST_TIMEOUT_SECONDS'] = [string]$OwnerTimeoutSeconds
+        $process = [Diagnostics.Process]::Start($psi)
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        $finished = $process.WaitForExit($OuterTimeoutSeconds * 1000)
+        if (-not $finished) {
+            try { $process.Kill($true) } catch {}
+            [void]$process.WaitForExit(5000)
+        }
+        $timer.Stop()
+        [void]([Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdoutTask,$stderrTask)).Wait([TimeSpan]::FromSeconds(5)))
+        return [pscustomobject]@{
+            finished = $finished
+            elapsedSeconds = $timer.Elapsed.TotalSeconds
+            exitCode = if ($finished) { $process.ExitCode } else { $null }
+            stdout = if ($stdoutTask.IsCompletedSuccessfully) { $stdoutTask.Result } else { '' }
+            stderr = if ($stderrTask.IsCompletedSuccessfully) { $stderrTask.Result } else { '' }
+        }
+    } finally {
+        if ($process -and -not $process.HasExited) { try { $process.Kill($true) } catch {} }
+        if ($process) { $process.Dispose() }
+        Remove-Item -LiteralPath $probeRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-$summary | ConvertTo-Json -Depth 8
-if ($failures.Count -ne 0) { exit 1 }
+
+$neverReads = Invoke-IsolatedInputProbe -ChildCommand 'Start-Sleep -Seconds 30' -InputLength (4MB) -OwnerTimeoutSeconds 2 -OuterTimeoutSeconds 7
+Check ($neverReads.finished -and $neverReads.exitCode -eq 91 -and $neverReads.stderr -match 'timed out') 'stdin writer is bounded when the child never reads stdin'
+
+$backpressureCommand = "[Console]::Out.Write(('O'*1048576));[Console]::Error.Write(('E'*1048576));`$text=[Console]::In.ReadToEnd();if(`$text.Length -ne $([int](4MB))){exit 12};[Console]::Out.Write('|INPUT_OK|')"
+$backpressure = Invoke-IsolatedInputProbe -ChildCommand $backpressureCommand -InputLength (4MB) -OwnerTimeoutSeconds 15 -OuterTimeoutSeconds 20
+Check ($backpressure.finished -and $backpressure.exitCode -eq 0 -and $backpressure.stdout -match '\|INPUT_OK\|') 'stdout/stderr drains start before stdin delivery and avoid pipe backpressure deadlock'
+
+$eofResult = Invoke-External -FilePath $shell -ArgumentList @('-NoProfile','-NonInteractive','-Command','$text=[Console]::In.ReadToEnd();[Console]::Out.Write($text.Length)') -TimeoutSeconds 5 -StandardInputText 'dummy-input' -Capture
+Check ($eofResult -eq '11') 'stdin content and EOF are delivered exactly once'
+
+$earlyExitError = ''
+try {
+    Invoke-External -FilePath $shell -ArgumentList @('-NoProfile','-NonInteractive','-Command','exit 23') -TimeoutSeconds 5 -StandardInputText ('X' * (4MB)) -Capture | Out-Null
+} catch {
+    $earlyExitError = $_.Exception.Message
+}
+Check ($earlyExitError -match 'failed with exit code 23') 'early child exit preserves direct exit-code semantics instead of surfacing a broken-pipe wrapper'
+
+$brokenPipeError = ''
+$brokenPipeTimer = [Diagnostics.Stopwatch]::StartNew()
+try {
+    Invoke-External -FilePath $python -ArgumentList @('-c','import os,time; os.close(0); time.sleep(30)') -TimeoutSeconds 10 -StandardInputText ('X' * (4MB)) -Capture | Out-Null
+} catch {
+    $brokenPipeError = $_.Exception.Message
+} finally {
+    $brokenPipeTimer.Stop()
+}
+Check ($brokenPipeError -match 'input delivery failed' -and $brokenPipeError -notmatch 'timed out after' -and $brokenPipeTimer.Elapsed.TotalSeconds -lt 4) 'a live child that breaks stdin preserves the input transport error and is bounded'
+
+$deadlineError = ''
+$deadlineTimer = [Diagnostics.Stopwatch]::StartNew()
+try {
+    Invoke-External -FilePath $shell -ArgumentList @('-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 3;$null=[Console]::In.ReadToEnd();Start-Sleep -Seconds 30') -TimeoutSeconds 20 -DeadlineUtc ([datetime]::UtcNow.AddSeconds(5)) -StandardInputText ('X' * (4MB)) -Capture | Out-Null
+} catch {
+    $deadlineError = $_.Exception.Message
+} finally {
+    $deadlineTimer.Stop()
+}
+Check ($deadlineError -match 'timed out' -and $deadlineTimer.Elapsed.TotalSeconds -lt 5.5) 'one absolute deadline is shared across delayed stdin delivery and execution'
+
+[pscustomobject]@{
+    status = if ($failures.Count) { 'FAIL' } else { 'PASS' }
+    passed = $passed
+    failures = @($failures)
+    neverReadElapsedSeconds = [math]::Round($neverReads.elapsedSeconds, 3)
+    backpressureElapsedSeconds = [math]::Round($backpressure.elapsedSeconds, 3)
+    brokenPipeElapsedSeconds = [math]::Round($brokenPipeTimer.Elapsed.TotalSeconds, 3)
+    sharedDeadlineElapsedSeconds = [math]::Round($deadlineTimer.Elapsed.TotalSeconds, 3)
+} | ConvertTo-Json -Depth 4
+if ($failures.Count) { exit 1 }
 
 ```
 
 
-## FILE: source/tests/Test-TailscaleStageDeadlineComposition.ps1
+## FILE: source/tests/Test-HostSecretRecovery.ps1
 
-SHA256: 32076c12d01e5c0b9cbc72fb7824959e633e60aa098cadc71f76d8e41182fd23 | Bytes: 1201 | Git mode: 100644
+SHA256: 8057414f92b8d1c4f9f68a64507737d4a1eac26b6a73051c774a86b0fa7f75ec | Bytes: 2163 | Git mode: 100644
+
+```
+$ErrorActionPreference = 'Stop'
+$originalProgramData = $env:ProgramData
+$testProgramData = Join-Path ([IO.Path]::GetTempPath()) "devfleet-secret-tests-$([guid]::NewGuid().ToString('N'))"
+$env:ProgramData = $testProgramData
+Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'windows\DevFleet.Common.psm1') -Force
+
+function Reset-State([switch]$Existing) {
+    $root = Get-DevFleetStateRoot
+    if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
+    New-Item -ItemType Directory -Path (Join-Path $root 'secrets') -Force | Out-Null
+    if ($Existing) { [IO.File]::WriteAllText((Join-Path $root 'node-identity.json'),' {"schema_version":1,"node_id":"fixture"} ') }
+    return $root
+}
+function Assert-RecoveryRequired([scriptblock]$Action) {
+    try { & $Action; throw 'Expected SECRET RECOVERY REQUIRED.' }
+    catch { if ($_.Exception.Message -notmatch '^SECRET RECOVERY REQUIRED') { throw } }
+}
+
+try {
+    $root = Reset-State
+    $fresh = Get-OrCreateSecrets
+    if (-not (Test-DevFleetSecretRecord $fresh) -or [int]$fresh.SchemaVersion -ne 2 -or [string]$fresh.SecretGeneration -notmatch '^[0-9a-fA-F-]{36}$') { throw 'Fresh secret generation is invalid.' }
+
+    $root = Reset-State -Existing
+    Assert-RecoveryRequired { Get-OrCreateSecrets | Out-Null }
+
+    $root = Reset-State -Existing
+    [IO.File]::WriteAllText((Join-Path $root 'secrets\host-secrets.json'),'{not-json')
+    Assert-RecoveryRequired { Get-OrCreateSecrets | Out-Null }
+
+    $root = Reset-State -Existing
+    [IO.File]::WriteAllText((Join-Path $root 'secrets\host-secrets.json'),'{"PortalAdminUser":"dylan"}')
+    Assert-RecoveryRequired { Get-OrCreateSecrets | Out-Null }
+
+    $first = New-DevFleetSecretRecord
+    $second = New-DevFleetSecretRecord
+    if ($first.SecretGeneration -eq $second.SecretGeneration -or $first.NodeApiToken -eq $second.NodeApiToken) { throw 'Re-key generations or token material were reused.' }
+    'PASS host secret fail-closed and generation tests'
+} finally {
+    $env:ProgramData = $originalProgramData
+    if (Test-Path -LiteralPath $testProgramData) { Remove-Item -LiteralPath $testProgramData -Recurse -Force }
+}
+
+```
+
+
+## FILE: source/tests/Test-MultipassLaunchTimeoutEnvelope.ps1
+
+SHA256: 01bec115b8ef4905b78b5391341c5c62a6ebc1955795a756ba19d9fbc6bfda97 | Bytes: 12850 | Git mode: 100644
 
 ```
 [CmdletBinding()]
-param(
-    [string]$WorkspaceRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
-)
+param()
 
 $ErrorActionPreference = 'Stop'
-$commonPath = Join-Path $WorkspaceRoot 'source/windows/DevFleet.Common.psm1'
-Import-Module $commonPath -Force -DisableNameChecking
-
-$windowsBudget = [int](Get-DevFleetStageBudgetSeconds 'windowsTailscale')
-$guestBudget = [int](Get-DevFleetStageBudgetSeconds 'tailscale')
-
-# The Windows stage owns service startup, browser handoff, and a real human
-# approval. The exact Laptop run showed that 180 seconds could be consumed
-# before the browser handoff became usable. Reuse the existing bounded guest
-# pairing budget instead of introducing a second timeout policy.
-if ($windowsBudget -ne 900) {
-    throw "windowsTailscale stage budget must be 900 seconds for the bounded human pairing flow; observed $windowsBudget."
-}
-if ($windowsBudget -ne $guestBudget) {
-    throw "Windows and guest Tailscale pairing budgets diverged: windows=$windowsBudget guest=$guestBudget."
-}
-
-[ordered]@{
-    status = 'PASS'
-    windowsTailscaleSeconds = $windowsBudget
-    tailscaleSeconds = $guestBudget
-    boundedHumanPairingBudgetAligned = $true
-} | ConvertTo-Json -Compress
-
-```
-
-
-## FILE: source/tests/Test-WindowsIntegrationOwnership.ps1
-
-SHA256: b1ed85f8d67c5ab506ad550fac4d6a93af97ca8a2b9b6ab2ff530ad83aa14846 | Bytes: 5263 | Git mode: 100644
-
-```
-$ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent $PSScriptRoot
-Import-Module (Join-Path $root 'windows\DevFleet-WindowsIntegrationOwnership.psm1') -Force
-
-function Assert-ThrowsOwnershipConflict([scriptblock]$Action) {
-    try { & $Action; throw 'Expected an ownership conflict.' }
-    catch { if ($_.Exception.Message -notmatch 'OWNERSHIP CONFLICT') { throw } }
-}
-
-$generation = [guid]::NewGuid().ToString('D')
-$task = @{Name='DevFleet Host Agent';Executable="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe";Arguments='-NoProfile -File "C:\ProgramData\DevFleetHostAgent\DevFleet-HostAgent.ps1"';Principal='SYSTEM';LogonType='ServiceAccount';RunLevel='Highest';Description="M-TechLabs DevFleet; generation=$generation";Generation=$generation;Marker='M-TechLabs DevFleet Host Agent'}
-Assert-DevFleetTaskBinding -Expected $task -Actual (@{} + $task) | Out-Null
-$foreignTask = @{} + $task; $foreignTask.Executable = "$env:SystemRoot\System32\cmd.exe"
-Assert-ThrowsOwnershipConflict { Assert-DevFleetTaskBinding -Expected $task -Actual $foreignTask }
-
-$firewall = @{Name='DevFleetHostAgent-8790-Tailscale';DisplayName='DevFleet Host Agent 8790 - Tailscale';Group='M-TechLabs DevFleet Host Agent';Description="M-TechLabs DevFleet; generation=$generation";Direction='Inbound';Action='Allow';Protocol='TCP';LocalPort='8790';InterfaceAlias='Tailscale';RemoteAddress='100.64.0.0/10';Profile='Any';Generation=$generation;Marker='M-TechLabs DevFleet Host Agent'}
-Assert-DevFleetFirewallBinding -Expected $firewall -Actual (@{} + $firewall) | Out-Null
-$providerFirewall = @{} + $firewall; $providerFirewall.RemoteAddress = '100.64.0.0/255.192.0.0'
-Assert-DevFleetFirewallBinding -Expected $firewall -Actual $providerFirewall | Out-Null
-$multipassFirewall = @{} + $firewall; $multipassFirewall.Name = 'DevFleetHostAgent-8790-Multipass'; $multipassFirewall.DisplayName = 'DevFleet Host Agent 8790 - Multipass'; $multipassFirewall.InterfaceAlias = 'vEthernet (Default Switch)'; $multipassFirewall.RemoteAddress = '172.23.144.1/20'
-$multipassProviderFirewall = @{} + $multipassFirewall; $multipassProviderFirewall.RemoteAddress = '172.23.144.0/255.255.240.0'
-Assert-DevFleetFirewallBinding -Expected $multipassFirewall -Actual $multipassProviderFirewall | Out-Null
-$staleVirtualNetworkFirewall = @{} + $multipassFirewall; $staleVirtualNetworkFirewall.InterfaceAlias = '0e5a7c8a-7826-4655-8648-a711bb6d7f87'; $staleVirtualNetworkFirewall.RemoteAddress = '172.21.176.0/255.255.240.0'
-Assert-DevFleetFirewallRefreshIdentity -Expected $multipassFirewall -Actual $staleVirtualNetworkFirewall | Out-Null
-Assert-ThrowsOwnershipConflict { Assert-DevFleetFirewallBinding -Expected $multipassFirewall -Actual $staleVirtualNetworkFirewall }
-$foreignRefreshFirewall = @{} + $staleVirtualNetworkFirewall; $foreignRefreshFirewall.Group = 'Foreign Firewall Group'
-Assert-ThrowsOwnershipConflict { Assert-DevFleetFirewallRefreshIdentity -Expected $multipassFirewall -Actual $foreignRefreshFirewall }
-$foreignFirewall = @{} + $firewall; $foreignFirewall.RemoteAddress = 'Any'
-Assert-ThrowsOwnershipConflict { Assert-DevFleetFirewallBinding -Expected $firewall -Actual $foreignFirewall }
-
-$service = @{Name='DevFleetHostAgent';ImagePath='C:\Program Files\M-TechLabs\DevFleet\agent.exe';Account='LocalSystem';StartMode='Auto';Generation=$generation;Marker='M-TechLabs DevFleet Host Agent'}
-$liveService = @{} + $service; $liveService.ImagePath = '"C:\Program Files\M-TechLabs\DevFleet\agent.exe" --service'
-Assert-DevFleetServiceBinding -Expected $service -Actual $liveService | Out-Null
-$foreignService = @{} + $service; $foreignService.ImagePath = 'C:\Foreign\agent.exe'
-Assert-ThrowsOwnershipConflict { Assert-DevFleetServiceBinding -Expected $service -Actual $foreignService }
-
-$temporary = Join-Path ([IO.Path]::GetTempPath()) ("devfleet-integration-ownership-$([guid]::NewGuid().ToString('N')).json")
-try {
-    $ledger = @{SchemaVersion=1;InstallationGeneration=$generation;ScheduledTasks=@($task);FirewallRules=@($firewall);Services=@($service)}
-    Write-DevFleetIntegrationOwnership -Path $temporary -Ledger $ledger
-    $loaded = Read-DevFleetIntegrationOwnership -Path $temporary
-    if ($loaded.InstallationGeneration -ne $generation) { throw 'Ledger generation did not round-trip.' }
-    $ledger.FirewallRules[0].Generation = [guid]::NewGuid().ToString('D')
-    Write-DevFleetIntegrationOwnership -Path $temporary -Ledger $ledger
-    try { Read-DevFleetIntegrationOwnership -Path $temporary | Out-Null; throw 'Cross-generation ledger was accepted.' }
-    catch { if ($_.Exception.Message -notmatch 'cross-generation') { throw } }
-} finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
-
-$hostAgent = Get-Content -LiteralPath (Join-Path $root 'windows\DevFleet-HostAgent.ps1') -Raw
-if ($hostAgent -notmatch 'Invoke-DevFleetOwnedFirewallRefresh') { throw 'Host Agent startup does not reconcile owned firewall bindings.' }
-$installer = Get-Content -LiteralPath (Join-Path $root 'windows\Install-DevFleet-HostAgent.ps1') -Raw
-if ($installer -notmatch 'Invoke-DevFleetOwnedFirewallRefresh') { throw 'Host Agent installation path does not reconcile prior owned firewall bindings.' }
-
-'PASS Windows integration ownership binding tests'
-
-```
-
-
-## FILE: source/tests/_bundle_layout.py
-
-SHA256: bcd842e85f5b6c5f4a5365ffbdf032b9b1781b4e9a1a9f811e12652d171727c3 | Bytes: 1572 | Git mode: 100644
-
-```
-from __future__ import annotations
-
-from dataclasses import dataclass
-import importlib.util
-import sys
-from pathlib import Path
-
-
-@dataclass(frozen=True)
-class BundleLayout:
-    """Explicit repository/canonical-bundle roots used by path-sensitive tests."""
-
-    bundle_root: Path
-    source_root: Path
-    installer_source_root: Path
-    release_tooling_root: Path
-    release_e2e_root: Path
-
-
-def resolve_bundle_layout(anchor: Path) -> BundleLayout:
-    anchor = anchor.resolve()
-    for candidate in (anchor, *anchor.parents):
-        for helper in (candidate / "release-tooling/audit_bundle_paths.py", candidate / "tools/audit_bundle_paths.py"):
-            if not helper.is_file():
-                continue
-            spec = importlib.util.spec_from_file_location("devfleet_audit_bundle_paths", helper)
-            if spec is None or spec.loader is None:
-                continue
-            module = importlib.util.module_from_spec(spec)
-            # Dataclasses and other introspection-based modules expect the
-            # executing module to be registered, as it is during ordinary
-            # imports.  Preserve that invariant for relocated bundles.
-            sys.modules[spec.name] = module
-            spec.loader.exec_module(module)
-            layout = module.resolve_bundle_layout(anchor)
-            return BundleLayout(layout.bundle_root, layout.source_root, layout.installer_source_root, layout.release_tooling_root, layout.release_e2e_root)
-    raise AssertionError(f"Could not identify a repository or canonical audit bundle root from {anchor}")
-
-```
-
-
-## FILE: source/tests/conftest.py
-
-SHA256: 03e3e1fab21c2523e89b74fb326aca7d38c1927a1aec528997f30558f714ee64 | Bytes: 1430 | Git mode: 100644
-
-```
-import json,os,sys
-from pathlib import Path
-ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'app'))
-TESTROOT=ROOT/'.test-runtime';
-for d in ('workspaces','quarantine','runtime','cache','static','templates'): (TESTROOT/d).mkdir(parents=True,exist_ok=True)
-config={'node_name':'test-node','deployment_id':'deployment-123','node_role':'primary','friendly_name':'CodexDevVM','portal_port':8787,'workspaces':str(TESTROOT/'workspaces'),'quarantine':str(TESTROOT/'quarantine'),'peer_file':str(TESTROOT/'peer.json'),'runtime_root':str(TESTROOT/'runtime'),'cache_root':str(TESTROOT/'cache'),'ollama_base_url':'http://127.0.0.1:11434/v1','ollama_model':'test-model','ollama_profile':'stable-interactive','development_profile':'balanced','docker_mode':'rootless','enable_shared_caches':True,'enable_analyzer_cache':True,'auto_start_codexpro':True,'allow_tailnet_ports':True,'backup_before_rebuild':False,'backup_before_quarantine':True,'require_tailscale':False,'tailnet_cidr':'100.64.0.0/10','public_binding_allowed':True}
-(TESTROOT/'config.json').write_text(json.dumps(config));(TESTROOT/'peer.json').write_text('{}');os.environ.update({'DEVFLEET_CONFIG_PATH':str(TESTROOT/'config.json'),'DEVFLEET_ADMIN_USER':'test','DEVFLEET_ADMIN_PASSWORD':'test-password','DEVFLEET_API_TOKEN':'test-token','DEVFLEET_STATIC_DIR':str(ROOT/'app/static'),'DEVFLEET_TEMPLATE_DIR':str(ROOT/'app/templates')})
-
-```
-
-
-## FILE: source/tests/test_analyzer.py
-
-SHA256: 359450217b36e714dd5411b47230100fc0723991377d4ecab213d3ef11ed2a00 | Bytes: 3363 | Git mode: 100644
-
-```
-from pathlib import Path
-import tempfile
-import pytest
-
-from devfleet.analyzer import analyze_project, has_blockers
-
-
-def analyze(compose: str):
-    with tempfile.TemporaryDirectory() as tmp:
-        p=Path(tmp)
-        (p/'compose.yaml').write_text(compose)
-        return analyze_project(p)
-
-
-def test_safe_relative_mount():
-    findings=analyze('''services:\n  dev:\n    image: ubuntu:24.04\n    volumes: [\".:/workspaces/x\"]\n    security_opt: [\"no-new-privileges:true\"]\n    healthcheck: {test: [\"CMD\", \"true\"]}\n''')
-    assert not has_blockers(findings), findings
-
-
-def test_absolute_mount_blocked():
-    findings=analyze('''services:\n  dev:\n    image: ubuntu:24.04\n    volumes: [\"/home/devrunner:/host\"]\n''')
-    assert any(x['code']=='docker.mount' and x['severity']=='critical' for x in findings)
-
-
-def test_parent_mount_blocked():
-    findings=analyze('''services:\n  dev:\n    image: ubuntu:24.04\n    volumes: [\"../other-project:/other\"]\n''')
-    assert any(x['code']=='docker.mount' and x['severity']=='critical' for x in findings)
-
-
-def test_socket_and_privileged_blocked():
-    findings=analyze('''services:\n  dev:\n    image: ubuntu:24.04\n    privileged: true\n    volumes: [\"/run/user/1001/docker.sock:/var/run/docker.sock\"]\n''')
-    assert has_blockers(findings)
-    assert {'docker.mount','docker.privileged'} <= {x['code'] for x in findings}
-
-def test_public_port_and_device_blocked():
-    findings=analyze('''services:\n  dev:\n    image: ubuntu:24.04\n    ports: [\"3000:3000\"]\n    devices: [\"/dev/kvm:/dev/kvm\"]\n''')
-    assert {'docker.port-public','docker.devices'} <= {x['code'] for x in findings}
-
-
-def test_loopback_port_allowed():
-    findings=analyze('''services:\n  dev:\n    image: ubuntu:24.04\n    ports: [\"127.0.0.1:3000:3000\"]\n    security_opt: [\"no-new-privileges:true\"]\n    healthcheck: {test: [\"CMD\", \"true\"]}\n''')
-    assert not has_blockers(findings), findings
-
-def test_symlink_bind_source_outside_project_is_blocked(tmp_path: Path):
-    outside=tmp_path/'outside'
-    outside.mkdir()
-    project=tmp_path/'project'
-    project.mkdir()
-    try:
-        (project/'escape').symlink_to(outside, target_is_directory=True)
-    except OSError:
-        pytest.skip('Windows test host does not grant symbolic-link creation privilege')
-    (project/'compose.yaml').write_text('''services:\n  app:\n    image: alpine:3.20\n    security_opt: [no-new-privileges:true]\n    volumes:\n      - ./escape:/data\n    ports:\n      - 127.0.0.1:8080:80\n''')
-    findings=analyze_project(project)
-    assert has_blockers(findings)
-    assert any(x['code']=='docker.mount-resolution' for x in findings)
-
-
-def test_rebuild_context_symlink_outside_project_is_blocked(tmp_path: Path):
-    outside=tmp_path/'outside-build'
-    outside.mkdir()
-    project=tmp_path/'project'
-    project.mkdir()
-    try:
-        (project/'escape-build').symlink_to(outside, target_is_directory=True)
-    except OSError:
-        pytest.skip('Windows test host does not grant symbolic-link creation privilege')
-    (project/'compose.yaml').write_text('''services:\n  app:\n    build: ./escape-build\n    security_opt: [no-new-privileges:true]\n    ports:\n      - 127.0.0.1:8080:80\n''')
-    findings=analyze_project(project)
-    assert has_blockers(findings)
-    assert any(x['code']=='docker.build-context' for x in findings)
-
-```
-
-
-## FILE: source/tests/test_analyzer_v11.py
-
-SHA256: 11738fb7c631b7c0d2de4d70956ce3e458f5b0aed5d302702ff7bb60ee484ccb | Bytes: 4024 | Git mode: 100644
-
-```
-from pathlib import Path
-import pytest
-from devfleet.analyzer import analyze_project,has_blockers
-def project(tmp_path,text):
- p=tmp_path/'demo';p.mkdir();(p/'compose.yaml').write_text(text);return p
-def test_windows_mount_blocked(tmp_path):assert has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    volumes: ["C:\\\\Users:/host"]\n'),'balanced',True))
-def test_parent_mount_blocked(tmp_path):assert has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    volumes: ["../:/host"]\n'),'fast',True))
-def test_docker_socket_blocked_in_fast(tmp_path):assert has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    volumes: ["/var/run/docker.sock:/var/run/docker.sock"]\n'),'fast',True))
-def test_loopback_port_allowed_balanced(tmp_path):assert not has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    ports: ["127.0.0.1:3000:3000"]\n    healthcheck: {test: ["CMD","true"]}\n    security_opt: ["no-new-privileges:true"]\n'),'balanced',True))
-def test_tailnet_allowed_balanced(tmp_path):assert not has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    ports: ["100.64.1.2:3000:3000"]\n    healthcheck: {test: ["CMD","true"]}\n    security_opt: ["no-new-privileges:true"]\n'),'balanced',True))
-def test_public_port_blocked(tmp_path):assert has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    ports: ["3000:3000"]\n'),'fast',True))
-def test_symlink_escape_blocked(tmp_path):
- p=project(tmp_path,'services:\n  x:\n    image: x:1\n')
- try:(p/'escape').symlink_to(tmp_path)
- except OSError:pytest.skip('Windows test host does not grant symbolic-link creation privilege')
- assert has_blockers(analyze_project(p,'balanced',True))
-def test_cache_invalidates(tmp_path):
- p=project(tmp_path,'services:\n  x:\n    image: x:1\n    ports: ["127.0.0.1:3000:3000"]\n');a=analyze_project(p,'balanced');(p/'compose.yaml').write_text('services:\n  x:\n    image: x:1\n    ports: ["3000:3000"]\n');b=analyze_project(p,'balanced');assert a!=b and has_blockers(b)
-
-def test_balanced_hardening_items_are_warnings(tmp_path):
- p=project(tmp_path,'services:\n  x:\n    build: .\n    ports: ["127.0.0.1:3000:3000"]\n');(p/'Dockerfile').write_text('FROM alpine:3.20\nRUN true\n')
- findings=analyze_project(p,'balanced',True)
- by_code={x['code']:x['severity'] for x in findings}
- assert by_code['docker.healthcheck']=='warning'
- assert by_code['docker.no-new-privileges']=='warning'
- assert by_code['docker.non-root-user']=='warning'
- assert not has_blockers(findings)
-
-def test_strict_hardening_items_block(tmp_path):
- p=project(tmp_path,'services:\n  x:\n    build: .\n');(p/'Dockerfile').write_text('FROM alpine:3.20\n')
- assert has_blockers(analyze_project(p,'strict',True))
-
-def test_fast_device_requires_project_acknowledgement(tmp_path):
- p=project(tmp_path,'services:\n  x:\n    image: alpine:3.20\n    devices: ["/dev/kvm:/dev/kvm"]\n    ports: ["127.0.0.1:3000:3000"]\n    healthcheck: {test: ["CMD","true"]}\n    security_opt: ["no-new-privileges:true"]\n')
- (p/'.devfleet').mkdir();(p/'.devfleet/project.json').write_text('{"profile":"fast","allow_devices":false}')
- assert has_blockers(analyze_project(p,'fast',True))
- (p/'.devfleet/project.json').write_text('{"profile":"fast","allow_devices":true}')
- assert not has_blockers(analyze_project(p,'fast',True))
-
-def test_cache_invalidates_when_referenced_environment_file_changes(tmp_path):
- p=project(tmp_path,'services:\n  x:\n    image: alpine:3.20\n    env_file: config/runtime-settings\n    ports: ["127.0.0.1:3000:3000"]\n    healthcheck: {test: ["CMD","true"]}\n    security_opt: ["no-new-privileges:true"]\n')
- (p/'config').mkdir();env=p/'config/runtime-settings';env.write_text('MODE=one\n')
- analyze_project(p,'balanced');cache=p/'.devfleet/runtime/analyzer-cache.json';first=cache.read_text()
- env.write_text('MODE=two-with-different-size\n')
- analyze_project(p,'balanced');assert cache.read_text()!=first
-
-```
-
-
-## FILE: source/tests/test_audit5_destructive.py
-
-SHA256: 3ce81d650d6d41c7d18b76194d7eefe01feeb1231d80f772051ef845003f0ec1 | Bytes: 5863 | Git mode: 100644
-
-```
-from __future__ import annotations
-
-import hashlib
-import os
-import tarfile
-from pathlib import Path
-
-import pytest
-from types import SimpleNamespace
-
-from devfleet import projects
-from devfleet.workspace_archives import (
-    create_workspace_archive,
-    restore_workspace_archive,
-    write_backup_manifest,
-)
-
-
-def _hash_tree(root: Path) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for path in sorted(p for p in root.rglob("*") if p.is_file()):
-        result[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
-    return result
-
-
-def _metadata(source: Path) -> None:
-    metadata = source / ".devfleet" / "project.json"
-    metadata.parent.mkdir(parents=True, exist_ok=True)
-    metadata.write_text('{"schema_version":3,"managed_by":"devfleet","project_id":"12345678-1234-1234-1234-123456789012","slug":"demo","runtime_provider":"docker-compose","host_id":"test-node"}', encoding="utf-8")
-
-
-def test_destructive_backup_preserves_generated_looking_user_files(tmp_path: Path):
-    source = tmp_path / "source"
-    _metadata(source)
-    for relative, data in {
-        "build/irreplaceable.bin": b"build-user-data",
-        "dist/manual-output.dat": b"dist-user-data",
-        "node_modules/user-preserved-test.txt": b"node-user-data",
-        ".next/notes.txt": b"next-user-data",
-        "arbitrary/nested-generated-looking/file.txt": b"nested-user-data",
-    }.items():
-        path = source / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-
-    archive = tmp_path / "backup.tar.gz"
-    result = create_workspace_archive(source, "demo", archive, include_generated=True, consistency_level="quiesced")
-    assert result["omitted_paths"] == []
-    assert result["included_file_count"] == 6
-    restored = tmp_path / "restored"
-    restore_workspace_archive(archive, restored, "demo")
-    assert _hash_tree(source) == _hash_tree(restored)
-
-
-def test_routine_backup_keeps_documented_generated_directory_omission(tmp_path: Path):
-    source = tmp_path / "source"
-    _metadata(source)
-    (source / "build").mkdir(parents=True)
-    (source / "build" / "cache.bin").write_bytes(b"cache")
-    archive = tmp_path / "routine.tar.gz"
-    result = create_workspace_archive(source, "demo", archive)
-    assert "build" in result["omitted_paths"]
-    with tarfile.open(archive, "r:gz") as bundle:
-        assert "demo/build/cache.bin" not in bundle.getnames()
-
-
-@pytest.mark.skipif(os.name != "posix", reason="POSIX permission fidelity is unavailable on Windows")
-def test_restore_preserves_safe_modes_and_strips_special_bits(tmp_path: Path):
-    source = tmp_path / "source"
-    source.mkdir()
-    _metadata(source)
-    executable = source / "hook.sh"
-    private = source / "private.key"
-    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    private.write_text("secret", encoding="utf-8")
-    os.chmod(executable, 0o755)
-    os.chmod(private, 0o600)
-    archive = tmp_path / "modes.tar.gz"
-    create_workspace_archive(source, "demo", archive, include_generated=True)
-
-    # Make the archive metadata hostile.  Restore must mask privilege-bearing
-    # special bits while retaining ordinary permissions.
-    rewritten = tmp_path / "hostile.tar.gz"
-    with tarfile.open(archive, "r:gz") as original, tarfile.open(rewritten, "w:gz") as target:
-        for member in original.getmembers():
-            member.mode |= 0o6000
-            if member.name.endswith("hook.sh"):
-                member.mode = 0o6755
-            source_file = original.extractfile(member) if member.isfile() else None
-            target.addfile(member, source_file)
-            if source_file is not None:
-                source_file.close()
-
-    restored = tmp_path / "restored"
-    restore_workspace_archive(rewritten, restored, "demo")
-    assert (restored / "hook.sh").stat().st_mode & 0o777 == 0o755
-    assert (restored / "private.key").stat().st_mode & 0o777 == 0o600
-
-
-def test_restore_deleted_project_uses_tombstone_and_exact_identity(tmp_path: Path, monkeypatch):
-    workspaces = tmp_path / "workspaces"
-    runtime = tmp_path / "runtime"
-    settings = SimpleNamespace(workspaces=workspaces, runtime_root=runtime, host_id="test-node")
-    monkeypatch.setattr(projects, "SETTINGS", settings)
-    source = tmp_path / "source"
-    _metadata(source)
-    (source / "build").mkdir()
-    (source / "build" / "irreplaceable.bin").write_bytes(b"keep")
-    backup_dir = runtime / "workspace-backups" / "demo-backup"
-    archive = backup_dir / "demo.tar.gz"
-    result = create_workspace_archive(source, "demo", archive, include_generated=True, consistency_level="quiesced")
-    write_backup_manifest(
-        backup_dir,
-        slug="demo",
-        project_id="12345678-1234-1234-1234-123456789012",
-        runtime={"provider": "docker-compose", "runtime_id": ""},
-        archive=result,
-        consistency_level="quiesced",
-    )
-    tombstone = {
-        "project_id": "12345678-1234-1234-1234-123456789012",
-        "slug": "demo",
-        "runtime_provider": "docker-compose",
-        "backup_id": "demo-backup",
-        "backup_sha256": result["archive_sha256"],
-    }
-    tombstone_path = projects._recovery_tombstone_path("demo", tombstone["project_id"])
-    tombstone_path.parent.mkdir(parents=True, exist_ok=True)
-    tombstone_path.write_text(__import__("json").dumps(tombstone), encoding="utf-8")
-    recovered = projects.restore_deleted_project(
-        "demo", "demo-backup", project_id=tombstone["project_id"], confirm_restore=True
-    )
-    assert recovered["ok"] is True
-    assert (workspaces / "demo" / "build" / "irreplaceable.bin").read_bytes() == b"keep"
-    with pytest.raises(ValueError, match="absent destination"):
-        projects.restore_deleted_project(
-            "demo", "demo-backup", project_id=tombstone["project_id"], confirm_restore=True
+$modulePath = Join-Path $PSScriptRoot '..\windows\DevFleet.Common.psm1'
+Import-Module (Resolve-Path $modulePath) -Force
+$module = Get-Module DevFleet.Common
+$calls = [System.Collections.Generic.List[object]]::new()
+
+# Replace only external process, executable lookup, and readiness boundaries;
+# the production recovery helper itself remains under test.
+$result = $module.Invoke({
+    param($callLog, $deadline)
+    function Get-MultipassExe { 'multipass.exe' }
+    function Invoke-External {
+        param(
+            [string]$FilePath,
+            [string[]]$ArgumentList,
+            [switch]$Capture,
+            [int]$TimeoutSeconds,
+            [datetime]$DeadlineUtc = [datetime]::MinValue
         )
+        [void]$callLog.Add([pscustomobject]@{
+            file = $FilePath
+            args = @($ArgumentList)
+            timeoutSeconds = $TimeoutSeconds
+            deadlineUtc = $DeadlineUtc
+        })
+        if (@($ArgumentList) -contains 'list') { return '{"list":[]}' }
+        return ''
+    }
+    function Wait-MultipassReady { param($Name,$TimeoutSeconds,$DeadlineUtc) }
+    Invoke-MultipassLaunchWithReadinessRecovery `
+        -InstanceName 'devfleet-primary' `
+        -LaunchArguments @('launch','24.04','--name','devfleet-primary') `
+        -ReadinessTimeoutSeconds 1200 `
+        -LaunchTimeoutSeconds 900 `
+        -DeadlineUtc $deadline
+}, $calls, ([datetime]::UtcNow.AddSeconds(900)))
+
+$launch = @($calls | Where-Object { $_.args -contains 'launch' }) | Select-Object -First 1
+if (-not $launch) { throw 'Expected the production helper to invoke a launch operation.' }
+$innerTimeoutIndex = [Array]::IndexOf([string[]]$launch.args, '--timeout')
+if ($innerTimeoutIndex -lt 0) { throw 'Expected the helper to supply an explicit Multipass inner timeout.' }
+$innerTimeout = [int]$launch.args[$innerTimeoutIndex + 1]
+
+# The intended invariant is a real grace between Multipass self-termination
+# and the wrapper tree-kill deadline, within the existing 900-second envelope.
+if ($innerTimeout -ge $launch.timeoutSeconds) {
+    throw "Timeout envelope has no supervisor grace: inner=$innerTimeout supervisor=$($launch.timeoutSeconds)."
+}
+if (($launch.timeoutSeconds + (900 - $launch.timeoutSeconds)) -gt 900) {
+    throw 'Launch envelope exceeds the existing stage budget.'
+}
+
+[pscustomobject]@{
+    status = 'PASS'
+    innerTimeoutSeconds = $innerTimeout
+    supervisorTimeoutSeconds = $launch.timeoutSeconds
+    resultReady = [bool]$result.ready
+} | ConvertTo-Json -Depth 4
+
+$explicitTimeoutError = $module.Invoke({
+    param($deadline)
+    function Get-MultipassExe { 'multipass.exe' }
+    function Invoke-External { throw 'external boundary should not be reached' }
+    function Wait-MultipassReady { }
+    try {
+        Invoke-MultipassLaunchWithReadinessRecovery `
+            -InstanceName 'devfleet-primary' `
+            -LaunchArguments @('launch','24.04','--name','devfleet-primary','--timeout','7') `
+            -ReadinessTimeoutSeconds 1200 `
+            -LaunchTimeoutSeconds 900 `
+            -DeadlineUtc $deadline
+    } catch { $_.Exception.Message }
+}, ([datetime]::UtcNow.AddSeconds(900)))
+if ([string]$explicitTimeoutError -notmatch 'rejects caller-supplied --timeout') {
+    throw "Caller-supplied Multipass timeout was not rejected by the production helper: $explicitTimeoutError"
+}
+
+$recoveryCalls = [System.Collections.Generic.List[object]]::new()
+$recoveryError = $module.Invoke({
+    param($callLog, $deadline)
+    $script:inventoryCount = 0
+    function Get-MultipassExe { 'multipass.exe' }
+    function Invoke-External {
+        param(
+            [string]$FilePath,
+            [string[]]$ArgumentList,
+            [switch]$Capture,
+            [int]$TimeoutSeconds,
+            [datetime]$DeadlineUtc = [datetime]::MinValue
+        )
+        [void]$callLog.Add([pscustomobject]@{ args=@($ArgumentList); timeoutSeconds=$TimeoutSeconds })
+        if (@($ArgumentList) -contains 'list') {
+            $script:inventoryCount++
+            if ($script:inventoryCount -eq 1) { return '{"list":[]}' }
+            return '{"list":[{"name":"devfleet-primary"}]}'
+        }
+        if (@($ArgumentList) -contains 'launch') { throw 'native launch failed' }
+        if (@($ArgumentList) -contains 'start') { throw 'wrapper start failed' }
+        return ''
+    }
+    function Wait-MultipassReady { }
+    try {
+        Invoke-MultipassLaunchWithReadinessRecovery `
+            -InstanceName 'devfleet-primary' `
+            -LaunchArguments @('launch','24.04','--name','devfleet-primary') `
+            -ReadinessTimeoutSeconds 1200 `
+            -LaunchTimeoutSeconds 900 `
+            -DeadlineUtc $deadline
+    } catch { $_.Exception.Message }
+}, $recoveryCalls, ([datetime]::UtcNow.AddSeconds(900)))
+if ([string]$recoveryError -notmatch 'Original launch error: native launch failed' -or [string]$recoveryError -notmatch 'Recovery error: wrapper start failed') {
+    throw "Recovery error did not preserve both causal layers: $recoveryError"
+}
+$start = @($recoveryCalls | Where-Object { $_.args -contains 'start' }) | Select-Object -First 1
+if (-not $start) { throw 'Expected bounded recovery to invoke an exact-instance start.' }
+$startTimeoutIndex = [Array]::IndexOf([string[]]$start.args, '--timeout')
+$startInner = [int]$start.args[$startTimeoutIndex + 1]
+if ($startInner -ge $start.timeoutSeconds) {
+    throw "Recovery start has no supervisor grace: inner=$startInner supervisor=$($start.timeoutSeconds)."
+}
+
+# A failed fresh launch can wedge the Multipass daemon/control socket.  Retrying
+# `list` against the same daemon is not recovery.  Prove that the production
+# helper repairs the exact trusted service once, re-probes inventory, and only
+# then continues with the already-bounded exact-instance stop/start path.
+$controlPlaneCalls = [System.Collections.Generic.List[object]]::new()
+$controlPlaneRecoveries = [System.Collections.Generic.List[object]]::new()
+$controlPlaneResult = $module.Invoke({
+    param($callLog, $recoveryLog, $deadline)
+    $script:inventoryCount = 0
+    function Get-MultipassExe { 'multipass.exe' }
+    function Invoke-External {
+        param(
+            [string]$FilePath,
+            [string[]]$ArgumentList,
+            [switch]$Capture,
+            [int]$TimeoutSeconds,
+            [datetime]$DeadlineUtc = [datetime]::MinValue
+        )
+        [void]$callLog.Add([pscustomobject]@{ args=@($ArgumentList); timeoutSeconds=$TimeoutSeconds })
+        if (@($ArgumentList) -contains 'list') {
+            $script:inventoryCount++
+            if ($script:inventoryCount -eq 1) { return '{"list":[]}' }
+            if ($script:inventoryCount -eq 2) { throw 'External command timed out after 60 seconds: multipass.exe list --format json' }
+            return '{"list":[{"name":"devfleet-primary"}]}'
+        }
+        if (@($ArgumentList) -contains 'launch') { throw 'native launch failed with exit code 5' }
+        return ''
+    }
+    function Wait-MultipassReady { param($Name,$TimeoutSeconds,$DeadlineUtc) }
+    $recover = {
+        param($Reason,$MultipassPath,$OwnerDeadlineUtc)
+        [void]$recoveryLog.Add([pscustomobject]@{ reason=$Reason; path=$MultipassPath; deadline=$OwnerDeadlineUtc })
+        [pscustomobject]@{ status='PASS'; service='Multipass'; reason=$Reason; forcedDaemonTermination=$false }
+    }
+    Invoke-MultipassLaunchWithReadinessRecovery `
+        -InstanceName 'devfleet-primary' `
+        -LaunchArguments @('launch','24.04','--name','devfleet-primary') `
+        -ReadinessTimeoutSeconds 1200 `
+        -LaunchTimeoutSeconds 900 `
+        -DeadlineUtc $deadline `
+        -ControlPlaneRecoveryProvider $recover
+}, $controlPlaneCalls, $controlPlaneRecoveries, ([datetime]::UtcNow.AddSeconds(900)))
+if ($controlPlaneRecoveries.Count -ne 1) { throw "Expected one exact Multipass control-plane recovery; observed $($controlPlaneRecoveries.Count)." }
+if ([string]$controlPlaneRecoveries[0].reason -cne 'POST_LAUNCH_INVENTORY_TRANSPORT_FAILURE') { throw "Unexpected recovery reason: $($controlPlaneRecoveries[0].reason)" }
+if ([string]$controlPlaneResult.recovery -cne 'multipass-service-and-instance-stop-start' -or -not [bool]$controlPlaneResult.ready) {
+    throw "Control-plane recovery did not return a ready exact instance: $($controlPlaneResult | ConvertTo-Json -Compress -Depth 6)"
+}
+
+# Exercise the real service-recovery algorithm with only its Windows service
+# boundaries mocked.  It must bind the exact Multipass service to the trusted
+# multipassd path and LocalSystem identity before stop/start.
+$serviceControls = [System.Collections.Generic.List[string]]::new()
+$serviceStates = [System.Collections.Generic.Queue[object]]::new()
+@(
+    [pscustomobject]@{ Name='Multipass'; State='Running'; ProcessId=4242; PathName='"C:\Program Files\Multipass\bin\multipassd.exe" /svc'; StartName='LocalSystem' },
+    [pscustomobject]@{ Name='Multipass'; State='Stopped'; ProcessId=0; PathName='"C:\Program Files\Multipass\bin\multipassd.exe" /svc'; StartName='LocalSystem' },
+    [pscustomobject]@{ Name='Multipass'; State='Running'; ProcessId=4243; PathName='"C:\Program Files\Multipass\bin\multipassd.exe" /svc'; StartName='LocalSystem' }
+) | ForEach-Object { $serviceStates.Enqueue($_) }
+$serviceRecovery = $module.Invoke({
+    param($controls,$states,$deadline)
+    $lookup = { if ($states.Count -gt 1) { $states.Dequeue() } else { $states.Peek() } }
+    $control = { param($Action) [void]$controls.Add([string]$Action) }
+    Invoke-DevFleetMultipassControlPlaneRecovery `
+        -Reason 'POST_LAUNCH_INVENTORY_TRANSPORT_FAILURE' `
+        -MultipassPath 'C:\Program Files\Multipass\bin\multipass.exe' `
+        -OwnerDeadlineUtc $deadline `
+        -ServiceLookupProvider $lookup `
+        -ServiceControlProvider $control `
+        -DaemonLookupProvider { throw 'daemon fallback was not expected' } `
+        -DaemonStopProvider { throw 'daemon fallback was not expected' } `
+        -SleepProvider { param($Milliseconds) }
+}, $serviceControls, $serviceStates, ([datetime]::UtcNow.AddSeconds(120)))
+if (($serviceControls -join '|') -cne 'stop|start') { throw "Expected exact Multipass stop/start; observed $($serviceControls -join '|')." }
+if ([string]$serviceRecovery.status -cne 'PASS' -or [bool]$serviceRecovery.forcedDaemonTermination) {
+    throw "Trusted Multipass service recovery did not PASS normally: $($serviceRecovery | ConvertTo-Json -Compress -Depth 6)"
+}
+
+$forcedControls = [System.Collections.Generic.List[string]]::new()
+$forcedDaemonIds = [System.Collections.Generic.List[int]]::new()
+$forcedRecovery = $module.Invoke({
+    param($controls,$daemonIds,$deadline)
+    $script:lookupCount = 0
+    $script:daemonStopped = $false
+    $script:serviceStarted = $false
+    $script:clock = [datetime]::UtcNow
+    $lookup = {
+        $script:lookupCount++
+        $state = if ($script:serviceStarted) { 'Running' } elseif ($script:daemonStopped) { 'Stopped' } elseif ($script:lookupCount -eq 1) { 'Running' } else { 'Stop Pending' }
+        [pscustomobject]@{ Name='Multipass'; State=$state; ProcessId=4242; PathName='"C:\Program Files\Multipass\bin\multipassd.exe" /svc'; StartName='NT AUTHORITY\SYSTEM' }
+    }
+    $control = { param($Action) [void]$controls.Add([string]$Action); if ($Action -eq 'start') { $script:serviceStarted = $true } }
+    $clockProvider = { $script:clock = $script:clock.AddSeconds(5); $script:clock }
+    $daemonStop = { param($Id) [void]$daemonIds.Add([int]$Id); $script:daemonStopped = $true }
+    Invoke-DevFleetMultipassControlPlaneRecovery `
+        -Reason 'POST_LAUNCH_INVENTORY_TRANSPORT_FAILURE' `
+        -MultipassPath 'C:\Program Files\Multipass\bin\multipass.exe' `
+        -OwnerDeadlineUtc $deadline `
+        -ServiceLookupProvider $lookup `
+        -ServiceControlProvider $control `
+        -DaemonLookupProvider { param($Id) [pscustomobject]@{ ProcessName='multipassd'; Path='C:\Program Files\Multipass\bin\multipassd.exe' } } `
+        -DaemonStopProvider $daemonStop `
+        -ClockProvider $clockProvider `
+        -SleepProvider { param($Milliseconds) }
+}, $forcedControls, $forcedDaemonIds, ([datetime]::UtcNow.AddSeconds(180)))
+if (-not [bool]$forcedRecovery.forcedDaemonTermination -or ($forcedDaemonIds -join '|') -cne '4242') {
+    throw "Stop-Pending fallback did not terminate only the exact service-bound daemon PID: $($forcedRecovery | ConvertTo-Json -Compress -Depth 6) ids=$($forcedDaemonIds -join '|')"
+}
+if (($forcedControls -join '|') -cne 'stop|start') { throw "Forced recovery service controls differed: $($forcedControls -join '|')." }
+
+[pscustomobject]@{
+    status = 'PASS'
+    controlPlaneRecovery = [string]$controlPlaneResult.recovery
+    trustedServiceRecovery = [string]$serviceRecovery.status
+    forcedDaemonRecovery = [bool]$forcedRecovery.forcedDaemonTermination
+} | ConvertTo-Json -Depth 4
 
 ```
 
 
-## FILE: source/tests/test_audit_coherence.py
+## FILE: source/tests/Test-MultipassStandardInputTransport.ps1
 
-SHA256: 58d8a589d22f1d4ff33419dbee2864b9a56fe5a9b4a6ffcf4fdc6d1079156e57 | Bytes: 36369 | Git mode: 100644
+SHA256: 919655da1d747a27c7e965502ade0de80ac42feeb9592df7b84effa7b79c2ae0 | Bytes: 12157 | Git mode: 100644
 
 ```
-from __future__ import annotations
-
-import copy
-import hashlib
-import json
-import shutil
-import subprocess
-import sys
-import zipfile
-from pathlib import Path
-from types import SimpleNamespace
-
-import pytest
-import importlib.util
-
-_VALIDATOR_PATH = Path(__file__).parents[1] / "tools" / "validate_audit_coherence.py"
-_SPEC = importlib.util.spec_from_file_location("validate_audit_coherence", _VALIDATOR_PATH)
-assert _SPEC and _SPEC.loader
-_MODULE = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(_MODULE)
-validate_root = _MODULE.validate_root
-
-_AI_VALIDATOR_PATH = Path(__file__).parents[1] / "tools" / "validate_ai_audit_bundle.py"
-_AI_SPEC = importlib.util.spec_from_file_location("validate_ai_audit_bundle", _AI_VALIDATOR_PATH)
-assert _AI_SPEC and _AI_SPEC.loader
-_AI_MODULE = importlib.util.module_from_spec(_AI_SPEC)
-_AI_SPEC.loader.exec_module(_AI_MODULE)
-
-ROOT = Path(__file__).parents[2]
-
-_COMPUTE_SPEC = importlib.util.spec_from_file_location("compute_shipping_input_identity", ROOT / "tools/compute_shipping_input_identity.py")
-assert _COMPUTE_SPEC and _COMPUTE_SPEC.loader
-_COMPUTE_MODULE = importlib.util.module_from_spec(_COMPUTE_SPEC)
-_COMPUTE_SPEC.loader.exec_module(_COMPUTE_MODULE)
-
-_RELEASE_BUNDLE_SPEC = importlib.util.spec_from_file_location("validate_release_bundle", ROOT / "tools/validate_release_bundle.py")
-assert _RELEASE_BUNDLE_SPEC and _RELEASE_BUNDLE_SPEC.loader
-_RELEASE_BUNDLE_MODULE = importlib.util.module_from_spec(_RELEASE_BUNDLE_SPEC)
-_RELEASE_BUNDLE_SPEC.loader.exec_module(_RELEASE_BUNDLE_MODULE)
-
-def _fixture(tmp_path: Path) -> Path:
-    root = tmp_path / "bundle"
-    (root / "outputs").mkdir(parents=True)
-    (root / "audit").mkdir()
-    (root / "source" / "tools").mkdir(parents=True)
-    # The validator recomputes release identities from the canonical helper.
-    # Keep synthetic extracted fixtures self-contained just like the real
-    # bundle; omitting this authority turns valid fixtures into import errors.
-    shutil.copy2(ROOT / "source/tools/release_fingerprint.py", root / "source/tools/release_fingerprint.py")
-    shutil.copy2(ROOT / "source/tools/hook_modes.py", root / "source/tools/hook_modes.py")
-    (root / "installer-source").mkdir(parents=True)
-    (root / "source" / "VERSION").write_text("1.2.13", encoding="utf-8")
-    (root / "installer-source" / "INSTALLER_VERSION").write_text("1.4.1", encoding="utf-8")
-    mode = {"schemaVersion": 1, "defaultMode": "0644", "executableMode": "0755", "executableByContract": []}
-    rows = _fixture_shipping_rows(root)
-    rows.sort(key=lambda row: (row["root"], row["path"]))
-    shipping_identity = _MODULE._shipping_identity(
-        {(row["root"], row["path"]): row for row in rows}, mode, "1.2.13", "1.4.1"
-    )
-    artifacts = {
-        "exe": {"name": "exe", "path": "outputs/a.exe", "bytes": 1, "sha256": "a" * 64},
-        "tar": {"name": "tar", "path": "outputs/a.tar.gz", "bytes": 2, "sha256": "b" * 64},
-        "portable": {"name": "portable", "path": "outputs/a.zip", "bytes": 3, "sha256": "c" * 64},
-        "installerSource": {"name": "installerSource", "path": "outputs/a-source.zip", "bytes": 4, "sha256": "d" * 64},
+[CmdletBinding()]
+param()
+$ErrorActionPreference='Stop'
+$sourceRoot=Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $sourceRoot 'windows/DevFleet.Common.psm1') -Force -DisableNameChecking
+$module=Get-Module DevFleet.Common
+$bash='C:\Program Files\Git\bin\bash.exe'
+$python=(Get-Command python.exe -ErrorAction Stop).Source
+if(-not(Test-Path $bash)){throw 'Existing Git Bash is required for the local shell boundary tests.'}
+function UnixPath([string]$Path){$p=[IO.Path]::GetFullPath($Path).Replace('\','/');if($p-match'^([A-Za-z]):/(.*)$'){return '/'+$Matches[1].ToLowerInvariant()+'/'+$Matches[2]};$p}
+$fixtureRoot=Join-Path ([IO.Path]::GetTempPath()) ("devfleet-input transport O'Hara "+[guid]::NewGuid().ToString('N'))
+$checks=[Collections.Generic.List[object]]::new()
+$priorContext=Get-DevFleetDeadlineContext
+try {
+    New-Item -ItemType Directory -Path $fixtureRoot|Out-Null
+    $bin=Join-Path $fixtureRoot 'bin';New-Item -ItemType Directory -Path $bin|Out-Null
+    # jq is an external dependency. Use a real JSON parser for this local
+    # fixture, while executing the production Bash input helper unchanged.
+    $jq=@'
+#!/usr/bin/env bash
+"$DEVFLEET_TEST_PYTHON" -c 'import json,sys; value=json.load(open(sys.argv[-1],encoding="utf-8")); sys.exit(0 if isinstance(value,dict) else 1)' "$(cygpath -w "${@: -1}")"
+'@
+    [IO.File]::WriteAllText((Join-Path $bin 'jq'),$jq.Replace("`r`n","`n"),[Text.UTF8Encoding]::new($false))
+    & $bash --noprofile --norc -c ('chmod +x -- '+(ConvertTo-ShellSingleQuotedScalar (UnixPath (Join-Path $bin 'jq'))))
+    if($LASTEXITCODE-ne0){throw 'Local JSON parser fixture could not be made executable.'}
+    $originalExternal=& $module {(Get-Command Invoke-External).ScriptBlock}
+    $parserProbe=Join-Path $fixtureRoot 'parser-probe.json'
+    [IO.File]::WriteAllText($parserProbe,'{"kind":"dummy"}',[Text.UTF8Encoding]::new($false))
+    $parserCommand='export DEVFLEET_TEST_PYTHON='+(ConvertTo-ShellSingleQuotedScalar (UnixPath $python))+'; '+(ConvertTo-ShellSingleQuotedScalar (UnixPath (Join-Path $bin 'jq')))+' -e '+(ConvertTo-ShellSingleQuotedScalar 'type == "object"')+' '+(ConvertTo-ShellSingleQuotedScalar (UnixPath $parserProbe))
+    & $originalExternal $bash @('--noprofile','--norc','-c',$parserCommand) -TimeoutSeconds 10
+    & $module {param($original)$script:TransportOriginalExternal=$original} $originalExternal
+    & $module {
+        function script:Invoke-External {
+            param($FilePath,[string[]]$ArgumentList,[int]$TimeoutSeconds,[datetime]$DeadlineUtc,[string]$StandardInputText,[switch]$Capture)
+            $s=$script:TransportFixture;$index=$s.calls.Count+1
+            $s.calls.Add([pscustomobject]@{index=$index;verb=$ArgumentList[0];hasInput=([bool]$StandardInputText);argumentContainsDummy=([bool](($ArgumentList-join' ').Contains($s.dummy)));deadline=$DeadlineUtc;timeout=$TimeoutSeconds})
+            if($ArgumentList[0]-ceq'transfer'){
+                if($ArgumentList[1]-cne'-'-or$ArgumentList[2]-notmatch'^[A-Za-z0-9._-]+:/run/devfleet-input-[0-9a-f]{32}/input$'){throw 'Unexpected transfer framing.'}
+                $program='import pathlib,sys; p=pathlib.Path(sys.argv[1]); assert p.is_file(); data=sys.stdin.buffer.read(); p.write_bytes(data); sys.exit(int(sys.argv[2]))'
+                $exitCode=if($s.mode-in@('transfer-failure','combined-failure')){77}else{0}
+                & $script:TransportOriginalExternal $s.python @('-c',$program,$s.localInput,[string]$exitCode) -StandardInputText $StandardInputText -TimeoutSeconds $TimeoutSeconds -DeadlineUtc $DeadlineUtc
+                $s.transferredSha256=(Get-FileHash -LiteralPath $s.localInput -Algorithm SHA256).Hash.ToLowerInvariant()
+                $s.transferredBytes=(Get-Item -LiteralPath $s.localInput).Length
+                if($s.mode-ceq'bad-file-mode'){& $script:TransportOriginalExternal $s.bash @('--noprofile','--norc','-c',('chmod 0644 -- '+(ConvertTo-ShellSingleQuotedScalar $s.unixInput))) -TimeoutSeconds 5}
+                return
+            }
+            if($ArgumentList[0]-cne'exec'-or$ArgumentList[2]-cne'--'-or$ArgumentList[3]-cne'bash'-or$ArgumentList[4]-cne'-lc'-or$StandardInputText){throw 'Unexpected exec or secret bytes on exec.'}
+            if(($s.mode-ceq'cleanup-failure'-and$index-eq4)-or($s.mode-ceq'combined-failure'-and$index-eq3)){throw 'fixture cleanup unavailable'}
+            $command=[string]$ArgumentList[5]
+            $match=[regex]::Match($command,'/run/devfleet-input-[0-9a-f]{32}')
+            if(-not$match.Success){throw 'No exact private input path.'}
+            $remoteDirectory=$match.Value
+            $command=$command.Replace((ConvertTo-ShellSingleQuotedScalar ($remoteDirectory+'/input')),(ConvertTo-ShellSingleQuotedScalar $s.unixInput)).Replace((ConvertTo-ShellSingleQuotedScalar $remoteDirectory),(ConvertTo-ShellSingleQuotedScalar $s.unixDirectory))
+            if($s.mode-ceq'prepare-collision'-and$index-eq1){New-Item -ItemType Directory -Path $s.localDirectory|Out-Null;[IO.File]::WriteAllText((Join-Path $s.localDirectory 'foreign-marker'),'keep')}
+            # Git Bash cannot enforce Linux mkdir modes on the inherited
+            # Windows ACL. Map sudo/mode observations as external OS I/O;
+            # keep real creation, collision, content, redirection and unlink.
+            $modeFailure=if($s.mode-ceq'bad-file-mode'-and$index-ge3){'1'}else{'0'}
+            $prepareFailure=if($s.mode-ceq'prepare-partial-failure'){'1'}else{'0'}
+            $prefix='sudo(){ if [[ "$1" == mkdir ]]; then command mkdir -- "${@: -1}"; elif [[ "$1" == chown && "$DEVFLEET_TEST_PREPARE_FAILURE" == 1 ]]; then return 42; else "$@"; fi; }; stat(){ if [[ "$2" == "%a:%u" ]]; then if [[ "${@: -1}" == */input ]]; then if [[ "$DEVFLEET_TEST_BAD_MODE" == 1 ]]; then printf "644:%s\n" "$(id -u)"; else printf "600:%s\n" "$(id -u)"; fi; else printf "700:%s\n" "$(id -u)"; fi; else command stat "$@"; fi; }; export -f sudo stat; export DEVFLEET_TEST_PREPARE_FAILURE='+$prepareFailure+'; export DEVFLEET_TEST_BAD_MODE='+$modeFailure+'; export PATH='+(ConvertTo-ShellSingleQuotedScalar $s.unixBin)+':"$PATH"; export DEVFLEET_TEST_PYTHON='+(ConvertTo-ShellSingleQuotedScalar $s.unixPython)+'; export DEVFLEET_TEST_STAGE_DIR='+(ConvertTo-ShellSingleQuotedScalar $s.unixDirectory)+'; '
+            & $script:TransportOriginalExternal $s.bash @('--noprofile','--norc','-c',($prefix+$command)) -TimeoutSeconds $TimeoutSeconds -DeadlineUtc $DeadlineUtc -Capture:$Capture
+        }
     }
-    state = {
-        "release_version": "1.2.13",
-        "installer_version": "1.4.1",
-        "git_commit": "1" * 40,
-        "candidate_git_commit": "1" * 40,
-        "releaseFingerprintId": "f" * 64,
-        "toolingFingerprintId": "e" * 64,
-        "shipping_input_identity": shipping_identity,
-        "candidate_shipping_input_identity": shipping_identity,
-        "source_changed_since_candidate": False,
-        "rebuild_required": False,
-        "candidate_is_current": True,
-        "candidate_build_current": True,
-        "validation_evidence_current": True,
-        "full_release_passed": False,
-        "physical_surrogate_certification_current": False,
-        "internal_promotion_allowed": False,
-        "public_promotion_allowed": False,
-        "production_safety": {"production_unchanged": True, "mulattotechsurface_touched": False},
-        "candidate": copy.deepcopy(artifacts),
-        "gates": {"dependency_matrix": "UNVERIFIED"},
+    foreach($mode in @('success','unicode','transfer-failure','consumer-failure','bad-file-mode','prepare-collision','prepare-partial-failure','cleanup-failure','combined-failure','expired-owner','short-stage','bad-identity','bad-command','empty-input')){
+        $caseRoot=Join-Path $fixtureRoot $mode;New-Item -ItemType Directory -Path $caseRoot|Out-Null
+        $dummy=if($mode-ceq'unicode'){'{"kind":"dummy café","value":"quote\" and escaped\nline"}'}else{'{"kind":"dummy"}'}
+        if($mode-ceq'empty-input'){$dummy=''}
+        $state=[pscustomobject]@{mode=$mode;dummy=$dummy;calls=[Collections.Generic.List[object]]::new();transferredSha256='';transferredBytes=0;bash=$bash;python=$python;localDirectory=(Join-Path $caseRoot 'stage');localInput=(Join-Path $caseRoot 'stage/input');unixDirectory=(UnixPath (Join-Path $caseRoot 'stage'));unixInput=(UnixPath (Join-Path $caseRoot 'stage/input'));unixBin=(UnixPath $bin);unixPython=(UnixPath $python)}
+        & $module {param($state)$script:TransportFixture=$state} $state
+        $global:DevFleetDeadlineContext=$null
+        $helper=ConvertTo-ShellSingleQuotedScalar (UnixPath (Join-Path $sourceRoot 'linux/bootstrap-input.sh'))
+        $consumer='set -Eeuo pipefail; test ! -e "$DEVFLEET_TEST_STAGE_DIR"; source '+$helper+'; captured=$(devfleet_capture_json_stdin "$1/captured.XXXXXX" $(($(date +%s)+3))); trap ''rm -f -- "$captured"'' EXIT; sha256sum "$captured" | cut -d " " -f 1'
+        if($mode-ceq'consumer-failure'){$consumer='exit 23'}
+        if($mode-ceq'bad-command'){$consumer="echo invalid`ncommand"}
+        $deadline=[datetime]::UtcNow.AddSeconds(45)
+        if($mode-ceq'expired-owner'){$deadline=[datetime]::UtcNow.AddSeconds(5)}
+        if($mode-ceq'short-stage'){Set-DevFleetDeadlineContext -TransactionDeadlineUtc ([datetime]::UtcNow.AddSeconds(5)) -StageName 'test' -StageBudgetSeconds 5|Out-Null}
+        $name=if($mode-ceq'bad-identity'){'foreign;command'}else{'devfleet-primary'}
+        $output='';$errorText='';$timer=[Diagnostics.Stopwatch]::StartNew()
+        try{$output=Invoke-MultipassWithStandardInput -FilePath 'fixture-multipass.exe' -InstanceName $name -CommandArgumentList @('bash','-c',$consumer,'--',(UnixPath $caseRoot)) -StandardInputText $dummy -TimeoutSeconds 45 -DeadlineUtc $deadline -Capture}catch{$errorText=$_.Exception.Message}
+        $timer.Stop()
+        $hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($dummy))).ToLowerInvariant()
+        $exists=Test-Path $state.localDirectory
+        $secretOnlyOnTransfer=@($state.calls|Where-Object{$_.hasInput-and$_.verb-cne'transfer'}).Count-eq0
+        $noSecretArgs=@($state.calls|Where-Object argumentContainsDummy).Count-eq0
+        $bounded=@($state.calls|Where-Object{$_.deadline-gt$deadline.AddSeconds(-5)}).Count-eq0
+        if($state.calls.Count-ge2){$bounded=$bounded-and($state.calls[0].deadline-le$deadline.AddSeconds(-15))-and($state.calls[1].deadline-le$deadline.AddSeconds(-15))}
+        $pass=switch($mode){
+            {$_-in@('success','unicode')} {$output.Trim()-ceq$hash-and-not$errorText-and-not$exists-and$state.calls.Count-eq4;break}
+            'transfer-failure' {$errorText-match'exit code 77'-and-not$exists-and$state.calls.Count-eq3;break}
+            'consumer-failure' {$errorText-match'exit code 23'-and-not$exists-and$state.calls.Count-eq4;break}
+            'bad-file-mode' {$errorText-match'exit code 1'-and-not$exists-and$state.calls.Count-eq4;break}
+            'prepare-collision' {$errorText-match'exit code 1'-and(Test-Path (Join-Path $state.localDirectory 'foreign-marker'))-and$state.calls.Count-eq1;break}
+            'prepare-partial-failure' {$errorText-match'exit code 42'-and-not$exists-and$state.calls.Count-eq1;break}
+            'cleanup-failure' {$errorText-match'cleanup unavailable'-and-not$exists-and$state.calls.Count-eq4;break}
+            'combined-failure' {$errorText-match'exit code 77'-and$errorText-match'Guest input cleanup failed'-and$errorText-match'cleanup unavailable'-and$exists-and$state.calls.Count-eq3;break}
+            default {$errorText-and$state.calls.Count-eq0-and-not$exists}
+        }
+        $checks.Add([pscustomobject]@{case=$mode;pass=[bool]($pass-and$secretOnlyOnTransfer-and$noSecretArgs-and$bounded-and(-not$dummy-or-not$errorText.Contains($dummy)));calls=$state.calls.Count;elapsedSeconds=[math]::Round($timer.Elapsed.TotalSeconds,3);stagingRemains=$exists;transferredBytes=$state.transferredBytes;expectedBytes=[Text.Encoding]::UTF8.GetByteCount($dummy);transferredHashMatches=($state.transferredSha256-ceq$hash);error=if($pass){''}else{$errorText}})
     }
-    manifest = {
-        "releaseVersion": "1.2.13",
-        "installerVersion": "1.4.1",
-        "gitCommit": state["git_commit"],
-        "candidateGitCommit": state["git_commit"],
-        "releaseFingerprintId": state["releaseFingerprintId"],
-        "toolingFingerprintId": state["toolingFingerprintId"],
-        "sourceChangedSinceCandidate": False,
-        "rebuildRequired": False,
-        "candidateIsCurrent": True,
-        "artifacts": list(artifacts.values()),
-        "shippingInputIdentity": shipping_identity,
-        "candidateShippingInputIdentity": shipping_identity,
-        "shippingModeContract": mode,
-        "sourceInventory": [
-            {"path": f"{row['root']}/{row['path']}", "bytes": row["bytes"], "sha256": row["sha256"], "mode": row["mode"]}
-            for row in rows
-        ],
-        "expectedSourceCount": len(rows),
+} finally {
+    $global:DevFleetDeadlineContext=$priorContext
+    $resolved=[IO.Path]::GetFullPath($fixtureRoot);$tempPrefix=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'
+    if(-not$resolved.StartsWith($tempPrefix,[StringComparison]::OrdinalIgnoreCase)){throw 'Fixture cleanup escaped the temporary directory.'}
+    if(Test-Path $resolved){Remove-Item -LiteralPath $resolved -Recurse -Force}
+}
+[pscustomobject]@{status=if(@($checks|Where-Object{-not$_.pass}).Count){'FAIL'}else{'PASS'};passed=@($checks|Where-Object pass).Count;total=$checks.Count;checks=@($checks);vmOperations=0;realMultipassOperations=0;fixtureBoundary='Multipass external I/O, remote filesystem root/sudo and Linux mode observations are fixtures. Production orchestration, shell parsing, collision rejection, input helper, JSON parser, native stdin writer, file content/EOF and unlink execute locally. Linux ACL enforcement requires the actual guest gate.'}|ConvertTo-Json -Depth 5
+if(@($checks|Where-Object{-not$_.pass}).Count){exit 1}
+
+```
+
+
+## FILE: source/tests/Test-PendingReboot.ps1
+
+SHA256: 0dae89d672d2e5250c009b50f69f4b248e9315bd169cbb82a8828f72d7fff966 | Bytes: 1582 | Git mode: 100644
+
+```
+$ErrorActionPreference = 'Stop'
+$common = Join-Path (Split-Path -Parent $PSScriptRoot) 'windows\DevFleet.Common.psm1'
+Import-Module $common -Force
+$cases = @(
+    @{ name='clean absent'; cbs=$false; wu=$false; pfro=$null; expected=$false },
+    @{ name='empty value'; cbs=$false; wu=$false; pfro=@(); expected=$false },
+    @{ name='empty strings'; cbs=$false; wu=$false; pfro=@('','   '); expected=$false },
+    @{ name='real rename'; cbs=$false; wu=$false; pfro=@('C:\source.tmp','C:\destination.tmp'); expected=$true },
+    @{ name='real delete'; cbs=$false; wu=$false; pfro=@('C:\source.tmp',''); expected=$true },
+    @{ name='CBS with empty value'; cbs=$true; wu=$false; pfro=@(''); expected=$true },
+    @{ name='Windows Update with empty value'; cbs=$false; wu=$true; pfro=@(''); expected=$true },
+    @{ name='multiple operations'; cbs=$false; wu=$false; pfro=@('C:\one','C:\two','C:\three',''); expected=$true }
+)
+foreach ($case in $cases) {
+    $actual = Test-PendingRebootState -CbsPending:$case.cbs -WindowsUpdatePending:$case.wu -PendingFileRenameOperations $case.pfro
+    if ([bool]$actual -ne [bool]$case.expected) { throw "PFRO semantic case failed: $($case.name) expected=$($case.expected) actual=$actual" }
+}
+$source = Get-Content $common -Raw
+if ($source -match '(?m)\b(Remove|Set)-Item(Property)?\b[^\r\n]*PendingFileRenameOperations') { throw 'PFRO regression test detected registry mutation in shipping reboot detection.' }
+[ordered]@{ status='PASS'; cases=$cases.Count; cbsAndWindowsUpdatePreserved=$true; registryMutated=$false } | ConvertTo-Json -Compress
+
+```
+
+
+## FILE: source/tests/Test-ProcessOutputDrain.ps1
+
+SHA256: a553a80e8fbe8c2863faeacf3ccccf4261e7b7e636e819443a1f7410b44bbf1c | Bytes: 5755 | Git mode: 100644
+
+```
+$ErrorActionPreference='Stop'
+$root=Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $root 'windows\DevFleet.Common.psm1') -Force
+
+$shell=(Get-Command powershell.exe -ErrorAction Stop).Source
+$normal=Invoke-External -FilePath $shell -ArgumentList @('-NoProfile','-NonInteractive','-Command',"[Console]::Out.Write('complete-output')") -Capture
+if($normal -cne 'complete-output'){throw 'Invoke-External did not preserve ordinary complete output.'}
+
+$pidPath=Join-Path ([IO.Path]::GetTempPath()) ("devfleet-common-inherited-pipe-"+[guid]::NewGuid().ToString('N')+'.pid')
+$descendantPid=0
+try{
+    $escapedPidPath=$pidPath.Replace("'","''")
+    $parentCommand="`$childInfo=[Diagnostics.ProcessStartInfo]::new();`$childInfo.FileName=(Get-Command powershell.exe).Source;`$childInfo.UseShellExecute=`$false;`$childInfo.CreateNoWindow=`$true;`$childInfo.ArgumentList.Add('-NoProfile');`$childInfo.ArgumentList.Add('-NonInteractive');`$childInfo.ArgumentList.Add('-Command');`$childInfo.ArgumentList.Add('Start-Sleep -Seconds 30');`$child=[Diagnostics.Process]::Start(`$childInfo);[IO.File]::WriteAllText('$escapedPidPath',[string]`$child.Id);exit 0"
+    $timer=[Diagnostics.Stopwatch]::StartNew();$blocked=$false
+    try{Invoke-External -FilePath $shell -ArgumentList @('-NoProfile','-NonInteractive','-Command',$parentCommand) -Capture|Out-Null}catch{if($_.Exception.Message -match 'redirected output was incomplete after the bounded post-exit drain'){$blocked=$true}else{throw}}
+    $timer.Stop()
+    if(-not $blocked -or $timer.Elapsed -ge [TimeSpan]::FromSeconds(15)){throw 'Invoke-External did not fail closed within the bounded post-exit drain allowance.'}
+    if(-not(Test-Path -LiteralPath $pidPath) -or -not [int]::TryParse([IO.File]::ReadAllText($pidPath),[ref]$descendantPid)){throw 'Invoke-External inherited-handle fixture did not publish its descendant PID.'}
+    $descendant=Get-Process -Id $descendantPid -ErrorAction Stop
+    if($descendant.HasExited){throw 'Invoke-External killed a descendant merely to manufacture redirected-output EOF.'}
+}finally{
+    if($descendantPid -gt 0){Stop-Process -Id $descendantPid -Force -ErrorAction SilentlyContinue}
+    Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue
+}
+
+$tx='a'*32;$payload='b'*64
+$computeBoundary=New-DevFleetBootstrapBoundary -Kind compute -InstanceName 'devfleet-primary' -TransactionId $tx -PayloadSha256 $payload -BootstrapMaxSeconds 6600 -PackageVersion '1.2.13' -NodeRole 'primary'
+if($computeBoundary.multipassResolvedStageName -cne 'compute-devfleet-primary-multipass-resolved' -or $computeBoundary.isolationVerifiedStageName -cne 'compute-devfleet-primary-isolation-verified' -or $computeBoundary.instanceAbsentStageName -cne 'compute-devfleet-primary-instance-absent' -or $computeBoundary.instanceLaunchedStageName -cne 'compute-devfleet-primary-instance-launched' -or $computeBoundary.instanceReadyStageName -cne 'compute-devfleet-primary-instance-ready' -or $computeBoundary.payloadTransferredStageName -cne 'compute-devfleet-primary-payload-transferred' -or $computeBoundary.payloadExtractedStageName -cne 'compute-devfleet-primary-payload-extracted' -or $computeBoundary.completionStageName -cne 'compute-devfleet-primary'){throw 'Compute bootstrap boundary did not produce the allowlisted substep names.'}
+if($computeBoundary.extractionCommand -notmatch 'unzip.+devfleet-payload\.zip' -or $computeBoundary.extractionCommand -match 'sudo\s+bash|(?i)password|apitoken|secret='){throw 'Compute extraction did not remain a distinct non-secret production boundary.'}
+if($computeBoundary.bootstrapCommand -notmatch "bootstrap-compute\.sh.*--transaction-id '$tx'.*--payload-sha256 '$payload'.*--bootstrap-max-seconds '6600'.*--package-version '1\.2\.13'.*--node-role 'primary'" -or $computeBoundary.bootstrapCommand -match '(?i)password|apitoken|secret='){throw 'Compute bootstrap command did not preserve its non-secret identity contract.'}
+$vaultBoundary=New-DevFleetBootstrapBoundary -Kind vault -InstanceName 'devfleet-vault' -TransactionId $tx -PayloadSha256 $payload -BootstrapMaxSeconds 3900 -PackageVersion 'vault' -NodeRole 'vault'
+if($vaultBoundary.multipassResolvedStageName -cne 'vault-multipass-resolved' -or $vaultBoundary.isolationVerifiedStageName -cne 'vault-isolation-verified' -or $vaultBoundary.instancePresentStageName -cne 'vault-instance-present' -or $vaultBoundary.instanceStartedStageName -cne 'vault-instance-started' -or $vaultBoundary.instanceReadyStageName -cne 'vault-instance-ready' -or $vaultBoundary.payloadTransferredStageName -cne 'vault-payload-transferred' -or $vaultBoundary.payloadExtractedStageName -cne 'vault-payload-extracted' -or $vaultBoundary.completionStageName -cne 'vault'){throw 'Vault bootstrap boundary did not produce the allowlisted substep names.'}
+if($vaultBoundary.extractionCommand -notmatch 'unzip.+devfleet-vault-payload\.zip' -or $vaultBoundary.extractionCommand -match 'sudo\s+bash|(?i)password|resticpassword|secret='){throw 'Vault extraction did not remain a distinct non-secret production boundary.'}
+if($vaultBoundary.bootstrapCommand -notmatch "bootstrap-vault\.sh.*--transaction-id '$tx'.*--payload-sha256 '$payload'.*--bootstrap-max-seconds '3900'.*--package-version 'vault'.*--node-role 'vault'" -or $vaultBoundary.bootstrapCommand -match '(?i)password|resticpassword|secret='){throw 'Vault bootstrap command did not preserve its non-secret identity contract.'}
+
+[ordered]@{ok=$true;tests=8;ordinaryCompleteOutput=$true;inheritedPipeFailsClosedBoundedly=$true;computeExtractionSeparated=$true;vaultExtractionSeparated=$true;computeBoundaryIdentityBound=$true;vaultBoundaryIdentityBound=$true;substepNamesAllowlisted=$true;secretsExcludedFromArguments=$true}|ConvertTo-Json -Compress
+
+```
+
+
+## FILE: source/tests/Test-TailscaleBrowserPairing.ps1
+
+SHA256: 4cae989aa96639e30e27d4a444b2bf1ae1c6f922d1cb5203f522b5db7e52408e | Bytes: 5498 | Git mode: 100644
+
+```
+$ErrorActionPreference='Stop'
+$WarningPreference='SilentlyContinue'
+Import-Module (Join-Path $PSScriptRoot '../windows/DevFleet.Tailscale.psm1') -Force
+$module=Get-Module DevFleet.Tailscale
+$results=[Collections.Generic.List[object]]::new()
+function Check([string]$Name,[bool]$Pass){$results.Add([pscustomobject]@{case=$Name;pass=$Pass})}
+foreach($item in @(
+    @('https://login.tailscale.com/a/fixture123',$true),
+    @('http://login.tailscale.com/a/fixture123',$false),
+    @('https://login.tailscale.com.evil.example/a/fixture123',$false),
+    @('https://evil.example/?https://login.tailscale.com/a/fixture123',$false),
+    @('https://evil@login.tailscale.com/a/fixture123',$false),
+    @('https://login.tailscale.com:8443/a/fixture123',$false),
+    @('https://login.tailscale.com/a/fixture123?redirect=evil',$false),
+    @('https://login.tailscale.com/a/fixture123#evil',$false),
+    @('https://login.tailscale.com/a/one https://login.tailscale.com/a/two',$false),
+    @('https://login.tailscale.com/a/fixture123 https://login.tailscale.com/a/fixture123',$true)
+)){
+    $uri=&$module {param($s)Get-DevFleetTailscaleAuthenticationUri $s} $item[0]
+    Check ('official browser URL case '+$results.Count) ([bool]$uri-eq$item[1])
+}
+foreach($item in @(@('Running','100.64.1.2',$true),@('NeedsLogin','100.64.1.2',$false),@('Running','192.168.1.2',$false),@('Running','100.1.1.2',$false),@('Running','100.128.1.2',$false),@('Running','fd7a:115c:a1e0::1',$false))){
+    $ip=&$module {param($s,$ip)Get-DevFleetAuthenticatedTailscaleIPv4 (@{BackendState=$s;TailscaleIPs=@($ip)}|ConvertTo-Json -Compress)} $item[0] $item[1]
+    Check ('authenticated private IPv4 '+$item[0]+'/'+$item[1]) ([bool]$ip-eq$item[2])
+}
+&$module {
+    function script:Get-DevFleetDeadlineContext {return $script:PairingFixtureContext}
+    function script:Open-DevFleetTailscaleAuthenticationPage {param($Uri)$script:PairingFixtureOpened++;if($Uri.AbsoluteUri-cne'https://login.tailscale.com/a/fixture123'){throw 'Unexpected browser target.'}}
+    function script:Start-Sleep {param($Milliseconds)}
+    function script:Invoke-External {
+        param($FilePath,$ArgumentList,[switch]$Capture,[switch]$IgnoreExitCode,$TimeoutSeconds,$DeadlineUtc)
+        if(-not$Capture-or-not$IgnoreExitCode-or$TimeoutSeconds-gt35-or$DeadlineUtc-gt$script:PairingFixtureDeadline){throw 'Native command lost its bounded capture contract.'}
+        $script:PairingFixtureCalls.Add([pscustomobject]@{path=$FilePath;args=@($ArgumentList);timeout=$TimeoutSeconds})
+        if($ArgumentList-contains'up'){
+            $script:PairingFixtureUp++
+            if($ArgumentList-notcontains'--timeout=30s'-or$ArgumentList-notcontains'--accept-dns=false'-or$ArgumentList-contains'--auth-key'){throw 'Unexpected authentication authority.'}
+            if($script:PairingFixtureCase-eq'bad-url'){return 'https://evil.example/a/fake'}
+            return 'To authenticate, visit: https://login.tailscale.com/a/fixture123'
+        }
+        if($ArgumentList-notcontains'--json'){throw 'Status request arguments were lost.'}
+        if($script:PairingFixtureCase-eq'malformed'){return 'malformed status'}
+        $connected=$script:PairingFixtureCase-eq'already-connected'-or$script:PairingFixtureOpened-gt0
+        return (@{BackendState=if($connected){'Running'}else{'NeedsLogin'};TailscaleIPs=if($connected){@('100.64.1.2')}else{@()}}|ConvertTo-Json -Compress)
     }
-    candidate_record = {
-        "schemaVersion": 1,
-        "candidateCommit": "1" * 40,
-        "candidateShippingInputIdentity": shipping_identity,
-        "shippingInputIdentity": shipping_identity,
-        "candidateShippingInputs": rows,
-        "candidateShippingModeContract": mode,
-        "shippingModeContract": mode,
-        "devfleetVersion": "1.2.13",
-        "installerVersion": "1.4.1",
-        "releaseFingerprintId": state["releaseFingerprintId"],
-        "toolingFingerprintId": state["toolingFingerprintId"],
-    }
-    state["releaseFingerprintId"] = "f" * 64
-    manifest["releaseFingerprintId"] = state["releaseFingerprintId"]
-    (root / "finalization-state.json").write_text(json.dumps(state), encoding="utf-8")
-    (root / "outputs" / "final-artifact-hashes.json").write_text(json.dumps(manifest), encoding="utf-8")
-    (root / "CURRENT-CANDIDATE.json").write_text(json.dumps(candidate_record), encoding="utf-8")
-    return root
-
-
-def _fixture_shipping_rows(root: Path) -> list[dict]:
-    rows = []
-    for shipping_root in (root / "source", root / "installer-source"):
-        label = shipping_root.name
-        for path in sorted(p for p in shipping_root.rglob("*") if p.is_file()):
-            relative = path.relative_to(shipping_root).as_posix()
-            rows.append({
-                "root": label,
-                "path": relative,
-                "bytes": path.stat().st_size,
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                "mode": "0644",
-            })
-    rows.sort(key=lambda row: (row["root"], row["path"]))
-    return rows
-
-
-def _write_audit(root: Path, value: dict) -> None:
-    (root / "audit" / "record.json").write_text(json.dumps(value), encoding="utf-8")
-
-
-def _split_identity_fixture(tmp_path: Path, *, differing_head: bool = False) -> Path:
-    root = _fixture(tmp_path)
-    state = json.loads((root / "finalization-state.json").read_text(encoding="utf-8"))
-    manifest = json.loads((root / "outputs/final-artifact-hashes.json").read_text(encoding="utf-8"))
-    candidate_record = json.loads((root / "CURRENT-CANDIDATE.json").read_text(encoding="utf-8"))
-    candidate = "1" * 40
-    head = "2" * 40 if differing_head else candidate
-    rows = _fixture_shipping_rows(root)
-    mode = {"schemaVersion": 1, "defaultMode": "0644", "executableMode": "0755", "executableByContract": []}
-    identity = _MODULE._shipping_identity({(r["root"], r["path"]): r for r in rows}, mode, "1.2.13", "1.4.1")
-    state.update({"git_commit": head, "repository_head": head, "candidate_git_commit": candidate, "shipping_input_identity": identity, "candidate_shipping_input_identity": identity, "source_identity_matches_candidate": True, "artifact_tuple_matches_candidate": True, "candidate_build_current": True, "candidate_is_current": True})
-    manifest.update({"gitCommit": head, "repositoryHead": head, "candidateGitCommit": candidate, "shippingInputIdentity": identity, "candidateShippingInputIdentity": identity, "shippingModeContract": mode})
-    candidate_record.update({"candidateCommit": candidate, "candidateShippingInputIdentity": identity, "shippingInputIdentity": identity, "candidateShippingInputs": rows, "candidateShippingModeContract": mode, "shippingModeContract": mode})
-    release = {"schemaVersion": 2, "devfleetVersion": "1.2.13", "installerVersion": "1.4.1", "releaseFingerprintId": state["releaseFingerprintId"], "toolingFingerprint": {"toolingFingerprintId": state["toolingFingerprintId"]}, "shippingModeContract": mode, "shippingInputs": rows, "artifacts": list(manifest["artifacts"])}
-    release["releaseFingerprintId"] = _MODULE._release_id(release)
-    state["releaseFingerprintId"] = release["releaseFingerprintId"]
-    manifest["releaseFingerprintId"] = release["releaseFingerprintId"]
-    candidate_record["releaseFingerprintId"] = release["releaseFingerprintId"]
-    (root / "finalization-state.json").write_text(json.dumps(state), encoding="utf-8")
-    (root / "outputs/final-artifact-hashes.json").write_text(json.dumps(manifest), encoding="utf-8")
-    (root / "CURRENT-CANDIDATE.json").write_text(json.dumps(candidate_record), encoding="utf-8")
-    (root / "outputs/release-fingerprint.json").write_text(json.dumps(release), encoding="utf-8")
-    manifest["sourceInventory"] = [{"path": f"{row['root']}/{row['path']}", "bytes": row["bytes"], "sha256": row["sha256"], "mode": row["mode"]} for row in rows]
-    manifest["expectedSourceCount"] = len(rows)
-    # Keep the staged inventory in AUDIT-MANIFEST separate from the artifact
-    # manifest, as the real bundle does.
-    (root / "AUDIT-MANIFEST.json").write_text(json.dumps(manifest), encoding="utf-8")
-    return root
-
-
-def test_coherent_bundle_passes(tmp_path: Path):
-    assert validate_root(_fixture(tmp_path))["status"] == "PASS"
-
-
-def test_split_identity_equal_head_passes(tmp_path: Path):
-    assert validate_root(_split_identity_fixture(tmp_path))["status"] == "PASS"
-
-
-def test_split_identity_tooling_only_head_advance_passes(tmp_path: Path):
-    assert validate_root(_split_identity_fixture(tmp_path, differing_head=True))["status"] == "PASS"
-
-
-def test_shipping_inventory_requires_explicit_canonical_mode(tmp_path: Path):
-    root = _split_identity
+}
+foreach($target in @('windows','guest')){
+    foreach($case in @('already-connected','browser-required','bad-url','deadline-exhausted','parent-deadline')){
+        $v=&$module {
+            param($Case,$Target)
+            $script:PairingFixtureCase=$Case;$script:PairingFixtureOpened=0;$script:PairingFixtureUp=0;$script:PairingFixtureCalls=[Collections.Generic.List[object]]::new();$script:PairingFixtureContext=$null
+            $script:PairingFixtureDeadline=[datetime]::UtcNow.AddSeconds($(if($Case-eq'deadline-exhausted'){3}else{60}))
+            if($Case-eq'parent-deadline'){$script:PairingFixtureContext=[pscustomobject]@{StageDeadlineUtc=[datetime]::UtcNow.AddSeconds(3)}}
+            $parameters=@{FilePath=if($Target-eq'guest'){'multipass-fixture.exe'}else{'tailscale-fixture.exe'};Hostname='devfleet-fixture';DeadlineUtc=$script:PairingFixtureDeadline}
+            if($Target-eq'guest'){$parameters.InstanceName='devfleet-vault'}
+            $result=$null;$failed=$false
+            try{$result=Invoke-DevFleetTailscaleBrowserPairing @parameters}catch{$failed=$true}
+            [pscustomobject]@{result=$result;failed=$failed;calls=@($script:PairingFixtureCalls);up=$script:PairingFixtureUp;opened=$script:PairingFixtureOpened}
+        } $case $target
+        $pass=switch($case){
+            'already-connected' {-not$v.failed-an

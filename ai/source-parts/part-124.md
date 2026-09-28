@@ -1,553 +1,917 @@
 # DevFleet source part 124
 
 Full-source UTF-8 byte interval [5719500, 5766000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 2bdf2d67591ca5b39e6fdc1128b5a5fc1f84bac77d6792dbef3700c557d420e7
+Payload SHA-256: 08284b16bc3bc049b4b2266b07386ee8bb14f492822c39fb8de64e3dcbf7970f
 
 <!-- BEGIN SOURCE SLICE -->
- / "outputs" / "DevFleet-v1.2.13-AI-Audit-LATEST.zip"
-
-
-def digest(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def read_json(entries: dict[str, bytes], name: str) -> dict:
-    return json.loads(entries[name].decode("utf-8-sig"))
-
-
-def put(entries: dict[str, bytes], name: str, value: object) -> None:
-    entries[name] = (json.dumps(value, indent=2) + "\n").encode()
-
-
-def canonical_shipping_rows(rows: list[dict]) -> list[dict]:
-    return sorted(rows, key=lambda row: (0 if row["root"] == "source" else 1, tuple(part.casefold() for part in row["path"].split("/"))))
-
-
-def shipping_identity(rows: list[dict], mode: dict, version: str, installer: str) -> str:
-    payload = {"schemaVersion": 1, "devfleetVersion": version, "installerVersion": installer, "shippingModeContract": mode, "shippingInputs": canonical_shipping_rows(rows)}
-    return digest(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode())
-
-
-def release_identity(release: dict) -> str:
-    payload = {key: release.get(key) for key in ("schemaVersion", "devfleetVersion", "installerVersion", "shippingModeContract")}
-    payload["shippingInputs"] = release.get("shippingInputs")
-    payload["artifacts"] = release.get("artifacts", [])
-    return digest(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode())
-
-
-def final_entries() -> dict[str, bytes]:
-    with zipfile.ZipFile(ARCHIVE) as archive:
-        entries = {name: archive.read(name) for name in archive.namelist() if not name.endswith("/")}
-    state = read_json(entries, "finalization-state.json")
-    candidate = str(state["candidate_git_commit"])
-    head = str(state["repository_head"])
-    manifest = read_json(entries, "AUDIT-MANIFEST.json")
-    shipping_rows = []
-    for row in manifest["sourceInventory"]:
-        path = str(row["path"]).replace("\\", "/")
-        if path.startswith("source/"):
-            root_name, relative = "source", path[len("source/"):]
-        elif path.startswith("installer-source/"):
-            root_name, relative = "installer-source", path[len("installer-source/"):]
-        else:
-            continue
-        shipping_rows.append({"root": root_name, "path": relative, "bytes": int(row["bytes"]), "sha256": str(row["sha256"]).lower(), "mode": str(row["mode"])})
-    mode = manifest["shippingModeContract"]
-    shipping_rows = canonical_shipping_rows(shipping_rows)
-    shipping = shipping_identity(shipping_rows, mode, str(manifest["devfleetVersion"]), str(manifest["installerVersion"]))
-    release_record = read_json(entries, "outputs/release-fingerprint.json")
-    release_record.update({"devfleetVersion": manifest["devfleetVersion"], "installerVersion": manifest["installerVersion"], "shippingModeContract": mode, "shippingInputs": shipping_rows})
-    release = release_identity(release_record)
-    release_record["releaseFingerprintId"] = release
-    put(entries, "outputs/release-fingerprint.json", release_record)
-    tooling_record = read_json(entries, "outputs/tooling-fingerprint-current.json")
-    tooling_record.update({"repositoryHead": head, "gitCommit": head, "candidateGitCommit": head, "shippingInputIdentity": shipping, "candidateShippingInputIdentity": shipping, "releaseFingerprintId": release})
-    put(entries, "outputs/tooling-fingerprint-current.json", tooling_record)
-    tooling = str(state["toolingFingerprintId"])
-    run_id = "FullRelease-synthetic-current"
-    state["repository_head"] = head
-    state["candidate_git_commit"] = head
-    state["candidate_shipping_input_identity"] = shipping
-    state["shipping_input_identity"] = shipping
-    state["releaseFingerprintId"] = release
-    state.update({"source_changed_since_candidate": False, "rebuild_required": False, "source_identity_matches_candidate": True, "artifact_tuple_matches_candidate": True, "candidate_build_current": True, "candidate_is_current": True, "validation_evidence_current": True, "full_release_passed": True, "internal_promotion_allowed": True, "public_promotion_allowed": False, "full_release_run_id": run_id, "full_release_current": True})
-    state.update({"status": "PASS", "release_status": "PASS", "blocker": None})
-    candidate_record = read_json(entries, "CURRENT-CANDIDATE.json")
-    candidate_record.pop("historicalProvenance", None)
-    candidate_record.update({"repositoryHead": head, "gitCommit": head, "candidateCommit": head, "candidateShippingInputs": shipping_rows, "candidateShippingModeContract": mode, "shippingModeContract": mode, "shippingInputIdentity": shipping, "candidateShippingInputIdentity": shipping, "releaseFingerprintId": release, "candidateIsCurrent": True, "sourceChangedSinceCandidate": False, "rebuildRequired": False})
-    candidate_record["candidateTuple"] = {"candidateCommit": head, "shippingInputIdentity": shipping, "releaseFingerprintId": release, "toolingFingerprintId": tooling}
-    manifest.pop("historicalProvenance", None)
-    manifest.update({"repositoryHead": head, "gitCommit": head, "candidateGitCommit": head, "shippingInputIdentity": shipping, "candidateShippingInputIdentity": shipping, "releaseFingerprintId": release, "candidate": candidate_record, "candidateIsCurrent": True, "sourceChangedSinceCandidate": False, "rebuildRequired": False})
-    put(entries, "CURRENT-CANDIDATE.json", candidate_record)
-    put(entries, "AUDIT-MANIFEST.json", manifest)
-    artifact_manifest = read_json(entries, "outputs/final-artifact-hashes.json")
-    artifact_manifest.update({"repositoryHead": head, "gitCommit": head, "candidateGitCommit": head, "shippingInputIdentity": shipping, "releaseFingerprintId": release, "sourceChangedSinceCandidate": False, "rebuildRequired": False, "sourceIdentityMatchesCandidate": True, "candidateBuildCurrent": True, "candidateIsCurrent": True, "validationEvidenceCurrent": True, "fullReleasePassed": True, "internalPromotionAllowed": True, "publicPromotionAllowed": False})
-    put(entries, "outputs/final-artifact-hashes.json", artifact_manifest)
-    tuple_value = {"repositoryHead": head, "candidateCommit": candidate, "shippingInputIdentity": shipping, "releaseFingerprintId": release, "toolingFingerprintId": tooling}
-    tuple_value["candidateCommit"] = head
-
-    # The archive contains several current-authority documents whose nested
-    # ``candidate`` records predate this synthetic current-candidate fixture.
-    # Rebind those records together, so the release-tooling validator sees one
-    # coherent tuple while preserving any separately marked historical data.
-    def rebind_current_authority(value: object) -> None:
-        if isinstance(value, dict):
-            for key in ("repositoryHead", "repository_head", "gitCommit", "git_commit", "candidateGitCommit", "candidate_git_commit", "candidateCommit", "candidate_commit"):
-                if key in value:
-                    value[key] = head
-            for key in ("shippingInputIdentity", "shipping_input_identity", "candidateShippingInputIdentity", "candidate_shipping_input_identity"):
-                if key in value:
-                    value[key] = shipping
-            for key in ("releaseFingerprintId",):
-                if key in value:
-                    value[key] = release
-            for key in ("toolingFingerprintId",):
-                if key in value:
-                    value[key] = tooling
-            for key in ("candidateIsCurrent", "candidate_is_current", "sourceIdentityMatchesCandidate", "source_identity_matches_candidate", "candidateBuildCurrent", "candidate_build_current", "validationEvidenceCurrent", "validation_evidence_current", "fullReleasePassed", "full_release_passed", "internalPromotionAllowed", "internal_promotion_allowed"):
-                if key in value:
-                    value[key] = True
-            for key in ("sourceChangedSinceCandidate", "source_changed_since_candidate", "rebuildRequired", "rebuild_required", "publicPromotionAllowed", "public_promotion_allowed"):
-                if key in value:
-                    value[key] = False
-            for child in value.values():
-                rebind_current_authority(child)
-        elif isinstance(value, list):
-            for child in value:
-                rebind_current_authority(child)
-
-    # The shipping coherence gate inspects every top-level audit JSON record.
-    # This isolated final-state fixture must project those mutable handoffs to
-    # its synthetic tuple as well; nested historical originals are untouched.
-    authority_names = {"evidence/CURRENT-STATUS.json", "evidence/CURRENT-GATES.json", "evidence/CURRENT-PROOF.json", "evidence/FULLRELEASE-SUMMARY.json", "evidence/CURRENT-HANDOFF.json", "evidence/CURRENT-RELEASE-AUTHORITY.json"}
-    authority_names.update(name for name in entries if name.startswith("audit/") and name.count("/") == 1 and name.endswith(".json"))
-    for authority_name in sorted(authority_names):
-        authority = read_json(entries, authority_name)
-        rebind_current_authority(authority)
-        put(entries, authority_name, authority)
-
-    # A release-good fixture must never smuggle the historical candidate
-    # provenance that is tested separately in diagnostic mode.
-    assert "historicalProvenance" not in candidate_record
-    assert "historicalProvenance" not in manifest
-    # Current authority evidence must bind the same synthetic current tuple;
-    # preserved historical records, if any, remain untouched in their own
-    # historical namespaces.
-    handoff = read_json(entries, "audit/CURRENT-HANDOFF.json")
-    handoff.update({"repositoryHead": head, "candidateCommit": head, "shippingInputIdentity": shipping, "candidateShippingInputIdentity": shipping, "releaseFingerprintId": release, "toolingFingerprintId": tooling, "candidateIsCurrent": True, "sourceChangedSinceCandidate": False, "rebuildRequired": False})
-    put(entries, "audit/CURRENT-HANDOFF.json", handoff)
-    put(entries, "finalization-state.json", state)
-    current = read_json(entries, "evidence/CURRENT-PROOF.json")
-    current.update({"status": "PASS", "outcome": "PASS", "fullReleaseRunId": run_id, **tuple_value})
-    put(entries, "evidence/CURRENT-PROOF.json", current)
-    summary = read_json(entries, "evidence/FULLRELEASE-SUMMARY.json")
-    summary.update({"status": "PASS", "diagnosticOnly": False, "historicalEvidenceOnly": False, "latestRunId": run_id, "candidateTuple": tuple_value})
-    put(entries, "evidence/FULLRELEASE-SUMMARY.json", summary)
-    l1_terminal = {"name": "DevFleet-E2E-Win11-01", "id": "84b7d8b8-ee6c-4085-aa29-4b0adc316de2", "state": "Off", "timestamp": "2026-08-30T00:00:02Z", "timestampUtc": "2026-08-30T00:00:02Z", "runId": run_id, "ownershipScope": "exact disposable"}
-    put(entries, "evidence/l1-terminal-state.json", l1_terminal)
-    nested_observation = {"schemaVersion": 1, "runId": run_id, "status": "ABSENT", "expectedName": "DevFleet-E2E-Linux-01", "present": False, "observedUtc": "2026-08-30T00:00:01Z", "verification": "Bounded Multipass JSON inventory inside exact L1", "exactMatchCount": 0, "inventoryCount": 0, "backendInventories": [], "candidate": tuple_value, "l1": {"name": "DevFleet-E2E-Win11-01", "id": "84b7d8b8-ee6c-4085-aa29-4b0adc316de2"}, "nestedScope": "inside the exact L1 guest session", "observer": "Get-DevFleetNestedL2State", "evidenceClass": "FullRelease run-bound nested observation"}
-    put(entries, "evidence/current-fullrelease/nested-l2-terminal-observation.json", nested_observation)
-    nested_hash = digest(entries["evidence/current-fullrelease/nested-l2-terminal-observation.json"])
-    l2_terminal = {"schemaVersion": 2, "expectedName": "DevFleet-E2E-Linux-01", "status": "ABSENT", "present": False, "timestamp": "2026-08-30T00:00:01Z", "timestampUtc": "2026-08-30T00:00:01Z", "verificationMethod": nested_observation["verification"], "ownershipScope": "exact expected nested L2 name inside exact disposable L1", "nestedScope": nested_observation["nestedScope"], "backendInventories": [], "runId": run_id, "sourceRunId": run_id, "sourceEvidence": "nested-l2-terminal-observation.json", "sourceEvidenceSha256": nested_hash, "l1Name": "DevFleet-E2E-Win11-01", "l1Id": "84b7d8b8-ee6c-4085-aa29-4b0adc316de2", "candidate": tuple_value, "evidenceClass": nested_observation["evidenceClass"], "certifiedReleaseCleanup": False}
-    put(entries, "evidence/l2-terminal-state.json", l2_terminal)
-    cleanup = {"status": "PASS", "runId": run_id, "candidate": tuple_value, "l1": {"name": "DevFleet-E2E-Win11-01", "id": "84b7d8b8-ee6c-4085-aa29-4b0adc316de2", "state": "Off", "deleted": False}, "guest": {"runRootAbsent": True, "nestedAbsent": True, "foreignResourcesMutated": False}, "productionTouched": False, "physicalSurfaceTouched": False}
-    put(entries, "evidence/current-fullrelease/final-cleanup.json", cleanup)
-    cleanup_hash = digest(entries["evidence/current-fullrelease/final-cleanup.json"])
-    l1_hash = digest(entries["evidence/l1-terminal-state.json"])
-    l2_hash = digest(entries["evidence/l2-terminal-state.json"])
-    entries["evidence/current-fullrelease/l1-terminal-state.json"] = entries["evidence/l1-terminal-state.json"]
-    entries["evidence/current-fullrelease/l2-terminal-state.json"] = entries["evidence/l2-terminal-state.json"]
-    l1_hash = digest(entries["evidence/current-fullrelease/l1-terminal-state.json"])
-    l2_hash = digest(entries["evidence/current-fullrelease/l2-terminal-state.json"])
-    put(entries, "evidence/current-fullrelease/post-cleanup-finalization.json", {"schemaVersion": 3, "status": "PASS", "runId": run_id, "cleanupConsumed": True, "reconcileAfterCleanup": True, "cleanupEvidenceHash": cleanup_hash, "terminalL1Hash": l1_hash, "terminalL2Hash": l2_hash, "nestedL2Observation": "nested-l2-terminal-observation.json", "nestedL2ObservationSha256": nested_hash, "terminalL1Timestamp": "2026-08-30T00:00:02Z", "terminalL2Timestamp": "2026-08-30T00:00:01Z", "expectedL2Name": "DevFleet-E2E-Linux-01", "candidate": tuple_value, "liveChecks": {"l1ExactOff": True, "l2ExactAbsent": True, "hostSameNameL2Absent": True, "foreignResourcesMutated": False}})
-    full_hashes = {**tuple_value, **{row["name"]: row["sha256"] for row in release_record["artifacts"]}}
-    put(entries, "evidence/current-fullrelease/run-state.json", {"runId": run_id, "mode": "FullRelease", "finalStatus": "PASS", "candidateHashes": full_hashes, "completedPhases": sorted(REQUIRED_FULLRELEASE_PHASES)})
-    real_binding_name = "evidence/current-fullrelease/real-use-acceptance-binding.json"
-    real_prepare_name = "evidence/current-fullrelease/real-use-acceptance-prepare.json"
-    put(entries, real_binding_name, {"schemaVersion": 1, "contract": "devfleet-real-use-acceptance-v1", "runId": run_id, "phaseId": "REAL-USE-ACCEPTANCE", "precedingPhase": "SURROGATE-DISPOSABLE", "candidate": tuple_value})
-    put(entries, real_prepare_name, {"schemaVersion": 1, "contract": "devfleet-real-use-acceptance-v1", "status": "PREPARED", "stage": "prepare", "phaseId": "REAL-USE-ACCEPTANCE", "runId": run_id, "candidate": tuple_value})
-    real_binding_hash = digest(entries[real_binding_name])
-    real_prepare_hash = digest(entries[real_prepare_name])
-    real_report = {"schemaVersion": 1, "contract": "devfleet-real-use-acceptance-v1", "status": "PASS", "stage": "resume", "phaseId": "REAL-USE-ACCEPTANCE", "runId": run_id, "candidate": tuple_value, "journeys": [{"id": name, "status": "PASS", "assertions": {"real": True, "endToEnd": True}} for name in ("U01", "U02", "U03", "U04", "U05")], "cleanup": {"status": "PASS", "ownedOnly": True, "errors": []}, "failure": None, "cleanupFailure": None}
-    put(entries, "evidence/current-fullrelease/real-use-acceptance-report.json", real_report)
-    real_hash = digest(entries["evidence/current-fullrelease/real-use-acceptance-report.json"])
-    put(entries, "evidence/current-fullrelease/real-use-acceptance-evidence.json", {"contract": "devfleet-real-use-acceptance-evidence-v1", "status": "PASS", "runId": run_id, "credentialsStoredInEvidence": False, "internalPromotionAllowed": False, "journeys": [{"id": name, "status": "PASS"} for name in ("U01", "U02", "U03", "U04", "U05")], "evidence": {"binding": {"sha256": real_binding_hash}, "prepare": {"sha256": real_prepare_hash}, "report": {"sha256": real_hash}}})
-    records = [{"id": phase, "status": "PASS", "runId": run_id} for phase in sorted(REQUIRED_FULLRELEASE_PHASES)]
-    for record in records:
-        if record["id"] == "HOST-SAFETY":
-            record["evidence"] = {"startSafe": True, "rawHostSafetyStartSafe": True, "effectiveE2EStartAuthorized": True, "ramPressureOverrideAuthorized": False}
-        elif record["id"] == "REAL-USE-ACCEPTANCE":
-            record["evidence"] = {"executor": {"status": "REAL E2E PASS", "phase": "REAL-USE-ACCEPTANCE", "contract": "devfleet-real-use-acceptance-phase-v1", "candidate": tuple_value, "credentialsStoredInEvidence": False, "internalPromotionAllowed": False, "evidence": {"bindingPath": "C:/fixture/real-use-acceptance-binding.json", "bindingSha256": real_binding_hash, "preparePath": "C:/fixture/real-use-acceptance-prepare.json", "prepareSha256": real_prepare_hash, "reportPath": "C:/fixture/real-use-acceptance-report.json", "reportSha256": real_hash}}}
-        elif record["id"] == "RECONCILE":
-            record["evidence"] = {"executor": {"status": "REAL E2E PASS", "phase": "RECONCILE", "maintenance": "5/5", "candidate": tuple_value}}
-    put(entries, "evidence/current-fullrelease/fullrelease-phase-records.json", records)
-    entries["evidence/current-proof/product-lifecycle-progress.jsonl"] = b'{"heartbeat":true}\n'
-    source_files = {"proofScriptSha256": "run-exact-candidate-proof.ps1", "invokeRealProductPhaseSha256": "Invoke-RealProductPhase.psm1", "invokeWpfUiAutomationSha256": "Invoke-WpfUiAutomation.ps1", "wpfLaunchContractSha256": "WpfLaunchContract.psm1"}
-    source_bytes = {key: entries[f"release-tooling/proof-entrypoints/{name}"] for key, name in source_files.items()}
-    proof_tuple = {"repositoryHead": head, "candidateCommit": head, "shippingInputIdentity": shipping, "releaseFingerprint": release, "toolingFingerprint": tooling}
-    artifact_hashes = {entry["name"]: entry["sha256"] for entry in read_json(entries, "outputs/release-fingerprint.json")["artifacts"]}
-    # Replace only this temporary fixture's proof namespace; the archive and
-    # its historical evidence remain immutable on disk.
-    for name in list(entries):
-        if name.startswith("evidence/proof-runs/"):
-            del entries[name]
-    proof_ids = []
-    for index in (1, 2):
-        with tempfile.TemporaryDirectory() as directory:
-            run, *_ = native_proof_fixture(Path(directory), laptop=(index == 2), index=index, config_bytes=entries["source/config/devfleet.config.json"], expected=proof_tuple, source_bytes=source_bytes, artifacts=artifact_hashes)
-            proof_ids.append(run.name)
-            for path in run.iterdir():
-                entries[f"evidence/proof-runs/{run.name}/{path.name}"] = path.read_bytes()
-
-    authority = read_json(entries, "evidence/CURRENT-RELEASE-AUTHORITY.json")
-    authority["proofs"] = {"passing": 2, "required": 2, "status": "2 / 2 PASS", "runs": [{"runId": run_id_value, "status": "PASS"} for run_id_value in proof_ids]}
-    put(entries, "evidence/CURRENT-RELEASE-AUTHORITY.json", authority)
-
-    standard_id = "standard-token-synthetic-current"
-    raw_name = f"evidence/standard-token/{standard_id}/installer-self-test-raw.txt"
-    canonical_name = f"evidence/standard-token/{standard_id}/standard-token-evidence.json"
-    entries[raw_name] = f"PASS\npayload={artifact_hashes['tar']}\n".encode()
-    standard = {"schemaVersion": 1, "runId": standard_id, "status": "PASS", "standardNonAdministratorToken": True, "runDirectory": f"evidence/standard-token/{standard_id}", "rawReportPath": raw_name, "canonicalEvidencePath": canonical_name, "generatedAtUtc": "2026-09-16T00:00:00Z", "candidateBuildCommit": head, **tuple_value, "exe": next(row for row in release_record["artifacts"] if row["name"] == "exe"), "tar": next(row for row in release_record["artifacts"] if row["name"] == "tar"), "runner": {"path": "automation/release-e2e/tests/Test-InstallerSelfTestStandardToken.ps1", "sha256": digest(entries["automation/release-e2e/tests/Test-InstallerSelfTestStandardToken.ps1"])}, "token": {"standardNonAdministratorToken": True, "isAdministratorMember": False, "isAdministratorEnabled": False, "isElevated": False, "integrityLevel": "Medium"}, "exitCode": 0, "reportSha256": digest(entries[raw_name]), "requiredChecks": {name: True for name in ("pass", "payloadExtraction", "bootstrapEntrypoint", "parameterContract", "embeddedTarCount", "factoryResetBackupGate", "planSafety", "devfleetVersion", "installerVersion", "payloadSha")}, "residualSelfTestScratchCount": 0}
-    put(entries, canonical_name, standard)
-    entries["evidence/CURRENT-STANDARD-TOKEN.json"] = entries[canonical_name]
-
-    full_bindings = {
-        "runStateSha256": digest(entries["evidence/current-fullrelease/run-state.json"]),
-        "phaseRecordsSha256": digest(entries["evidence/current-fullrelease/fullrelease-phase-records.json"]),
-        "realUseBindingSha256": real_binding_hash,
-        "realUsePrepareSha256": real_prepare_hash,
-        "realUseReportSha256": real_hash,
-        "realUseSummarySha256": digest(entries["evidence/current-fullrelease/real-use-acceptance-evidence.json"]),
-        "cleanupSha256": digest(entries["evidence/current-fullrelease/final-cleanup.json"]),
-        "postCleanupSha256": digest(entries["evidence/current-fullrelease/post-cleanup-finalization.json"]),
-        "l1Sha256": l1_hash,
-        "l2Sha256": l2_hash,
-    }
-    audit_id = "release-audit-synthetic-current"
-    audit_prefix = f"evidence/release-audits/{audit_id}"
-    report_name = f"{audit_prefix}/ai-audit-bundle-self-test.json"
-    audit_manifest_name = f"{audit_prefix}/release-audit.manifest.json"
-    audit_validation_name = f"{audit_prefix}/pre-acceptance-validation.json"
-    synthetic_archive_hash = "a" * 64
-    audit_report = {"status": "COMPLETE_FOR_AI_AUDIT", "bundleMode": "release", "releaseEligible": True, "internalPromotionAllowed": False, "publicPromotionAllowed": False, "publicPublisherTrust": False, "modeVerification": "PASS", "coherenceVerification": "PASS", "secretScan": "PASS", "archiveSha256": synthetic_archive_hash, "archiveBytes": 1234, "candidateTuple": tuple_value, "fullReleaseRunId": run_id, "standardTokenRunId": standard_id, "proofRunIds": proof_ids, "expectedSourceCount": 10, "includedSourceCount": 10, "checks": {"pythonCompile": "PASS", "powershellParse": "PASS"}}
-    put(entries, report_name, audit_report)
-    put(entries, audit_manifest_name, {"sha256": synthetic_archive_hash, "bytes": 1234, "selfTest": "PASS", "expectedSourceCount": 10, "includedSourceCount": 10})
-    put(entries, audit_validation_name, {"status": "PASS", "bundleMode": "pre-acceptance", "releaseEligible": False, "internalPromotionAllowed": False, "publicPromotionAllowed": False, "candidateTuple": tuple_value, "fullReleaseRunId": run_id, "standardTokenRunId": standard_id, "proofRunIds": proof_ids})
-    audit_pointer = {"schemaVersion": 1, "contract": "devfleet-pre-acceptance-release-audit-v1", "runId": audit_id, "status": "PASS", "bundleMode": "release", "releaseEligible": False, "internalPromotionAllowed": False, "publicPromotionAllowed": False, "publicPublisherTrust": False, "candidate": tuple_value, "fullReleaseRunId": run_id, "standardTokenRunId": standard_id, "proofRunIds": proof_ids, "inputs": {"fullReleaseRunStateSha256": full_bindings["runStateSha256"], "fullReleasePhaseRecordsSha256": full_bindings["phaseRecordsSha256"], "realUseBindingSha256": real_binding_hash, "realUsePrepareSha256": real_prepare_hash, "realUseReportSha256": real_hash, "realUseSummarySha256": full_bindings["realUseSummarySha256"], "cleanupSha256": full_bindings["cleanupSha256"], "postCleanupSha256": full_bindings["postCleanupSha256"], "terminalL1Sha256": l1_hash, "terminalL2Sha256": l2_hash, "standardTokenPointerSha256": digest(entries["evidence/CURRENT-STANDARD-TOKEN.json"]), "proofRunIds": proof_ids}, "evidence": {"archive": {"workspacePath": f"audit/release-audits/{audit_id}/release-audit.zip", "bundlePath": None, "bytes": 1234, "sha256": synthetic_archive_hash}, "report": {"workspacePath": f"audit/release-audits/{audit_id}/ai-audit-bundle-self-test.json", "bundlePath": report_name, "bytes": len(entries[report_name]), "sha256": digest(entries[report_name])}, "manifest": {"workspacePath": f"audit/release-audits/{audit_id}/release-audit.manifest.json", "bundlePath": audit_manifest_name, "bytes": len(entries[audit_manifest_name]), "sha256": digest(entries[audit_manifest_name])}, "releaseValidation": {"workspacePath": f"audit/release-audits/{audit_id}/pre-acceptance-validation.json", "bundlePath": audit_validation_name, "bytes": len(entries[audit_validation_name]), "sha256": digest(entries[audit_validation_name])}}, "checks": {"cleanExtraction": "PASS", "secrets": "PASS", "coherence": "PASS", "sourceCount": "PASS", "releaseValidation": "PASS"}, "gates": {"candidate": "PASS", "proofs": "2/2 PASS", "fullRelease": "PASS", "realUseAcceptance": "U01-U05 PASS", "maintenance": "5/5 PASS", "standardToken": "PASS", "reconcile": "PASS", "cleanup": "PASS", "l1": "OFF", "l2": "ABSENT", "releaseAudit": "PASS"}}
-    put(entries, "evidence/CURRENT-RELEASE-AUDIT.json", audit_pointer)
-
-    binding_values = {"standardTokenPointerSha256": digest(entries["evidence/CURRENT-STANDARD-TOKEN.json"]), "standardTokenCanonicalSha256": digest(entries[canonical_name]), "standardTokenRawReportSha256": digest(entries[raw_name]), "fullReleaseRunStateSha256": full_bindings["runStateSha256"], "fullReleasePhaseRecordsSha256": full_bindings["phaseRecordsSha256"], "realUseBindingSha256": real_binding_hash, "realUsePrepareSha256": real_prepare_hash, "realUseReportSha256": real_hash, "realUseSummarySha256": full_bindings["realUseSummarySha256"], "cleanupSha256": full_bindings["cleanupSha256"], "postCleanupSha256": full_bindings["postCleanupSha256"], "terminalL1Sha256": l1_hash, "terminalL2Sha256": l2_hash, "releaseAuditPointerSha256": digest(entries["evidence/CURRENT-RELEASE-AUDIT.json"]), "releaseAuditArchiveSha256": synthetic_archive_hash, "releaseAuditReportSha256": digest(entries[report_name]), "releaseAuditManifestSha256": digest(entries[audit_manifest_name]), "releaseAuditValidationSha256": digest(entries[audit_validation_name])}
-    final = {"schemaVersion": 1, "contract": "devfleet-internal-final-acceptance-v1", "status": "PASS", "releaseEligible": True, "internalPromotionAllowed": True, "publicPromotionAllowed": False, "publicPublisherTrust": False, "candidate": {**tuple_value, "artifacts": {row["name"]: {"sha256": row["sha256"], "bytes": row["bytes"]} for row in release_record["artifacts"]}, "authenticode": {"status": "PASS", "signatureStatus": "Valid", "signerThumbprint": "DE42CD7369A01E9357BDA13597C0173E5E703E9D", "signerSubject": "CN=DevFleet Private Personal Code Signing", "codeSigningEkuVerified": True, "rsaBits": 3072, "exactCertificateMatch": True, "privateKeyExported": False}}, "proofRunIds": proof_ids, "fullReleaseRunId": run_id, "standardTokenRunId": standard_id, "releaseAuditRunId": audit_id, "bindings": binding_values, "gates": audit_pointer["gates"], "safety": {"f005Attempted": False, "formatterOnlyAuditCleanupPerformed": False, "f005StructuralRefactoringPerformed": False, "protectedProductionMutated": False, "hostRebooted": False, "amdRadeonTouched": False, "biosUefiTouched": False, "mulattoTechSurfaceTouched": False, "githubPushed": False, "privateSigningKeyExported": False, "ramPressureOverrideUsed": False, "productionUnchanged": True, "disposableLabOnly": True}}
-    put(entries, "evidence/FINAL-ACCEPTANCE.json", final)
-    return entries
-
-
-def write_archive(entries: dict[str, bytes], path: Path) -> None:
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
-        for name, data in entries.items():
-            archive.writestr(name, data)
-
-
-def must_fail(entries: dict[str, bytes], mutate, label: str, mode: str = "final") -> None:
-    changed = copy.deepcopy(entries)
-    mutate(changed)
-    with tempfile.TemporaryDirectory() as directory:
-        path = Path(directory) / "synthetic.zip"
-        write_archive(changed, path)
-        try:
-            validate(path, mode)
-        except ValueError:
-            return
-    raise AssertionError(f"negative bundle was accepted: {label}")
-
-
-def main() -> None:
-    # LATEST is the generic current-candidate diagnostic baseline. Historical
-    # source checks have a separate deterministic fixture, independent of the
-    # archive's optional historical pointer and old hard-coded candidate ID.
-    diagnostic_result = validate(ARCHIVE, "diagnostic")
-    assert diagnostic_result.get("status") == "PASS_WITH_BLOCKER"
-    assert diagnostic_result.get("releaseEligible") is False
-    # A pending diagnostic may truthfully have no current proof after rebind.
-    # Compare with its actual pointer; final-mode acceptance remains strict.
-    with zipfile.ZipFile(ARCHIVE) as archive:
-        diagnostic_proof = json.loads(archive.read("evidence/CURRENT-PROOF.json").decode("utf-8-sig"))
-    assert diagnostic_proof.get("outcome") in {"PASS", "NOT_OBSERVED"}
-    assert diagnostic_result.get("proofOutcome") == diagnostic_proof["outcome"]
-    assert diagnostic_result.get("candidateIsCurrent") is True
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory)
-        relative = "release-tooling/historical/fixture-proof/proof-start.json"
-        historical_root = (root / relative).parent
-        historical_root.mkdir(parents=True)
-        source_map = {"proofScriptSha256": "run-exact-candidate-proof.ps1", "invokeRealProductPhaseSha256": "Invoke-RealProductPhase.psm1", "invokeWpfUiAutomationSha256": "Invoke-WpfUiAutomation.ps1"}
-        provenance = {}
-        for key, name in source_map.items():
-            content = name.encode()
-            (historical_root / name).write_bytes(content)
-            provenance[key] = digest(content)
-        (root / relative).write_text(json.dumps({"provenance": provenance}), encoding="utf-8")
-        current = {"proofStartHistoricalPath": relative}
-        validate_historical_proof_sources(root, current)
-        source_path = historical_root / "run-exact-candidate-proof.ps1"
-        original = source_path.read_bytes()
-        for mutation in ("missing", "wrong"):
-            if mutation == "missing":
-                source_path.unlink()
-            else:
-                source_path.write_bytes(b"wrong historical bytes")
-            try:
-                validate_historical_proof_sources(root, current)
-            except ValueError:
-                pass
-            else:
-                raise AssertionError(f"{mutation} historical source was accepted")
-            source_path.write_bytes(original)
-    entries = final_entries()
-    full_state = read_json(entries, "evidence/current-fullrelease/run-state.json")
-    full_run_id = str(full_state["runId"])
-    terminal_l1 = read_json(entries, "evidence/current-fullrelease/l1-terminal-state.json")
-    terminal_l2 = read_json(entries, "evidence/current-fullrelease/l2-terminal-state.json")
-    candidate_tuple = {key: str(full_state["candidateHashes"][key]) for key in ("repositoryHead", "candidateCommit", "shippingInputIdentity", "releaseFingerprintId", "toolingFingerprintId")}
-    nested_validation_cases = 3
-    nested_symlink_skipped = []
-    with tempfile.TemporaryDirectory() as nested_directory:
-        nested_root = Path(nested_directory)
-        for name in ("nested-l2-terminal-observation.json",):
-            (nested_root / name).write_bytes(entries[f"evidence/current-fullrelease/{name}"])
-        _validate_nested_l2_terminal(nested_root, terminal_l2, terminal_l1, candidate_tuple, full_run_id)
-        legacy_l2 = {"expectedName": "DevFleet-E2E-Linux-01", "status": "ABSENT", "present": False, "timestampUtc": "2026-08-30T00:00:01Z", "verificationMethod": "Get-VM -Name exact returned no VM"}
-        try:
-            _validate_nested_l2_terminal(nested_root, legacy_l2, terminal_l1, candidate_tuple, full_run_id)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError("host-only L2 absence passed the nested terminal validator")
-        nested_path = nested_root / "nested-l2-terminal-observation.json"
-        valid_nested_bytes = nested_path.read_bytes()
-        valid_nested = json.loads(valid_nested_bytes)
-        for label, field, bad_value, message in (
-            ("boolean exact-match count", "exactMatchCount", False, "zero exact matches"),
-            ("boolean inventory count", "inventoryCount", True, "inventory completeness"),
-        ):
-            bad_nested = {**valid_nested, field: bad_value}
-            bad_bytes = json.dumps(bad_nested).encode()
-            nested_path.write_bytes(bad_bytes)
-            bad_terminal = {**terminal_l2, "sourceEvidenceSha256": digest(bad_bytes)}
-            try:
-                _validate_nested_l2_terminal(nested_root, bad_terminal, terminal_l1, candidate_tuple, full_run_id)
-            except ValueError as exc:
-                if message not in str(exc):
-                    raise AssertionError(f"{label} rejected for the wrong reason: {exc}") from exc
-            else:
-                raise AssertionError(f"{label} was accepted as exact nested terminal evidence")
-        backend_verification = "Multipass CLI absent; complete read-only inventories from every supported in-L1 virtualization backend"
-        duplicate_backend = {
-            **valid_nested,
-            "verification": backend_verification,
-            "inventoryCount": 2,
-            "backendInventories": [
-                {"provider": "Hyper-V", "status": "PASS", "names": ["foreign-instance", "foreign-instance"], "verification": "bounded Hyper-V inventory"},
-                {"provider": "VirtualBox", "status": "PASS", "names": [], "verification": "bounded VirtualBox inventory"},
-            ],
+cipal'],
+                                   'accountEnabled': True,
+                                   'sourceObservedUtc': auth['observedUtc']},
+            'nestedL2': auth['nestedL2'],
+            'finalL1': live['vm'],
+            'liveCheckpointInventory': live['snapshots'],
+            'adoptionAuthority': {'decision': approval['decision'],
+                                  'approvedBy': approval['approvedBy'],
+                                  'sourceSha256': digest(approval_path)},
+            'sources': {'proposalSha256': digest(proposal_path),
+                        'predecessorEvidenceSha256': digest(predecessor_path),
+                        'approvalSha256': digest(approval_path),
+                        'authenticatedGuestSha256': digest(auth_path),
+                        'nativeInventorySha256': digest(live_path),
+                        'currentTupleSha256': digest(tuple_path),
+                        'r2LedgerSha256': digest(ledger_path)},
         }
-        duplicate_bytes = json.dumps(duplicate_backend).encode()
-        nested_path.write_bytes(duplicate_bytes)
-        duplicate_terminal = {**terminal_l2, "verificationMethod": backend_verification, "sourceEvidenceSha256": digest(duplicate_bytes)}
-        try:
-            _validate_nested_l2_terminal(nested_root, duplicate_terminal, terminal_l1, candidate_tuple, full_run_id)
-        except ValueError as exc:
-            if "duplicate instance name" not in str(exc):
-                raise AssertionError(f"duplicate backend names were rejected for the wrong reason: {exc}") from exc
-        else:
-            raise AssertionError("duplicate nested backend names were accepted as complete absence evidence")
-        nested_validation_cases += 1
-        nested_path.write_bytes(valid_nested_bytes)
-        with tempfile.TemporaryDirectory() as external_directory:
-            outside = Path(external_directory) / "outside-nested-evidence.json"
-            outside.write_bytes(valid_nested_bytes)
-            nested_path.unlink()
-            try:
-                nested_path.symlink_to(outside)
-            except (OSError, NotImplementedError) as exc:
-                nested_path.write_bytes(valid_nested_bytes)
-                nested_symlink_skipped.append(f"source symlink rejection ({type(exc).__name__})")
-            else:
-                try:
-                    try:
-                        _validate_nested_l2_terminal(nested_root, terminal_l2, terminal_l1, candidate_tuple, full_run_id)
-                    except ValueError as exc:
-                        if "reparse or symlink escape" not in str(exc):
-                            raise AssertionError(f"source symlink rejected for the wrong reason: {exc}") from exc
-                    else:
-                        raise AssertionError("nested source symlink outside the FullRelease run root was accepted")
-                    nested_validation_cases += 1
-                finally:
-                    nested_path.unlink(missing_ok=True)
-                    nested_path.write_bytes(valid_nested_bytes)
-    with tempfile.TemporaryDirectory() as directory:
-        good = Path(directory) / "good.zip"
-        write_archive(entries, good)
-        validate(good, "final")
-    must_fail(
-        entries,
-        lambda e: put(
-            e,
-            "evidence/current-fullrelease/run-state.json",
-            {**read_json(e, "evidence/current-fullrelease/run-state.json"), "finalStatus": "BLOCKED"},
-        ),
-        "incomplete FullRelease remains pending and cannot validate",
+        receipt_path = receipts / receipt_file
+        _write_exclusive(receipt_path, _json_bytes(receipt))
+        receipt_hash = digest(receipt_path)
+        if fault == 'after_receipt':
+            raise RuntimeError('Injected interruption after immutable receipt')
+        pointer_value = {'schemaVersion': 1, 'contract': 'devfleet-accepted-baseline-v1',
+                         'generation': 1, 'status': 'ACCEPTED',
+                         'receiptFile': receipt_file, 'receiptSha256': receipt_hash,
+                         'checkpoint': proposal['replacement']}
+        _atomic_replace(pointer, _json_bytes(pointer_value))
+        return {'receiptFile': receipt_file, 'receiptSha256': receipt_hash,
+                'certificationCredit': False, 'passwordExpiresUtc': expires.isoformat()}
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest='command', required=True)
+    inspect = sub.add_parser('inspect')
+    inspect.add_argument('--root', required=True)
+    inspect.add_argument('--tuple')
+    adoption = sub.add_parser('adopt')
+    for flag in ('root', 'proposal', 'approval', 'auth', 'live', 'tuple', 'ledger'):
+        adoption.add_argument('--' + flag, required=True)
+    binding = sub.add_parser('rebind')
+    for flag in ('root', 'tuple', 'approval', 'ledger', 'live'):
+        binding.add_argument('--' + flag, required=True)
+    binding3 = sub.add_parser('rebind-gen3')
+    for flag in ('root', 'tuple', 'approval', 'ledger', 'live'):
+        binding3.add_argument('--' + flag, required=True)
+    binding4 = sub.add_parser('rebind-gen4')
+    for flag in ('root', 'tuple', 'approval', 'ledger', 'live'):
+        binding4.add_argument('--' + flag, required=True)
+    args = parser.parse_args()
+    if args.command == 'inspect':
+        value = accepted_baseline(args.root, read_json(args.tuple) if args.tuple else None)
+    elif args.command == 'adopt':
+        value = adopt(args.root, args.proposal, args.approval, args.auth, args.live, args.tuple,
+                      args.ledger)
+    elif args.command == 'rebind':
+        value = rebind(args.root, args.tuple, args.approval, args.ledger, args.live)
+    elif args.command == 'rebind-gen4':
+        value = rebind_gen4(args.root, args.tuple, args.approval, args.ledger, args.live)
+    else:
+        value = rebind_gen3(args.root, args.tuple, args.approval, args.ledger, args.live)
+    print(json.dumps(value, indent=2))
+
+
+if __name__ == '__main__': main()
+
+```
+
+
+## FILE: tools/compute_shipping_input_identity.py
+
+SHA256: 124fb632ac98b18e48f3b163a1568b627381c1614e93f98effce4d13d254732b | Bytes: 9809 | Git mode: 100644
+
+```
+"""Compute live and candidate shipping-input rows from the release fingerprint contract.
+
+This is release tooling: it imports the candidate-bound ``release_fingerprint``
+implementation instead of maintaining a second inclusion/mode/hash policy.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import io
+import json
+import subprocess
+import sys
+import tarfile
+import tempfile
+from pathlib import Path
+
+
+RELEASE_ARTIFACT_NAMES = frozenset({"exe", "tar", "portable", "installerSource"})
+
+
+def _fingerprint(source: Path, installer: Path, artifacts: dict[str, Path] | None = None) -> dict[str, object]:
+    tools = source / "tools"
+    previous_modules = {name: sys.modules.get(name) for name in ("release_fingerprint", "hook_modes")}
+    for name in previous_modules:
+        sys.modules.pop(name, None)
+    sys.path.insert(0, str(tools))
+    try:
+        from release_fingerprint import build_fingerprint  # type: ignore
+
+        return build_fingerprint(source, installer, artifacts)
+    finally:
+        sys.path.pop(0)
+        for name in previous_modules:
+            sys.modules.pop(name, None)
+        for name, module in previous_modules.items():
+            if module is not None:
+                sys.modules[name] = module
+
+
+def _git_commit_exists(workspace: Path, commit: str) -> None:
+    if not commit or len(commit) != 40 or any(ch not in "0123456789abcdefABCDEF" for ch in commit):
+        raise ValueError("candidate commit must be an explicit 40-character Git object ID")
+    try:
+        subprocess.run(["git", "-C", str(workspace), "cat-file", "-e", f"{commit}^{{commit}}"], check=True, capture_output=True, text=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ValueError(f"candidate commit does not resolve to a commit: {commit}") from exc
+
+
+def _materialize_candidate(workspace: Path, commit: str, artifacts: dict[str, Path] | None = None) -> tuple[dict[str, object], Path]:
+    """Materialize candidate shipping trees without changing the checkout."""
+    _git_commit_exists(workspace, commit)
+    try:
+        archive = subprocess.check_output(["git", "-C", str(workspace), "-c", "core.autocrlf=false", "archive", "--format=tar", commit, "source", "installer-source"], stderr=subprocess.STDOUT)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ValueError(f"candidate shipping tree could not be materialized: {commit}") from exc
+    staging = Path(tempfile.mkdtemp(prefix="devfleet-candidate-"))
+    try:
+        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as stream:
+            stream.extractall(staging, filter="data")
+        source, installer = staging / "source", staging / "installer-source"
+        if not source.is_dir() or not installer.is_dir():
+            raise ValueError("candidate commit has ambiguous or incomplete shipping roots")
+        return _fingerprint(source, installer, artifacts), staging
+    except Exception:
+        import shutil
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
+def _shipping_identity(fingerprint: dict[str, object]) -> str:
+    payload = {"schemaVersion": 1, "devfleetVersion": fingerprint["devfleetVersion"], "installerVersion": fingerprint["installerVersion"], "shippingModeContract": fingerprint["shippingModeContract"], "shippingInputs": fingerprint["shippingInputs"]}
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _materialization_comparison(
+    live_source: Path,
+    live_installer: Path,
+    candidate_source: Path,
+    candidate_installer: Path,
+    live: dict[str, object],
+    candidate: dict[str, object],
+) -> dict[str, object]:
+    """Classify checkout differences without weakening Git-object authority.
+
+    Only insertion of CR before an LF in a live Windows checkout is accepted
+    as a non-substantive materialization difference.  Missing files, mode
+    contract changes, versions, bare CR changes, or any other byte change are
+    substantive.
+    """
+
+    def rows(value: dict[str, object]) -> dict[str, dict[str, object]]:
+        return {
+            f"{row['root']}/{row['path']}": row
+            for row in value["shippingInputs"]  # type: ignore[index]
+        }
+
+    live_rows, candidate_rows = rows(live), rows(candidate)
+    changed = sorted(
+        path
+        for path in set(live_rows) | set(candidate_rows)
+        if live_rows.get(path) != candidate_rows.get(path)
     )
-    must_fail(entries, lambda e: [e.update({f"evidence/proof-runs/e2e-proof2-synthetic/proof-start.json": json.dumps({**read_json(e, "evidence/proof-runs/e2e-proof2-synthetic/proof-start.json"), "provenance": {**read_json(e, "evidence/proof-runs/e2e-proof2-synthetic/proof-start.json")["provenance"], "transactionId": "transaction-1", "checkpointLineageId": "lineage-1"}}).encode()})], "reused transaction/lineage")
-    must_fail(entries, lambda e: [e.update({"evidence/proof-runs/e2e-proof2-synthetic/proof-final.json": json.dumps({"runId": "wrong-run", "status": "PASS"}).encode()})], "mixed RunId")
-    must_fail(entries, lambda e: [e.update({"evidence/current-fullrelease/post-cleanup-finalization.json": json.dumps({"status": "PASS", "runId": "FullRelease-synthetic-current", "cleanupConsumed": True, "reconcileAfterCleanup": True}).encode()})], "absent liveChecks")
-    must_fail(entries, lambda e: [e.update({"evidence/current-fullrelease/post-cleanup-finalization.json": json.dumps({**read_json(e, "evidence/current-fullrelease/post-cleanup-finalization.json"), "liveChecks": {"l1ExactOff": False, "l2ExactAbsent": True}}).encode()})], "false liveChecks")
-    must_fail(entries, lambda e: [e.update({"evidence/current-fullrelease/final-cleanup.json": b"{\"status\":\"tampered\"}"})], "cleanup hash mismatch")
-    must_fail(entries, lambda e: [e.update({"evidence/l1-terminal-state.json": b"{\"state\":\"Running\"}"})], "terminal hash mismatch")
-    must_fail(entries, lambda e: e.pop("evidence/FINAL-ACCEPTANCE.json"), "omitted FINAL-ACCEPTANCE")
-    raw_path = read_json(entries, "evidence/CURRENT-STANDARD-TOKEN.json")["rawReportPath"]
-    must_fail(entries, lambda e: e.update({raw_path: e[raw_path] + b"tamper\n"}), "tampered immutable standard-token raw report")
-    must_fail(entries, lambda e: put(e, "evidence/FINAL-ACCEPTANCE.json", {**read_json(e, "evidence/FINAL-ACCEPTANCE.json"), "fullReleaseRunId": "FullRelease-stale"}), "stale FINAL-ACCEPTANCE tuple/lineage")
-    audit_report_path = read_json(entries, "evidence/CURRENT-RELEASE-AUDIT.json")["evidence"]["report"]["bundlePath"]
-    must_fail(entries, lambda e: e.update({audit_report_path: e[audit_report_path] + b"\n"}), "tampered immutable release-audit report")
-    pre_entries = copy.deepcopy(entries)
-    pre_entries.pop("evidence/FINAL-ACCEPTANCE.json")
-    pre_entries.pop("evidence/CURRENT-RELEASE-AUDIT.json")
-    for name in list(pre_entries):
-        if name.startswith("evidence/release-audits/"):
-            del pre_entries[name]
-    with tempfile.TemporaryDirectory() as directory:
-        pre_good = Path(directory) / "pre-good.zip"
-        write_archive(pre_entries, pre_good)
-        pre_result = validate(pre_good, "pre-acceptance")
-        assert pre_result["status"] == "PASS" and pre_result["releaseEligible"] is False
-    must_fail(pre_entries, lambda e: e.update({"evidence/FINAL-ACCEPTANCE.json": entries["evidence/FINAL-ACCEPTANCE.json"]}), "pre-acceptance FINAL cycle", "pre-acceptance")
-    print(json.dumps({"status": "PASS", "cases": 13 + nested_validation_cases, "skipped": nested_symlink_skipped}))
+    crlf_only_paths: list[str] = []
+    crlf_only = bool(changed)
+    for relative in changed:
+        live_row, candidate_row = live_rows.get(relative), candidate_rows.get(relative)
+        if live_row is None or candidate_row is None or live_row.get("mode") != candidate_row.get("mode"):
+            crlf_only = False
+            continue
+        root_name, path = relative.split("/", 1)
+        live_root = live_source if root_name == "source" else live_installer
+        candidate_root = candidate_source if root_name == "source" else candidate_installer
+        live_bytes = (live_root / path).read_bytes()
+        candidate_bytes = (candidate_root / path).read_bytes()
+        if live_bytes != candidate_bytes and live_bytes.replace(b"\r\n", b"\n") == candidate_bytes:
+            crlf_only_paths.append(relative)
+        else:
+            crlf_only = False
+    if (
+        live["shippingModeContract"] != candidate["shippingModeContract"]
+        or live["devfleetVersion"] != candidate["devfleetVersion"]
+        or live["installerVersion"] != candidate["installerVersion"]
+    ):
+        crlf_only = False
+    if crlf_only and len(crlf_only_paths) != len(changed):
+        crlf_only = False
+    return {
+        "lineEndingComparison": "CRLF_ONLY" if crlf_only else ("BYTE_EXACT" if not changed else "SUBSTANTIVE"),
+        "materializedChangedPaths": changed,
+        "crlfOnlyPaths": crlf_only_paths if crlf_only else [],
+        "crlfOnlyMaterialization": crlf_only,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workspace", type=Path)
+    parser.add_argument("--candidate-commit")
+    parser.add_argument("--source-root", type=Path)
+    parser.add_argument("--installer-root", type=Path)
+    parser.add_argument("--artifact", action="append", default=[], metavar="NAME=PATH")
+    args = parser.parse_args()
+    artifacts: dict[str, Path] = {}
+    for value in args.artifact:
+        name, separator, raw_path = value.partition("=")
+        if not separator or not name or not raw_path:
+            parser.error(f"artifact must be NAME=PATH: {value}")
+        if name in artifacts:
+            parser.error(f"duplicate artifact name: {name}")
+        artifacts[name] = Path(raw_path).resolve()
+    if artifacts:
+        missing = sorted(RELEASE_ARTIFACT_NAMES - set(artifacts))
+        unexpected = sorted(set(artifacts) - RELEASE_ARTIFACT_NAMES)
+        if missing or unexpected:
+            parser.error(f"artifact tuple must be exactly {sorted(RELEASE_ARTIFACT_NAMES)}; missing={missing}; unexpected={unexpected}")
+        absent = sorted(name for name, path in artifacts.items() if not path.is_file())
+        if absent:
+            parser.error(f"artifact paths must be existing files: {absent}")
+    if args.source_root and args.installer_root:
+        fingerprint = _fingerprint(args.source_root.resolve(), args.installer_root.resolve(), artifacts)
+        print(json.dumps({"shippingInputIdentity": _shipping_identity(fingerprint), "releaseFingerprintId": fingerprint["releaseFingerprintId"], "artifacts": fingerprint["artifacts"], "toolingFingerprint": fingerprint["toolingFingerprint"]}, ensure_ascii=False, separators=(",", ":")))
+        return 0
+    if not args.workspace or not args.candidate_commit:
+        parser.error("--workspace and --candidate-commit are required unless --source-root and --installer-root are supplied")
+    workspace = args.workspace.resolve()
+    live = _fingerprint(workspace / "source", workspace / "installer-source", artifacts)
+    candidate, staging = _materialize_candidate(workspace, args.candidate_commit, artifacts)
+    try:
+        comparison = _materialization_comparison(
+            workspace / "source",
+            workspace / "installer-source",
+            staging / "source",
+            staging / "installer-source",
+            live,
+            candidate,
+        )
+        candidate_fingerprint = {
+            key: value for key, value in candidate.items() if key != "toolingFingerprint"
+        }
+        payload = {
+            "liveShippingInputs": live["shippingInputs"],
+            "candidateShippingInputs": candidate["shippingInputs"],
+            "liveShippingModeContract": live["shippingModeContract"],
+            "candidateShippingModeContract": candidate["shippingModeContract"],
+            "liveVersion": live["devfleetVersion"],
+            "candidateVersion": candidate["devfleetVersion"],
+            "liveInstallerVersion": live["installerVersion"],
+            "candidateInstallerVersion": candidate["installerVersion"],
+            "liveShippingInputIdentity": _shipping_identity(live),
+            "candidateShippingInputIdentity": _shipping_identity(candidate),
+            "liveReleaseFingerprintId": live["releaseFingerprintId"],
+            "candidateReleaseFingerprintId": candidate["releaseFingerprintId"],
+            "artifacts": candidate["artifacts"],
+            "candidateFingerprint": candidate_fingerprint,
+            "liveToolingFingerprint": live["toolingFingerprint"],
+            **comparison,
+        }
+    finally:
+        import shutil
+        shutil.rmtree(staging, ignore_errors=True)
+    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
 
 ```
 
 
-## FILE: tools/validate_audit_coherence.py
+## FILE: tools/reconcile_osv_scanner.py
 
-SHA256: 13f4bfa1db5cedd99da67b211c0d18e3330d19e1291e8e027aa4152aff812b90 | Bytes: 18596 | Git mode: 100644
+SHA256: 6cb2abed1ebcf7784767c22714f398bd68935bb74ede1b4239c0b512794ab82b | Bytes: 5548 | Git mode: 100644
 
 ```
-"""Validate current release-tooling authorities without rewriting identity."""
+"""Reconcile the custom dependency gate with first-party OSV-Scanner output."""
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
-
-CURRENT_AUTHORITIES = (
-    "AUDIT-MANIFEST.json", "CURRENT-CANDIDATE.json", "finalization-state.json",
-    "outputs/final-artifact-hashes.json", "evidence/CURRENT-STATUS.json",
-    "evidence/CURRENT-GATES.json", "evidence/CURRENT-PROOF.json",
-    "evidence/FULLRELEASE-SUMMARY.json", "audit/CURRENT-HANDOFF.json",
-    "evidence/CURRENT-HANDOFF.json",
-)
-REQUIRED_SOURCE_PROOF = "release-tooling/proof-entrypoints/run-exact-candidate-proof.ps1"
-FAILED_ATTEMPT_SNAPSHOT = "audit/luna-high-failed-attempt-freeze-20260831T002237512571Z.json"
-FAILED_ATTEMPT_SNAPSHOT_SHA256 = "ac37997945b6fa5ae9326b083ee730494b2c0c2e60d4809e7b49fc9707c0caac"
-FAILED_ATTEMPT_BLOCKER = "REPLACEMENT_CANDIDATE_BINDING_MISMATCH"
+from typing import Any
 
 
-def load(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8-sig"))
+def _sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+def _scanner_packages(payload: dict[str, Any]) -> set[tuple[str, str]]:
+    packages: set[tuple[str, str]] = set()
+    for result in payload.get("results", []) or []:
+        for item in result.get("packages", []) or []:
+            package = item.get("package") or {}
+            name, version = package.get("name"), package.get("version")
+            if name and version:
+                packages.add((str(name).lower().replace("_", "-"), str(version)))
+    return packages
 
 
-def walk(value: Any, location: str) -> Iterable[tuple[str, dict[str, Any]]]:
-    if isinstance(value, dict):
-        yield location, value
-        for key, child in value.items():
-            yield from walk(child, f"{location}.{key}")
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            yield from walk(child, f"{location}[{index}]")
+def _scanner_advisories(payload: dict[str, Any]) -> list[dict[str, str]]:
+    found: list[dict[str, str]] = []
+    for result in payload.get("results", []) or []:
+        for item in result.get("packages", []) or []:
+            package = item.get("package") or {}
+            for vulnerability in item.get("vulnerabilities", []) or []:
+                if isinstance(vulnerability, dict):
+                    found.append({
+                        "id": str(vulnerability.get("id") or vulnerability.get("aliases", ["unknown"])[0]),
+                        "package": str(package.get("name") or ""),
+                        "version": str(package.get("version") or ""),
+                        "severity": str(vulnerability.get("severity") or "UNKNOWN"),
+                    })
+    return sorted(found, key=lambda item: (item["package"], item["version"], item["id"]))
 
 
-def bool_value(value: Any, location: str) -> bool:
-    if not isinstance(value, bool):
-        raise ValueError(f"{location} must be a JSON boolean")
-    return value
+def _scanner_version(scanner: Path) -> str:
+    completed = subprocess.run([str(scanner), "--version"], capture_output=True, text=True, timeout=30, check=True)
+    for line in completed.stdout.splitlines():
+        if line.lower().startswith("osv-scanner version:"):
+            return line.split(":", 1)[1].strip()
+    raise RuntimeError("OSV-Scanner version output was not recognizable")
 
 
-def git_head(root: Path) -> str:
+def reconcile(scanner: Path, lock: Path, custom_report: Path, output: Path) -> dict[str, Any]:
+    custom = json.loads(custom_report.read_text(encoding="utf-8"))
+    raw_path = output.with_name(output.name + ".scanner-raw.json")
+    version = _scanner_version(scanner)
+    command = [str(scanner), "scan", "source", "--lockfile", str(lock), "--format", "json", "--all-packages", "--output-file", str(raw_path), "--verbosity", "error"]
     try:
-        return subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL).strip()
-    except (OSError, subprocess.CalledProcessError):
-        return ""
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=180)
+        try:
+            scanner_payload = json.loads(raw_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"OSV-Scanner returned no valid JSON (exit {completed.returncode}): {completed.stderr[-1000:]}") from exc
+    finally:
+        raw_path.unlink(missing_ok=True)
+    custom_packages = {
+        (str(item["package"]).lower().replace("_", "-"), str(item["version"]))
+        for item in custom.get("packages", [])
+    }
+    scanner_packages = _scanner_packages(scanner_payload)
+    advisories = _scanner_advisories(scanner_payload)
+    errors: list[str] = []
+    if completed.returncode != 0:
+        errors.append(f"OSV-Scanner exit code {completed.returncode}: {completed.stderr[-1000:]}")
+    if custom.get("status") != "PASS":
+        errors.append(f"custom dependency gate status is {custom.get('status')!r}")
+    if custom_packages != scanner_packages:
+        errors.append(f"package inventory mismatch: custom_only={sorted(custom_packages - scanner_packages)} scanner_only={sorted(scanner_packages - custom_packages)}")
+    if advisories:
+        errors.append("independent OSV-Scanner found advisories")
+    report = {
+        "schema_version": 1,
+        "status": "PASS" if not errors else "BLOCKED",
+        "scanner": "OSV-Scanner",
+        "scanner_version": version,
+        "invocation": command,
+        "input_lock": str(lock),
+        "input_lock_sha256": _sha(lock),
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "package_count": len(scanner_packages),
+        "custom_package_count": len(custom_packages),
+        "advisories": advisories,
+        "custom_blocking_advisories": custom.get("blocking_advisories", []),
+        "allowlisted_advisories": [item for item in custom.get("packages", []) if item.get("advisories")],
+        "errors": errors,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return report
 
 
-def validate_failed_attempt_authority(root: Path, state: dict[str, Any]) -> dict[str, Any] | None:
-    snapshot_path = root / Path(*FAILED_ATTEMPT_SNAPSHOT.split("/"))
-    if not snapshot_path.is_file():
-        return None
-    if sha256(snapshot_path) != FAILED_ATTEMPT_SNAPSHOT_SHA256:
-        raise ValueError("failed replacement-attempt snapshot is missing or hash-mismatched")
-    snapshot = load(snapshot_path)
-    if snapshot.get("immutableSnapshot") is not True or snapshot.get("freezeType") != "LUNA_HIGH_FAILED_ATTEMPT_EVIDENCE_FREEZE":
-        raise ValueError("failed replacement-attempt snapshot is not immutable evidence")
-    shipping = snapshot.get("shippingIdentity") if isinstance(snapshot.get("shippingIdentity"), dict) else {}
-    archive = shipping.get("gitArchive") if isinstance(shipping.get("gitArchive"), dict) else {}
-    live = shipping.get("buildTimeLive") if isinstance(shipping.get("buildTimeLive"), dict) else {}
-    if archive.get("rowCount") != 730 or live.get("rowCount") != 730 or archive.get("identity") != "6e0bac4b4eebc83cdcd9eddda2008607ba15c8835e5c72a931792f5b83c653f4" or live.get("identity") != "3a65fd54d70fe05565ac3a32f73100ca2c81a77a4008feb361f99f229f025f8a":
-        raise ValueError("failed replacement-attempt snapshot shipping identity is invalid")
-    diff = shipping.get("normalizedRowDiff") if isinstance(shipping.get("normalizedRowDiff"), dict) else {}
-    rows = diff.get("rows")
-    if diff.get("rowCount") != 28 or diff.get("crlfOnlyRows") != 25 or diff.get("exactChangedRows") != 3 or not isinstance(rows, list) or len(rows) != 28:
-        raise ValueError("failed replacement-attempt snapshot row partition is invalid")
-    generated = {"source/CHECKSUMS.sha256", "installer-source/DevFleet.Setup/PayloadManifest.cs", "installer-source/INSTALLER-BUILD-MANIFEST.json"}
-    if {f"{r.get('root')}/{r.get('path')}" for r in rows if isinstance(r, dict) and r.get("comparison") == "CONTENT_OR_GENERATED_CHANGE"} != generated or sum(1 for r in rows if isinstance(r, dict) and r.get("comparison") == "CRLF_ONLY_NORMALIZED_EQUAL") != 25:
-        raise ValueError("failed replacement-attempt snapshot generated/CRLF partition is invalid")
-    candidate_commit = str(
-        state.get("candidate_git_commit")
-        or state.get("candidateGitCommit")
-        or state.get("candidateCommit")
-        or ""
-    ).lower()
-    failed_attempt_bound = (
-        candidate_commit == "21752fc0e50978183322204c523b40947d073aa0"
-        or str(state.get("blocker_code") or "") == FAILED_ATTEMPT_BLOCKER
-    )
-    if not failed_attempt_bound:
-        # The immutable failed-attempt snapshot is retained for historical
-        # review.  Once current authority has advanced to another candidate,
-        # it must not force the current state back to the old blocked tuple.
-        return {
-            "historicalFailedAttempt": True,
-            "historicalFailedAttemptPath": FAILED_ATTEMPT_SNAPSHOT,
-            "releaseEligible": False,
-        }
-    attempt = state.get("failed_replacement_attempt")
-    if not isinstance(attempt, dict) or attempt.get("snapshotPath") != FAILED_ATTEMPT_SNAPSHOT or attempt.get("snapshotSha256") != FAILED_ATTEMPT_SNAPSHOT_SHA256 or attempt.get("blockerCode") != FAILED_ATTEMPT_BLOCKER or attempt.get("artifactTupleValid") is not True or attempt.get("artifactTupleMatchesCandidate") is not False:
-        raise ValueError("current authority does not bind the failed replacement attempt")
-    if (state.get("candidate_is_current"), state.get("source_changed_since_candidate"), state.get("rebuild_required"), state.get("artifact_tuple_matches_candidate"), state.get("full_release_passed"), state.get("internal_promotion_allowed"), state.get("public_promotion_allowed")) != (False, True, True, False, False, False, False):
-        raise ValueError("failed replacement-attempt authority flags are not truthful")
-    if state.get("status") != "BLOCKED — USER ACTION REQUIRED" or state.get("blocker_code") != FAILED_ATTEMPT_BLOCKER:
-        raise ValueError("failed replacement-attempt status is not user-action blocked")
-    return {"status": "PASS_WITH_BLOCKER", "blockerCode": FAILED_ATTEMPT_BLOCKER, "releaseEligible": False}
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--scanner", type=Path, required=True)
+    parser.add_argument("--lock", type=Path, required=True)
+    parser.add_argument("--custom-report", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    try:
+        report = reconcile(args.scanner, args.lock, args.custom_report, args.output)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, RuntimeError) as exc:
+        print(json.dumps({"status": "BLOCKED", "error": str(exc)}))
+        return 2
+    print(json.dumps({"status": report["status"], "packages": report["package_count"], "advisories": len(report["advisories"]), "errors": len(report["errors"])}))
+    return 0 if report["status"] == "PASS" else 2
 
 
-def validate(root: Path) -> dict[str, Any]:
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+```
+
+
+## FILE: tools/release-tooling-requirements.txt
+
+SHA256: 78a660089f62dde9ed045e27020e6fd7973a0addfd638e2235d8064dcd083f60 | Bytes: 340 | Git mode: 100644
+
+```
+# Release-only dependencies for source/tools/check_dependency_advisories.py.
+# These are intentionally not part of the DevFleet product runtime.
+packaging==26.3 \
+    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+cvss==3.6 \
+    --hash=sha256:e342c6d9c7eb69d2eabbbc2768a03cabd57eb947c806e145de5b936219833ea
+
+```
+
+
+## FILE: tools/run_portable_audit_tests.py
+
+SHA256: e65e234f040d84909033ce93152a27ba0ee6948c58892cf6bcf9fe6ccb0e90d9 | Bytes: 5249 | Git mode: 100644
+
+```
+"""Run the bounded, self-contained test corpus from a clean audit extraction."""
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import importlib.util
+import shutil
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+SCRIPT_ROOT = Path(__file__).resolve().parent
+if str(SCRIPT_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_ROOT))
+
+from audit_bundle_paths import resolve_bundle_layout
+
+
+def _classify(path: str, manifest: dict) -> str:
+    for category, patterns in manifest.get("categories", {}).items():
+        if any(fnmatch.fnmatch(path, pattern) for pattern in patterns):
+            return category
+    return "UNCLASSIFIED"
+
+
+def run(root: Path) -> dict:
     root = root.resolve()
-    state_path = root / "finalization-state.json"
-    manifest_path = root / "outputs" / "final-artifact-hashes.json"
-    if not state_path.is_file() or not manifest_path.is_file():
-        raise ValueError("Current finalization state and artifact manifest are required")
-    state, manife
+    layout = resolve_bundle_layout(root)
+    if layout.bundle_root != root:
+        raise RuntimeError(f"runner root is not the extracted bundle root: {root}")
+    manifest_path = layout.release_tooling_root / "audit-test-manifest.json"
+    if not manifest_path.is_file():
+        raise RuntimeError(f"audit test manifest is missing: {manifest_path}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+    if manifest.get("entrypoint") != "release-tooling/run_portable_audit_tests.py":
+        raise RuntimeError("audit test manifest entrypoint is not canonical")
+    # The portable tests intentionally retain their repository-relative
+    # authority imports (ROOT / tools/...).  A clean audit extraction maps
+    # release tooling under release-tooling/, so stage only these two
+    # non-shipping authority helpers into the temporary extraction root.
+    compatibility_root = root / "tools"
+    compatibility_root.mkdir(parents=True, exist_ok=True)
+    for helper in ("compute_shipping_input_identity.py", "validate_release_bundle.py", "Build-AIAuditBundle.ps1"):
+        source_helper = layout.release_tooling_root / helper
+        if not source_helper.is_file():
+            raise RuntimeError(f"portable authority helper is missing from extraction: {helper}")
+        shutil.copy2(source_helper, compatibility_root / helper)
+    classifications: dict[str, dict] = {}
+    for path in sorted((root / "source/tests").glob("test_*.py")):
+        relative = path.relative_to(root).as_posix()
+        category = _classify(relative, manifest)
+        classifications[relative] = {"category": category, "status": "NOT_RUN", "reason": "not selected by bounded portable corpus"}
+    for path in manifest.get("portableTests", []):
+        if path not in classifications:
+            raise RuntimeError(f"manifest portable test is missing from extraction: {path}")
+        classifications[path] = {"category": "portable", "status": "PENDING", "reason": "selected portable test"}
+    unclassified = [path for path, record in classifications.items() if record["category"] == "UNCLASSIFIED"]
+    if unclassified:
+        raise RuntimeError(f"unclassified tests: {unclassified}")
+    for path, record in classifications.items():
+        if record["status"] == "NOT_RUN":
+            record["status"] = "SKIPPED"
+            record["reason"] = f"classified {record['category']}; required artifact/platform is not part of portable mode"
+    pytest_available = importlib.util.find_spec("pytest") is not None
+    if not pytest_available:
+        raise RuntimeError("portable test runner requires pytest in the invoking interpreter; no original .venv-test path is used")
+    selected = list(manifest["portableTests"])
+    completed = subprocess.run([sys.executable, "-m", "pytest", "-q", *selected], cwd=root, capture_output=True, text=True, timeout=300)
+    if completed.returncode:
+        raise RuntimeError(f"portable pytest collection/test failure (exit {completed.returncode}): {(completed.stdout + completed.stderr)[-4000:]}")
+    for path in selected:
+        classifications[path]["status"] = "PASS"
+        classifications[path]["reason"] = "portable test completed with the invoking interpreter"
+    return {
+        "schemaVersion": 1,
+        "status": "PASS",
+        "root": str(root),
+        "python": sys.executable,
+        "workingDirectory": str(root),
+        "portableTests": selected,
+        "tests": classifications,
+        "unexpectedCollectionFailures": [],
+        "explicitSkips": [record for record in classifications.values() if record["status"] == "SKIPPED"],
+        "nestedReleaseArchiveAssumption": False,
+        "canonicalReleaseToolingResolved": True,
+        "originalRepositoryFallback": False,
+        "pytestOutput": completed.stdout,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", type=Path, default=Path.cwd())
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args()
+    try:
+        result = run(args.root)
+    except Exception as exc:  # noqa: BLE001 - structured CLI failure is required
+        result = {"schemaVersion": 1, "status": "FAIL", "error": str(exc), "unexpectedCollectionFailures": [str(exc)]}
+        print(json.dumps(result, indent=2))
+        return 2
+    if args.output:
+        args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+```
+
+
+## FILE: tools/test_baseline_generation3.py
+
+SHA256: 801f0d7885ad41b73112c0025aee5f789d9ec3e4cbb52f650a267bca0af5a2f1 | Bytes: 11201 | Git mode: 100644
+
+```
+"""VM-free generation-3 binding tests; no proof or release credit."""
+import importlib.util
+from datetime import datetime, timedelta, timezone
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import unittest
+
+from baseline_lineage import accepted_baseline, rebind, rebind_gen3
+from validate_release_bundle import load_accepted_baseline
+from test_baseline_lineage import BaselineLineageTests, TUPLE
+
+
+class Generation3Tests(unittest.TestCase):
+    def setUp(self):
+        self.case = BaselineLineageTests(methodName='runTest')
+        self.case.setUp()
+        self.addCleanup(self.case.doCleanups)
+        self.root = self.case.root
+        first = self.case.invoke()
+        self.v2_tuple = {**TUPLE, 'repositoryHead': '7' * 40,
+                         'toolingFingerprintId': '8' * 64}
+        v2_approval = {'schemaVersion': 1, 'contract': 'devfleet-baseline-rebind-approval-v1',
+                       'decision': 'APPROVE', 'approvedBy': 'ACCOUNT_OWNER',
+                       'candidate': self.v2_tuple, 'replacement': self.case.proposal['replacement'],
+                       'previousReceiptSha256': first['receiptSha256']}
+        d1 = self.case.one_diagnostic_ledger()
+        self.v2 = rebind(self.root, self.case.write('v2-tuple.json', self.v2_tuple),
+                         self.case.write('v2-approval.json', v2_approval), d1,
+                         self.case.write('v2-live.json', self.case.live))
+        journal_path = self.root / '.agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py'
+        spec = importlib.util.spec_from_file_location('fixture_fresh_attempts', journal_path)
+        journal = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(journal)
+        self.journal = journal
+        r2 = self.root / 'r2-ledger.json'
+        snapshot = self.root / 'repair-r2-snapshot.json'
+        snapshot.write_bytes(r2.read_bytes())
+        repair_auth = self.root / 'repair-authorization.md'
+        repair_auth.write_text('separate owner-approved bounded repair successor', encoding='utf-8')
+        self.repair = self.root / 'repair-ledger.json'
+        journal.initialize(self.repair, repair_auth, [snapshot, r2], journal.REPAIR_ID)
+        self.v3_tuple = {**self.v2_tuple, 'repositoryHead': '9' * 40,
+                         'toolingFingerprintId': 'a' * 64}
+        owner = {'pid': 123, 'startUtc': datetime.now(timezone.utc).isoformat()}
+        request = {'runId': 'repair-standard-token', 'operation': 'standard-token',
+                   'owner': owner, 'tuple': self.v3_tuple, 'entrypoint': 'qualification.ps1',
+                   'entrypointSha256': 'c' * 64, 'arguments': [],
+                   'changedCondition': 'fixture qualification for exact new tuple',
+                   'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+        journal.reserve(self.repair, request)
+        qualification = self.case.write('repair-standard-token-result.json',
+                                         {'status': 'PASS_NATIVE_STANDARD_TOKEN'})
+        journal.finish(self.repair, request['runId'], owner, 0,
+                       'PASS_NATIVE_STANDARD_TOKEN', [str(qualification)])
+        self.approval = {'schemaVersion': 2, 'contract': 'devfleet-baseline-rebind-approval-v2',
+                         'decision': 'APPROVE', 'approvedBy': 'ACCOUNT_OWNER',
+                         'candidate': self.v3_tuple, 'replacement': self.case.proposal['replacement'],
+                         'previousReceiptSha256': self.v2['receiptSha256']}
+        self.tuple_path = self.case.write('v3-tuple.json', self.v3_tuple)
+        self.approval_path = self.case.write('v3-approval.json', self.approval)
+        self.live_path = self.case.write('v3-live.json', self.case.live)
+
+    def bind(self):
+        return rebind_gen3(self.root, self.tuple_path, self.approval_path,
+                           self.repair, self.live_path)
+
+    def test_exact_approved_generation3_is_independently_accepted(self):
+        before = (self.root / 'evidence/baselines/CURRENT.json').read_bytes()
+        result = self.bind()
+        self.assertEqual(result['generation'], 3)
+        self.assertEqual(result['id'], self.case.proposal['replacement']['id'])
+        self.assertNotEqual(before, (self.root / 'evidence/baselines/CURRENT.json').read_bytes())
+        self.assertEqual(accepted_baseline(self.root, self.v3_tuple)['receiptSha256'],
+                         result['receiptSha256'])
+        expected = {'repositoryHead': self.v3_tuple['repositoryHead'],
+                    'candidateCommit': self.v3_tuple['candidateBuildCommit'],
+                    'shippingInputIdentity': self.v3_tuple['shippingInputIdentity'],
+                    'releaseFingerprintId': self.v3_tuple['releaseFingerprintId'],
+                    'toolingFingerprintId': self.v3_tuple['toolingFingerprintId']}
+        self.assertEqual(load_accepted_baseline(self.root, expected,
+                                                {'exe': self.v3_tuple['candidateSha256']})['receiptSha256'],
+                         result['receiptSha256'])
+        with self.assertRaises(ValueError):
+            self.bind()
+
+    def test_wrong_approval_or_shipping_change_cannot_update_pointer(self):
+        pointer = self.root / 'evidence/baselines/CURRENT.json'
+        original = pointer.read_bytes()
+        self.approval_path.write_text(json.dumps({**self.approval, 'decision': 'PENDING'}))
+        with self.assertRaises(ValueError):
+            self.bind()
+        self.assertEqual(pointer.read_bytes(), original)
+        self.approval_path.write_text(json.dumps(self.approval))
+        self.tuple_path.write_text(json.dumps({**self.v3_tuple, 'shippingInputIdentity': 'b' * 64}))
+        with self.assertRaises(ValueError):
+            self.bind()
+        self.assertEqual(pointer.read_bytes(), original)
+
+    def test_used_successor_cannot_bind_or_rebind(self):
+        journal = self.journal
+        request = {'runId': 'repair-used', 'operation': 'diagnostic',
+                   'owner': {'pid': 123, 'startUtc': '2026-09-28T00:00:00Z'},
+                   'tuple': {'repositoryHead': 'a' * 40}, 'entrypoint': 'native-test.ps1',
+                   'entrypointSha256': 'c' * 64, 'arguments': [],
+                   'changedCondition': 'fixture', 'deadlineUtc': '2099-01-01T00:00:00Z'}
+        journal.reserve(self.repair, request)
+        with self.assertRaises(ValueError):
+            self.bind()
+
+    def test_failed_developer_qualification_cannot_bind(self):
+        ledger = json.loads(self.repair.read_text(encoding='utf-8'))
+        ledger['attempts'][0]['classification'] = 'STANDARD_TOKEN_BLOCKED'
+        ledger['attempts'][0]['exitCode'] = 2
+        self.repair.write_text(json.dumps(ledger), encoding='utf-8')
+        with self.assertRaises(ValueError):
+            self.bind()
+
+    def test_journal_writer_lock_excludes_concurrent_binding(self):
+        pointer = self.root / 'evidence/baselines/CURRENT.json'
+        before = pointer.read_bytes()
+        with self.journal.locked(self.repair):
+            with self.assertRaises(ValueError):
+                self.bind()
+        self.assertEqual(pointer.read_bytes(), before)
+
+    def test_immutable_qualification_and_inventory_sources_are_required(self):
+        self.bind()
+        pointer = json.loads((self.root / 'evidence/baselines/CURRENT.json').read_text())
+        receipt = json.loads((self.root / 'evidence/baselines/receipts' /
+                              pointer['receiptFile']).read_text())
+        expected = {'repositoryHead': self.v3_tuple['repositoryHead'],
+                    'candidateCommit': self.v3_tuple['candidateBuildCommit'],
+                    'shippingInputIdentity': self.v3_tuple['shippingInputIdentity'],
+                    'releaseFingerprintId': self.v3_tuple['releaseFingerprintId'],
+                    'toolingFingerprintId': self.v3_tuple['toolingFingerprintId']}
+        for key in ('successorLedgerSha256', 'nativeInventorySha256'):
+            source = self.root / 'evidence/baselines/sources' / (receipt[key] + '.json')
+            original = source.read_bytes()
+            source.unlink()
+            with self.assertRaises(ValueError):
+                accepted_baseline(self.root, self.v3_tuple)
+            with self.assertRaises(ValueError):
+                load_accepted_baseline(self.root, expected,
+                                       {'exe': self.v3_tuple['candidateSha256']})
+            source.write_bytes(original + b' ')
+            with self.assertRaises(ValueError):
+                load_accepted_baseline(self.root, expected,
+                                       {'exe': self.v3_tuple['candidateSha256']})
+            source.write_bytes(original)
+
+    def test_tampered_v2_chain_is_rejected(self):
+        self.bind()
+        pointer = json.loads((self.root / 'evidence/baselines/CURRENT.json').read_text())
+        predecessor = self.root / 'evidence/baselines/history' / (pointer['previousPointerSha256'] + '.json')
+        predecessor.write_bytes(predecessor.read_bytes() + b' ')
+        with self.assertRaises(ValueError):
+            accepted_baseline(self.root, self.v3_tuple)
+
+    def test_powershell_native_reader_accepts_only_exact_v3_tuple(self):
+        if not shutil.which('pwsh'):
+            self.skipTest('PowerShell 7 is unavailable')
+        self.bind()
+        tools = self.root / 'tools'
+        tools.mkdir(exist_ok=True)
+        shutil.copyfile(Path(__file__).with_name('baseline_lineage.py'),
+                        tools / 'baseline_lineage.py')
+        module = Path(__file__).resolve().parents[1] / 'automation/release-e2e/modules/BaselineLineage.psm1'
+        def quote(value):
+            return "'" + str(value).replace("'", "''") + "'"
+        script = self.root / 'probe-v3.ps1'
+        script.write_text(
+            "$ErrorActionPreference='Stop'\n"
+            f"Import-Module {quote(module)} -Force\n"
+            f"$f=Get-Content -Raw -LiteralPath {quote(self.tuple_path)}|ConvertFrom-Json\n"
+            "$fp=[pscustomobject]@{repositoryHead=$f.repositoryHead;gitCommit=$f.candidateBuildCommit;"
+            "shippingInputIdentity=$f.shippingInputIdentity;releaseFingerprintId=$f.releaseFingerprintId;"
+            "toolingFingerprintId=$f.toolingFingerprintId;candidate=[pscustomobject]@{sha256=$f.candidateSha256}}\n"
+            f"Get-DevFleetAcceptedBaseline -WorkspaceRoot {quote(self.root)} -Fingerprint $fp|ConvertTo-Json -Depth 6\n",
+            encoding='utf-8')
+        result = subprocess.run(['pwsh', '-NoProfile', '-File', str(script)],
+                                capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['generation'], 3)
+        wrong = {**self.v3_tuple, 'toolingFingerprintId': 'f' * 64}
+        self.tuple_path.write_text(json.dumps(wrong), encoding='utf-8')
+        rejected = subprocess.run(['pwsh', '-NoProfile', '-File', str(script)],
+                                  capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(rejected.returncode, 0)
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+```
+
+
+## FILE: tools/test_baseline_generation4.py
+
+SHA256: 5fda914ef2dc9fd8978149fe13b2d24d05fbe322a67e6563347908314aa4e72c | Bytes: 14749 | Git mode: 100644
+
+```
+"""VM-free generation-4 binding for a distinct signed shipping candidate."""
+from datetime import datetime, timedelta, timezone
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import unittest
+
+from baseline_lineage import accepted_baseline, rebind_gen4
+import test_baseline_generation3 as generation3
+from validate_release_bundle import load_accepted_baseline
+
+
+class Generation4Tests(unittest.TestCase):
+    def setUp(self):
+        self.case = generation3.Generation3Tests(methodName='runTest')
+        self.case.setUp()
+        self.addCleanup(self.case.doCleanups)
+        self.root = self.case.root
+        self.v3 = self.case.bind()
+        journal = self.case.journal
+        self.journal = journal
+        repair1 = self.case.repair
+        for index, (operation, classification) in enumerate(journal.REPAIR_SEQUENCE[1:], 1):
+            owner = {'pid': 123, 'startUtc': datetime.now(timezone.utc).isoformat()}
+            request = {'runId': f'repair1-{index}', 'operation': operation,
+                       'owner': owner, 'tuple': self.case.v3_tuple,
+                       'entrypoint': 'fixture.ps1', 'entrypointSha256': 'c' * 64,
+                       'arguments': [], 'changedCondition': 'fixture terminal first repair',
+                       'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+            journal.reserve(repair1, request)
+            blocked = operation == 'fullrelease'
+            journal.finish(repair1, request['runId'], owner, 2 if blocked else 0,
+                           'NATIVE_FULLRELEASE_BLOCKED' if blocked else classification, [])
+        snapshot = self.root / 'repair1-terminal-snapshot.json'
+        snapshot.write_bytes(repair1.read_bytes())
+        auth = self.root / 'repair2-authorization.md'
+        auth.write_text('owner-approved failed build-sign successor', encoding='utf-8')
+        repair2 = self.root / 'repair2-ledger.json'
+        journal.initialize(repair2, auth, [snapshot, repair1], journal.REPAIR2_ID)
+        owner = {'pid': 123, 'startUtc': datetime.now(timezone.utc).isoformat()}
+        request = {'runId': 'repair2-build-sign', 'operation': 'build-sign',
+                   'owner': owner, 'tuple': self.case.v3_tuple,
+                   'entrypoint': 'fixture.ps1', 'entrypointSha256': 'c' * 64,
+                   'arguments': [], 'changedCondition': 'fixture blocked build-sign',
+                   'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+        journal.reserve(repair2, request)
+        journal.finish(repair2, request['runId'], owner, 2, 'BUILD_SIGN_BLOCKED', [])
+        repair2_snapshot = self.root / 'repair2-terminal-snapshot.json'
+        repair2_snapshot.write_bytes(repair2.read_bytes())
+        self.repair2 = self.root / 'repair3-ledger.json'
+        auth3 = self.root / 'repair3-authorization.md'
+        auth3.write_text('owner-approved prospective repair3 successor', encoding='utf-8')
+        self.v4_tuple = {**self.case.v3_tuple,
+                         'repositoryHead': 'b' * 40,
+                         'candidateBuildCommit': journal.REPAIR3_CANDIDATE_COMMIT,
+                         'shippingInputIdentity': journal.REPAIR3_SHIPPING_SHA256,
+                         'releaseFingerprintId': 'd' * 64,
+                         'toolingFingerprintId': 'f' * 64,
+                         'candidateSha256': journal.REPAIR3_SIGNED_EXE_SHA256}
+        self.artifact_receipt = self.root / 'signed-output-inspection.json'
+        self.artifact_receipt.write_text(json.dumps({
+            'schemaVersion': 1, 'contract': 'devfleet-signed-build-output-inspection-v1',
+            'status': 'PASS_VERIFIED_SIGNED_OUTPUT_WITH_FAILED_ADMISSION',
+            'certificationCredit': False, 'repositoryHead': self.v4_tuple['candidateBuildCommit'],
+            'failedAttemptLedgerSha256': journal.digest(repair2),
+            'shippingInputIdentity': self.v4_tuple['shippingInputIdentity'],
+            'artifacts': [
+                {'name': 'exe', 'path': 'candidate.exe', 'sha256': self.v4_tuple['candidateSha256']},
+                {'name': 'tar', 'path': 'candidate.tar.gz', 'sha256': '2' * 64},
+                {'name': 'portable', 'path': 'candidate.zip', 'sha256': '3' * 64},
+                {'name': 'installerSource', 'path': 'installer.zip', 'sha256': '4' * 64}],
+            'signatureStatus': 'Valid', 'publicPromotionAllowed': False,
+            'publicPublisherTrust': False}), encoding='utf-8')
+        # The native journal pins the production receipt bytes. This isolated
+        # fixture substitutes its own deterministic receipt hash.
+        journal.REPAIR3_FAILED_LEDGER_SHA256 = journal.digest(repair2)
+        journal.REPAIR3_RECEIPT_SHA256 = journal.digest(self.artifact_receipt)
+        native_journal = self.root / '.agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py'
+        native_journal.parent.mkdir(parents=True, exist_ok=True)
+        source = Path(__file__).resolve().parents[1] / '.agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py'
+        native_text = source.read_text(encoding='utf-8')
+        native_text = native_text.replace(
+            "REPAIR3_FAILED_LEDGER_SHA256 = 'dffe7810cc2f1833ed73a9514a8a49e4d65eed67eac0bf936bf81a1c8d6521ff'",
+            f"REPAIR3_FAILED_LEDGER_SHA256 = '{journal.REPAIR3_FAILED_LEDGER_SHA256}'")
+        native_text = native_text.replace(
+            "REPAIR3_RECEIPT_SHA256 = 'b071752cc2042b3405c05856780f74bbecdc11d0c647c8b602404c73829034b6'",
+            f"REPAIR3_RECEIPT_SHA256 = '{journal.REPAIR3_RECEIPT_SHA256}'")
+        native_journal.write_text(native_text, encoding='utf-8')
+        journal.initialize(self.repair2, auth3, [repair2_snapshot, repair2], journal.REPAIR3_ID,
+                           self.artifact_receipt)
+        for index, (operation, classification) in enumerate(journal.REPAIR3_SEQUENCE[:1]):
+            owner = {'pid': 123, 'startUtc': datetime.now(timezone.utc).isoformat()}
+            request = {'runId': f'repair2-{index}', 'operation': operation,
+                       'owner': owner, 'tuple': self.v4_tuple,
+                       'entrypoint': 'fixture.ps1', 'entrypointSha256': 'c' * 64,
+                       'arguments': [], 'changedCondition': 'fixture new signed candidate',
+                       'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+            journal.reserve(self.repair2, request)
+            journal.finish(self.repair2, request['runId'], owner, 0, classification,
+                           [str(self.case.case.write(f'repair3-{index}-result.json', {'status': 'PASS'}))])
+        self.approval = {'schemaVersion': 3, 'contract': 'devfleet-baseline-rebind-approval-v3',
+                         'decision': 'APPROVE', 'approvedBy': 'ACCOUNT_OWNER',
+                         'previousCandidate': self.case.v3_tuple, 'candidate': self.v4_tuple,
+                         'shippingChangeApproved': True,
+                         'replacement': self.case.case.proposal['replacement'],
+                         'previousReceiptSha256': self.v3['receiptSha256']}
+        self.tuple_path = self.case.case.write('v4-tuple.json', self.v4_tuple)
+        self.approval_path = self.case.case.write('v4-approval.json', self.approval)
+        self.live_path = self.case.case.write(
+            'v4-live.json', {**self.case.case.live,
+                             'observedUtc': datetime.now(timezone.utc).isoformat()})
+
+    def bind(self):
+        return rebind_gen4(self.root, self.tuple_path, self.approval_path,
+                           self.repair2, self.live_path)
+
+    def validator(self):
+        expected = {'repositoryHead': self.v4_tuple['repositoryHead'],
+                    'candidateCommit': self.v4_tuple['candidateBuildCommit'],
+                    'shippingInputIdentity': self.v4_tuple['shippingInputIdentity'],
+                    'releaseFingerprintId': self.v4_tuple['releaseFingerprintId'],
+                    'toolingFingerprintId': self.v4_tuple['toolingFingerprintId']}
+        return load_accepted_baseline(self.root, expected,
+                                      {'exe': self.v4_tuple['candidateSha256']})
+
+    def test_exact_approved_shipping_transition_is_accepted(self):
+        result = self.bind()
+        self.assertEqual(result['generation'], 4)
+        self.assertEqual(result['id'], self.case.case.proposal['replacement']['id'])
+        self.assertEqual(accepted_baseline(self.root, self.v4_tuple)['receiptSha256'],
+                         result['receiptSha256'])
+        self.assertEqual(self.validator()['receiptSha256'], result['receiptSha256'])
+        with self.assertRaises(ValueError):
+            self.bind()
+
+    def test_missing_approval_and_unchanged_shipping_fail_closed(self):
+        pointer = self.root / 'evidence/baselines/CURRENT.json'
+        original = pointer.read_bytes()
+        self.approval_path.write_text(json.dumps({**self.approval, 'shippingChangeApproved': False}))
+        with self.assertRaises(ValueError):
+            self.bind()
+        self.approval_path.write_text(json.dumps(self.approval))
+        self.tuple_path.write_text(json.dumps({**self.v4_tuple,
+                                               'shippingInputIdentity': self.case.v3_tuple['shippingInputIdentity']}))
+        with self.assertRaises(ValueError):
+            self.bind()
+        self.assertEqual(pointer.read_bytes(), original)
+
+    def test_immutable_source_and_predecessor_tamper_rejected(self):
+        self.bind()
+        pointer = json.loads((self.root / 'evidence/baselines/CURRENT.json').read_text())
+        receipt = json.loads((self.root / 'evidence/baselines/receipts' / pointer['receiptFile']).read_text())
+        source = self.root / 'evidence/baselines/sources' / (receipt['successorLedgerSha256'] + '.json')
+   

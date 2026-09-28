@@ -1,620 +1,704 @@
 # DevFleet source part 034
 
 Full-source UTF-8 byte interval [1534500, 1581000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 251cf6d7fe4e2c370c087847f55c8b52a0a662e5d958a36b195b2784b1599c86
+Payload SHA-256: 17c04e34384635872a55ebb694916e180ad7c06e43338acd275f8ff309db4891
 
 <!-- BEGIN SOURCE SLICE -->
-toryResetPhraseSet -and (Set-UiTextValue -Root $window -AutomationId 'ControlPhraseBox' -Value 'DELETE DEVFLEET')){$factoryResetPhraseSet=$true;$actions+=[ordered]@{name='factory-reset-control-plane-confirmation';result='SET_EXACT_REVIEWED_SCOPE'}}
-            }
-            $button=$buttons|Where-Object{$_.Current.IsEnabled -and $_.Current.Name -match '^(Next|Continue)$'}|Select-Object -First 1;if(-not $button){break};$button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke();$actions+=[ordered]@{name='navigation';result='INVOKED';label=$button.Current.Name};Start-Sleep -Milliseconds 600;$all=Get-UiElements $window;$buttons=@($all|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button})
-        }
-        $visible=@($all|ForEach-Object{$_.Current.Name}|Where-Object{$_})
-        if($AllowMutation){
-            $execute=$buttons|Where-Object{$_.Current.IsEnabled -and $_.Current.Name -match 'Execute verified plan'}|Select-Object -First 1;if(-not $execute){throw "Action $Action never exposed the reviewed execute control."}
-            $execute.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke();$actions+=[ordered]@{name='execute';result='INVOKED'};Start-Sleep -Seconds 2
-            $root=[System.Windows.Automation.AutomationElement]::RootElement;$yes=$null;$confirmDeadline=Get-MinDeadline ((Get-Date).ToUniversalTime().AddSeconds(10))
-            while((Get-Date).ToUniversalTime() -lt $confirmDeadline -and -not $yes){$yes=@($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.IsEnabled -and $_.Current.Name -eq 'Yes' -and $_.Current.ProcessId -eq $process.Id}|Select-Object -First 1);if(-not $yes){Start-Sleep -Milliseconds 500}}
-            if($yes){$yes.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke();$actions+=[ordered]@{name='confirmation';result='INVOKED'}}else{
-                $dialog=[DevFleetE2EWin32]::FindWindow('#32770','Confirm exact plan');if($dialog -eq [IntPtr]::Zero){throw 'The exact native confirmation dialog was not found.'}
-                $dialogProcessId=0;[void][DevFleetE2EWin32]::GetWindowThreadProcessId($dialog,[ref]$dialogProcessId);if($dialogProcessId -ne [uint32]$process.Id){throw 'The native confirmation dialog was not owned by the exact candidate process.'}
-                $yesButton=[IntPtr]::Zero;$child=[IntPtr]::Zero;do{$child=[DevFleetE2EWin32]::FindWindowEx($dialog,$child,$null,$null);if($child -eq [IntPtr]::Zero){break};$classBuffer=[Text.StringBuilder]::new(128);$captionBuffer=[Text.StringBuilder]::new(128);[void][DevFleetE2EWin32]::GetClassName($child,$classBuffer,$classBuffer.Capacity);[void][DevFleetE2EWin32]::GetWindowText($child,$captionBuffer,$captionBuffer.Capacity);if($classBuffer.ToString() -eq 'Button' -and ([DevFleetE2EWin32]::GetDlgCtrlID($child) -eq 6 -or ($captionBuffer.ToString() -replace '&','').Trim() -eq 'Yes')){$yesButton=$child;break}}while($true)
-                if($yesButton -eq [IntPtr]::Zero){[void][DevFleetE2EWin32]::SendMessage($dialog,0x0111,[IntPtr]6,[IntPtr]::Zero);$confirmationResult='NATIVE_IDYES_EXACT_DIALOG_PROCESS_VERIFIED'}else{$buttonProcessId=0;[void][DevFleetE2EWin32]::GetWindowThreadProcessId($yesButton,[ref]$buttonProcessId);if($buttonProcessId -ne [uint32]$process.Id){throw 'The native Yes button was not owned by the exact candidate process.'};[void][DevFleetE2EWin32]::SendMessage($yesButton,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero);$confirmationResult='NATIVE_YES_EXACT_PROCESS_VERIFIED'}
-                $confirmationVerified=$false;$verifyDeadline=Get-MinDeadline ((Get-Date).ToUniversalTime().AddSeconds(10));while((Get-Date).ToUniversalTime() -lt $verifyDeadline){if(-not [DevFleetE2EWin32]::IsWindow($dialog)){$confirmationVerified=$true;break};Start-Sleep -Milliseconds 250};if(-not $confirmationVerified){throw 'The exact candidate confirmation dialog did not demonstrably close.'};$actions+=[ordered]@{name='confirmation';result=$confirmationResult}
-            }
-            $semanticProgressSequence++
-            [void](Write-BoundaryCheckpoint -Phase 'EXECUTION_INVOKED' -Status 'PASS' -Detail @{candidatePid=$process.Id;semanticProgressSequence=$semanticProgressSequence;semanticProgressKind='PRODUCT_EXECUTION_ACCEPTED'})
-        }
-    }
+t path.is_symlink() and not path.parent.is_symlink(), "FIXTURE_EDIT_PATH_UNSAFE")
+        original = path.read_bytes()
+        require(len(original) < 65536, "FIXTURE_EDIT_SOURCE_TOO_LARGE")
+        entry = {"relative": relative, "originalBase64": base64.b64encode(original).decode("ascii"),
+                 "originalSha256": hashlib.sha256(original).hexdigest(), "replacementSha256": hashlib.sha256(replacement).hexdigest()}
+        self.state["temporaryEdits"].append(entry)
+        self.save()
+        path.write_bytes(replacement)
+        body_failure = None
+        try:
+            yield
+        except BaseException as exc:
+            body_failure = exc
+            raise
+        finally:
+            try:
+                require(not path.is_symlink() and digest(path) == entry["replacementSha256"], "FIXTURE_EDIT_CHANGED_EXTERNALLY")
+                path.write_bytes(original)
+                self.state["temporaryEdits"].remove(entry)
+                self.save()
+            except Exception as cleanup_exc:
+                if body_failure is None:
+                    raise
+                self.record_failure(body_failure)
+                self.record_failure(cleanup_exc, cleanup=True)
 
-    if($AllowMutation){
-        if($UseDurableCompletionFallback){
-            $handoffBasis=if($TransactionId){'EXACT_TRANSACTION_PRODUCT_OBSERVER_HANDOFF'}else{'GENERATION_ZERO_PRODUCT_OBSERVER_HANDOFF'}
-            $result=[ordered]@{status='OBSERVER_HANDOFF';terminal=$true;completionVerified=$false;durableCompletionPending=$false;ownershipTransferVerified=$true;productOutcomeClaimed=$false;handoffBasis=$handoffBasis;observerContract='Wait-DevFleetProductLifecycleTransition';handoffExecutionState=if($executionAlreadyStarted){'EXACT_IN_FLIGHT_OBSERVED'}else{'EXACT_EXECUTION_INVOKED'}}
-            $cleanupDisposition='RELINQUISH_LIFECYCLE_OWNER'
-        }else{
-            $completeDeadline=ConvertTo-WpfUtcInstant $ObserverDeadlineUtc;$completed=$false;$failed=$false;$rebootRequired=$false;$windowLostSince=$null;$lastProductStatus=''
-            while((Get-Date).ToUniversalTime() -lt $completeDeadline){
-                $process.Refresh();$windowHandle=[IntPtr]$process.MainWindowHandle;$windowOwner=0;if($windowHandle -ne [IntPtr]::Zero){[void][DevFleetE2EWindowProbe]::GetWindowThreadProcessId($windowHandle,[ref]$windowOwner)};$windowValid=$windowHandle -ne [IntPtr]::Zero -and [DevFleetE2EWindowProbe]::IsWindow($windowHandle) -and $windowOwner -eq [uint32]$process.Id
-                if($process.HasExited -or -not $windowValid){if(-not $windowLostSince){$windowLostSince=(Get-Date).ToUniversalTime()}elseif((((Get-Date).ToUniversalTime())-$windowLostSince).TotalSeconds -ge 5){throw "Candidate UI window disappeared during completion polling; processExited=$([bool]$process.HasExited); candidatePid=$($process.Id)."}}else{$windowLostSince=$null}
-                $all=Get-UiElements $window;$visible=@($all|ForEach-Object{$_.Current.Name}|Where-Object{$_});$diagnostics=Get-UiDiagnosticValues $window
-                $statusElement=@($all|Where-Object{$_.Current.AutomationId -eq 'OperationStatus'}|Select-Object -First 1);$productStatus=if($statusElement){[string]$statusElement.Current.Name}else{''}
-                if($productStatus -and $productStatus -cne $lastProductStatus){$lastProductStatus=$productStatus;$semanticProgressSequence++;[void](Write-BoundaryCheckpoint -Phase 'PRODUCT_STATUS_CHANGED' -Status 'SEMANTIC_PROGRESS' -Detail @{candidatePid=$process.Id;operationStatus=$productStatus;semanticProgressSequence=$semanticProgressSequence;semanticProgressKind='PRODUCT_STATUS_CHANGED'})}
-                $completed=@($visible|Where-Object{$_ -eq 'Completed and verified'}).Count -gt 0;$rebootRequired=@($visible|Where-Object{$_ -eq 'Reboot required; checkpoint preserved'}).Count -gt 0;$failed=@($visible|Where-Object{$_ -match 'Failed|FAILED|error|blocked'}).Count -gt 0
-                if($completed -or $rebootRequired -or $failed){break};Start-Sleep -Seconds 3
-            }
-            if($failed){$result=[ordered]@{status='PRODUCT_FAILURE';terminal=$true;completionVerified=$false;failureClass='PRODUCT_UI_FAILURE';error='Candidate UI reported a product failure.'};$cleanupDisposition='CLEANUP_EXACT_CANDIDATE'}
-            elseif($rebootRequired -and $AllowRebootRequired){$result=[ordered]@{status='REBOOT_REQUIRED';terminal=$true;completionVerified=$false;rebootRequired=$true};$cleanupDisposition='RELINQUISH_VERIFIED_PENDING'}
-            elseif($completed){$actions+=[ordered]@{name='completion';result='VERIFIED'};$result=[ordered]@{status='PASS';terminal=$true;completionVerified=$true};$cleanupDisposition='CLEANUP_EXACT_CANDIDATE'}
-            else{throw "Action $Action exhausted its inherited deadline without a terminal product state."}
+    def u05(self) -> None:
+        self.begin("U05")
+        before = self.identity()
+        existing_names = {path.name for path in self.store.workspaces.iterdir()}
+        # A failed or malformed return still requires explicit parent cleanup;
+        # never silently claim that an unobserved recovery produced no files.
+        self.state["recoveryUnverified"] = True
+        self.save()
+        result = self.operation("restore-vault", page=f"/projects/{self.fixture['slug']}?tab=backups")
+        copy = self.store.verify_copy(result.get("result"), self.fixture, self.request["execution"])
+        require(copy.name not in existing_names, "RESTORE_COPY_OVERWROTE_EXISTING_PATH")
+        self.fixture["recoveredPath"] = str(copy)
+        self.state["ledger"].append({"kind": "recovered-copy", "path": str(copy)})
+        self.state["recoveryUnverified"] = False
+        self.save()
+        after = self.identity()
+        require(all(before.get(key) == after.get(key) for key in ("project_id", "slug", "runtime_id", "deployment_id", "host_id")),
+                "ORIGINAL_CHANGED_DURING_COPY")
+        # The unadopted copy must be rejected synchronously, before admission to
+        # the asynchronous worker pool. No positive action form exists for it.
+        page = self.ui.page(f"/projects/{self.fixture['slug']}")
+        require(page.csrf, "RECOVERED_COPY_PROBE_CSRF_MISSING")
+        operations_before = self.store.operation_ids()
+        copy_start_route = f"/projects/{copy.name}/start"
+        rejected = self.ui.request("POST", copy_start_route, {"csrf_token": page.csrf})
+        require(rejected.status == 409, "RECOVERED_COPY_START_NOT_REJECTED")
+        operations_after = self.store.operation_ids()
+        require(operations_before == operations_after, "RECOVERED_COPY_OPERATION_WAS_CREATED")
+        copy_start = {"route": copy_start_route, "httpStatus": 409, "operationCreated": False,
+                      "beforeInventorySha256": hashlib.sha256(canonical(operations_before)).hexdigest(),
+                      "afterInventorySha256": hashlib.sha256(canonical(operations_after)).hexdigest()}
+        self.store.verify_copy(str(copy), self.fixture, self.request["execution"])
+        require(not any((item.get("State") or {}).get("Running") for item in self.probe.containers(self.fixture["projectId"])),
+                "RECOVERED_COPY_STARTED_WRITER")
+        compose = self.original() / "compose.yaml"
+        text = compose.read_text(encoding="utf-8")
+        # Existing harmless security corpus: unsupported execution field. This
+        # never requests privileged mode, a host path, or any actual host resource.
+        require(re.search(r"(?m)^  [A-Za-z0-9_-]+:\s*$", text), "GENERIC_COMPOSE_SHAPE_UNEXPECTED")
+        edited = re.sub(r"(?m)^(  [A-Za-z0-9_-]+:\s*)$", r"\1\n    future_execution_field: true", text, count=1)
+        with self.fixture_edit("compose.yaml", edited.encode("utf-8")):
+            failed = self.operation("start", expected="failed")
+            require("security analyzer" in str(failed.get("error", "")).lower(), "SECURITY_FIXTURE_WRONG_FAILURE")
+            require(not self.probe.containers(self.fixture["projectId"]), "SECURITY_FIXTURE_CREATED_CONTAINER")
+        lease = read_json(self.original() / ".devfleet" / "ownership-lease.json")
+        foreign = {**lease, "active": True, "active_node": "df-accept-foreign-" + self.fixture["slug"][-12:]}
+        with self.fixture_edit(".devfleet/ownership-lease.json", canonical(foreign)):
+            failed = self.operation("start", expected="failed")
+            require("ownership lease" in str(failed.get("error", "")).lower(), "OWNERSHIP_FIXTURE_WRONG_FAILURE")
+            require(not self.probe.containers(self.fixture["projectId"]), "OWNERSHIP_FIXTURE_CREATED_CONTAINER")
+        self.operation("start")
+        self.operation("health")
+        runtime = self.wait_healthy()
+        self.store.verify_copy(str(copy), self.fixture, self.request["execution"])
+        self.assert_no_pending()
+        self.complete("U05", {**runtime, "recoveredPath": str(copy), "copyAdopted": False, "copyStart": copy_start,
+                              "sentinelSha256": self.fixture["sentinelSha256"]})
+
+    def resume(self, credentials: tuple[str, str]) -> None:
+        require(self.state.get("prepared") is True and not self.state.get("resumed") and not self.state.get("failure"),
+                "RESUME_NOT_PREPARED")
+        require(self.state["cleanup"]["status"] == "NOT_RUN", "RESUME_ALREADY_CLEANED")
+        preflight = self.probe.preflight(self.request)
+        previous, current = self.state["serviceBeforeRestart"], preflight["service"]
+        require(previous["bootId"] == current["bootId"], "UNEXPECTED_GUEST_REBOOT")
+        require(previous["invocationId"] != current["invocationId"], "SERVICE_RESTART_NOT_OBSERVED")
+        self.ui.login(*credentials)
+        self.identity()
+        self.operation("health")
+        runtime = self.wait_healthy()
+        self.assert_no_pending()
+        self.complete("U03", {**runtime, "serviceBefore": previous, "serviceAfter": current,
+                              "sentinelSha256": self.fixture["sentinelSha256"]})
+        self.u04()
+        self.u05()
+        self.state["resumed"] = True
+        self.save()
+
+    def restore_edits(self) -> None:
+        for edit in list(reversed(self.state["temporaryEdits"])):
+            require(edit["relative"] in {"compose.yaml", ".devfleet/ownership-lease.json"}, "CLEANUP_EDIT_INVALID")
+            path = self.original() / edit["relative"]
+            require(path.is_file() and not path.is_symlink() and not path.parent.is_symlink(), "CLEANUP_EDIT_PATH_UNSAFE")
+            original = base64.b64decode(edit["originalBase64"], validate=True)
+            require(hashlib.sha256(original).hexdigest() == edit["originalSha256"], "CLEANUP_EDIT_HASH_INVALID")
+            require(digest(path) in {edit["replacementSha256"], edit["originalSha256"]}, "CLEANUP_EDIT_CHANGED_EXTERNALLY")
+            path.write_bytes(original)
+            self.state["temporaryEdits"].remove(edit)
+            self.save()
+
+    def discover_backup_fixtures(self) -> None:
+        """Account for an archive written before a broker/operation failure."""
+        if not self.state.get("backupDiscoveryRequired"):
+            return
+        root = self.store.runtime / "workspace-backups"
+        if not root.exists():
+            return
+        require(root.is_dir() and not root.is_symlink(), "CLEANUP_BACKUP_ROOT_UNSAFE")
+        baseline = set(self.state["backupBaseline"])
+        for directory in root.iterdir():
+            if directory.name in baseline or not directory.name.startswith(self.fixture["slug"] + "-"):
+                continue
+            manifest = read_json(directory / "manifest.json")
+            require(manifest.get("project_id") == self.fixture["projectId"] and manifest.get("slug") == self.fixture["slug"],
+                    "CLEANUP_NEW_BACKUP_NOT_OWNED")
+            meta = {"backup_id": directory.name, "backup_path": str(directory / (self.fixture["slug"] + ".tar.gz")),
+                    "backup_sha256": manifest.get("workspace", {}).get("archive_sha256")}
+            evidence = self.store.verify_backup(meta, self.fixture)
+            if evidence["path"] not in {entry["path"] for entry in self.state["ledger"]}:
+                self.state["ledger"].append(evidence)
+                self.save()
+
+    def cleanup(self) -> None:
+        cleanup = self.state["cleanup"]
+        if cleanup["status"] == "PASS":
+            return
+        require(self.fixture.get("projectId") and self.fixture.get("owner"), "CLEANUP_FIXTURE_NOT_BOUND")
+        self.remove_collision()
+        self.restore_edits()
+        # Never delete a path while an accepted asynchronous operation can still
+        # mutate it. A failed/expired operation is not evidence its worker died.
+        for entry in self.state["operations"]:
+            value = self.ui.json("/ui/operations/" + entry["id"])
+            require(value.get("state") in {"completed", "failed"}, "CLEANUP_OPERATION_NOT_QUIESCENT")
+        original = Path(self.fixture["originalPath"])
+        if original.exists():
+            self.identity()
+            if self.probe.containers(self.fixture["projectId"]):
+                # Cleanup is still an authenticated product operation, including
+                # partially failed starts where the rendered stop button is absent.
+                self.operation("stop", negative_fixture=True)
+        require(not self.probe.containers(self.fixture["projectId"]), "CLEANUP_CONTAINERS_REMAIN")
+        require(not self.state.get("recoveryUnverified"), "CLEANUP_UNVERIFIED_RECOVERY_REQUIRES_PARENT")
+        require(not self.state.get("quarantineUnverified"), "CLEANUP_UNVERIFIED_QUARANTINE_REQUIRES_PARENT")
+        self.discover_backup_fixtures()
+        for entry in reversed(self.state["ledger"]):
+            path = Path(entry["path"])
+            if not path.exists():
+                cleanup["resources"].append({"kind": entry["kind"], "path": str(path), "status": "ABSENT"})
+                continue
+            if entry["kind"] == "backup":
+                require(path.parent == self.store.runtime / "workspace-backups" and not path.is_symlink(),
+                        "CLEANUP_BACKUP_PATH_INVALID")
+                manifest = read_json(path / "manifest.json")
+                require(digest(path / "manifest.json") == entry["manifestSha256"]
+                        and manifest.get("project_id") == self.fixture["projectId"]
+                        and manifest.get("backup_id") == entry["backupId"], "CLEANUP_BACKUP_IDENTITY_MISMATCH")
+                require(not any(item.is_symlink() for item in path.rglob("*")), "CLEANUP_TREE_SYMLINK_REJECTED")
+                shutil.rmtree(path)
+            else:
+                self.store.remove_owned_tree(path, self.fixture)
+            require(not path.exists(), "CLEANUP_RESOURCE_REMAINS")
+            cleanup["resources"].append({"kind": entry["kind"], "path": str(path), "status": "REMOVED"})
+            self.save()
+        cleanup["status"] = "PASS"
+        self.save()
+
+    def record_failure(self, exc: BaseException, *, cleanup: bool = False) -> None:
+        code = exc.code if isinstance(exc, AcceptanceError) else "UNEXPECTED_DRIVER_FAILURE"
+        if cleanup:
+            self.state["cleanupFailure"] = self.state["cleanupFailure"] or {"code": code}
+            self.state["cleanup"]["status"] = "BLOCKED"
+            self.state["cleanup"]["errors"].append(code)
+        elif self.state["failure"] is None:
+            self.state["failure"] = {"code": code, "journey": self.state["currentJourney"]}
+            for row in self.state["journeys"]:
+                if row["id"] == self.state["currentJourney"] and row["status"] != "PASS":
+                    row["status"] = "BLOCKED"
+        self.save()
+
+    def report(self, stage: str) -> dict[str, Any]:
+        passed = (self.state["resumed"] and self.state["cleanup"]["status"] == "PASS"
+                  and not self.state["failure"] and not self.state["cleanupFailure"]
+                  and all(row["status"] == "PASS" and row["assertions"] == {key: True for key in ASSERTIONS[row["id"]]}
+                          for row in self.state["journeys"])
+                  and {row["id"] for row in self.state["journeys"]} == set(ASSERTIONS)
+                  and len(self.state["journeys"]) == 5)
+        prepared = self.state["prepared"] and not self.state["failure"] and not self.state["cleanupFailure"] and stage == "prepare"
+        fixture = {key: self.fixture[key] for key in ("slug", "projectId", "sentinelSha256", "originalPath", "recoveredPath")
+                   if key in self.fixture}
+        result = {
+            "schemaVersion": 1, "contract": CONTRACT, "status": "PASS" if passed else "PREPARED" if prepared else "BLOCKED",
+            "stage": stage, "runId": self.request["runId"], "phaseId": "REAL-USE-ACCEPTANCE",
+            "candidate": self.request["candidate"],
+            "execution": {**self.request["execution"], "uiTransport": "authenticated-http-form",
+                          "browserJavascriptExercised": False},
+            "runnerSha256": self.request["runnerSha256"], "startedAtUtc": self.state["startedAtUtc"],
+            "finishedAtUtc": utc_now(), "deadlineUtc": self.request["deadlineUtc"],
+            "journeys": self.state["journeys"], "operations": self.state["operations"], "fixture": fixture,
+            "cleanup": self.state["cleanup"], "failure": self.state["failure"], "cleanupFailure": self.state["cleanupFailure"],
         }
-    } else {$result=[ordered]@{status='PASS';terminal=$true;completionVerified=$true};$cleanupDisposition='CLEANUP_EXACT_CANDIDATE'}
-    $sequence++
-    foreach($pair in ([ordered]@{schemaVersion=2;contract='devfleet-wpf-terminal-v2';runId=$RunId;launchId=$LaunchId;transactionId=$TransactionId;payloadSha256=$PayloadSha256;candidateSha256=$candidateHash;sequence=$sequence;phase='WPF';lastDurableStep=if($executionAlreadyStarted){'ALREADY_RUNNING_OBSERVED'}elseif($AllowMutation){'EXECUTION_INVOKED'}else{'WINDOW_ACQUIRED'};launchMode=$LaunchMode;elevatedResume=[bool]$ElevatedResume;action=$Action;role=$Role;processId=[int]$process.Id;processStartTime=$actualStartUtc.ToString('o');sessionId=[int]$process.SessionId;driverPid=$driverPid;driverSessionId=$driverSessionId;driverIdentity=(Get-ProcessIdentityEvidence $driverPid $driverSessionId);candidateIdentity=(Get-ProcessIdentityEvidence $process.Id $process.SessionId);windowTitle=[string]$window.Current.Name;visibleNames=@($visible);actions=@($actions);diagnostics=@($diagnostics);mutationInvoked=([bool]$AllowMutation -and -not [bool]$executionAlreadyStarted);executionAlreadyStarted=[bool]$executionAlreadyStarted;candidateArguments=@($candidateArguments);cleanupDisposition=$cleanupDisposition;deadlineUtc=$ObserverDeadlineUtc;timestampUtc=(Get-Date).ToUniversalTime().ToString('o')}).GetEnumerator()){$result[$pair.Key]=$pair.Value}
-    Write-WpfAtomicJson -Path $OutputPath -Value $result
-    exit $(if([string]$result.status -in @('PASS','REBOOT_REQUIRED','OBSERVER_HANDOFF')){0}else{3})
-} catch {
-    $primary=New-MinimalTerminal -Status 'OBSERVER_FAILURE' -FailureClass 'UIA_WORKER_FAILURE' -ErrorMessage $_.Exception.Message -LastStep $(if($sequence -gt 0){'UIA_BOUNDARY'}else{'LAUNCH_ACKNOWLEDGED'})
-    Write-WpfAtomicJson -Path $OutputPath -Value $primary
-    # Diagnostic enrichment is deliberately after the primary atomic report.
-    try {
-        $snapshot=@();if($window){$snapshot=@(Get-UiElements $window|ForEach-Object{[ordered]@{name=[string]$_.Current.Name;controlType=[string]$_.Current.ControlType.ProgrammaticName;enabled=[bool]$_.Current.IsEnabled;automationId=[string]$_.Current.AutomationId;processId=[int]$_.Current.ProcessId}})}
-        Write-WpfAtomicJson -Path ($OutputPath+'.diagnostic.json') -Value ([ordered]@{status='DIAGNOSTIC';primaryError=$_.Exception.Message;uiSnapshot=$snapshot;actions=$actions;visibleNames=$visible;timestampUtc=(Get-Date).ToUniversalTime().ToString('o')})
-    } catch {}
-    exit 2
-}
+        all_secrets = self.ui.secret_values + self.ui.transport.secrets()
+        return redact(result, all_secrets)
+
+    def execute(self, stage: str, credentials: tuple[str, str]) -> dict[str, Any]:
+        try:
+            if stage == "prepare":
+                self.prepare(credentials)
+            elif stage == "resume":
+                self.resume(credentials)
+            else:
+                self.probe.preflight(self.request)
+                self.ui.login(*credentials)
+        except Exception as exc:
+            self.record_failure(exc)
+        if stage != "prepare" or self.state["failure"]:
+            try:
+                if self.fixture.get("projectId") and self.fixture.get("owner"):
+                    self.cleanup()
+                elif self.fixture:
+                    raise AcceptanceError("CLEANUP_PARTIAL_CREATE_REQUIRES_PARENT")
+            except Exception as exc:
+                self.record_failure(exc, cleanup=True)
+        return self.report(stage)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--stage", required=True, choices=("prepare", "resume", "cleanup"))
+    parser.add_argument("--input", required=True, type=Path)
+    parser.add_argument("--state", required=True, type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args(argv)
+    result: dict[str, Any]
+    try:
+        require(args.input.resolve() not in {args.state.resolve(), args.output.resolve()}
+                and args.state.resolve() != args.output.resolve(), "INPUT_OUTPUT_PATH_COLLISION")
+        request = normalized_request(read_json(args.input), digest(Path(__file__)))
+        require(args.stage != "prepare" or not args.state.exists(), "PREPARE_STATE_ALREADY_EXISTS")
+        state = read_json(args.state) if args.stage != "prepare" else None
+        dashboard = Dashboard(HttpTransport(request["baseUrl"]), instant(request["deadlineUtc"]))
+        runner = AcceptanceRunner(request, args.state, dashboard, NativeProbe(), state=state)
+        credentials = (os.environ.get("DEVFLEET_ADMIN_USER", ""), os.environ.get("DEVFLEET_ADMIN_PASSWORD", ""))
+        result = runner.execute(args.stage, credentials)
+    except Exception as exc:
+        result = {"schemaVersion": 1, "contract": CONTRACT, "status": "BLOCKED", "stage": args.stage,
+                  "phaseId": "REAL-USE-ACCEPTANCE",
+                  "failure": {"code": exc.code if isinstance(exc, AcceptanceError) else "DRIVER_INITIALIZATION_FAILED"},
+                  "cleanup": {"status": "NOT_RUN", "ownedOnly": True}}
+    try:
+        write_json(args.output, result)
+    except Exception:
+        # No traceback, command line, secret-containing response or raw exception.
+        print(json.dumps({"status": "BLOCKED", "failure": {"code": "EVIDENCE_WRITE_FAILED"}}))
+        return 1
+    print(json.dumps({"status": result["status"], "contract": CONTRACT, "stage": args.stage,
+                      "evidenceSha256": digest(args.output)}, sort_keys=True))
+    return 0 if result["status"] in {"PASS", "PREPARED"} else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 
 ```
 
 
-## FILE: automation/release-e2e/modules/executors/WpfLaunchContract.psm1
+## FILE: automation/release-e2e/modules/executors/Invoke-SecurityPoisonPhase.ps1
 
-SHA256: 613270ead8d20ae457b4a64569d0d9db985f317d2bc82fd34ad60a80f3a417e5 | Bytes: 43448 | Git mode: 100644
+SHA256: 38c5bd51d2b597f37d3cf5df55fe821c9d0064bcb6b601853b8e3fd4fae63821 | Bytes: 5408 | Git mode: 100644
 
 ```
-Set-StrictMode -Version Latest
-$script:WpfAbandonedProviderCalls=New-Object System.Collections.ArrayList
-
-function Get-WpfContractValue {
-    param([AllowNull()][object]$Value, [Parameter(Mandatory)][string]$Name)
-    if ($null -eq $Value) { return $null }
-    if ($Value -is [System.Collections.IDictionary]) {
-        foreach ($key in $Value.Keys) { if ([string]$key -ieq $Name) { return $Value[$key] } }
-        return $null
+[CmdletBinding()]
+param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
+$ErrorActionPreference='Stop'
+$context=$ContextJson|ConvertFrom-Json -ErrorAction Stop
+$workspace=(Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+$candidatePath=[string]$context.candidate.candidate.path
+$candidateItem=Get-Item -LiteralPath $candidatePath -ErrorAction Stop
+$candidateSha=(Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash.ToLowerInvariant()
+if($candidateSha -ne [string]$context.candidate.candidate.sha256 -or [int64]$candidateItem.Length -ne [int64]$context.candidate.candidate.bytes){throw 'Security-Poison exact candidate changed before adversarial execution.'}
+$candidateTuple=[ordered]@{releaseFingerprintId=[string]$context.candidate.releaseFingerprintId;toolingFingerprintId=[string]$context.candidate.toolingFingerprintId;gitCommit=[string]$context.candidate.gitCommit;exeSha256=$candidateSha;exeBytes=[int64]$candidateItem.Length}
+$runDir=[string]$context.runDir;New-Item -ItemType Directory -Force -Path $runDir|Out-Null
+$python=if(Test-Path -LiteralPath (Join-Path $workspace '.venv-test\Scripts\python.exe')){(Join-Path $workspace '.venv-test\Scripts\python.exe')}else{(Get-Command python.exe -ErrorAction Stop).Source}
+$scenarioDefinitions=@(
+    [ordered]@{id='DEPENDENCY-TRUST';command='tests/test_installed_dependency_authenticity.py tests/test_v1211_release_contract.py';reason='canonical redirect and exact signer policy plus bootstrap boundary tests'},
+    [ordered]@{id='PROVISIONING-OWNERSHIP';command='automation/release-e2e/tests/Test-SecurityPoisonHostAgent.ps1';reason='real inter-process registry stress and same-name collision fixture'},
+    [ordered]@{id='HOST-AGENT-PROTOCOL';command='tests/test_host_transport.py tests/test_host_agent_integration.py';reason='real local signed endpoint, tamper binding, and authenticated error responses'},
+    [ordered]@{id='PROJECT-MUTATION-AUTHORITY';command='tests/test_project_safety.py tests/test_v126_dynamic_vm_hotfix.py';reason='missing/foreign identity and address-only readiness fail-closed tests'},
+    [ordered]@{id='SSH-READINESS';command='tests/test_v126_dynamic_vm_hotfix.py tests/test_v124_vm_creation_ssh.py';reason='proof-bearing connection state is required before workspace readiness'},
+    [ordered]@{id='SECURITY-CONFIGURATION';command='tests/test_security_config.py tests/test_configuration.py';reason='malformed and unsafe policy fixtures fail closed'},
+    [ordered]@{id='PACKAGE-WATCHDOG';command='tests/test_verify_package_watchdog.py';reason='timeout, descendant termination, and bounded output fixtures'}
+)
+function Initialize-DevFleetSecurityPoisonProcessEnvironment {
+    if([string]::IsNullOrWhiteSpace([string]$env:COMPUTERNAME)){
+        $computerName=[Environment]::MachineName
+        if([string]::IsNullOrWhiteSpace($computerName)){throw 'Native machine identity is unavailable for SECURITY-POISON child execution.'}
+        $env:COMPUTERNAME=$computerName
     }
-    foreach ($property in @($Value.PSObject.Properties)) { if ([string]$property.Name -ieq $Name) { return $property.Value } }
-    return $null
-}
-
-function ConvertTo-WpfUtcInstant {
-    param([Parameter(Mandatory)][object]$Value)
-    if ($Value -is [datetimeoffset]) { return $Value.UtcDateTime }
-    if ($Value -is [datetime]) {
-        $date = [datetime]$Value
-        if ($date.Kind -eq [DateTimeKind]::Unspecified) { throw 'UTC instant omitted its offset/kind.' }
-        return $date.ToUniversalTime()
+    if([string]::IsNullOrWhiteSpace([string]${env:ProgramFiles(x86)})){
+        $programFilesX86=[Environment]::GetFolderPath('ProgramFilesX86')
+        if([string]::IsNullOrWhiteSpace($programFilesX86)){throw 'Native Program Files (x86) path is unavailable for SECURITY-POISON child execution.'}
+        ${env:ProgramFiles(x86)}=$programFilesX86
     }
-    $parsed = [datetimeoffset]::MinValue
-    if (-not [datetimeoffset]::TryParse([string]$Value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$parsed)) {
-        throw "UTC instant was malformed: $Value"
+}
+Import-Module (Join-Path $PSScriptRoot '..\Evidence.psm1') -Force
+$records=[Collections.Generic.List[object]]::new()
+foreach($scenario in $scenarioDefinitions){
+    $started=(Get-Date).ToUniversalTime().ToString('o');$output=@();$exit=0;$command=[string]$scenario.command
+    if($scenario.id -eq 'PROVISIONING-OWNERSHIP'){
+        Initialize-DevFleetSecurityPoisonProcessEnvironment
+        $output=& pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $workspace $command) -WorkspaceRoot $workspace 2>&1;$exit=$LASTEXITCODE
+    }else{
+        $paths=@($command -split '\s+')
+        Push-Location (Join-Path $workspace 'source');try{$output=& $python -m pytest -q @paths 2>&1;$exit=$LASTEXITCODE}finally{Pop-Location}
     }
-    return $parsed.UtcDateTime
+    $text=($output|ForEach-Object{[string]$_}) -join "`n"
+    $records.Add([ordered]@{id=$scenario.id;status=if($exit -eq 0){'PASS'}else{'FAIL'};exitCode=$exit;startedAt=$started;completedAt=(Get-Date).ToUniversalTime().ToString('o');testCommand=$command;reason=$scenario.reason;outputExcerpt=if($text.Length -gt 4000){$text.Substring($text.Length-4000)}else{$text}})
+    $allPassed=($exit -eq 0 -and $records.Count -eq $scenarioDefinitions.Count)
+    $evidence=[ordered]@{schemaVersion=1;status=if($exit -ne 0){'FAIL'}elseif($allPassed){'REAL E2E PASS'}else{'IN_PROGRESS'};phase='SECURITY-POISON';candidate=$candidateTuple;fixturePolicy=[ordered]@{malware=$false;credentialsAccessed=$false;productionMutation=$false;resources='temporary test roots and loopback endpoint only'};scenarios=@($records);allRequiredScenariosPassed=$allPassed}
+    $evidencePath=Join-Path $runDir 'SECURITY-POISON-evidence.json'
+    try { Write-EvidenceJson -Path $evidencePath -Value $evidence }
+    catch {
+        if($exit -ne 0){throw "SECURITY-POISON scenario $($scenario.id) failed with exit $exit; its evidence could not be persisted."}
+        throw
+    }
+    if($exit -ne 0){throw "SECURITY-POISON scenario $($scenario.id) failed. Evidence has been retained under $runDir."}
 }
+$evidence|ConvertTo-Json -Depth 16 -Compress
 
-function ConvertTo-WpfCommandLineToken {
-    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
-    if ($Value.IndexOf([char]0) -ge 0 -or $Value.Contains('"')) { throw 'WPF launch argument contained a forbidden quote or NUL.' }
-    if ($Value -eq '' -or $Value -match '\s') { return '"' + $Value + '"' }
-    return $Value
-}
+```
 
-function ConvertTo-WpfCommandLine {
-    param([Parameter(Mandatory)][object[]]$Tokens)
-    return (@($Tokens | ForEach-Object { ConvertTo-WpfCommandLineToken -Value ([string]$_) }) -join ' ')
-}
 
-function Write-WpfAtomicJson {
-    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][object]$Value)
+## FILE: automation/release-e2e/modules/executors/Invoke-TailscalePhase.ps1
+
+SHA256: b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95 | Bytes: 234 | Git mode: 100644
+
+```
+param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
+Import-Module (Join-Path $PSScriptRoot 'Invoke-RealProductPhase.psm1') -Force
+Invoke-RealProductPhase -ContextJson $ContextJson | ConvertTo-Json -Depth 32 -Compress
+
+```
+
+
+## FILE: automation/release-e2e/modules/executors/Invoke-WpfPhase.ps1
+
+SHA256: b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95 | Bytes: 234 | Git mode: 100644
+
+```
+param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
+Import-Module (Join-Path $PSScriptRoot 'Invoke-RealProductPhase.psm1') -Force
+Invoke-RealProductPhase -ContextJson $ContextJson | ConvertTo-Json -Depth 32 -Compress
+
+```
+
+
+## FILE: automation/release-e2e/modules/executors/Invoke-WpfUiAutomation.ps1
+
+SHA256: bc6fe36716dc608d213d08abab8c61082f9f68b0dfe9e680e874222bcec2b44a | Bytes: 35816 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)][string]$ExePath,
+    [Parameter(Mandatory)][string]$Action,
+    [string]$Role = 'Primary / Desktop',
+    [Parameter(Mandatory)][string]$OutputPath,
+    [string]$StartedPath,
+    [string]$CheckpointPath,
+    [string]$WorkerResultPath,
+    [Parameter(Mandatory)][string]$LaunchRequestPath,
+    [Parameter(Mandatory)][string]$RunId,
+    [Parameter(Mandatory)][string]$LaunchId,
+    [AllowEmptyString()][string]$TransactionId = '',
+    [Parameter(Mandatory)][string]$PayloadSha256,
+    [Parameter(Mandatory)][ValidateSet('direct','initial','resume','fallback')][string]$LaunchMode,
+    [Parameter(Mandatory)][string]$ObserverDeadlineUtc,
+    [Parameter(Mandatory)][int]$ExpectedInteractiveSessionId,
+    [switch]$AllowMutation,
+    [switch]$AllowRebootRequired,
+    [switch]$UseDurableCompletionFallback,
+    [switch]$ElevatedResume,
+    [switch]$ContractProbe,
+    [switch]$WorkerMode,
+    [int]$CandidateProcessId,
+    [string]$ExpectedCandidateStartUtc
+)
+
+$ErrorActionPreference = 'Stop'
+$contractModule = Join-Path $PSScriptRoot 'WpfLaunchContract.psm1'
+$driverPid = [int]$PID
+$driverSessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+$candidateHash = ''
+$candidateArguments = @()
+$process = $null
+$cleanupDisposition = 'NONE'
+$sequence = 0
+$semanticProgressSequence = 0
+$specification = $null
+
+function Write-BootstrapAtomicJson([string]$Path, [object]$Value) {
     $parent = Split-Path -Parent $Path
     if ($parent) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
     $temporary = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
     try {
         [IO.File]::WriteAllText($temporary, (($Value | ConvertTo-Json -Depth 24) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
         Move-Item -LiteralPath $temporary -Destination $Path -Force
-    } finally {
-        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
-    }
+    } finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
 }
 
-function Get-WpfFileSha256 {
-    param([Parameter(Mandatory)][string]$Path)
-    $stream = [IO.File]::OpenRead($Path)
+function Read-BootstrapLaunchSpecification([string]$Path, [string]$DeadlineUtc) {
+    # PowerShell Direct can start the registered task just before the atomic
+    # launch-request move becomes visible in the task's interactive session.
+    # Wait only for that bounded visibility condition; the immutable binding
+    # and all hash/identity checks still run after the exact request is read.
+    $waitDeadline = [DateTime]::UtcNow.AddSeconds(15)
     try {
-        $sha = [Security.Cryptography.SHA256]::Create()
-        try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant() }
-        finally { $sha.Dispose() }
-    } finally { $stream.Dispose() }
-}
-
-function Get-WpfTextSha256 {
-    param([Parameter(Mandatory)][string]$Value)
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value)))).Replace('-', '').ToLowerInvariant() }
-    finally { $sha.Dispose() }
-}
-
-function Resolve-WpfPrincipalSid {
-    param([Parameter(Mandatory)][string]$Account, [scriptblock]$SidResolver)
-    if ($SidResolver) { $resolved = [string](& $SidResolver $Account) }
-    else {
-        $candidates = if ($Account -notmatch '[\\@]' -and $env:COMPUTERNAME) { @("$env:COMPUTERNAME\$Account", $Account) } else { @($Account) }
-        $resolved = ''
-        foreach ($candidate in $candidates) {
-            try { $resolved = ([Security.Principal.NTAccount]::new($candidate)).Translate([Security.Principal.SecurityIdentifier]).Value; break } catch {}
-        }
-    }
-    if ($resolved -notmatch '^S-\d-(?:\d+-)+\d+$') { throw "Scheduled-task principal did not resolve to a SID: $Account" }
-    return $resolved
-}
-
-function Test-WpfRegisteredTaskBinding {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][object]$Specification,
-        [Parameter(Mandatory)][object]$RegisteredTask,
-        [Parameter(Mandatory)][object]$RequestedPrincipal,
-        [Parameter(Mandatory)][ref]$Reason,
-        [Parameter(Mandatory)][ref]$Evidence,
-        [scriptblock]$SidResolver
-    )
-    $Reason.Value = ''
-    $Evidence.Value = $null
-    $expectedExecute = [Environment]::ExpandEnvironmentVariables([string](Get-WpfContractValue $Specification 'taskExecutable'))
-    $expectedArguments = [string](Get-WpfContractValue $Specification 'taskArguments')
-    $expectedUser = [string](Get-WpfContractValue $Specification 'taskPrincipalUserId')
-    $expectedLogonType = [int](Get-WpfContractValue $Specification 'taskLogonTypeValue')
-    $expectedRunLevel = [int](Get-WpfContractValue $Specification 'taskRunLevelValue')
-    $actions = @((Get-WpfContractValue $RegisteredTask 'Actions'))
-    $principal = Get-WpfContractValue $RegisteredTask 'Principal'
-    $actualExecute = if ($actions.Count -eq 1) { [Environment]::ExpandEnvironmentVariables([string](Get-WpfContractValue $actions[0] 'Execute')) } else { '' }
-    $actualArguments = if ($actions.Count -eq 1) { [string](Get-WpfContractValue $actions[0] 'Arguments') } else { '' }
-    $requestedUser = [string](Get-WpfContractValue $RequestedPrincipal 'UserId')
-    $actualUser = [string](Get-WpfContractValue $principal 'UserId')
-    $requestedLogonType = -1
-    $actualLogonType = -1
-    $requestedRunLevel = -1
-    $actualRunLevel = -1
-    try { $requestedLogonType = [Convert]::ToInt32((Get-WpfContractValue $RequestedPrincipal 'LogonType'), [Globalization.CultureInfo]::InvariantCulture) } catch {}
-    try { $actualLogonType = [Convert]::ToInt32((Get-WpfContractValue $principal 'LogonType'), [Globalization.CultureInfo]::InvariantCulture) } catch {}
-    try { $requestedRunLevel = [Convert]::ToInt32((Get-WpfContractValue $RequestedPrincipal 'RunLevel'), [Globalization.CultureInfo]::InvariantCulture) } catch {}
-    try { $actualRunLevel = [Convert]::ToInt32((Get-WpfContractValue $principal 'RunLevel'), [Globalization.CultureInfo]::InvariantCulture) } catch {}
-    $expectedSid = ''
-    $requestedSid = ''
-    $actualSid = ''
-    try {
-        $expectedSid = Resolve-WpfPrincipalSid -Account $expectedUser -SidResolver $SidResolver
-        $requestedSid = Resolve-WpfPrincipalSid -Account $requestedUser -SidResolver $SidResolver
-        $actualSid = Resolve-WpfPrincipalSid -Account $actualUser -SidResolver $SidResolver
-    } catch {
-        $Reason.Value = "principal SID resolution failed: $($_.Exception.Message)"
-    }
-    $sidHash = if ($actualSid) { Get-WpfTextSha256 -Value $actualSid } else { '' }
-    $Evidence.Value = [pscustomobject][ordered]@{
-        actionCount = $actions.Count
-        requestedExecute = $expectedExecute
-        registeredExecute = $actualExecute
-        argumentsMatched = [string]::Equals($actualArguments, $expectedArguments, [StringComparison]::Ordinal)
-        expectedUserId = $expectedUser
-        requestedUserId = $requestedUser
-        registeredUserId = $actualUser
-        principalSidSha256 = $sidHash
-        requestedLogonTypeValue = $requestedLogonType
-        registeredLogonTypeValue = $actualLogonType
-        requestedRunLevelValue = $requestedRunLevel
-        registeredRunLevelValue = $actualRunLevel
-        verifiedBeforeStart = $false
-    }
-    if ($Reason.Value) { return $false }
-    if ($actions.Count -ne 1) { $Reason.Value = 'registered task action count diverged'; return $false }
-    try {
-        $expectedExecute = [IO.Path]::GetFullPath($expectedExecute)
-        $actualExecute = [IO.Path]::GetFullPath($actualExecute)
-    } catch { $Reason.Value = 'registered task executable path was malformed'; return $false }
-    if (-not [string]::Equals($actualExecute, $expectedExecute, [StringComparison]::OrdinalIgnoreCase)) { $Reason.Value = 'registered task executable identity diverged'; return $false }
-    if (-not [string]::Equals($actualArguments, $expectedArguments, [StringComparison]::Ordinal)) { $Reason.Value = 'registered task arguments diverged'; return $false }
-    if ($expectedSid -cne $requestedSid -or $expectedSid -cne $actualSid) { $Reason.Value = 'registered task principal SID diverged'; return $false }
-    if ($requestedLogonType -ne $expectedLogonType -or $actualLogonType -ne $expectedLogonType) { $Reason.Value = 'registered task logon type diverged'; return $false }
-    if ($requestedRunLevel -ne $expectedRunLevel -or $actualRunLevel -ne $expectedRunLevel) { $Reason.Value = 'registered task run level diverged'; return $false }
-    $Evidence.Value.verifiedBeforeStart = $true
-    return $true
-}
-
-function Get-WpfCandidateArguments {
-    param(
-        [Parameter(Mandatory)][ValidateSet('direct','initial','resume','fallback')][string]$LaunchMode,
-        [Parameter(Mandatory)][string]$Action,
-        [Parameter(Mandatory)][string]$Role,
-        [switch]$ElevatedResume
-    )
-    if ($LaunchMode -eq 'resume' -and -not $ElevatedResume) { throw 'Resume launch mode requires ElevatedResume.' }
-    if ($LaunchMode -ne 'resume' -and $ElevatedResume) { throw 'ElevatedResume is only valid for resume launch mode.' }
-    $arguments = @('--action', $Action, '--role', $Role)
-    if($Role-notmatch'(?i)Laptop'){$arguments+='--defer-network-pairing'}
-    if ($ElevatedResume) { $arguments = @('--elevated-resume') + $arguments }
-    return @($arguments)
-}
-
-function Get-WpfNavigationDisposition {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][ValidateSet('direct','initial','resume','fallback')][string]$LaunchMode,
-        [Parameter(Mandatory)][bool]$ElevatedResume,
-        [Parameter(Mandatory)][bool]$WindowOwnerMatches,
-        [AllowEmptyString()][string]$PageKicker = '',
-        [AllowEmptyString()][string]$OperationStatus = '',
-        [Parameter(Mandatory)][bool]$NextEnabled,
-        [Parameter(Mandatory)][bool]$ExecutePresent,
-        [Parameter(Mandatory)][bool]$ExecuteEnabled
-    )
-    if (-not $WindowOwnerMatches) { return 'REJECT_OWNER_MISMATCH' }
-    $executePage = $PageKicker -match '^STEP 7 OF 8 . EXECUTE$'
-    $finishPage = $PageKicker -match '^STEP 8 OF 8 . FINISH$'
-    $executionStatus = $OperationStatus -match '(?i)invoking actual|reboot required|completed|failed|verif'
-    if ($LaunchMode -eq 'resume') {
-        if (-not $ElevatedResume) { return 'REJECT_MODE_MISMATCH' }
-        if (($executePage -and (($ExecutePresent -and -not $ExecuteEnabled) -or $executionStatus)) -or ($finishPage -and $OperationStatus -match '(?i)completed and verified')) {
-            return 'OBSERVE_EXISTING'
-        }
-        return 'WAIT'
-    }
-    if ($NextEnabled) { return 'NAVIGATE' }
-    if ($executePage -and $ExecutePresent -and -not $ExecuteEnabled -and $executionStatus) { return 'OBSERVE_EXISTING' }
-    return 'WAIT'
-}
-
-function New-WpfLaunchSpecification {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$DriverPath,
-        [Parameter(Mandatory)][string]$ExePath,
-        [Parameter(Mandatory)][string]$Action,
-        [Parameter(Mandatory)][string]$Role,
-        [Parameter(Mandatory)][string]$OutputPath,
-        [Parameter(Mandatory)][string]$StartedPath,
-        [Parameter(Mandatory)][string]$CheckpointPath,
-        [Parameter(Mandatory)][string]$WorkerResultPath,
-        [Parameter(Mandatory)][string]$LaunchRequestPath,
-        [Parameter(Mandatory)][string]$RunId,
-        [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{32}$')][string]$LaunchId,
-        [AllowEmptyString()][ValidatePattern('^$|^[0-9a-fA-F]{32}$')][string]$TransactionId = '',
-        [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$PayloadSha256,
-        [Parameter(Mandatory)][ValidateSet('direct','initial','resume','fallback')][string]$LaunchMode,
-        [Parameter(Mandatory)][ValidateRange(1,65535)][int]$ExpectedInteractiveSessionId,
-        [switch]$AllowMutation,
-        [switch]$AllowRebootRequired,
-        [switch]$UseDurableCompletionFallback,
-        [switch]$ElevatedResume,
-        [Parameter(Mandatory)][object]$OwnerDeadlineUtc,
-        [ValidateRange(1,2147483647)][int]$SemanticNoProgressSeconds = 300,
-        [scriptblock]$ClockProvider = { (Get-Date).ToUniversalTime() },
-        [switch]$ContractProbe,
-        [string]$DriverSha256,
-        [string]$CandidateSha256,
-        [string]$TaskExecutable,
-        [switch]$SkipPathValidation
-    )
-    if (-not $SkipPathValidation) { foreach ($path in @($DriverPath, $ExePath)) { if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "WPF launch input is absent: $path" } } }
-    $now = ConvertTo-WpfUtcInstant (& $ClockProvider)
-    $ownerDeadline = ConvertTo-WpfUtcInstant $OwnerDeadlineUtc
-    $boundaryDeadline = $ownerDeadline
-    $driverDeadline = $boundaryDeadline.AddSeconds(-60)
-    if ($driverDeadline -le $now.AddSeconds(30)) { throw 'Insufficient remaining owner budget for WPF launch and terminalization.' }
-    $candidateArguments = @(Get-WpfCandidateArguments -LaunchMode $LaunchMode -Action $Action -Role $Role -ElevatedResume:$ElevatedResume)
-    $driverHash = if ($DriverSha256) { $DriverSha256.ToLowerInvariant() } else { Get-WpfFileSha256 -Path $DriverPath }
-    $candidateHash = if ($CandidateSha256) { $CandidateSha256.ToLowerInvariant() } else { Get-WpfFileSha256 -Path $ExePath }
-    if ($driverHash -notmatch '^[0-9a-f]{64}$' -or $candidateHash -notmatch '^[0-9a-f]{64}$') { throw 'WPF launch input hashes were malformed.' }
-    $taskExecutableValue = if ($TaskExecutable) { $TaskExecutable } else { Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' }
-    $tokens = @(
-        '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-STA','-File',$DriverPath,
-        '-ExePath',$ExePath,'-Action',$Action,'-Role',$Role,'-OutputPath',$OutputPath,
-        '-StartedPath',$StartedPath,'-CheckpointPath',$CheckpointPath,'-WorkerResultPath',$WorkerResultPath,
-        '-LaunchRequestPath',$LaunchRequestPath,'-RunId',$RunId,'-LaunchId',$LaunchId,
-        '-TransactionId',$TransactionId,'-PayloadSha256',$PayloadSha256,'-LaunchMode',$LaunchMode,
-        '-ObserverDeadlineUtc',$driverDeadline.ToString('o'),'-ExpectedInteractiveSessionId',[string]$ExpectedInteractiveSessionId
-    )
-    if ($AllowMutation) { $tokens += '-AllowMutation' }
-    if ($AllowRebootRequired) { $tokens += '-AllowRebootRequired' }
-    if ($UseDurableCompletionFallback) { $tokens += '-UseDurableCompletionFallback' }
-    if ($ElevatedResume) { $tokens += '-ElevatedResume' }
-    if ($ContractProbe) { $tokens += '-ContractProbe' }
-    $specification = [ordered]@{
-        schemaVersion = 2
-        contract = 'devfleet-wpf-launch-v2'
-        runId = $RunId
-        launchId = $LaunchId.ToLowerInvariant()
-        transactionId = $TransactionId.ToLowerInvariant()
-        payloadSha256 = $PayloadSha256.ToLowerInvariant()
-        launchMode = $LaunchMode
-        elevatedResume = [bool]$ElevatedResume
-        action = $Action
-        role = $Role
-        allowMutation = [bool]$AllowMutation
-        allowRebootRequired = [bool]$AllowRebootRequired
-        useDurableCompletionFallback = [bool]$UseDurableCompletionFallback
-        expectedInteractiveSessionId = $ExpectedInteractiveSessionId
-        driverPath = $DriverPath
-        driverSha256 = $driverHash
-        exePath = $ExePath
-        candidateSha256 = $candidateHash
-        candidateArguments = @($candidateArguments)
-        outputPath = $OutputPath
-        startedPath = $StartedPath
-        checkpointPath = $CheckpointPath
-        workerResultPath = $WorkerResultPath
-        launchRequestPath = $LaunchRequestPath
-        ownerDeadlineUtc = $ownerDeadline.ToString('o')
-        boundaryDeadlineUtc = $boundaryDeadline.ToString('o')
-        driverDeadlineUtc = $driverDeadline.ToString('o')
-        terminalizationMarginSeconds = 60
-        semanticNoProgressSeconds = $SemanticNoProgressSeconds
-        taskExecutable = $taskExecutableValue
-        taskPrincipalUserId = 'DEVFLEET-E2E-01\E2EAdmin'
-        taskLogonType = 'Interactive'
-        taskLogonTypeValue = 3
-        taskRunLevel = 'Highest'
-        taskRunLevelValue = 1
-        driverArgumentTokens = @($tokens)
-        taskArguments = ConvertTo-WpfCommandLine -Tokens $tokens
-        contractProbe = [bool]$ContractProbe
-        sequence = 0
-        createdAtUtc = $now.ToString('o')
-    }
-    return [pscustomobject]$specification
-}
-
-function Copy-WpfLaunchSpecification {
-    param([Parameter(Mandatory)][object]$Specification, [switch]$ContractProbe)
-    $copy = [ordered]@{}
-    foreach ($property in @($Specification.PSObject.Properties)) { $copy[$property.Name] = $property.Value }
-    $tokens = @($copy.driverArgumentTokens | ForEach-Object { [string]$_ })
-    if ($ContractProbe -and $tokens -notcontains '-ContractProbe') { $tokens += '-ContractProbe' }
-    $copy.driverArgumentTokens = $tokens
-    $copy.taskArguments = ConvertTo-WpfCommandLine -Tokens $tokens
-    $copy.contractProbe = [bool]$ContractProbe
-    return [pscustomobject]$copy
-}
-
-function Assert-WpfDriverBinding {
-    param(
-        [Parameter(Mandatory)][object]$Specification,
-        [Parameter(Mandatory)][hashtable]$Actual
-    )
-    $pairs = @{
-        exePath='ExePath'; action='Action'; role='Role'; outputPath='OutputPath'; startedPath='StartedPath'; checkpointPath='CheckpointPath';
-        workerResultPath='WorkerResultPath'; launchRequestPath='LaunchRequestPath'; runId='RunId'; launchId='LaunchId'; transactionId='TransactionId';
-        payloadSha256='PayloadSha256'; launchMode='LaunchMode'
-    }
-    foreach ($expectedName in $pairs.Keys) {
-        $expected = [string](Get-WpfContractValue $Specification $expectedName)
-        $actualValue = [string]$Actual[$pairs[$expectedName]]
-        if ($expected -cne $actualValue) { throw "WPF driver binding mismatch for $expectedName." }
-    }
-    foreach ($booleanName in @('AllowMutation','AllowRebootRequired','UseDurableCompletionFallback','ElevatedResume','ContractProbe')) {
-        $expectedProperty = $booleanName.Substring(0,1).ToLowerInvariant() + $booleanName.Substring(1)
-        if ([bool](Get-WpfContractValue $Specification $expectedProperty) -ne [bool]$Actual[$booleanName]) { throw "WPF driver binding mismatch for $booleanName." }
-    }
-    if ([int](Get-WpfContractValue $Specification 'expectedInteractiveSessionId') -ne [int]$Actual.ExpectedInteractiveSessionId) { throw 'WPF driver binding mismatch for interactive session.' }
-    $deadlineExpected = ConvertTo-WpfUtcInstant (Get-WpfContractValue $Specification 'driverDeadlineUtc')
-    $deadlineActual = ConvertTo-WpfUtcInstant $Actual.ObserverDeadlineUtc
-    if ($deadlineExpected.Ticks -ne $deadlineActual.Ticks) { throw 'WPF driver binding mismatch for observer deadline.' }
-    $driverPath = [string](Get-WpfContractValue $Specification 'driverPath')
-    $exePath = [string](Get-WpfContractValue $Specification 'exePath')
-    if ((Get-WpfFileSha256 -Path $driverPath) -cne [string](Get-WpfContractValue $Specification 'driverSha256')) { throw 'WPF driver hash diverged after launch request creation.' }
-    if ((Get-WpfFileSha256 -Path $exePath) -cne [string](Get-WpfContractValue $Specification 'candidateSha256')) { throw 'WPF candidate hash diverged after launch request creation.' }
-    $contractModulePath = [string](Get-WpfContractValue $Specification 'contractModulePath')
-    $contractModuleSha256 = [string](Get-WpfContractValue $Specification 'contractModuleSha256')
-    if ($contractModulePath -or $contractModuleSha256) {
-        if (-not $contractModulePath -or -not $contractModuleSha256 -or [string]$Actual.ContractModulePath -cne $contractModulePath) { throw 'WPF contract module path binding diverged after launch request creation.' }
-        if ((Get-WpfFileSha256 -Path $contractModulePath) -cne $contractModuleSha256) { throw 'WPF contract module hash diverged after launch request creation.' }
-    }
-    $actualArguments = @(Get-WpfCandidateArguments -LaunchMode ([string]$Actual.LaunchMode) -Action ([string]$Actual.Action) -Role ([string]$Actual.Role) -ElevatedResume:([bool]$Actual.ElevatedResume))
-    $expectedArguments = @((Get-WpfContractValue $Specification 'candidateArguments') | ForEach-Object { [string]$_ })
-    if (($actualArguments -join [char]0) -cne ($expectedArguments -join [char]0)) { throw 'WPF candidate argument vector diverged from the launch request.' }
-    return $true
-}
-
-function Test-WpfTerminalReport {
-    param([AllowNull()][object]$Report, [Parameter(Mandatory)][object]$Specification, [ref]$Reason, [int]$MinimumSequenceExclusive = 0)
-    $Reason.Value = ''
-    if ($null -eq $Report) { $Reason.Value = 'report absent'; return $false }
-    if ([string](Get-WpfContractValue $Report 'contract') -cne 'devfleet-wpf-terminal-v2') { $Reason.Value = 'report contract is missing or stale'; return $false }
-    if ([int](Get-WpfContractValue $Report 'schemaVersion') -lt 2) { $Reason.Value = 'report schema is stale'; return $false }
-    if (-not [bool](Get-WpfContractValue $Report 'terminal')) { $Reason.Value = 'report is not terminal'; return $false }
-    foreach ($name in @('runId','launchId','payloadSha256','candidateSha256')) {
-        if ([string](Get-WpfContractValue $Report $name) -cne [string](Get-WpfContractValue $Specification $name)) { $Reason.Value = "report $name mismatch"; return $false }
-    }
-    $expectedTransaction = [string](Get-WpfContractValue $Specification 'transactionId')
-    if ([string](Get-WpfContractValue $Report 'transactionId') -cne $expectedTransaction) { $Reason.Value = 'report transactionId mismatch'; return $false }
-    try {
-        $reportDeadline = ConvertTo-WpfUtcInstant (Get-WpfContractValue $Report 'deadlineUtc')
-        $expectedDeadline = ConvertTo-WpfUtcInstant (Get-WpfContractValue $Specification 'driverDeadlineUtc')
-        if ($reportDeadline.Ticks -ne $expectedDeadline.Ticks) { $Reason.Value = 'report deadline identity mismatch'; return $false }
-    } catch { $Reason.Value = 'report deadline identity is missing or malformed'; return $false }
-    $sequence = 0
-    if (-not [int]::TryParse([string](Get-WpfContractValue $Report 'sequence'), [ref]$sequence) -or $sequence -le $MinimumSequenceExclusive) { $Reason.Value = 'report sequence is missing or non-monotonic'; return $false }
-    $status = [string](Get-WpfContractValue $Report 'status')
-    if ($status -notin @('PASS','REBOOT_REQUIRED','DURABLE_PENDING','OBSERVER_HANDOFF','PRODUCT_FAILURE','FAIL','OBSERVER_FAILURE','CANCELLED')) { $Reason.Value = "report status is not terminal: $status"; return $false }
-    $completion = [bool](Get-WpfContractValue $Report 'completionVerified')
-    if ($status -eq 'PASS' -and -not $completion) { $Reason.Value = 'PASS omitted verified completion'; return $false }
-    if ($status -ne 'PASS' -and $completion) { $Reason.Value = "$status cannot assert verified completion"; return $false }
-    $cleanupDisposition = [string](Get-WpfContractValue $Report 'cleanupDisposition')
-    if ($status -eq 'PASS' -and $cleanupDisposition -cne 'CLEANUP_EXACT_CANDIDATE') { $Reason.Value = 'PASS omitted exact-candidate cleanup ownership'; return $false }
-    if ($status -eq 'REBOOT_REQUIRED' -and (-not [bool](Get-WpfContractValue $Report 'rebootRequired') -or $cleanupDisposition -cne 'RELINQUISH_VERIFIED_PENDING')) { $Reason.Value = 'REBOOT_REQUIRED omitted validated pending ownership'; return $false }
-    if ($status -eq 'DURABLE_PENDING') {
-        $basis = [string](Get-WpfContractValue $Report 'pendingBasis')
-        if (-not [bool](Get-WpfContractValue $Report 'durableCompletionPending') -or
-            -not [bool](Get-WpfContractValue $Report 'durableStateVerified') -or
-            -not [bool](Get-WpfContractValue $Report 'ownershipTransferVerified') -or
-            [bool](Get-WpfContractValue $Report 'productOutcomeClaimed') -or
-            $cleanupDisposition -cne 'RELINQUISH_VERIFIED_PENDING' -or
-            $basis -cne 'EXACT_TRANSACTION_DURABLE_STATE') {
-            $Reason.Value = 'DURABLE_PENDING omitted validated durable product identity and ownership transfer'; return $false
-        }
-        if ($expectedTransaction -notmatch '^[0-9a-fA-F]{32}$') { $Reason.Value = 'durable pending omitted exact transaction identity'; return $false }
-    }
-    if ($status -eq 'OBSERVER_HANDOFF') {
-        $basis = [string](Get-WpfContractValue $Report 'handoffBasis')
-        if (-not [bool](Get-WpfContractValue $Report 'ownershipTransferVerified') -or
-            [bool](Get-WpfContractValue $Report 'productOutcomeClaimed') -or
-            [bool](Get-WpfContractValue $Report 'durableCompletionPending') -or
-            [string](Get-WpfContractValue $Report 'observerContract') -cne 'Wait-DevFleetProductLifecycleTransition' -or
-            $cleanupDisposition -cne 'RELINQUISH_LIFECYCLE_OWNER' -or
-            $basis -notin @('GENERATION_ZERO_PRODUCT_OBSERVER_HANDOFF','EXACT_TRANSACTION_PRODUCT_OBSERVER_HANDOFF')) {
-            $Reason.Value = 'OBSERVER_HANDOFF omitted an exact no-outcome ownership transfer'; return $false
-        }
-        if ($basis -eq 'EXACT_TRANSACTION_PRODUCT_OBSERVER_HANDOFF' -and $expectedTransaction -notmatch '^[0-9a-fA-F]{32}$') { $Reason.Value = 'transaction-bound handoff omitted exact transaction identity'; return $false }
-        if ($basis -eq 'GENERATION_ZERO_PRODUCT_OBSERVER_HANDOFF' -and $expectedTransaction) { $Reason.Value = 'generation-zero handoff contradicted an existing transaction identity'; return $false }
-    }
-    return $true
-}
-
-function Resolve-WpfProviderObservation {
-    param([AllowNull()][object]$ProviderValue,[Parameter(Mandatory)][ValidateSet('TERMINAL','PROGRESS')][string]$Kind,[Parameter(Mandatory)][datetime]$Now)
-    if ($null -eq $ProviderValue) { return [pscustomobject]@{value=$null;establishedAtUtc=$Now;metadataValid=$true;reason=''} }
-    if ([string](Get-WpfContractValue $ProviderValue 'contract') -cne 'devfleet-wpf-file-observation-v1') {
-        return [pscustomobject]@{value=$ProviderValue;establishedAtUtc=$Now;metadataValid=$true;reason='collection time is the only establishment evidence'}
-    }
-    if ([string](Get-WpfContractValue $ProviderValue 'kind') -cne $Kind) {
-        return [pscustomobject]@{value=$null;establishedAtUtc=$Now;metadataValid=$false;reason='provider observation kind mismatch'}
-    }
-    try { $established = ConvertTo-WpfUtcInstant (Get-WpfContractValue $ProviderValue 'fileWriteUtc') }
-    catch { return [pscustomobject]@{value=$null;establishedAtUtc=$Now;metadataValid=$false;reason='provider observation fileWriteUtc is missing or malformed'} }
-    if ($established -gt $Now) { return [pscustomobject]@{value=$null;establishedAtUtc=$established;metadataValid=$false;reason='provider observation claims a future file write'} }
-    $value = Get-WpfContractValue $ProviderValue 'value'
-    if ($null -eq $value) { return [pscustomobject]@{value=$null;establishedAtUtc=$established;metadataValid=$false;reason='provider observation omitted its value'} }
-    return [pscustomobject]@{value=$value;establishedAtUtc=$established;metadataValid=$true;reason='atomic file write time'}
-}
-
-function Test-WpfBoundProgress {
-    param([AllowNull()][object]$Progress,[Parameter(Mandatory)][object]$Specification,[int]$MinimumSequenceExclusive,[int]$MinimumSemanticSequenceExclusive,[ref]$Sequence,[ref]$SemanticSequence,[ref]$Reason)
-    $Reason.Value='';$Sequence.Value=0;$SemanticSequence.Value=0
-    if($null -eq $Progress){$Reason.Value='progress absent';return $false}
-    if([string](Get-WpfContractValue $Progress 'contract') -cne 'devfleet-wpf-checkpoint-v2' -or [int](Get-WpfContractValue $Progress 'schemaVersion') -lt 2){$Reason.Value='progress contract is missing or stale';return $false}
-    foreach($name in @('runId','launchId','transactionId','payloadSha256','candidateSha256')){if([string](Get-WpfContractValue $Progress $name) -cne [string](Get-WpfContractValue $Specification $name)){$Reason.Value="progress $name mismatch";return $false}}
-    try{$progressDeadline=ConvertTo-WpfUtcInstant (Get-WpfContractValue $Progress 'deadlineUtc');$expectedDeadline=ConvertTo-WpfUtcInstant (Get-WpfContractValue $Specification 'driverDeadlineUtc');if($progressDeadline.Ticks-ne$expectedDeadline.Ticks){$Reason.Value='progress deadline identity mismatch';return $false}}catch{$Reason.Value='progress deadline identity is missing or malformed';return $false}
-    $sequenceValue=0;if(-not[int]::TryParse([string](Get-WpfContractValue $Progress 'sequence'),[ref]$sequenceValue)-or$sequenceValue-le$MinimumSequenceExclusive){$Reason.Value='progress sequence is missing or non-monotonic';return $false}
-    $Sequence.Value=$sequenceValue
-    $semanticValue=0;if(-not[int]::TryParse([string](Get-WpfContractValue $Progress 'semanticProgressSequence'),[ref]$semanticValue)-or$semanticValue-le$MinimumSemanticSequenceExclusive){$Reason.Value='progress semantic sequence is missing or non-monotonic';return $false}
-    $SemanticSequence.Value=$semanticValue
-    if([string](Get-WpfContractValue $Progress 'semanticProgressKind') -ne 'DURABLE_PRODUCT_PROGRESS' -or [string](Get-WpfContractValue $Progress 'progressSource') -ne 'DURABLE_PRODUCT_OBSERVER'){$Reason.Value='observer breadcrumb is not durable semantic product progress';return $false}
-    if([string](Get-WpfContractValue $Progress 'transactionId') -notmatch '^[0-9a-fA-F]{32}$'){$Reason.Value='durable semantic progress lacks an exact transaction identity';return $false}
-    return $true
-}
-
-function Get-WpfCleanupDisposition {
-    param([Parameter(Mandatory)][string]$Status, [switch]$CompletionVerified)
-    switch ($Status) {
-        'ALREADY_RUNNING' { return 'CONTINUE_OBSERVATION' }
-        'DURABLE_PENDING' { return 'RELINQUISH_VERIFIED_PENDING' }
-        'OBSERVER_HANDOFF' { return 'RELINQUISH_LIFECYCLE_OWNER' }
-        'REBOOT_REQUIRED' { return 'RELINQUISH_VERIFIED_PENDING' }
-        'OBSERVER_FAILURE' { return 'RELINQUISH_LIFECYCLE_OWNER' }
-        'CANCELLED' { return 'RELINQUISH_LIFECYCLE_OWNER' }
-        'PASS' { if ($CompletionVerified) { return 'CLEANUP_EXACT_CANDIDATE' }; return 'REJECT_INCOMPLETE_PASS' }
-        default { return 'CLEANUP_EXACT_CANDIDATE' }
-    }
-}
-
-function New-WpfSupervisorFailure {
-    param([Parameter(Mandatory)][object]$Specification, [Parameter(Mandatory)][string]$FailureClass, [Parameter(Mandatory)][string]$Error, [Parameter(Mandatory)][datetime]$Now, [int]$LastSequence = 0, [string]$LastDurableStep = 'LAUNCH_REQUESTED')
-    return [pscustomobject][ordered]@{
-        schemaVersion=2; contract='devfleet-wpf-terminal-v2'; status='OBSERVER_FAILURE'; terminal=$true; completionVerified=$false; failureClass=$FailureClass; error=$Error;
-        runId=[string](Get-WpfContractValue $Specification 'runId'); launchId=[string](Get-WpfContractValue $Specification 'launchId');
-        transactionId=[string](Get-WpfContractValue $Specification 'transactionId'); payloadSha256=[string](Get-WpfContractValue $Specification 'payloadSha256');
-        candidateSha256=[string](Get-WpfContractValue $Specification 'candidateSha256'); sequence=([Math]::Max(0,$LastSequence)+1); phase='SUPERVISOR'; lastDurableStep=$LastDurableStep; productStarted=$true;
-        deadlineUtc=[string](Get-WpfContractValue $Specification 'driverDeadlineUtc'); timestampUtc=$Now.ToString('o'); cleanupDisposition='RELINQUISH_LIFECYCLE_OWNER'
-    }
-}
-
-function Invoke-WpfBoundProviderCall {
-    param(
-        [Parameter(Mandatory)][scriptblock]$Provider,
-        [Parameter(Mandatory)][string]$Kind,
-        [Parameter(Mandatory)][ValidateRange(1,60)][int]$TimeoutSeconds
-    )
-    $runspace=$null
-    $pipeline=$null
-    $invocation=$null
-    $quarantined=$false
-    try {
-        $runspace=[runspacefactory]::CreateRunspace()
-        $runspace.Open()
-        $runspace.SessionStateProxy.SetVariable('DevFleetWpfBoundProvider',$Provider)
-        $pipeline=[powershell]::Create()
-        $pipeline.Runspace=$runspace
-        [void]$pipeline.AddScript('& $DevFleetWpfBoundProvider')
-        $invocation=$pipeline.BeginInvoke()
-        if (-not $invocation.AsyncWaitHandle.WaitOne([TimeSpan]::FromSeconds($TimeoutSeconds))) {
-            try {
-                $stopInvocation=$pipeline.BeginStop($null,$null)
-                [void]$stopInvocation.AsyncWaitHandle.WaitOne([TimeSpan]::FromSeconds(2))
-            } catch {}
-            [void]$script:WpfAbandonedProviderCalls.Add([pscustomobject]@{pipeline=$pipeline;runspace=$runspace;invocation=$invocation;kind=$Kind})
-            $quarantined=$true
-            return [pscustomobject]@{ok=$false;timedOut=$true;value=$null;error="$Kind did not return within its bounded $TimeoutSeconds-second call window."}
-        }
+        $observerDeadline = ([DateTimeOffset]::Parse($DeadlineUtc)).UtcDateTime
+        if ($observerDeadline.AddSeconds(-1) -lt $waitDeadline) { $waitDeadline = $observerDeadline.AddSeconds(-1) }
+    } catch {}
+    $lastReadError = $null
+    do {
         try {
-            $values=@($pipeline.EndInvoke($invocation))
-            if($pipeline.HadErrors){
-                $providerErrors=@($pipeline.Streams.Error)
-                $providerError=if($providerErrors.Count){[string]$providerErrors[0].Exception.Message}else{"$Kind failed without a preserved error record."}
-                return [pscustomobject]@{ok=$false;timedOut=$false;value=$null;error=$providerError}
+            if (Test-Path -LiteralPath $Path -PathType Leaf -ErrorAction Stop) {
+                return ([IO.File]::ReadAllText($Path) | ConvertFrom-Json -ErrorAction Stop)
             }
-            $value=if($values.Count -eq 0){$null}elseif($values.Count -eq 1){$values[0]}else{$values}
-            return [pscustomobject]@{ok=$true;timedOut=$false;value=$value;error=''}
-        } catch {
-            $providerErrors=@($pipeline.Streams.Error)
-            $providerError=if($providerErrors.Count){[string]$providerErrors[0].Exception.Message}else{[string]$_.Exception.Message}
-            return [pscustomobject]@{ok=$false;timedOut=$false;value=$null;error=$providerError}
+        } catch { $lastReadError = $_.Exception.Message }
+        if ([DateTime]::UtcNow -ge $waitDeadline) { break }
+        Start-Sleep -Milliseconds 100
+    } while ($true)
+    if ($lastReadError) { throw "Launch request was not readable before the bounded bootstrap deadline: $lastReadError" }
+    throw "Launch request did not become visible before the bounded bootstrap deadline: $Path"
+}
+
+try {
+    $specification = Read-BootstrapLaunchSpecification -Path $LaunchRequestPath -DeadlineUtc $ObserverDeadlineUtc
+    $candidateHash = [string]$specification.candidateSha256
+    Import-Module $contractModule -Force -ErrorAction Stop
+} catch {
+    $bootstrapError = $_.Exception.Message
+    try {
+        Write-BootstrapAtomicJson -Path $OutputPath -Value ([ordered]@{
+            schemaVersion=2; contract='devfleet-wpf-terminal-v2'; status='OBSERVER_FAILURE'; terminal=$true; completionVerified=$false;
+            failureClass='DRIVER_BOOTSTRAP_FAILURE'; error="WPF driver bootstrap failed before contract binding: $bootstrapError";
+            runId=$RunId; launchId=$LaunchId; transactionId=$TransactionId; payloadSha256=$PayloadSha256; candidateSha256=$candidateHash;
+            sequence=1; phase='DRIVER_BOOTSTRAP'; lastDurableStep='TASK_PROCESS_STARTED'; launchMode=$LaunchMode; elevatedResume=[bool]$ElevatedResume;
+            action=$Action; role=$Role; driverPid=$driverPid; driverSessionId=$driverSessionId; processId=$null; candidateArguments=@();
+            mutationInvoked=$false; productStarted=$false; cleanupDisposition='RELINQUISH_LIFECYCLE_OWNER'; deadlineUtc=$ObserverDeadlineUtc;
+            contractModulePath=$contractModule; timestampUtc=(Get-Date).ToUniversalTime().ToString('o')
+        })
+    } catch {}
+    exit 2
+}
+
+function Get-ProcessIdentityEvidence([int]$Id, [int]$ExpectedSessionId) {
+    try {
+        $row = Get-CimInstance Win32_Process -Filter "ProcessId=$Id" -ErrorAction Stop
+        if (-not $row) { return $null }
+        $owner = Invoke-CimMethod -InputObject $row -MethodName GetOwner -ErrorAction Stop
+        $processInfo = Get-Process -Id $Id -ErrorAction Stop
+        if ([int]$processInfo.SessionId -ne $ExpectedSessionId) { return $null }
+        return [ordered]@{present=$true;pid=$Id;user=[string]$owner.User;domain=[string]$owner.Domain;owner=([string]$owner.Domain+'\'+[string]$owner.User);sessionId=[int]$processInfo.SessionId}
+    } catch { return $null }
+}
+
+function Write-BoundaryCheckpoint([string]$Phase, [string]$Status, [hashtable]$Detail) {
+    $script:sequence++
+    $entry = [ordered]@{
+        schemaVersion=2; contract='devfleet-wpf-checkpoint-v2'; runId=$RunId; launchId=$LaunchId; transactionId=$TransactionId;
+        payloadSha256=$PayloadSha256; candidateSha256=$script:candidateHash; sequence=$script:sequence; phase=$Phase; status=$Status;
+        deadlineUtc=$ObserverDeadlineUtc; timestampUtc=(Get-Date).ToUniversalTime().ToString('o')
+    }
+    if ($Detail) { foreach ($key in $Detail.Keys) { $entry[$key] = $Detail[$key] } }
+    if ($CheckpointPath) { Write-WpfAtomicJson -Path $CheckpointPath -Value $entry }
+    return [pscustomobject]$entry
+}
+
+function New-MinimalTerminal([string]$Status, [string]$FailureClass, [string]$ErrorMessage, [string]$LastStep) {
+    $script:sequence++
+    return [pscustomobject][ordered]@{
+        schemaVersion=2; contract='devfleet-wpf-terminal-v2'; status=$Status; terminal=$true; completionVerified=$false;
+        failureClass=$FailureClass; error=$ErrorMessage; runId=$RunId; launchId=$LaunchId; transactionId=$TransactionId;
+        payloadSha256=$PayloadSha256; candidateSha256=$script:candidateHash; sequence=$script:sequence; phase='WPF'; lastDurableStep=$LastStep;
+        launchMode=$LaunchMode; elevatedResume=[bool]$ElevatedResume; action=$Action; role=$Role; driverPid=$driverPid;
+        driverSessionId=$driverSessionId; processId=if($script:process){[int]$script:process.Id}else{$null};
+        candidateArguments=@($script:candidateArguments); cleanupDisposition='RELINQUISH_LIFECYCLE_OWNER';
+        deadlineUtc=$ObserverDeadlineUtc; timestampUtc=(Get-Date).ToUniversalTime().ToString('o')
+    }
+}
+
+function Get-MinDeadline([datetime]$Maximum) {
+    $absolute = ConvertTo-WpfUtcInstant $ObserverDeadlineUtc
+    if ($absolute -lt $Maximum) { return $absolute }
+    return $Maximum
+}
+
+function Read-ObservedJsonFile([string]$Path,[ValidateSet('TERMINAL','PROGRESS')][string]$Kind) {
+    try {
+        # The worker publishes these files with an atomic replace while the
+        # supervisor polls them.  A short-lived access-denied from the guest
+        # filesystem must remain an absent observation; the bounded watchdog
+        # below will retry and will still terminalize on its deadline.
+        if (-not (Test-Path -LiteralPath $Path -PathType Leaf -ErrorAction Stop)) { return $null }
+        $value = [IO.File]::ReadAllText($Path) | ConvertFrom-Json -ErrorAction Stop
+        $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+        return [pscustomobject][ordered]@{contract='devfleet-wpf-file-observation-v1';kind=$Kind;value=$value;fileWriteUtc=$item.LastWriteTimeUtc.ToString('o')}
+    } catch { return $null }
+}
+
+$actualBinding = @{
+    ExePath=$ExePath;Action=$Action;Role=$Role;OutputPath=$OutputPath;StartedPath=$StartedPath;CheckpointPath=$CheckpointPath;
+    WorkerResultPath=$WorkerResultPath;LaunchRequestPath=$LaunchRequestPath;RunId=$RunId;LaunchId=$LaunchId;TransactionId=$TransactionId;
+    PayloadSha256=$PayloadSha256;LaunchMode=$LaunchMode;ObserverDeadlineUtc=$ObserverDeadlineUtc;
+    ExpectedInteractiveSessionId=$ExpectedInteractiveSessionId;AllowMutation=[bool]$AllowMutation;AllowRebootRequired=[bool]$AllowRebootRequired;
+    UseDurableCompletionFallback=[bool]$UseDurableCompletionFallback;ElevatedResume=[bool]$ElevatedResume;ContractProbe=[bool]$ContractProbe;
+    ContractModulePath=$contractModule
+}
+
+if (-not $WorkerMode) {
+    try {
+        Assert-WpfDriverBinding -Specification $specification -Actual $actualBinding | Out-Null
+        $candidateHash = [string]$specification.candidateSha256
+        $candidateArguments = @($specification.candidateArguments | ForEach-Object { [string]$_ })
+        if ($ContractProbe) {
+            Write-WpfAtomicJson -Path $OutputPath -Value ([ordered]@{
+                schemaVersion=2;status='CONTRACT_PROBE_PASS';terminal=$false;completionVerified=$false;runId=$RunId;launchId=$LaunchId;
+                transactionId=$TransactionId;payloadSha256=$PayloadSha256;candidateSha256=$candidateHash;launchMode=$LaunchMode;
+                elevatedResume=[bool]$ElevatedResume;candidateArguments=@($candidateArguments);driverPid=$driverPid;driverSessionId=$driverSessionId
+            })
+            exit 0
         }
+        if ($driverSessionId -ne $ExpectedInteractiveSessionId -or $driverSessionId -eq 0) { throw 'WPF supervisor did not bind to the expected interactive session.' }
+        $bound = Write-BoundaryCheckpoint -Phase 'DRIVER_BOUND' -Status 'PASS' -Detail @{driverPid=$driverPid;driverSessionId=$driverSessionId;driverSha256=[string]$specification.driverSha256;launchMode=$LaunchMode;elevatedResume=[bool]$ElevatedResume}
+        if ($StartedPath) { Write-WpfAtomicJson -Path $StartedPath -Value $bound }
+
+        $process = Start-Process -FilePath $ExePath -ArgumentList (ConvertTo-WpfCommandLine -Tokens $candidateArguments) -PassThru
+        Start-Sleep -Milliseconds 200
+        $process.Refresh()
+        $processStartUtc = $process.StartTime.ToUniversalTime().ToString('o')
+        if ($process.SessionId -ne $ExpectedInteractiveSessionId -or $process.SessionId -eq 0) { throw 'Exact candidate launched outside the expected interactive session.' }
+        $candidateIdentity = Get-ProcessIdentityEvidence -Id $process.Id -ExpectedSessionId $ExpectedInteractiveSessionId
+        if (-not $candidateIdentity) { throw 'Exact candidate launch identity could not be proven.' }
+        $launchAck = Write-BoundaryCheckpoint -Phase 'LAUNCH_ACKNOWLEDGED' -Status 'PASS' -Detail @{
+            processId=[int]$process.Id;processStartTime=$processStartUtc;sessionId=[int]$process.SessionId;candidateIdentity=$candidateIdentity;
+            candidatePath=$ExePath;candidateArguments=@($candidateArguments);driverPath=$PSCommandPath;driverIdentity=(Get-ProcessIdentityEvidence $driverPid $driverSessionId)
+        }
+
+        Remove-Item -LiteralPath $WorkerResultPath -Force -ErrorAction SilentlyContinue
+        $workerTokens = @(
+            '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-STA','-File',$PSCommandPath,'-WorkerMode',
+            '-ExePath',$ExePath,'-CandidateProcessId',[string]$process.Id,'-ExpectedCandidateStartUtc',$processStartUtc,
+            '-Action',$Action,'-Role',$Role,'-OutputPath',$WorkerResultPath,'-CheckpointPath',$CheckpointPath,
+            '-LaunchRequestPath',$LaunchRequestPath,'-RunId',$RunId,'-LaunchId',$LaunchId,'-TransactionId',$TransactionId,
+            '-PayloadSha256',$PayloadSha256,'-LaunchMode',$LaunchMode,'-ObserverDeadlineUtc',$ObserverDeadlineUtc,
+            '-ExpectedInteractiveSessionId',[string]$ExpectedInteractiveSessionId
+        )
+        if ($AllowMutation) { $workerTokens += '-AllowMutation' }
+        if ($AllowRebootRequired) { $workerTokens += '-AllowRebootRequired' }
+        if ($UseDurableCompletionFallback) { $workerTokens += '-UseDurableCompletionFallback' }
+        if ($ElevatedResume) { $workerTokens += '-ElevatedResume' }
+        $worker = Start-Process -FilePath ([string]$specification.taskExecutable) -ArgumentList (ConvertTo-WpfCommandLine -Tokens $workerTokens) -PassThru
+        $terminal = Wait-WpfBoundReport -Specification $specification `
+            -ReportProvider { Read-ObservedJsonFile -Path $WorkerResultPath -Kind TERMINAL } `
+            -WorkerStateProvider { try { $worker.Refresh(); if ($worker.HasExited) { 'Exited' } else { 'Running' } } catch { 'Exited' } } `
+            -StopWorker { try { if (-not $worker.HasExited) { $worker.Kill() } } catch {} } `
+            -ProgressProvider { Read-ObservedJsonFile -Path $CheckpointPath -Kind PROGRESS } `
+            -TerminalWriter { param($value) Write-WpfAtomicJson -Path $OutputPath -Value $value }
+
+        $terminal | Add-Member -NotePropertyName driverPid -NotePropertyValue $driverPid -Force
+        $terminal | Add-Member -NotePropertyName driverSessionId -NotePropertyValue $driverSessionId -Force
+        $terminal | Add-Member -NotePropertyName driverIdentity -NotePropertyValue (Get-ProcessIdentityEvidence $driverPid $driverSessionId) -Force
+        $terminal | Add-Member -NotePropertyName candidateIdentity -NotePropertyValue $candidateIdentity -Force
+        $terminal | Add-Member -NotePropertyName processId -NotePropertyValue ([int]$process.Id) -Force
+        $terminal | Add-Member -NotePropertyName processStartTime -NotePropertyValue $processStartUtc -Force
+        $terminal | Add-Member -NotePropertyName launchAcknowledgement -NotePropertyValue $launchAck -Force
+        $cleanupDisposition = Get-WpfCleanupDisposition -Status ([string]$terminal.status) -CompletionVerified:([bool]$terminal.completionVerified)
+        $terminal | Add-Member -NotePropertyName cleanupDisposition -NotePropertyValue $cleanupDisposition -Force
+        Write-WpfAtomicJson -Path $OutputPath -Value $terminal
+        if ([string]$terminal.status -in @('OBSERVER_FAILURE','CANCELLED')) { exit 2 }
+        if ([string]$terminal.status -in @('PRODUCT_FAILURE','FAIL')) { exit 3 }
+        exit 0
+    } catch {
+        $primary = New-MinimalTerminal -Status 'OBSERVER_FAILURE' -FailureClass 'DRIVER_STARTUP_OR_SUPERVISION_FAILURE' -ErrorMessage $_.Exception.Message -LastStep $(if($sequence -ge 2){'LAUNCH_ACKNOWLEDGED'}elseif($sequence -ge 1){'DRIVER_BOUND'}else{'LAUNCH_REQUESTED'})
+        Write-WpfAtomicJson -Path $OutputPath -Value $primary
+        $cleanupDisposition = 'RELINQUISH_LIFECYCLE_OWNER'
+        try {
+            Write-WpfAtomicJson -Path ($OutputPath + '.diagnostic.json') -Value ([ordered]@{status='DIAGNOSTIC';primaryError=$_.Exception.Message;driverPid=$driverPid;driverSessionId=$driverSessionId;processId=if($process){$process.Id}else{$null};timestampUtc=(Get-Date).ToUniversalTime().ToString('o')})
+        } catch {}
+        exit 2
     } finally {
-        if(-not$quarantined){
-            if($pipeline){$pipeline.Dispose()}
-            if($runspace){$runspace.Close();$runspace.Dispose()}
+        if ($process -and $cleanupDisposition -eq 'CLEANUP_EXACT_CANDIDATE') {
+            try { $process.Refresh(); if (-not $process.HasExited) { $process.CloseMainWindow() | Out-Null; Start-Sleep -Seconds 1; $process.Refresh(); if (-not $process.HasExited) { $process.Kill() } } } catch {}
         }
     }
 }
 
-function Wait-WpfBoundReport {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][object]$Specification,
-        [Parameter(Mandatory)][scriptblock]$ReportProvider,
-        [Parameter(Mandatory)][scriptblock]$WorkerStateProvider,
-        [Parameter(Mandatory)][scriptblock]$StopWorker,
-        [scriptblock]$ProgressProvider = { $null },
-        [scriptblock]$ClockProvider = { (Get-Date).ToUniversalTime() },
-        [scriptblock]$SleepProvider = { param($Seconds) Start-Sleep -Seconds $Seconds },
-        [ValidateRange(1,60)][int]$ProviderCallTimeoutSeconds = 30,
-        [Parameter(Mandatory)][scriptblock]$TerminalWriter
-    )
-    $deadline = ConvertTo-WpfUtcInstant (Get-WpfContractValue $Specification 'driverDeadlineUtc')
-    $semanticNoProgressSeconds = [int](Get-WpfContractValue $Specification 'semanticNoProgressSeconds')
-    if ($semanticNoProgressSeconds -le 0) { throw 'WPF semantic no-progress deadline is missing or invalid.' }
-    $lastRejected = ''
-    $lastSequence = 0
-    $lastDurableStep = 'LAUNCH_REQUESTED'
-    $lastSemanticSequence = 0
-    $semanticDeadline = $null
-    while ($true) {
-        $now = ConvertTo-WpfUtcInstant (& $ClockProvider)
-        if (-not $semanticDeadline) { $semanticDeadline = $now.AddSeconds($semanticNoProgressSeconds) }
-        $reportCall=Invoke-WpfBoundProviderCall -Provider $ReportProvider -Kind 'REPORT_PROVIDER' -TimeoutSeconds $ProviderCallTimeoutSeconds
-        if(-not $reportCall.ok){
-            try{&$StopWorker}catch{}
-            $failureNow=ConvertTo-WpfUtcInstant (&$ClockProvider)
-            $failureClass=if($reportCall.timedOut){'REPORT_PROVIDER_TIMEOUT'}else{'REPORT_PROVIDER_FAILURE'}
-            $failure=New-WpfSupervisorFailure -Specification $Specification -FailureClass $failureClass -Error ([string]$reportCall.error) -Now $failureNow -LastSequence $lastSequence -LastDurableStep $lastDurableStep
-            &$TerminalWriter $failure|Out-Null
-            return $failure
-        }
-        $reportObservation = Resolve-WpfProviderObservation -ProviderValue $reportCall.value -Kind TERMINAL -
+# UI Automation is intentionally isolated in this worker process. The parent
+# supervisor can terminate this exact worker and publish a primary terminal
+# report even if a synchronous COM/UIA call below never returns.
+$actions = @()
+$visible = @()
+$diagnostics = @()
+$postConfirmationState = $null
+$window = $null
+try {
+    $candidateHash = Get-WpfFileSha256 -Path $ExePath
+    $candidateArguments = @($specification.candidateArguments | ForEach-Object { [string]$_ })
+    if ($RunId -cne [string]$specification.runId -or $LaunchId -cne [string]$specification.launchId -or $PayloadSha256 -cne [string]$specification.payloadSha256 -or $candidateHash -cne [string]$specification.candidateSha256) { throw 'UIA worker launch identity did not match the immutable launch request.' }
+    if ($TransactionId -and $TransactionId -cne [string]$specification.transactionId) { throw 'UIA worker transaction identity did not match the launch request.' }
+    $process = Get-Process -Id $CandidateProcessId -ErrorAction Stop
+    $actualStartUtc = $process.StartTime.ToUniversalTime()
+    if ($actualStartUtc.Ticks -ne (ConvertTo-WpfUtcInstant $ExpectedCandidateStartUtc).Ticks -or $process.SessionId -ne $ExpectedInteractiveSessionId) { throw 'UIA worker candidate PID/start-time/session binding failed.' }
+    $sequence = 2
+    [void](Write-BoundaryCheckpoint -Phase 'UIA_LOADING' -Status 'STARTED' -Detail @{workerPid=$driverPid;candidatePid=$process.Id})
+    Add-Type -AssemblyName UIAutomationClient
+    Add-Type -AssemblyName UIAutomationTypes
+    if (-not ('DevFleetE2EWindowProbe' -as [type])) {
+        Add-Type @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class DevFleetE2EWindowProbe {
+    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+}
+'@
+    }
+    if (-not ('DevFleetE2EWin32' -as [type])) {
+        Add-Type @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class DevFleetE2EWin32 {
+    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr hWndParent, IntPtr hWndChildAfter, string lpszClass, string lpszWindow);
+    [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+    [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxCount);
+}
+'@
+    }
+    [void](Write-BoundaryCheckpoint -Phase 'UIA_READY' -Status 'PASS' -Detail @{workerPid=$driverPid})
+
+    function Get-UiElements { param([Parameter(Mandatory)]$Root) @($Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)) }
+    function Ensure-UiCheckbox {
+        param([Parameter(Mandatory)]$Root,[Parameter(Mandatory)][string]$Pattern)
+        $element=Get-UiElements $Root|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::CheckBox -and $_.Current.Name -match $Pattern}|Select-Object -First 1
+        if(-not $element){return $false};$toggle=$element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+        if($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On){$toggle.Toggle();Start-Sleep -Milliseconds 300};return $true
+    }
+    function Set-UiTextValue {
+        param([Parameter(Mandatory)]$Root,[Parameter(Mandatory)][string]$AutomationId,[Parameter(Mandatory)][string]$Value)
+        $element=Get-UiElements $Root|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -and $_.Current.AutomationId -eq $AutomationId}|Select-Object -First 1
+        if(-not $element){return $false}
+        $valuePattern=$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+        if([string]$valuePattern.Current.Value -cne $Value){$valuePattern.SetValue($Value);Start-Sleep -Milliseconds 300}
+        if([string]$valuePattern.Current.Value -cne $Value){throw "UI text control $AutomationId did not accept the exact reviewed value."}
+        return $true
+    }
+    function Get-UiDiagnosticValues {
+        param([Parameter(Mandatory)]$Root)
+        $values=@();foreach($edit in @(Get-UiElements $Root|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit})){try{$value=$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value;if($value){$values+=[string]$value}}catch{}};return $values
+    }
+
+    $windowDeadline = Get-MinDeadline ((Get-Date).ToUniversalTime().AddSeconds(90))
+    while((Get-Date).ToUniversalTime() -lt $windowDeadline -and -not $window){Start-Sleep -Milliseconds 500;$process.Refresh();if($process.MainWindowHandle -ne 0){try{$window=[System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)}catch{}}}
+    if(-not $window){throw "Exact candidate did not expose a WPF window for action $Action."}
+    [void](Write-BoundaryCheckpoint -Phase 'WINDOW_ACQUIRED' -Status 'PASS' -Detail @{candidatePid=$process.Id;windowTitle=[string]$window.Current.Name})
+    $all=Get-UiElements $window;$buttons=@($all|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button})
+    $actions=@([ordered]@{name='startup';result='PASS';window=$window.Current.Name})
+    $navigationReady=$null;$executionAlreadyStarted=$false;$factoryResetPhraseSet=$false;$navigationDeadline=Get-MinDeadline ((Get-Date).ToUniversalTime().AddSeconds(120))
+    while((Get-Date).ToUniversalTime() -lt $navigationDeadline -and -not $navigationReady -and -not $executionAlreadyStarted){
+        $all=Get-UiElements $window;$buttons=@($all|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button})
+        $nextControl=$buttons|Where-Object{$_.Current.IsEnabled -and $_.Current.Name -match '^(Next|Continue)$'}|Select-Object -First 1
+        $executeControl=$buttons|Where-Object{$_.Current.Name -eq 'Execute verified plan'}|Select-Object -First 1
+        $windowHandle=[IntPtr]$process.MainWindowHandle;$windowOwner=0;if($windowHandle -ne [IntPtr]::Zero){[void][DevFleetE2EWindowProbe]::GetWindowThreadProcessId($windowHandle,[ref]$windowOwner)}
+        $pageKickerElement=@($all|Where-Object{$_.Current.AutomationId -eq 'PageKicker'}|Select-Object -First 1);$statusElement=@($all|Where-Object{$_.Current.AutomationId -eq 'OperationStatus'}|Select-Object -First 1)
+        $pageKicker=if($pageKickerElement){[string]$pageKickerElement.Current.Name}else{''};$operationStatus=if($statusElement){[string]$statusElement.Current.Name}else{''}
+        $navigationDisposition=Get-WpfNavigationDisposition -LaunchMode $LaunchMode -ElevatedResume ([bool]$ElevatedResume) -WindowOwnerMatches ($windowOwner -eq [uint32]$proces

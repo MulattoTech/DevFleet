@@ -1,969 +1,274 @@
 # DevFleet source part 080
 
 Full-source UTF-8 byte interval [3673500, 3720000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 28e963b672f1c0162cd92f6c8ddeba7a5fd6de6b3b28893cb03bbbebba32893e
+Payload SHA-256: 4a382c65d1800ff884593cdc3631f82ba04e44f7e4c477b9904d6e1ef34f0e79
 
 <!-- BEGIN SOURCE SLICE -->
-able></div><div id="container-details" class="container-details" hidden><div class="section-heading"><h3 id="container-details-title">Container details</h3><button type="button" id="close-container-details" class="button ghost">Close</button></div><div class="details-grid"><pre id="container-inspect"></pre><pre id="container-logs"></pre></div></div></section>
-
-    {% elif view == 'activity' %}
-    <section class="page-intro"><div><p class="eyebrow">AUDIT TRAIL</p><h2>Activity</h2><p class="muted">Operations are durable, progress-aware, and expandable when you need technical detail.</p></div></section><section class="panel activity-panel">{% for op in status.operations %}<article class="operation-row" id="{{ op.id }}"><span class="activity-dot {{ 'bad' if op.state == 'failed' else 'ok' if op.state == 'completed' else 'warn' }}"></span><div class="operation-main"><strong>{{ op.kind|replace('-', ' ')|title }}</strong><p>{{ op.project }} · {{ op.message }}</p><div class="progress-track"><span style="width:{{ op.progress }}%"></span></div></div><div class="operation-meta">{{ op.state }}<br><small>{{ op.updated_at }}</small></div><details class="advanced"><summary>Details</summary><pre>{{ op.log|tojson(indent=2) }}{{ op.result or op.error or '' }}</pre></details></article>{% else %}<p class="muted">No activity yet.</p>{% endfor %}</section>
-
-    {% else %}
-    <section class="page-intro"><div><p class="eyebrow">DEVFLEET SETTINGS</p><h2>Settings & safety</h2><p class="muted">Host-safe controls and diagnostics.</p></div></section><section class="content-grid two-thirds"><article class="panel"><div class="eyebrow">NODE HEALTH</div><h2>{{ status.friendly_name }}</h2><p class="muted">Profile {{ status.profile }} · Docker {{ status.docker.mode|default('unknown', true) }} · AMD graphics configuration is not managed by DevFleet.</p><form method="post" action="/repair">{{ csrf() }}<button class="button ghost">Run non-destructive repair</button></form><details class="advanced"><summary>Advanced health records</summary><div class="details-grid"><pre>{{ status.docker|tojson(indent=2) }}</pre><pre>{{ status.backup|tojson(indent=2) }}</pre><pre>{{ status.ollama|tojson(indent=2) }}</pre></div></details></article><article class="panel"><div class="eyebrow">RECOVERY</div><h2>Quarantine</h2><p class="muted">Quarantined workspaces are reversible and remain outside active projects.</p>{% for q in quarantine %}<form method="post" action="/quarantine/restore">{{ csrf() }}<input type="hidden" name="name" value="{{ q.name }}"><button class="button ghost">Restore {{ q.name }}</button></form>{% else %}<p class="muted">No quarantined projects.</p>{% endfor %}<details class="advanced"><summary>Peer diagnostics</summary><pre>{{ peer|tojson(indent=2) }}</pre></details></article></section>
-    {% endif %}
-  </main>
-</div>
-</body>
-</html>
+lar,Consolas,monospace}.success{color:#66e2b2}.warning{color:#f3d47e}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}.safety-list{display:grid;gap:5px;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}.safety-list p{margin:0;color:#c6d3e9;font-size:.8rem}.danger-panel{position:relative}.button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid #9ab8ff;outline-offset:2px}
+/* DevFleet login landing page */
+.login-page{min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 15% 15%,rgba(67,118,255,.18),transparent 38%),#08101f;color:#eef4ff}
+.login-shell{width:min(920px,calc(100% - 32px));display:grid;grid-template-columns:1fr minmax(320px,420px);gap:48px;align-items:center}
+.login-brand h1{font-size:clamp(3rem,8vw,6rem);letter-spacing:-.07em;margin:.1em 0}.login-brand>p:not(.eyebrow){max-width:34rem;color:#a7b7d4;font-size:1.15rem;line-height:1.6}.eyebrow{color:#71a3ff;font-size:.72rem;font-weight:800;letter-spacing:.16em}
+.login-card{background:rgba(18,31,56,.92);border:1px solid rgba(141,174,232,.25);border-radius:20px;padding:32px;box-shadow:0 28px 80px rgba(0,0,0,.35)}.login-card h2{margin:.25rem 0 1.5rem}.login-card label{display:block;margin:1rem 0 .35rem;color:#c6d3e8}.login-card input:not([type=checkbox]){width:100%;box-sizing:border-box;border:1px solid #41577d;border-radius:9px;background:#0b1528;color:#fff;padding:.75rem}.login-remember{display:flex!important;align-items:center;gap:.5rem;font-size:.9rem}.login-submit{width:100%;margin-top:1rem}.login-error{padding:.7rem;border-radius:8px;background:#4b1d2a;color:#ffb8c4}.login-footer{text-align:center;color:#8da0bf;margin:1.5rem 0 0;font-size:.85rem}
+@media (max-width:720px){.login-shell{grid-template-columns:1fr;gap:18px}.login-brand{text-align:center}.login-brand h1{font-size:4rem}}
+.inline-form{display:inline-flex;margin:0}.inline-form button{font:inherit}
+.custom-resource-controls{margin:0;padding:15px;border:1px solid var(--line);border-radius:10px;background:rgba(12,22,41,.45)}.custom-resource-controls legend{padding:0 7px;color:#b9cbed;font-size:.8rem;font-weight:750}.wizard-review{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 15px;border:1px solid #4669a4;border-radius:10px;background:rgba(28,48,88,.4)}.wizard-review div{display:grid;gap:5px}.wizard-review span:not(.status-badge){color:#b8c9e8;font-size:.78rem;line-height:1.45}.workspace-link{white-space:nowrap}.resource-allocation{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:16px 0;padding:15px;border:1px solid var(--line);border-radius:10px;background:rgba(12,22,41,.45)}.resource-allocation div{display:grid;gap:4px}.resource-allocation small{color:var(--muted);font-size:.7rem}.resource-allocation strong{font-size:.82rem}.resource-telemetry{font-size:.75rem}.workspace-readiness-note,.project-action-status{display:block;margin-top:7px;color:var(--muted);font-size:.72rem;line-height:1.35}.project-action-status.error{color:#ff9daa}.project-action-form details{margin-top:8px}@media(max-width:680px){.resource-allocation{grid-template-columns:1fr 1fr}}
+/* v1.2.11 authoritative stopped/transitioning project states */
+.project-state-banner{display:flex;align-items:center;justify-content:space-between;gap:22px;margin:0 0 22px;padding:18px 20px;border:2px solid #7185a9;border-radius:14px;background:#17223a;box-shadow:var(--shadow)}.project-state-banner strong{display:block;font-size:1.1rem;letter-spacing:.01em}.project-state-banner p{max-width:720px;margin:6px 0 0;color:#d7e0f1;line-height:1.5}.project-state-banner.stopped{border-color:#a8b6ce;background:linear-gradient(120deg,#28334a,#192338)}.project-state-banner.transitioning{border-color:#f0c96a;background:#302b24}.project-state-banner.error{border-color:#ed6b7a;background:#3a202c}.strong-state .status-badge{padding:7px 12px;border:1px solid currentColor;font-size:.76rem;font-weight:850;letter-spacing:.08em;text-transform:uppercase}.state-stopped .status-badge{background:#c7d0df;color:#182238}.state-starting .status-badge,.state-stopping .status-badge,.state-provisioning .status-badge{background:#f0c96a;color:#211c12}.state-running .status-badge{background:#35d49a;color:#082419}.state-error .status-badge,.state-unreachable .status-badge{background:#ed6b7a;color:#2b0c13}.runtime-unavailable{margin:12px 0;padding:18px;border:1px dashed #7185a9;border-radius:10px;background:#111a2c;color:#dbe4f5}.runtime-unavailable p{margin:6px 0 0;color:var(--muted)}
+@media(max-width:680px){.project-state-banner{align-items:flex-start;flex-direction:column}.project-state-banner form,.project-state-banner button{width:100%}}
 
 ```
 
 
-## FILE: source/app/templates/login.html
+## FILE: source/app/systemd/devfleet-backup.service
 
-SHA256: 2545054327bb69d476b2fdb4b28ed75b12e1d30222a34cab8a46ebb82d2af4d1 | Bytes: 1660 | Git mode: 100644
+SHA256: 4262827dc7134b7a52088898b25c35eba6359089ca24b4149acc5053c5c877c9 | Bytes: 390 | Git mode: 100644
+
+```
+[Unit]
+Description=DevFleet encrypted workspace backup
+After=network-online.target tailscaled.service
+[Service]
+Type=oneshot
+User=devfleet-backup
+Group=devfleet-backup
+ExecStart=/usr/local/bin/devfleet-backup
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/run/lock /var/lib/devfleet/backup-status
+ReadOnlyPaths=__WORKSPACES__ __QUARANTINE__
+
+```
+
+
+## FILE: source/app/systemd/devfleet-backup.timer
+
+SHA256: 52148ce1d51758771ea6aa53c5168ab750af865b40a4b084334359f800796a7e | Bytes: 207 | Git mode: 100644
+
+```
+[Unit]
+Description=Run DevFleet workspace backup every 15 minutes
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=__BACKUP_INTERVAL_MINUTES__min
+RandomizedDelaySec=60
+Persistent=true
+[Install]
+WantedBy=timers.target
+
+```
+
+
+## FILE: source/app/systemd/devfleet-vault-broker.socket
+
+SHA256: 9bfd790f5f2152ac43bdc78fb56efc3924c1f10975f31c0995a1cb690d64836f | Bytes: 331 | Git mode: 100644
+
+```
+[Unit]
+Description=DevFleet bounded Vault operation socket
+
+[Socket]
+ListenStream=/run/devfleet-vault-broker.sock
+SocketUser=root
+SocketGroup=devfleet-control
+SocketMode=0660
+Accept=yes
+MaxConnections=1
+MaxConnectionsPerSource=1
+TriggerLimitIntervalSec=60s
+TriggerLimitBurst=20
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target
+
+```
+
+
+## FILE: source/app/systemd/devfleet-vault-broker@.service
+
+SHA256: 4431ccb294f011419df43b9475954cfed6ff3f570d600074b4b5bda5037ef1da | Bytes: 866 | Git mode: 100644
+
+```
+[Unit]
+Description=DevFleet bounded Vault operation broker
+After=network-online.target tailscaled.service
+
+[Service]
+Type=exec
+User=devfleet-backup
+Group=devfleet-backup
+ExecStart=/usr/local/bin/devfleet-vault-broker
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+# Backup configuration creates this directory. Before configuration the broker
+# must start to return its authenticated refusal; the absent path stays read-only.
+ReadWritePaths=/run/lock -/var/lib/devfleet/backup-status __WORKSPACES__ __QUARANTINE__
+UMask=0077
+TimeoutStartSec=30
+RuntimeMaxSec=3660
+TimeoutStopSec=10
+KillMode=control-group
+
+```
+
+
+## FILE: source/app/systemd/devfleet.service
+
+SHA256: f33f84cc58fc18f2217a064cc40d9a55bbb14a008a664609b29d0518183a5cca | Bytes: 897 | Git mode: 100644
+
+```
+[Unit]
+Description=DevFleet remote development control plane
+After=network-online.target tailscaled.service
+Wants=network-online.target
+[Service]
+User=devfleet-control
+Group=devfleet-control
+SupplementaryGroups=devrunner
+WorkingDirectory=/opt/devfleet
+Environment=PYTHONUNBUFFERED=1
+Environment=DOCKER_HOST=unix:///run/user/__DEVRUNNER_UID__/docker.sock
+EnvironmentFile=/etc/devfleet/secrets.env
+# The application enforces loopback plus the configured Tailscale CIDR at the
+# TCP peer boundary.  Do not trust forwarded headers from arbitrary interfaces.
+ExecStart=/opt/devfleet/venv/bin/uvicorn devfleet.main:app --host 0.0.0.0 --port __PORT__
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=__WORKSPACES__ __QUARANTINE__ __TRANSACTION_ROOT__ /var/lib/devfleet /var/cache/devfleet
+[Install]
+WantedBy=multi-user.target
+
+```
+
+
+## FILE: source/app/systemd/mutable-paths.json
+
+SHA256: 00862e8161b5dbe817a5e4a4e2ce662c67b43fa45c160a9070b5b624db1f8069 | Bytes: 202 | Git mode: 100644
+
+```
+{
+  "schema_version": 1,
+  "workspace": "/home/devrunner/workspaces",
+  "quarantine": "/home/devrunner/.devfleet-quarantine",
+  "transaction_root": "/home/devrunner/workspaces/.devfleet-transactions"
+}
+
+```
+
+
+## FILE: source/app/templates/index.html
+
+SHA256: 0fdd41703ebacd3f0231d7f18a74d908dbdc19f629f120d6af65c49b3707e559 | Bytes: 46645 | Git mode: 100644
 
 ```
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <title>Sign in · DevFleet</title>
-<link rel="stylesheet" href="/static/style.css?v={{ version|default('unknown', true) }}-r5">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DevFleet · {{ status.friendly_name }}</title>
+<link rel="stylesheet" href="/static/style.css?v={{ version|default(status.version|default('unknown', true), true) }}-r5">
+<script src="/static/app.js?v={{ version|default(status.version|default('unknown', true), true) }}-r5" defer></script>
 </head>
-<body class="login-page">
-  <main class="login-shell">
-    <section class="login-brand" aria-labelledby="brand-title">
-      <p class="eyebrow">SAFE REMOTE DEVELOPMENT</p>
-      <h1 id="brand-title">DevFleet</h1>
-      <p>Manage isolated development environments from one protected control plane.</p>
+<body class="{{ 'advanced-mode' if request.cookies.get('devfleet_advanced') == '1' else '' }}">
+{% macro csrf() %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endmacro %}
+{% macro status_badge(value) %}{% set state=value|default('unknown', true)|lower %}<span class="status-badge {{ 'ok' if state in ['online','running','healthy','ready','completed','verified'] else 'neutral' if state in ['stopped','unknown','not-checked','not-verified','offline'] else 'warn' if state in ['starting','provisioning','restart-required','queued','degraded','unavailable'] else 'bad' }}" role="status">{{ state|replace('-', ' ') }}</span>{% endmacro %}
+{% macro runtime_label(p) %}{% if p.runtime_isolation|default('container', true) == 'vm' %}Dedicated VM{% else %}Project-isolated containers{% endif %}{% endmacro %}
+{% macro provider_label(p) %}{{ p.runtime_provider|default(p.provider|default('unassigned', true), true)|replace('-', ' ')|title }}{% endmacro %}
+{% macro workspace_target(p) %}{% if p.runtime_isolation|default(p.runtime_type|default('container', true), true) == 'vm' and p.lifecycle_status|default('') == 'stopped' %}stopped — address refreshes on start{% else %}{{ p.workspace_host|default(p.runtime_address|default(p.host_id|default(provider_label(p), true), true), true) }}{% endif %}{% endmacro %}
+{% macro open_workspace(p) %}{% set ssh_alias=p.ssh_alias|default(p.runtime_id if p.runtime_isolation|default('container', true) == 'vm' and p.runtime_id else 'devfleet-primary', true) %}{% set remote_path=p.workspace_path|default('/home/devrunner/workspaces/' ~ p.slug, true) %}{% set readiness=p.workspace_readiness|default({}, true) %}{% if readiness.ready %}<a class="button ghost workspace-link" href="/projects/{{ p.slug|urlencode }}/workspace" data-provider="{{ provider_label(p) }}" data-ssh-alias="{{ ssh_alias }}" data-workspace-target="{{ workspace_target(p) }}" title="Open {{ ssh_alias }}:{{ remote_path }} in VS Code">Open workspace</a>{% else %}<button class="button ghost disabled workspace-link" type="button" disabled data-provider="{{ provider_label(p) }}" data-ssh-alias="{{ ssh_alias }}" data-workspace-target="{{ workspace_target(p) }}" title="{{ readiness.reason|default('Workspace readiness has not been verified.', true) }}">Open workspace</button><small class="workspace-readiness-note">{{ readiness.reason|default('Workspace readiness has not been verified.', true) }}</small>{% endif %}{% endmacro %}
+{% macro resource_allocation(p) %}{% set limits=p.resource_limits|default({}, true) %}<div class="resource-allocation" data-resource-profile="{{ p.resource_profile|default('standard', true) }}"><div><small>Environment</small><strong>{{ runtime_label(p) }}</strong></div><div><small>Allocation</small><strong>{{ p.resource_profile_label|default(p.resource_profile|default('standard', true)|title, true) }}</strong></div><div><small>CPU</small><strong>{{ limits.cpus|default(limits.vcpus|default('—', true), true) }}</strong></div><div><small>RAM</small><strong>{{ limits.memory|default(limits.memory_gb ~ ' GB' if limits.memory_gb else '—', true) }}</strong></div><div><small>Disk</small><strong>{{ limits.disk_gb|default('—', true) }} GB</strong></div><div><small>PID limit</small><strong>{{ 'Not applicable — VM isolation' if p.runtime_isolation|default(p.runtime_type|default('container', true), true) == 'vm' else limits.pids|default('—', true) }}</strong></div></div><p class="muted resource-telemetry"><strong>Runtime telemetry:</strong> {{ 'Unavailable while stopped' if p.lifecycle_status|default('') == 'stopped' else p.health_scope|default('Not checked', true)|replace('-', ' ')|title }}</p>{% endmacro %}
+{% macro project_action(slug, action, label, style='') %}<form method="post" action="/projects/{{ slug }}/{{ action }}" class="project-action-form" data-project-action="{{ action }}">{{ csrf() }}<button class="{{ style }}" type="submit">{{ label }}</button></form>{% endmacro %}
+  <div id="devfleet-csrf" data-token="{{ csrf_token }}" hidden></div>
+  <script id="devfleet-cluster-data" type="application/json">{{ cluster|tojson }}</script>
+  <svg class="icon-sprite" aria-hidden="true" focusable="false"><symbol id="icon-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 21v-6h6v6" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol><symbol id="icon-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="14" y="3" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3" y="14" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="14" y="14" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol><symbol id="icon-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3" y="14" width="18" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 7h.01M7 17h.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></symbol><symbol id="icon-activity" viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol><symbol id="icon-settings" viewBox="0 0 24 24"><path d="M9.5 3h5l.7 2.2 2 .9 2.1-1 2.2 3.8-1.6 1.7v2.3l1.6 1.7-2.2 3.8-2.1-1-2 .9-.7 2.2h-5l-.7-2.2-2-.9-2.1 1-2.2-3.8 1.6-1.7v-2.3L2.5 8.9l2.2-3.8 2.1 1 2-.9z" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="12" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol></svg>
+<div class="app-shell" id="devfleet-app" data-view="{{ view }}">
+  <aside class="sidebar">
+    <a class="brand" href="/?view=overview"><span class="brand-mark">DF</span><span><strong>DevFleet</strong><small>Safe remote development</small></span></a>
+    <nav class="primary-nav" aria-label="Primary navigation">
+      <a class="{{ 'active' if view == 'overview' else '' }}" href="/?view=overview"><svg aria-hidden="true"><use href="#icon-home"></use></svg> Overview</a>
+      <a class="{{ 'active' if view in ['projects','project'] else '' }}" href="/?view=projects"><svg aria-hidden="true"><use href="#icon-grid"></use></svg> Projects</a>
+      <a class="{{ 'active' if view == 'infrastructure' else '' }}" href="/?view=infrastructure"><svg aria-hidden="true"><use href="#icon-server"></use></svg> Infrastructure</a>
+      <a class="{{ 'active' if view == 'activity' else '' }}" href="/?view=activity"><svg aria-hidden="true"><use href="#icon-activity"></use></svg> Activity</a>
+      <a class="{{ 'active' if view == 'settings' else '' }}" href="/?view=settings"><svg aria-hidden="true"><use href="#icon-settings"></use></svg> Settings</a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="node-presence"><span class="presence-dot"></span><span><strong>{{ status.friendly_name }}</strong><small>{{ status.node }} · {{ status.role }}</small></span></div>
+<span class="version-label">DevFleet v{{ status.version|default('unknown', true) }}</span>
+    </div>
+  </aside>
+  <main class="app-main">
+    <header class="topbar">
+      <div><p class="eyebrow">{{ 'PROJECT WORKSPACE' if view == 'project' else view|upper }}</p><h1>{% if view == 'project' and selected_project %}{{ selected_project.display_name }}{% elif view == 'overview' %}{{ status.greeting|default('DevFleet overview', true) }}{% else %}{{ view|capitalize }}{% endif %}</h1></div>
+      <div class="topbar-actions"><span class="connection-pill"><span class="presence-dot"></span> {{ status.friendly_name }} online</span><a class="button primary" href="/?view=projects#create-project">New project</a><form method="post" action="/logout" class="inline-form">{{ csrf() }}<button class="button ghost" type="submit">Sign out</button></form></div>
+    </header>
+    {% if operation %}
+    <section class="operation-banner {{ 'failed' if operation.state == 'failed' else 'complete' if operation.state == 'completed' else '' }}" aria-live="polite" data-operation-id="{{ operation.id }}">
+      <div class="operation-icon">{{ '!' if operation.state == 'failed' else '✓' if operation.state == 'completed' else '…' }}</div>
+      <div class="operation-copy"><strong>{{ operation.kind|replace('-', ' ')|title }}</strong><span data-operation-message>{{ operation.message }}</span><div class="progress-track"><span data-operation-progress style="width:{{ operation.progress }}%"></span></div></div>
+      <div class="operation-meta" data-operation-meta>{{ operation.progress }}% · {{ operation.state }}<br><small>Updated {{ operation.updated_at }}</small></div>
+      <details class="advanced operation-details"><summary>Details</summary><pre>{% for line in operation.log %}{{ line.time }}  {{ line.message }}&#10;{% endfor %}{{ operation.result or operation.error or '' }}</pre></details>
     </section>
-    <section class="login-card" aria-labelledby="login-title">
-      <p class="eyebrow">DEVELOPER ACCESS</p>
-      <h2 id="login-title">Sign in to DevFleet</h2>
-      {% if error %}<p class="login-error" role="alert">{{ error }}</p>{% endif %}
-      <form method="post" action="/login">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="next" value="{{ next }}">
-        <label for="username">Username</label>
-        <input id="username" name="username" autocomplete="username" required autofocus>
-        <label for="password">Password</label>
-        <input id="password" type="password" name="password" autocomplete="current-password" required>
-        <label class="login-remember"><input type="checkbox" name="keep_signed_in" value="true"> Keep me signed in</label>
-        <button class="button primary login-submit" type="submit">Sign in</button>
-      </form>
-      <p class="login-footer">DevFleet v{{ version }}</p>
+    {% endif %}
+
+    {% if view == 'overview' %}
+    <section class="hero-grid">
+      <article class="hero-card"><div class="eyebrow">DEVFLEET OVERVIEW</div><h2>Your environments at a glance.</h2><p>Manage projects, runtime isolation, and infrastructure from one safe control plane. GPU passthrough remains disabled.</p><div class="hero-actions"><a class="button primary" href="/?view=projects">Open projects</a><a class="button ghost" href="/?view=infrastructure">View infrastructure</a></div></article>
+      <article class="health-card"><div class="card-heading"><span class="icon-tile green">✓</span><div><h3>Node health</h3><p class="muted">{{ status.friendly_name }}</p></div></div><div class="health-score">{{ status.host_agent.status|default('ready', true)|replace('-', ' ')|title }}</div><p class="muted">Docker {{ status.docker.mode|default('ready', true) }} · {{ status.system.disk_free_gb }} GB free</p><a href="/?view=infrastructure">Inspect infrastructure →</a></article>
     </section>
-  </main>
-</body>
-</html>
-
-```
-
-
-## FILE: source/client/Configure-DockerContext.ps1
-
-SHA256: d27ae17fba723ce41695a05d644d6ac5e4eb99557f6ff9296005e23e8e587058 | Bytes: 916 | Git mode: 100644
-
-```
-[CmdletBinding()]param([string]$ContextName='Codexdevvm')
-$ErrorActionPreference='Stop';$root=Split-Path -Parent $PSScriptRoot;Import-Module (Join-Path $root 'windows\DevFleet.Common.psm1') -Force;$config=Get-DevFleetConfig;if(-not(Get-Command docker.exe -ErrorAction SilentlyContinue)){throw 'Docker CLI is optional but must be installed to create a context. Docker Desktop is not required for main workloads.'};$uri="ssh://devrunner@$($config.Primary.SshAlias)";$exists=& docker.exe context ls --format '{{.Name}}'|Where-Object{$_ -eq $ContextName};if($exists){& docker.exe context update $ContextName --docker "host=$uri" --description 'DevFleet CodexDevVM over SSH'}else{& docker.exe context create $ContextName --docker "host=$uri" --description 'DevFleet CodexDevVM over SSH'};if($LASTEXITCODE){throw 'Docker context creation failed.'};Write-Host "Use: docker --context $ContextName ps" -ForegroundColor Green
-
-```
-
-
-## FILE: source/client/Configure-SSH.ps1
-
-SHA256: 9376560ad72753307bf3ce174039807ad00e2bb13b12b9f6c2087ff630e141dc | Bytes: 1699 | Git mode: 100644
-
-```
-[CmdletBinding()]param([switch]$SkipConnectivityTest)
-$ErrorActionPreference='Stop';$root=Split-Path -Parent $PSScriptRoot;Import-Module (Join-Path $root 'windows\DevFleet.Common.psm1') -Force;$config=Get-DevFleetConfig;$key=Get-OrCreateDevFleetSshKey;$sshDir=Join-Path $env:USERPROFILE '.ssh';New-Item -ItemType Directory $sshDir -Force|Out-Null;$configFile=Join-Path $sshDir 'config';$begin='# BEGIN DEVFLEET MANAGED';$end='# END DEVFLEET MANAGED';$existing=if(Test-Path $configFile){Get-Content $configFile -Raw}else{''}
-function Resolve-Host([string]$Instance){$mp=Get-MultipassExe;$raw=Invoke-External $mp @('exec',$Instance,'--','tailscale','ip','-4') -Capture;return ($raw -split "`n"|Select-Object -First 1).Trim()}
-$blocks=@();foreach($n in @($config.Primary,$config.Failover)){try{$hostName=Resolve-Host $n.InstanceName}catch{$hostName=$n.InstanceName};$blocks+=@"
-Host $($n.SshAlias)
-    HostName $hostName
-    User devrunner
-    IdentityFile $($key.Replace('\','/'))
-    IdentitiesOnly yes
-    ServerAliveInterval 30
-    ServerAliveCountMax 4
-    TCPKeepAlive yes
-    Compression yes
-    ForwardAgent no
-"@}
-$managed=$begin+"`n"+($blocks -join "`n")+$end;if($existing -match '(?s)# BEGIN DEVFLEET MANAGED.*?# END DEVFLEET MANAGED'){$existing=[regex]::Replace($existing,'(?s)# BEGIN DEVFLEET MANAGED.*?# END DEVFLEET MANAGED',$managed)}else{$existing=$existing.TrimEnd()+"`n`n"+$managed+"`n"};Set-Content $configFile $existing -Encoding utf8;if(-not $SkipConnectivityTest){& ssh.exe -o BatchMode=yes -o ConnectTimeout=10 $config.Primary.SshAlias 'echo DevFleet SSH OK'};Write-Host "SSH aliases configured: $($config.Primary.SshAlias), $($config.Failover.SshAlias)" -ForegroundColor Green
-
-```
-
-
-## FILE: source/client/Configure-VSCode.ps1
-
-SHA256: 38e8948c6ae1e6f3c9b5d605d5650666939fbe477d23b9b2c9329fdc22b92ad1 | Bytes: 950 | Git mode: 100644
-
-```
-[CmdletBinding()]param([string[]]$ExtensionSets=@('core'))
-$ErrorActionPreference='Stop';$root=Split-Path -Parent $PSScriptRoot;Import-Module (Join-Path $root 'windows\DevFleet.Common.psm1') -Force;$code=Get-VsCodeCli -AllowPerUser;if(-not $code){throw 'VS Code CLI was not found.'};$settingsDir=Join-Path $env:APPDATA 'Code\User';New-Item -ItemType Directory $settingsDir -Force|Out-Null;$source=Join-Path $PSScriptRoot 'vscode-settings.jsonc';$dest=Join-Path $settingsDir 'devfleet-settings.reference.jsonc';Copy-Item $source $dest -Force;foreach($set in $ExtensionSets){$list=Join-Path $PSScriptRoot "vscode-extensions-$set.txt";if(-not(Test-Path $list)){throw "Unknown extension set: $set"};foreach($ext in Get-Content $list){if($ext.Trim()){& $code --install-extension $ext.Trim() --force|Out-Null}}};Write-Host "VS Code extensions installed. Reference settings copied to $dest; merge reviewed values into settings.json." -ForegroundColor Green
-
-```
-
-
-## FILE: source/client/ssh-config.example
-
-SHA256: f299ee1509445c514d3faf5d91db10f071768f6f62b5cc90223856bf2afbdeff | Bytes: 258 | Git mode: 100644
-
-```
-Host CodexDevVM
-    HostName <PRIMARY_VM_TAILSCALE_NAME_OR_IP>
-    User devrunner
-    IdentityFile ~/.ssh/<DEVFLEET_KEY>
-    IdentitiesOnly yes
-    ServerAliveInterval 30
-    ServerAliveCountMax 4
-    TCPKeepAlive yes
-    Compression yes
-    ForwardAgent no
-
-```
-
-
-## FILE: source/client/vscode-extensions-core.txt
-
-SHA256: 4cd73e74d6ab46ccbe37cb08c46200aa203747f3b6ac79bb823a1c03226911c1 | Bytes: 79 | Git mode: 100644
-
-```
-ms-vscode-remote.remote-ssh
-ms-vscode-remote.remote-containers
-eamodio.gitlens
-
-```
-
-
-## FILE: source/client/vscode-extensions-enterprise.txt
-
-SHA256: 56eee44c27cdc6b543a8f58f580629bc9197a7123a74d4f05f063aac54745eb9 | Bytes: 49 | Git mode: 100644
-
-```
-ms-dotnettools.csdevkit
-vscjava.vscode-java-pack
-
-```
-
-
-## FILE: source/client/vscode-extensions-python.txt
-
-SHA256: aaa364399deda68c33ac158dbf32dad3dc4a4a522f66567df618d7bb3a48e131 | Bytes: 64 | Git mode: 100644
-
-```
-ms-python.python
-charliermarsh.ruff
-ms-python.mypy-type-checker
-
-```
-
-
-## FILE: source/client/vscode-extensions-systems.txt
-
-SHA256: 25b7b8985b0071eeaa9a69e1304dec94beb5919b14f1303a6353124d2c3455c8 | Bytes: 53 | Git mode: 100644
-
-```
-golang.go
-rust-lang.rust-analyzer
-ms-vscode.cpptools
-
-```
-
-
-## FILE: source/client/vscode-extensions-web.txt
-
-SHA256: 8eefa88fd78c091f9ac23130aef1399a649929fc6a895a05be4f3742c0aa874d | Bytes: 46 | Git mode: 100644
-
-```
-dbaeumer.vscode-eslint
-esbenp.prettier-vscode
-
-```
-
-
-## FILE: source/client/vscode-settings.jsonc
-
-SHA256: c5b88bbcff8c96b667cb46ea26eaabfb7336f2d7b5243f7a528553b825da0cf9 | Bytes: 882 | Git mode: 100644
-
-```
-{
-  "remote.SSH.connectTimeout": 30,
-  "remote.SSH.useLocalServer": true,
-  "terminal.integrated.defaultProfile.windows": "PowerShell",
-  "git.autofetch": true,
-  "git.detectSubmodules": false,
-  "files.watcherExclude": {"**/.git/objects/**": true,"**/node_modules/**": true,"**/.venv/**": true,"**/target/**": true,"**/.next/**": true,"**/.cache/**": true,"**/.ai-bridge/local-agent/**": true,"**/models/**": true,"**/data/generated/**": true},
-  "search.exclude": {"**/node_modules": true,"**/.venv": true,"**/target": true,"**/.next": true,"**/dist": true,"**/build": true,"**/coverage": true,"**/.cache": true,"**/.ai-bridge/local-agent": true,"**/models": true,"**/*.bin": true,"**/*.safetensors": true},
-  "python.analysis.exclude": ["**/.venv","**/.ai-bridge/local-agent","**/data/generated"],
-  "typescript.tsserver.maxTsServerMemory": 4096,
-  "editor.formatOnSave": true
-}
-
-```
-
-
-## FILE: source/cloud-init/compute.yaml
-
-SHA256: 00316cd0d11900a961163b07a24f26e9ebfc71830100847ce2cc10ef650ea4cf | Bytes: 1847 | Git mode: 100644
-
-```
-#cloud-config
-hostname: __NODE_NAME__
-manage_etc_hosts: true
-package_update: true
-package_upgrade: false
-packages:
-  - unzip
-  - curl
-  - ca-certificates
-  - gnupg
-  - jq
-  - git
-  - gh
-  - openssh-server
-  - python3
-  - python3-venv
-  - python3-pip
-  - uidmap
-  - dbus-user-session
-  - slirp4netns
-  - fuse-overlayfs
-  - iptables
-  - ufw
-  - fail2ban
-  - unattended-upgrades
-users:
-  - default
-  - name: devrunner
-    gecos: DevFleet restricted development user
-    groups: [users]
-    shell: /bin/bash
-    lock_passwd: true
-    sudo: []
-write_files:
-  - path: /etc/wsl.conf
-    permissions: !!str 0644
-    content: |
-      [automount]
-      enabled=false
-      [interop]
-      enabled=false
-  - path: /etc/ssh/sshd_config.d/60-devfleet.conf
-    permissions: !!str 0644
-    content: |
-      PasswordAuthentication no
-      PermitRootLogin no
-      AllowUsers ubuntu devrunner
-      X11Forwarding no
-      AllowAgentForwarding no
-      AllowTcpForwarding yes
-  - path: /etc/apt/apt.conf.d/20auto-upgrades
-    permissions: !!str 0644
-    content: |
-      APT::Periodic::Update-Package-Lists "1";
-      APT::Periodic::Unattended-Upgrade "1";
-runcmd:
-  - systemctl enable --now ssh
-  - systemctl enable --now fail2ban
-  - loginctl enable-linger devrunner
-  - install -d -o devrunner -g devrunner -m 0700 /home/devrunner/.ssh
-  # DevFleet adds its distinct managed operator key after bootstrap.  Never
-  # copy the administrator account's authorized_keys into devrunner.
-  - touch /home/devrunner/.ssh/authorized_keys
-  - chown devrunner:devrunner /home/devrunner/.ssh/authorized_keys
-  - chmod 0600 /home/devrunner/.ssh/authorized_keys
-  - sudo -u devrunner git config --global user.name __GIT_NAME_SHELL__
-  - sudo -u devrunner git config --global user.email __GIT_EMAIL_SHELL__
-final_message: "DevFleet base cloud-init complete for __NODE_ROLE__."
-
-```
-
-
-## FILE: source/cloud-init/vault.yaml
-
-SHA256: 02799e2f3cac7df71db945030cce0d122d3663564db761197ade7e34d09f18ca | Bytes: 2314 | Git mode: 100644
-
-```
-#cloud-config
-hostname: __NODE_NAME__
-manage_etc_hosts: true
-package_update: true
-package_upgrade: false
-packages:
-  - unzip
-  - curl
-  - ca-certificates
-  - gnupg
-  - jq
-  - openssh-server
-  - apache2-utils
-  - ufw
-  - fail2ban
-  - unattended-upgrades
-users:
-  - default
-  - name: resticvault
-    gecos: DevFleet backup vault service
-    system: true
-    shell: /usr/sbin/nologin
-    homedir: /srv/restic
-write_files:
-  - path: /usr/local/sbin/devfleet-install-vault-tailscale
-    permissions: !!str 0700
-    content: |
-      #!/usr/bin/env bash
-      set -Eeuo pipefail
-      export DEBIAN_FRONTEND=noninteractive
-      . /etc/os-release
-      [[ "$ID" == ubuntu && "$VERSION_CODENAME" =~ ^[a-z]+$ ]] || exit 4
-      key=$(mktemp)
-      trap 'rm -f -- "$key"' EXIT
-      curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 "https://pkgs.tailscale.com/stable/ubuntu/$VERSION_CODENAME.noarmor.gpg" -o "$key"
-      observed=$(gpg --show-keys --with-colons "$key" | awk -F: '$1=="pub"{count++;pending=1;next} pending && $1=="fpr"{fingerprint=toupper($10);pending=0} END{if(count!=1 || pending || length(fingerprint)!=40)exit 4;print fingerprint}')
-      [[ "$observed" == '__TAILSCALE_SIGNING_FINGERPRINT__' ]] || { echo 'Tailscale signing-key identity mismatch' >&2; exit 4; }
-      install -m 0644 "$key" /usr/share/keyrings/tailscale-archive-keyring.gpg
-      printf 'deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu %s main\n' "$VERSION_CODENAME" > /etc/apt/sources.list.d/tailscale.list
-      apt-get update
-      apt-get install -y tailscale
-      systemctl enable --now tailscaled
-  - path: /etc/ssh/sshd_config.d/60-devfleet-vault.conf
-    permissions: !!str 0644
-    content: |
-      PasswordAuthentication no
-      PermitRootLogin no
-      AllowUsers ubuntu
-      X11Forwarding no
-      AllowAgentForwarding no
-  - path: /etc/apt/apt.conf.d/20auto-upgrades
-    permissions: !!str 0644
-    content: |
-      APT::Periodic::Update-Package-Lists "1";
-      APT::Periodic::Unattended-Upgrade "1";
-runcmd:
-  - [timeout, --signal=TERM, --kill-after=10s, 900s, /usr/local/sbin/devfleet-install-vault-tailscale]
-  - systemctl enable --now ssh
-  - systemctl enable --now fail2ban
-final_message: "DevFleet vault base cloud-init complete."
-
-```
-
-
-## FILE: source/config/compose-security-policy.json
-
-SHA256: e2db65056b5030e3547c8659563bdb0db197d71d6c6dfd50a609efddbd514279 | Bytes: 758 | Git mode: 100644
-
-```
-{
-  "schemaVersion": 1,
-  "policyVersion": "2.0.0",
-  "compose": {
-    "supportedSchema": "compose-spec-safe-subset-2026-08",
-    "resolver": "none",
-    "transitiveResolution": "fail-closed",
-    "blockedFeatures": ["include", "extends", "use_api_socket", "volumes_from", "provider", "lifecycle-hooks", "host-backed-secrets-configs"],
-    "maxReferenceDepth": 8,
-    "maxReferenceFiles": 256,
-    "maxReferenceBytes": 33554432,
-    "environmentInterpolation": "blocked",
-    "unknownExecutionFields": "blocked"
-  },
-  "devcontainer": {
-    "supportedSchema": "devcontainer-json-safe-subset-2026-08",
-    "jsonc": true,
-    "runArgs": "reject-by-default",
-    "features": "reject-unresolved",
-    "hostCommands": "blocked",
-    "hostMounts": "blocked"
-  }
-}
-
-```
-
-
-## FILE: source/config/devfleet.config.json
-
-SHA256: e6d6d298e5437f994eeab4579253b1ef1bf49fe2ebeeffe01cd6e9ca30c65b5d | Bytes: 3298 | Git mode: 100644
-
-```
-{
-  "SchemaVersion": 2,
-  "PackageVersion": "1.2.13",
-  "ClusterName": "dylan-devfleet",
-  "Hosts": {
-    "DesktopFriendlyName": "DevFleet Primary",
-    "LaptopFriendlyName": "DevFleet Surrogate"
-  },
-  "Git": {
-    "UserName": "Dylan Mellor",
-    "Email": "dylanmellor@gmail.com",
-    "DefaultOwner": "MulattoTech"
-  },
-  "Development": {
-    "Profile": "balanced",
-    "EnableSharedBuildCaches": true,
-    "EnableAnalyzerCache": true,
-    "EnableTrustedOrchestrator": true,
-    "AllowLoopbackPortPublishing": true,
-    "AllowTailnetPortPublishing": true,
-    "AutoStartCodexPro": true,
-    "AutoStartProjectServices": true,
-    "RequireConfirmationForRoutineRebuild": false,
-    "RequireConfirmationForRoutineRepair": false,
-    "BackupBeforeRebuild": false,
-    "BackupBeforeQuarantine": true
-  },
-  "Docker": {
-    "PrimaryMode": "rootless",
-    "FailoverMode": "rootless",
-    "EnableBuildKit": true,
-    "EnableSharedBuildCache": true,
-    "EnableRegistryCache": false,
-    "RootfulModeAcknowledged": false
-  },
-  "CodexPro": {
-    "Mode": "project-scoped-adapter",
-    "AutoBootstrap": true,
-    "ToolCards": true,
-    "DefaultHost": "127.0.0.1",
-    "DefaultPort": 8787,
-    "SharedTransportStatus": "adapter-only-until-a-verified-multi-workspace-registration-interface-is-exposed"
-  },
-  "Ollama": {
-    "BaseUrl": "",
-    "PreferredBaseUrl": "",
-    "Model": "oaksight-gpt-oss-20b:latest",
-    "Profile": "stable-interactive",
-    "ProfilesFile": "config/ollama-profiles.json"
-  },
-  "Network": {
-    "PortalPort": 8787,
-    "VaultPort": 8000,
-    "RequireTailscale": true,
-    "TailnetCidr": "100.64.0.0/10",
-    "PublicBindingAllowed": false
-  },
-  "Primary": {
-    "InstanceName": "devfleet-primary",
-    "FriendlyName": "CodexDevVM",
-    "SshAlias": "CodexDevVM",
-    "UbuntuImage": "24.04",
-    "Cpus": 12,
-      "Memory": "12G",
-    "Disk": "220G"
-  },
-  "Failover": {
-    "InstanceName": "devfleet-failover",
-    "FriendlyName": "DevFleetFailover",
-    "SshAlias": "DevFleetFailover",
-    "UbuntuImage": "24.04",
-    "Cpus": 4,
-    "Memory": "8G",
-    "Disk": "70G"
-  },
-  "Vault": {
-    "InstanceName": "devfleet-vault",
-    "FriendlyName": "DevFleetVault",
-    "SshAlias": "DevFleetVault",
-    "UbuntuImage": "24.04",
-    "Cpus": 2,
-    "Memory": "3G",
-    "Disk": "160G"
-  },
-  "RoleProfiles": {
-    "LaptopSurrogate": {
-      "Recommended": {
-        "FailoverMemory": "5G",
-        "VaultMemory": "2G"
-      },
-      "MinimumTested": {
-        "FailoverMemory": "4G",
-        "VaultMemory": "2G"
-      }
-    }
-  },
-  "Backup": {
-    "IntervalMinutes": 15,
-    "KeepWithin": "90d",
-    "QuarantineDays": 30,
-    "RequireVerifiedBackupBeforeQuarantine": true,
-    "OfflineExportEnabled": true
-  },
-  "Safety": {
-    "DisableHostMounts": true,
-    "AllowDockerTcp": false,
-    "AllowPermanentDeleteInUi": false,
-    "RequireRootlessDocker": false,
-    "BlockWindowsPaths": true,
-    "BlockUncPaths": true,
-    "BlockWorkspaceEscape": true,
-    "OrdinaryContainersMayMountDockerSocket": false
-  },
-  "LanguagePolicy": {
-    "DefaultAutomation": "python",
-    "DefaultWindowsAdministration": "powershell",
-    "DefaultLinuxAdministration": "bash-or-python",
-    "DefaultCrossPlatformCli": "go",
-    "DefaultWebFrontend": "typescript",
-    "DefaultRapidApi": "python-fastapi"
-  }
-}
-
-```
-
-
-## FILE: source/config/ollama-profiles.json
-
-SHA256: 3e3b592adfe477dbc58c3995f8f34602f14d4145ef01b9b4cad117053c32b148 | Bytes: 961 | Git mode: 100644
-
-```
-{
-  "stable-interactive": {
-    "Description": "Low-latency coding and one or two concurrent requests.",
-    "Environment": {
-      "OLLAMA_CONTEXT_LENGTH": "32768",
-      "OLLAMA_NUM_PARALLEL": "2",
-      "OLLAMA_MAX_LOADED_MODELS": "1",
-      "OLLAMA_MAX_QUEUE": "64",
-      "OLLAMA_KEEP_ALIVE": "15m"
-    }
-  },
-  "large-context": {
-    "Description": "One primary repository-analysis task with reduced concurrency.",
-    "Environment": {
-      "OLLAMA_CONTEXT_LENGTH": "65536",
-      "OLLAMA_NUM_PARALLEL": "1",
-      "OLLAMA_MAX_LOADED_MODELS": "1",
-      "OLLAMA_MAX_QUEUE": "32",
-      "OLLAMA_KEEP_ALIVE": "30m"
-    }
-  },
-  "parallel-agents": {
-    "Description": "Several concurrent CodexPro requests using smaller per-request contexts.",
-    "Environment": {
-      "OLLAMA_CONTEXT_LENGTH": "16384",
-      "OLLAMA_NUM_PARALLEL": "4",
-      "OLLAMA_MAX_LOADED_MODELS": "1",
-      "OLLAMA_MAX_QUEUE": "128",
-      "OLLAMA_KEEP_ALIVE": "15m"
-    }
-  }
-}
-
-```
-
-
-## FILE: source/config/resource-policy.json
-
-SHA256: 8e93275c24263491338ac3939a808acdf07f15c3d0c45badda90edb51646de8d | Bytes: 214 | Git mode: 100644
-
-```
-{
-  "schemaVersion": 1,
-  "policyVersion": "1.0.0",
-  "physicalFloorMinGiB": 8,
-  "physicalFloorPercent": 0.10,
-  "commitHeadroomFloorMinGiB": 16,
-  "commitHeadroomPercent": 0.20,
-  "commitUsageLimitPercent": 80
-}
-
-```
-
-
-## FILE: source/dependencies.json
-
-SHA256: b939c07de544806e87b8324c050a1a3aff6baac8b36fac57201d917ea8810b46 | Bytes: 19463 | Git mode: 100644
-
-```
-{
-  "schemaVersion": 1,
-  "manifestVersion": "1.2.13",
-  "supportedProfile": "Windows 11 Pro x64, Internet-connected, administrator/UAC, hardware virtualization",
-  "dependencies": [
-    {
-      "id": "powershell7",
-      "displayName": "PowerShell 7",
-      "classification": "CORE_REQUIRED",
-      "required": true,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["bootstrap", "installer"],
-      "minimumSupportedVersion": "7.4.0",
-      "maximumMajor": 7,
-      "executableProbes": ["pwsh.exe"],
-      "registryProbes": ["HKLM:\\SOFTWARE\\Microsoft\\PowerShellCore\\InstalledVersions"],
-      "appPathsProbes": ["pwsh.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\PowerShell\\7\\pwsh.exe", "%LocalAppData%\\Microsoft\\powershell\\pwsh.exe"],
-      "wingetPackageId": "Microsoft.PowerShell",
-      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/PowerShell/PowerShell/releases/latest", "allowedHosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"], "assetRegex": "^PowerShell-7\\.[0-9.]+-win-x64\\.msi$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".msi"] },
-      "silentInstallArguments": ["/qn", "/norestart"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["-NoProfile", "-NonInteractive", "-Command", "$PSVersionTable.PSVersion.ToString()"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, App Paths, registry and known locations",
-      "postInstallVersionVerification": "pwsh version >= minimum and major policy"
-    },
-    {
-      "id": "git",
-      "displayName": "Git",
-      "classification": "CORE_REQUIRED",
-      "required": true,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["source-control", "guest-bootstrap"],
-      "minimumSupportedVersion": "2.40.0",
-      "maximumMajor": null,
-      "executableProbes": ["git.exe"],
-      "registryProbes": ["HKLM:\\SOFTWARE\\GitForWindows", "HKCU:\\SOFTWARE\\GitForWindows"],
-      "appPathsProbes": ["git.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\Git\\cmd\\git.exe", "%LocalAppData%\\Programs\\Git\\cmd\\git.exe"],
-      "wingetPackageId": "Git.Git",
-      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/git-for-windows/git/releases/latest", "allowedHosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"], "assetRegex": "^Git-[0-9.]+-64-bit\\.exe$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Johannes Schindelin, O=Johannes Schindelin, L=Bruehl, C=DE"], "extensions": [".exe"] },
-      "silentInstallArguments": ["/VERYSILENT", "/NORESTART", "/MERGETASKS=!runcode"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, App Paths, registry and known locations",
-      "postInstallVersionVerification": "git --version >= minimum"
-    },
-    {
-      "id": "openssh-client",
-      "displayName": "OpenSSH Client",
-      "classification": "CORE_REQUIRED",
-      "required": true,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["ssh", "guest-bootstrap"],
-      "minimumSupportedVersion": "8.1.0",
-      "maximumMajor": null,
-      "executableProbes": ["ssh.exe"],
-      "registryProbes": [],
-      "appPathsProbes": ["ssh.exe"],
-      "knownVendorInstallLocations": ["%WINDIR%\\System32\\OpenSSH\\ssh.exe"],
-      "wingetPackageId": null,
-      "directOfficialVendorResolver": { "type": "windows-capability", "metadataUri": "https://learn.microsoft.com/windows-server/administration/openssh/openssh_install_firstuse", "allowedHosts": ["learn.microsoft.com"], "assetRegex": null },
-      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".exe"] },
-      "silentInstallArguments": [],
-      "rebootSemantics": "capability-dependent",
-      "versionProbe": { "arguments": ["-V"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, App Paths, capability and known location",
-      "postInstallVersionVerification": "ssh -V >= minimum"
-    },
-    {
-      "id": "multipass",
-      "displayName": "Multipass",
-      "classification": "CORE_REQUIRED",
-      "required": true,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["virtualization", "ubuntu-provisioning"],
-      "minimumSupportedVersion": "1.13.0",
-      "maximumMajor": 1,
-      "executableProbes": ["multipass.exe"],
-      "registryProbes": ["HKLM:\\SOFTWARE\\Canonical\\Multipass"],
-      "appPathsProbes": ["multipass.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\Multipass\\bin\\multipass.exe", "%ProgramFiles(x86)%\\Multipass\\bin\\multipass.exe"],
-      "wingetPackageId": "Canonical.Multipass",
-      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/canonical/multipass/releases/latest", "allowedHosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"], "assetRegex": "(?i)^multipass.*win.*64.*\\.(msi|exe)$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=CANONICAL GROUP LIMITED, O=CANONICAL GROUP LIMITED, L=London, C=GB"], "installedExecutableTrust": "signed-installer-locked-path", "extensions": [".msi", ".exe"] },
-      "silentInstallArguments": ["/quiet", "/norestart"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["version"], "regex": "(?m)^multipass\\s+(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, App Paths, registry and known vendor locations",
-      "postInstallVersionVerification": "multipass version and multipass list both succeed"
-    },
-    {
-      "id": "virtualization-backend",
-      "displayName": "Virtualization backend",
-      "classification": "CORE_REQUIRED",
-      "required": true,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["multipass"],
-      "minimumSupportedVersion": "0.0.0",
-      "maximumMajor": null,
-      "executableProbes": ["systeminfo.exe"],
-      "registryProbes": [],
-      "appPathsProbes": [],
-      "knownVendorInstallLocations": [],
-      "wingetPackageId": null,
-      "directOfficialVendorResolver": { "type": "windows-feature-or-virtualbox", "metadataUri": "https://documentation.ubuntu.com/multipass/latest/how-to-guides/install-multipass", "allowedHosts": ["documentation.ubuntu.com"], "assetRegex": null },
-      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US", "CN=Oracle Corporation, O=Oracle Corporation, L=Redwood City, S=California, C=US"], "extensions": [] },
-      "silentInstallArguments": [],
-      "rebootSemantics": "feature-dependent",
-      "versionProbe": { "arguments": ["/FO", "LIST"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "verify Hyper-V capability or VirtualBox installation and Multipass driver",
-      "postInstallVersionVerification": "backend capability and selected driver are usable"
-    },
-    {
-      "id": "virtualbox",
-      "displayName": "Oracle VirtualBox",
-      "classification": "FEATURE_REQUIRED",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["multipass", "windows-home"],
-      "minimumSupportedVersion": "7.0.0",
-      "maximumMajor": null,
-      "executableProbes": ["VBoxManage.exe"],
-      "registryProbes": ["HKLM:\\SOFTWARE\\Oracle\\VirtualBox", "HKLM:\\SOFTWARE\\WOW6432Node\\Oracle\\VirtualBox"],
-      "appPathsProbes": ["VBoxManage.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\Oracle\\VirtualBox\\VBoxManage.exe", "%ProgramFiles(x86)%\\Oracle\\VirtualBox\\VBoxManage.exe"],
-      "wingetPackageId": "Oracle.VirtualBox",
-      "directOfficialVendorResolver": { "type": "official-download-page", "metadataUri": "https://www.virtualbox.org/wiki/Downloads", "allowedHosts": ["www.virtualbox.org", "download.virtualbox.org"], "assetRegex": "(?i)^VirtualBox-[0-9.]+-Win\\.exe$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Oracle Corporation, O=Oracle Corporation, L=Redwood City, S=California, C=US"], "extensions": [".exe"] },
-      "silentInstallArguments": ["--silent", "--msiparams", "REBOOT=ReallySuppress"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover VBoxManage from HKLM App Paths and canonical Oracle machine locations",
-      "postInstallVersionVerification": "VBoxManage --version >= minimum and Multipass virtualbox driver is selected"
-    },
-    {
-      "id": "tailscale",
-      "displayName": "Tailscale",
-      "classification": "ROLE_REQUIRED",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["network-pairing", "failover", "vault"],
-      "minimumSupportedVersion": "1.60.0",
-      "maximumMajor": 1,
-      "executableProbes": ["tailscale.exe"],
-      "registryProbes": ["HKLM:\\SOFTWARE\\Tailscale"],
-      "appPathsProbes": ["tailscale.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\Tailscale\\tailscale.exe", "%ProgramFiles(x86)%\\Tailscale\\tailscale.exe"],
-      "wingetPackageId": "Tailscale.Tailscale",
-      "directOfficialVendorResolver": { "type": "official-download-page", "metadataUri": "https://tailscale.com/download/windows", "allowedHosts": ["tailscale.com", "pkgs.tailscale.com"], "assetRegex": "(?i)^tailscale-setup-latest\\.(exe|msi)$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Tailscale Inc., O=Tailscale Inc., L=Toronto, S=Ontario, C=CA, SERIALNUMBER=1131559-5, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.3=CA"], "extensions": [".exe", ".msi"] },
-      "silentInstallArguments": ["/quiet"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, App Paths, registry and known locations",
-      "postInstallVersionVerification": "tailscale version succeeds; auth remains explicit/deferred"
-    },
-    {
-      "id": "vscode",
-      "displayName": "VS Code",
-      "classification": "RECOMMENDED",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["editor", "remote-development"],
-      "minimumSupportedVersion": "1.90.0",
-      "maximumMajor": null,
-      "executableProbes": ["code.cmd", "code.exe"],
-      "registryProbes": ["HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"],
-      "appPathsProbes": ["code.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\Microsoft VS Code\\bin\\code.cmd", "%LocalAppData%\\Programs\\Microsoft VS Code\\bin\\code.cmd"],
-      "wingetPackageId": "Microsoft.VisualStudioCode",
-      "directOfficialVendorResolver": { "type": "official-download-page", "metadataUri": "https://code.visualstudio.com/Download", "directUri": "https://update.code.visualstudio.com/latest/win32-x64/stable", "allowedHosts": ["code.visualstudio.com", "update.code.visualstudio.com", "vscode.download.prss.microsoft.com"], "assetRegex": "(?i)^VSCodeSetup-x64-[0-9.]+\\.exe$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".exe"] },
-      "silentInstallArguments": ["/VERYSILENT", "/NORESTART"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover code.cmd/code.exe via PATH, registry and known locations",
-      "postInstallVersionVerification": "code --version >= minimum"
-    },
-    {
-      "id": "github-cli",
-      "displayName": "GitHub CLI",
-      "classification": "RECOMMENDED",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["GitHub integration"],
-      "minimumSupportedVersion": "2.40.0",
-      "maximumMajor": null,
-      "executableProbes": ["gh.exe"],
-      "registryProbes": [],
-      "appPathsProbes": ["gh.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\GitHub CLI\\gh.exe", "%LocalAppData%\\Programs\\GitHub CLI\\gh.exe"],
-      "wingetPackageId": "GitHub.cli",
-      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/cli/cli/releases/latest", "allowedHosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"], "assetRegex": "(?i)^gh_.*_windows_amd64\\.msi$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=GitHub, Inc., O=GitHub, Inc., L=San Francisco, S=California, C=US"], "extensions": [".msi"] },
-      "silentInstallArguments": ["/qn", "/norestart"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, App Paths and known locations",
-      "postInstallVersionVerification": "gh --version >= minimum"
-    },
-    {
-      "id": "sevenzip",
-      "displayName": "7-Zip",
-      "classification": "OPTIONAL",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["encrypted-transfer-bundle"],
-      "minimumSupportedVersion": "23.0.0",
-      "maximumMajor": null,
-      "executableProbes": ["7z.exe"],
-      "registryProbes": ["HKLM:\\SOFTWARE\\7-Zip", "HKLM:\\SOFTWARE\\WOW6432Node\\7-Zip"],
-      "appPathsProbes": ["7z.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\7-Zip\\7z.exe", "%ProgramFiles(x86)%\\7-Zip\\7z.exe"],
-      "wingetPackageId": "7zip.7zip",
-      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/ip7z/7zip/releases/latest", "officialPageUri": "https://www.7-zip.org/download.html", "expectedOwner": "ip7z", "expectedRepository": "7zip", "allowedHosts": ["api.github.com", "github.com", "release-assets.githubusercontent.com"], "assetRegex": "(?i)^7z\\d+-x64\\.exe$", "officialPageAssetRegex": "(?i)^7z\\d+-x64\\.exe$" },
-      "installerAuthenticityPolicy": { "strategy": "VendorReleaseSha256", "required": true, "allowedSignerSubjectsExact": ["CN=Igor Pavlov"], "extensions": [".exe"] },
-      "silentInstallArguments": ["/S"],
-      "rebootSemantics": "0",
-      "versionProbe": { "arguments": [], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, registry and known locations",
-      "postInstallVersionVerification": "7z executable is present and responds"
-    },
-    {
-      "id": "remote-ssh-extension",
-      "displayName": "Remote SSH extension",
-      "classification": "FEATURE_REQUIRED",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["remote-development"],
-      "minimumSupportedVersion": "0.0.0",
-      "maximumMajor": null,
-      "executableProbes": ["code.cmd"],
-      "registryProbes": [],
-      "appPathsProbes": [],
-      "knownVendorInstallLocations": [],
-      "wingetPackageId": null,
-      "directOfficialVendorResolver": { "type": "vscode-extension", "metadataUri": "https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-ssh", "allowedHosts": ["marketplace.visualstudio.com"], "assetRegex": null },
-      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".vsix"] },
-      "silentInstallArguments": ["--install-extension", "ms-vscode-remote.remote-ssh", "--force"],
-      "rebootSemantics": "0",
-      "versionProbe": { "arguments": [], "regex": null },
-      "postInstallExecutableDiscovery": "resolve VS Code CLI and inspect extension list",
-      "postInstallVersionVerification": "code --list-extensions contains ms-vscode-remote.remote-ssh"
-    },
-    {
-      "id": "remote-explorer-extension",
-      "displayName": "Remote Explorer extension",
-      "classification": "FEATURE_REQUIRED",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["remote-development"],
-      "minimumSupportedVersion": "0.0.0",
-      "maximumMajor": null,
-      "executableProbes": ["code.cmd"],
-      "registryProbes": [],
-      "appPathsProbes": [],
-      "knownVendorInstallLocations": [],
-      "wingetPackageId": null,
-      "directOfficialVendorResolver": { "type": "vscode-extension", "metadataUri": "https://marketplace.visualstudio.com/items?itemName=ms-vscode.remote-explorer", "allowedHosts": ["marketplace.visualstudio.com"], "assetRegex": null },
-      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".vsix"] },
-      "silentInstallArguments": ["--install-extension", "ms-vscode.remote-explorer", "--force"],
-      "rebootSemantics": "0",
-      "versionProbe": { "arguments": [], "regex": null },
-      "postInstallExecutableDiscovery": "resolve VS Code CLI and inspect extension list",
-      "postInstallVersionVerification": "code --list-extensions contains ms-vscode.remote-explorer"
-    },
-    {
-      "id": "dev-containers-extension",
-      "displayName": "Dev Containers extension",
-      "classification": "FEATURE_REQUIRED",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["remote-development", "containers"],
-      "minimumSupportedVersion": "0.0.0",
-      "maximumMajor": null,
-      "executableProbes": ["code.cmd"],
-      "registryProbes": [],
-      "appPathsProbes": [],
-      "knownVendorInstallLocations": [],
-      "wingetPackageId": null,
-      "directOfficialVendorResolver": { "type": "vscode-extension", "metadataUri": "https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers", "allowedHosts": ["marketplace.visualstudio.com"], "assetRegex": null },
-      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".vsix"] },
-      "silentInstallArguments": ["--install-extension", "ms-vscode-remote.remote-containers", "--force"],
-      "rebootSemantics": "0",
-      "versionProbe": { "arguments": [], "regex": null },
-      "postInstallExecutableDiscovery": "resolve VS Code CLI and inspect extension list",
-      "postInstallVersionVerification": "code --list-extensions contains ms-vscode-remote.remote-containers"
-    }
-  ]
-}
-
-```
-
-
-## FILE: source/docs/00-HARD-STOPS-AND-ASSUMPTIONS.md
-
-SHA256: 95f36460eee2e88d097ca0dc1f7cb4062292fc24e9702aaf2c28326127934c8f | Bytes: 3228 | Git mode: 100644
-
-```
-# Hard stops and assumptions
-
-No unanswered design question blocked creation of this package. The installer performs preflight checks and stops before VM provisioning when a required condition is missing.
-
-## Actual hard stops while installing
-
-1. **Hardware virtualization must be enabled in UEFI/BIOS.**
-2. **Windows Package Manager (`winget`) must work.** The included bootstrap can install PowerShell 7, but cannot repair a missing or damaged App Installer installation.
-3. **Free storage:** approximately 120 GB on the desktop and 100 GB on the laptop with the default sparse VM sizes. The preflight script adjusts CPU/RAM conservatively but does not silently shrink disks.
-4. **Tailscale approval:** sign in the laptop Windows host, desktop Windows host, primary VM, failover VM, and vault VM. Existing authenticated hosts are detected and skipped.
-5. **Reboot:** enabling Hyper-V requires a reboot. Run the same START-HERE file again afterward.
-6. **Private GitHub repositories:** browser/device authorization cannot be scripted away.
-7. **Encrypted bundle passphrase:** choose at least 12 characters and keep it until both pairing transfers are complete.
-
-## One decision to review before running
-
-You use MuMu Player. Hyper-V can affect some Android-emulator configurations. The preflight warns when emulator/virtualization processes are running. Close MuMu before provisioning and confirm your current MuMu build works with Hyper-V before allowing a Windows edition that supports Hyper-V to enable it. On Windows Home, the package uses VirtualBox instead.
-
-## Defaults used
-
-- Desktop primary: up to 12 vCPU, 32 GB RAM, 220 GB sparse disk; automatically reduced for smaller hardware.
-- Laptop failover: up to 4 vCPU, 8 GB RAM, 70 GB sparse disk.
-- Laptop vault: up to 2 vCPU, 3 GB RAM, 160 GB sparse disk.
-- Ubuntu 24.04 LTS guests.
-- Ollama remains on MulattoTechBox using `oaksight-gpt-oss-20b:latest`. DevFleet prefers the configured tailnet hostname and retains `http://192.168.1.243:11434/v1` as the supported LAN fallback.
-- Git identity: `Dylan Mellor <dylanmellor@gmail.com>`.
-- Backups every 15 minutes.
-- Quarantine review window: 30 days.
-- Vault retention maintenance default: 90 days.
-
-Edit `config/devfleet.config.json` **before the first run** to change these defaults.
-
-## CodexPro hard limit
-
-The package creates a project-scoped `.devfleet/codexpro-bootstrap.sh` hook, but does not contain your private CodexPro installer, credentials, or ChatGPT connector authorization. The hook executes **inside the selected project container**, which is not given the Docker socket. Exact CodexPro authentication remains an interactive/product-specific step.
-
-## v1.1.0 additions
-
-Clean installation defaults to Balanced/rootless on CodexDevVM and rootless on failover. Upgrade defaults remain Strict/rootless. Rootful bootstrap requires a separately provisioned privileged helper and fails closed when it is unavailable. Installation stops for missing virtualization, winget, disk capacity, reboot requirements, Tailscale/GitHub authorization, failed mount isolation, failed snapshots, or missing encrypted-bundle passphrases. CodexPro private authorization remains the only intentionally manual adapter input.
-
-```
-
-
-## FILE: source/docs/01-ARCHITECTURE.md
-
-SHA256: 6b2d8c54bdef789c3fd80a6b6512a38d657c38bfb1a2e9a0b8bddd86809f3dc9 | Bytes: 2879 | Git mode: 100644
-
-````
-# Architecture
-
-```text
-Laptop Windows — trusted recovery side
-├─ Tailscale client + VS Code
-├─ devfleet-failover Ubuntu VM
-│  ├─ rootless Docker by default
-│  ├─ project containers
-│  └─ DevFleet dashboard/API
-├─ devfleet-vault Ubuntu VM
-│  ├─ no Docker
-│  ├─ append-only rest-server
-│  └─ client-side encrypted restic repository
-└─ optional encrypted offline vault exports
-
-Desktop Windows — heavy disposable compute
-├─ Tailscale client + VS Code
-├─ Ollama / RX 7900 XTX service remains on Windows
-└─ devfleet-primary Ubuntu VM (friendly name: CodexDevVM)
-   ├─ rootless Docker on a clean Balanced install
-   ├─ project containers
-   └─ DevFleet dashboard/API
-
-GitHub
-└─ off-device committed history
-```
-
-## Isolation layers
-
-1. Windows files are outside the VMs.
-2. Multipass host-directory mounting is disabled globally with `local.privileged-mounts=false`.
-3. Docker runs inside each disposable compute VM. Clean installations use rootless Docker. Strict mode requires rootless Docker; an explicit rootful configuration requires acknowledgement and a separately provisioned privileged helper. Bootstrap does not grant docker-group access or provision that helper. Docker TCP and Windows folder mounts remain disabled.
-4. A project may bind only relative paths within its own project directory. Absolute, parent-directory, Windows, UNC, and Docker-socket mounts are blocked before startup.
-5. CodexPro hooks run inside project containers, not on the VM control plane.
-6. Compute nodes receive append-only vault credentials. Vault pruning 
+    <section class="stats-grid">
+      <article class="stat-card"><span class="stat-label">Projects</span><strong>{{ status.projects|length }}</strong><small>managed workspaces</small></article>
+      <article class="stat-card"><span class="stat-label">Dedicated VMs</span><strong>{{ status.projects|selectattr('runtime_isolation','equalto','vm')|list|length }}</strong><small>project environments</small></article>
+      <article class="stat-card"><span class="stat-label">Memory</span><strong>{{ status.system.memory_percent }}%</strong><small>host utilization</small></article>
+      <article class="stat-card"><span class="stat-label">Disk free</span><strong>{{ status.system.disk_free_gb }}</strong><small>GB on the DevFleet host</small></article>
+    </section>
+    <section class="content-grid two-thirds">
+      <article class="panel"><div class="section-heading"><div><p class="eyebrow">YOUR WORK</p><h2>Projects</h2></div><a href="/?view=projects">View all →</a></div><div class="project-list">{% for p in status.projects[:4] %}<a class="project-row" href="/projects/{{ p.slug }}"><span class="project-avatar">{{ (p.display_name|default(p.slug, true))[0]|upper }}</span><span class="project-row-copy"><strong>{{ p.display_name|default(p.slug, true) }}</strong><small>{{ runtime_label(p) }} · {{ p.resource_profile|default('standard', true)|title }}</small></span>{{ status_badge('running' if p.running else p.runtime_status|default('ready', true)) }}<span class="chevron">›</span></a>{% else %}<p class="muted">No projects yet.</p>{% endfor %}</div></article>
+      <article class="panel"><div class="section-heading"><div><p class="eyebrow">RECENT</p><h2>Activity</h2></div><a href="/?view=activity">View all →</a></div>{% for op in status.operations[:5] %}<a class="activity-row" href="/?view=activity#{{ op.id }}"><span class="activity-dot {{ 'bad' if op.state == 'failed' else 'ok' if op.state == 'completed' else 'warn' }}"></span><span><strong>{{ op.kind|replace('-', ' ')|title }}</strong><small>{{ op.project }} · {{ op.message }}</small></span><time>{{ op.updated_at }}</time></a>{% else %}<p class="muted">No recent operations.</p>{% endfor %}</article>
+    </section>
+    <section class="panel"><div class="section-heading"><div><p class="eyebrow">CONNECTED INFRASTRUCTURE</p><h2>DevFleet nodes</h2></div><a href="/?view=infrastructure">Manage infrastructure →</a></div><div id="cluster-nodes" class="node-grid" data-endpoint="/cluster/status"><p class="muted">Loading node health…</p></div><span id="cluster-updated" class="muted"></span></section>
+
+    {% elif view == 'projects' %}
+    <section class="page-intro"><div><p class="eyebrow">WORKSPACES</p><h2>Projects</h2><p class="muted">Every project keeps its workspace and gets an explicit, reviewable environment assignment.</p></div><a class="button primary" href="#create-project">New project</a></section>
+    <section class="project-card-grid">{% for p in status.projects %}<article class="project-card"><div class="project-card-top"><span class="project-avatar large">{{ (p.display_name|default(p.slug, true))[0]|upper }}</span><div><h3>{{ p.display_name|default(p.slug, true) }}</h3><p class="muted">{{ p.slug }}</p></div>{{ status_badge('running' if p.running else p.runtime_status|default('ready', true)) }}</div><div class="project-facts"><div><small>Environment</small><strong>{{ runtime_label(p) }}</strong></div><div><small>Provider</small><strong>{{ provider_label(p) }}</strong></div><div><small>Workspace</small><strong class="truncate">{{ workspace_target(p) }}</strong></div><div><small>Resources</small><strong>{{ p.resource_profile_label|default(p.resource_profile|default('standard', true)|title, true) }} · {{ p.resource_limits.cpus|default('—', true) }} CPU · {{ p.resource_limits.memory|default('—', true) }}</strong></div></div><p class="muted project-summary">{{ p.language|default('Existing', true)|title }}{% if p.framework %} · {{ p.framework }}{% endif %} · {{ 'Workspace ready' if p.workspace_readiness.ready else 'Workspace readiness pending' }}</p>{% if p.recovery_only %}<div class="runtime-unavailable" data-recovery-only="{{ p.slug }}"><strong>Recovery artifact only</strong><p>This restored copy is inert. Its files are available for inspection, but runtime actions require a separate explicit adoption.</p></div>{% else %}<div class="card-actions">{{ open_workspace(p) }}{% if p.running %}{{ project_action(p.slug,'stop','Stop','ghost') }}{% else %}{{ project_action(p.slug,'start','Start') }}{% endif %}<a class="icon-button" href="/projects/{{ p.slug }}?tab=settings" title="Project settings">•••</a></div>{% endif %}<details class="advanced"><summary>Advanced details</summary><pre>{{ {'provider':p.runtime_provider|default('docker-compose',true),'runtime_id':p.runtime_id|default('',true),'host_id':p.host_id|default('',true),'limits':p.resource_limits|default({},true),'workspace_readiness':p.workspace_readiness|default({},true),'backup':p.backup_status|default('not-verified',true)}|tojson(indent=2) }}</pre></details></article>{% else %}<article class="empty-state"><h3>No projects yet</h3><p>Create a project to get started.</p></article>{% endfor %}</section>
+    <section id="create-project" class="panel wizard-panel"><div class="section-heading"><div><p class="eyebrow">PROJECT SETUP</p><h2>Create a project</h2><p class="muted">The wizard recommends resources from project complexity and keeps GPU access disabled.</p></div></div><form method="post" action="/projects/create" class="wizard-form" data-environment-wizard>{{ csrf() }}<div class="form-step"><span class="step-number">1</span><div><h3>Project identity</h3><div class="form-grid"><label>Name<input name="display_name" required autocomplete="off" placeholder="M0TechLabs Job Finder"></label><label>Slug<input name="slug" required pattern="[a-z0-9][a-z0-9._-]{1,62}" autocomplete="off" placeholder="m-techlabs-job-finder"></label><label>Project kind<select name="project_kind"><option value="">General</option><option>automation</option><option>rapid-api</option><option>cross-platform-cli</option><option>web-frontend</option><option>full-stack-web</option><option>infrastructure-service</option></select></label></div></div></div><div class="form-step"><span class="step-number">2</span><div><h3>Environment</h3><div class="form-grid"><label>Environment type<select name="runtime_isolation"><option value="">Recommend automatically</option><option value="container">Project-isolated containers on shared host</option><option value="vm">Dedicated project VM</option></select></label><label>Resources<select name="resource_profile"><option value="">Recommend automatically</option><option value="small">Small · 1 CPU · 2 GB · 20 GB</option><option value="standard">Standard · 2 CPU · 4 GB · 40 GB</option><option value="large">Large · 4 CPU · 8 GB · 80 GB</option><option value="xlarge">Extra large · 6 CPU · 12 GB · 120 GB</option></select></label><label>Scale<select name="scale"><option>small</option><option>medium</option><option>large</option></select></label><label>Intent<select name="intent"><option>prototype</option><option>production</option></select></label></div></div></div><details class="advanced form-advanced"><summary>Advanced project inputs</summary><div class="form-grid"><label>Template<select name="template"><option value="auto">Recommend automatically</option>{% for name in templates_catalog %}<option>{{ name }}</option>{% endfor %}</select></label><label>Language<input name="language" placeholder="python, typescript, go..."></label><label>Framework<input name="framework" placeholder="FastAPI, Next.js, Spring..."></label><label>GitHub URL<input name="git_url"></label><label>Worktree source<input name="worktree_source"></label><label>Worktree branch<input name="worktree_branch"></label><label>Security profile<select name="profile"><option>balanced</option><option>strict</option></select></label><label>Testing<select name="testing_level"><option>standard</option><option>minimal</option><option>comprehensive</option></select></label><label class="checkbox-label"><input type="checkbox" name="use_ollama"> Use Ollama</label></div></details><fieldset class="custom-resource-controls"><legend>Custom resource controls</legend><div class="form-grid"><label>CPU cores<input name="custom_cpus" type="number" min="1" max="32" step="1" placeholder="Auto"></label><label>RAM (GB)<input name="custom_ram_gb" type="number" min="1" max="256" step="1" placeholder="Auto"></label><label>Disk (GB)<input name="custom_disk_gb" type="number" min="20" max="2048" step="1" placeholder="Auto"></label><label>PID mode<select name="pid_mode"><option value="private">Private PID namespace</option><option value="host">Host PID namespace (review required)</option></select></label><label>PID limit<input name="pid_limit" type="number" min="64" max="65536" step="1" value="4096"></label></div><p class="muted help-text">These values are captured for review. Backend support may apply them during a later environment assignment.</p></fieldset><section class="wizard-review" aria-live="polite"><div><strong>Review environment</strong><span data-review-summary>Automatic recommendation · PID limit 4096</span></div><span class="status-badge neutral" data-review-status>Review before provisioning</span></section><div class="review-note"><strong>Before provisioning</strong><span>DevFleet checks host CPU, RAM, disk, VM count, and reserved headroom. Dedicated VMs are host-assisted, GPU-free, and rollback-aware.</span></div><button class="button primary" type="submit">Create project</button></form></section>
+
+    {% elif view == 'project' and selected_project %}
+    {% set p = selected_project %}{% set caps = p.capabilities|default({}, true) %}{% set lifecycle = caps.lifecycle_state|default(p.lifecycle_status|default('unknown', true), true) %}{% if p.recovery_only %}<section class="panel recovery-only-panel" data-recovery-only="{{ p.slug }}"><a class="back-link" href="/?view=projects">← All projects</a><div class="eyebrow">RECOVERY ARTIFACT</div><h2>{{ p.display_name|default(p.slug, true) }}</h2><p>This restored copy is intentionally inert. DevFleet will not inspect, start, modify, back up, restore, quarantine, or delete it as a managed project.</p><p class="muted">Workspace path: <code>{{ p.path }}</code></p><div class="runtime-unavailable"><strong>Separate adoption required</strong><p>Review the recovered files, then use a future explicit ownership-adoption workflow before enabling any runtime action. The original managed project remains unchanged.</p></div></section>{% else %}<section class="project-hero" data-project-state="{{ lifecycle }}"><a class="back-link" href="/?view=projects">← All projects</a>{% if lifecycle == 'stopped' %}<div class="project-state-banner stopped" role="status"><div><strong>Project is stopped</strong><p>{{ p.display_name|default(p.slug, true) }} is not currently running. Live metrics, application health, logs, and runtime actions are unavailable until the environment starts.</p></div>{{ project_action(p.slug,'start','Start Project','primary') }}</div>{% elif caps.runtime_transitioning %}<div class="project-state-banner transitioning" role="status"><div><strong>{{ lifecycle|replace('-', ' ')|title }}…</strong><p>Live tabs remain gated until the environment is running and ready.</p></div></div>{% elif lifecycle in ['unreachable','error'] %}<div class="project-state-banner error" role="alert"><div><strong>Runtime {{ lifecycle }}</strong><p>Live information is unavailable. Static configuration, backups, safety, activity, and settings remain usable.</p></div></div>{% endif %}<div class="project-hero-row"><span class="project-avatar huge">{{ (p.display_name|default(p.slug, true))[0]|upper }}</span><div><p class="eyebrow">PROJECT WORKSPACE</p><h2>{{ p.display_name|default(p.slug, true) }}</h2><p class="muted">{{ p.slug }} · {{ p.language|default('Existing project', true)|title }}{% if p.framework %} · {{ p.framework }}{% endif %}</p></div><div class="hero-status strong-state state-{{ lifecycle }}">{{ status_badge(lifecycle) }}<small>{{ caps.status_reason|default('Environment state is current.', true) }}</small></div></div><div class="quick-actions">{% if caps.can_stop %}{{ project_action(p.slug,'stop','Stop','ghost') }}{% elif caps.can_start %}{{ project_action(p.slug,'start','Start','primary') }}{% endif %}{% if caps.can_restart %}{{ project_action(p.slug,'restart','Restart','ghost') }}{% else %}<button class="button ghost disabled" type="button" disabled title="Start the project and wait for runtime readiness before restarting.">Restart unavailable</button>{% endif %}<a class="button ghost" href="/projects/{{ p.slug }}?tab=environment">Change environment</a><a class="button ghost" href="/projects/{{ p.slug }}?tab=settings">Project settings</a></div></section>
+    <nav class="tabs" aria-label="Project sections"><a class="{{ 'active' if request.query_params.get('tab','overview') == 'overview' else '' }}" href="/projects/{{ p.slug }}?tab=overview">Overview</a><a class="{{ 'active' if request.query_params.get('tab') == 'environment' else '' }}" href="/projects/{{ p.slug }}?tab=environment">Environment</a><a class="{{ 'active' if request.query_params.get('tab') == 'logs' else '' }}" href="/projects/{{ p.slug }}?tab=logs">Logs</a><a class="{{ 'active' if request.query_params.get('tab') == 'backups' else '' }}" href="/projects/{{ p.slug }}?tab=backups">Backups</a><a class="{{ 'active' if request.query_params.get('tab') == 'safety' else '' }}" href="/projects/{{ p.slug }}?tab=safety">Safety</a><a class="{{ 'active' if request.query_params.get('tab') == 'isolate' else '' }}" href="/projects/{{ p.slug }}?tab=isolate">Isolate</a><a class="{{ 'active' if request.query_params.get('tab') == 'activity' else '' }}" href="/projects/{{ p.slug }}?tab=activity">Activity</a><a class="{{ 'active' if request.query_params.get('tab') == 'settings' else '' }}" href="/projects/{{ p.slug }}?tab=settings#advanced-controls">Advanced</a></nav>
+    {% set project_tab = request.query_params.get('tab','overview') %}
+    {% if project_tab == 'environment' %}
+    <section class="panel environment-wizard-shell" data-existing-environment-wizard data-project-slug="{{ p.slug }}"><nav class="wizard-stage-nav" aria-label="Environment assignment stages"><button type="button" data-wizard-stage="environment">1. Environment</button><button type="button" data-wizard-stage="resources">2. Resources</button><button type="button" data-wizard-stage="review">3. Review</button><button type="button" data-wizard-stage="confirm">4. Confirm</button></nav><p class="muted" data-environment-preflight>Read-only preflight runs against the selected environment and resources.</p><fieldset class="custom-resource-controls" data-custom-resources><legend>Custom resources</legend><label>CPU<input type="number" name="custom_cpus" min="1" max="6" step="1" placeholder="CPU cores"></label><label>RAM GB<input type="number" name="custom_ram_gb" min="2" max="12" step="1" placeholder="RAM GB"></label><label>Disk GB<input type="number" name="custom_disk_gb" min="20" max="120" step="1" placeholder="Disk GB"></label><label>PID mode<select name="pid_mode"><option value="private">Private PID namespace</option></select></label><label>PID limit<input type="number" name="pid_limit" min="0" max="4096" value="4096"></label></fieldset><output data-environment-review aria-live="polite">CURRENT → NEW details will appear during Review.</output><div class="review-note"><strong>Confirm is deliberate</strong><span>Only a ready preflight enables the final assignment; a verified backup and fallback are retained if the operation rolls back.</span></div></section>
+    <section class="content-grid two-thirds"><article class="panel"><div class="eyebrow">CURRENT DETECTION</div><h2>Environment</h2><p class="muted">DevFleet detected this workspace as {{ runtime_label(p)|lower }}. Review the runtime assignment, exact actions, and fallback behavior before confirming.</p><div class="environment-summary"><div><small>Environment type</small><strong>{{ runtime_label(p) }}</strong></div><div><small>Resources</small><strong>{{ p.resource_profile|default('standard', true)|title }}</strong></div><div><small>Health</small><strong>{{ p.health_status|default('unknown', true)|replace('-', ' ')|title }}</strong></div></div><form method="post" action="/projects/{{ p.slug }}/environment" class="environment-form">{{ csrf() }}<label>Environment type<select name="runtime_isolation"><option value="container" {{ 'selected' if p.runtime_isolation|default('container', true) == 'container' else '' }}>Project-isolated containers on shared host</option><option value="vm" {{ 'selected' if p.runtime_isolation|default('container', true) == 'vm' else '' }}>Dedicated project VM</option></select></label><label>Resources<select name="resource_profile">{% for name, profile in resource_profiles.items() %}<option value="{{ name }}" {{ 'selected' if p.resource_profile|default('standard', true) == name else '' }}>{{ profile.label }} · {{ profile.cpus }} CPU · {{ profile.memory }} · {{ profile.disk_gb }} GB</option>{% endfor %}<option value="custom" {{ 'selected' if p.resource_profile|default('', true) == 'custom' else '' }}>Custom</option></select></label><div class="review-note"><strong>Migration safety</strong><span>DevFleet creates a verified backup, validates capacity, verifies the workspace, and rolls metadata back if provisioning or import fails. Existing projects are never migrated automatically.</span></div><button class="button primary" type="submit" data-environment-confirm>Continue to Resources</button></form></article><article class="panel"><div class="eyebrow">DESTINATION</div><h3>Move to another node</h3><p class="muted">Ownership transfer is separate from runtime type. Offline destinations cannot be selected.</p>{% if peer.ok %}<form method="post" action="/projects/{{ p.slug }}/transfer-to-peer">{{ csrf() }}<button class="button ghost" type="submit">Move to DevFleetFailover</button></form>{% else %}<button class="button disabled" disabled title="Destination is offline">DevFleetFailover offline</button><p class="error">The failover node is unavailable, so transfer is disabled.</p>{% endif %}<details class="advanced"><summary>Advanced runtime record</summary><pre>{{ {'provider':p.runtime_provider|default('docker-compose',true),'runtime_id':p.runtime_id|default('',true),'runtime_address':p.runtime_address|default('',true),'host_id':p.host_id|default('',true),'limits':p.resource_limits|default({},true),'migration_snapshot':p.runtime_migration_snapshot|default('',true)}|tojson(indent=2) }}</pre></details></article></section>
+    {{ resource_allocation(p) }}
+    {% elif project_tab == 'logs' %}
+     <section class="panel logs-panel"><div class="section-heading"><div><div class="eyebrow">RUNTIME LOGS</div><h2>Project logs</h2><p class="muted">Logs are fetched through the selected runtime provider; no host shell or machine API token is exposed.</p></div><span class="status-badge neutral">Session protected</span></div>{% if caps.can_query_logs %}<pre class="log-output" data-project-logs="{{ p.slug }}">Loading the latest bounded log tail…</pre>{% else %}<div class="runtime-unavailable" data-terminal-state="{{ lifecycle }}"><strong>Logs unavailable while {{ lifecycle }}</strong><p>{{ 'Start the project to view live logs.' if lifecycle == 'stopped' else 'Logs become available after the runtime reaches the ready state.' }}</p></div>{% endif %}<p class="muted">Stopped, transitioning, or unreachable runtimes use a terminal state instead of an indefinite spinner.</p></section>
+    {% elif project_tab == 'backups' %}
+    <section class="panel" data-backup-history data-project-slug="{{ p.slug }}"><div class="eyebrow">BACKUP HISTORY</div><h2>Verified restore points</h2><p class="muted">Each entry is identity-bound and re-hashed before restore. History loads through the session-authenticated endpoint.</p><div data-backup-list aria-live="polite">Loading backup history…</div></section>
+    <section class="content-grid two-thirds"><article class="panel"><div class="eyebrow">RECOVERY ARTIFACTS</div><h2>Backups</h2><p class="muted">A backup is verified only when a recoverable workspace archive exists outside the runtime and its SHA-256 matches.</p><div class="environment-summary"><div><small>Status</small><strong>{{ p.backup_status|default('not-verified', true)|replace('-', ' ')|title }}</strong></div><div><small>Backup ID</small><strong>{{ p.backup_id|default('None', true) }}</strong></div><div><small>SHA-256</small><strong class="truncate">{{ p.backup_sha256|default('Not available', true) }}</strong></div></div>{{ project_action(p.slug,'backup','Create verified backup','primary') }}{% if p.backup_status == 'verified' %}<p class="success">Verified artifact: <code>{{ p.backup_path|default('recorded') }}</code></p>{% else %}<p class="warning">No verified workspace archive is recorded yet.</p>{% endif %}</article><article class="panel"><div class="eyebrow">RECOVERY POLICY</div><h3>Safe restore and deletion</h3><p class="muted">Restore is identity-bound and refuses to overwrite a non-empty workspace. Permanent deletion is blocked unless this project has a specific verified backup artifact.</p>{{ project_action(p.slug,'restore-vault','Restore copy from vault','ghost') }}<p class="muted">A Vault recovery creates a new recovered copy and preserves the original workspace.</p><details class="advanced"><summary>Backup manifest details</summary><pre>{{ {'manifest':p.backup_manifest|default('',true),'path':p.backup_path|default('',true),'sha256':p.backup_sha256|default('',true)}|tojson(indent=2) }}</pre></details></article></section>
+    {% elif project_tab == 'safety' %}
+    <section class="content-grid two-thirds"><article class="panel"><div class="eyebrow">SAFETY PROFILE</div><h2>Safety controls</h2><p class="muted">Choose the narrowest profile that supports the project. GPU passthrough, firewall changes, and host driver changes remain outside DevFleet.</p><form method="post" action="/projects/{{ p.slug }}/profile" class="form-grid">{{ csrf() }}<label>Profile<select name="profile"><option value="strict" {{ 'selected' if p.profile|default('balanced', true) == 'strict' else '' }}>Strict</option><option value="balanced" {{ 'selected' if p.profile|default('balanced', true) == 'balanced' else '' }}>Balanced</option><option value="fast" {{ 'selected' if p.profile|default('balanced', true) == 'fast' else '' }}>Fast Trusted</option></select></label><label class="checkbox-label"><input type="checkbox" name="confirm_fast"> Acknowledge Fast Trusted only if required</label><button class="button primary" type="submit">Save safety profile</button></form><div class="safety-list"><p><strong>Workspace boundary</strong> · {{ 'Protected' if not p.blockers else 'Review required' }}</p><p><strong>Runtime health</strong> · {{ p.health_scope|default('not-checked', true)|replace('-', ' ') }}</p><p><strong>Backup gate</strong> · {{ p.backup_status|default('not-verified', true)|replace('-', ' ') }}</p></div></article><article class="panel"><div class="eyebrow">ANALYZER</div><h3>Findings</h3>{% for finding in p.findings|default([], true) %}<p class="{{ finding.severity|default('info') }}"><strong>{{ finding.severity|default('info')|title }}</strong> · {{ finding.message }}</p>{% else %}<p class="success">No analyzer findings were recorded.</p>{% endfor %}<details class="advanced"><summary>Raw analyzer details</summary><pre>{{ p.findings|default([], true)|tojson(indent=2) }}</pre></details></article></section>
+    <section class="panel advanced-permissions" data-fast-permissions><div class="eyebrow">FAST TRUSTED ADVANCED PERMISSIONS</div><h3>Explicit device and privileged access</h3><p class="muted">These permissions are inactive unless Fast Trusted is explicitly acknowledged. They remain disabled for Strict and Balanced profiles.</p><form method="post" action="/projects/{{ p.slug }}/profile" class="form-grid">{{ csrf() }}<input type="hidden" name="profile" value="fast"><label class="checkbox-label"><input type="checkbox" name="confirm_fast" required> I acknowledge Fast Trusted</label><label class="checkbox-label"><input type="checkbox" name="allow_devices" {{ 'checked' if p.allow_devices else '' }}> Allow devices</label><label class="checkbox-label"><input type="checkbox" name="allow_privileged" {{ 'checked' if p.allow_privileged else '' }}> Allow privileged runtime</label><button class="button ghost" type="submit">Save advanced permissions</button></form></section>
+    {% elif project_tab == 'activity' %}
+    <section class="panel"><div class="section-heading"><div><div class="eyebrow">PROJECT ACTIVITY</div><h2>Operations</h2></div><a href="/?view=activity">All activity →</a></div>{% for op in status.operations if op.project == p.slug %}<article class="operation-row" id="{{ op.id }}"><span class="activity-dot {{ 'bad' if op.state == 'failed' else 'ok' if op.state == 'completed' else 'warn' }}"></span><div><strong>{{ op.kind|replace('-', ' ')|title }}</strong><p class="muted">{{ op.message }} · {{ op.progress }}%</p></div><details class="advanced"><summary>Details</summary><pre>{{ op.log|tojson(indent=2) }}{{ op.result or op.error or '' }}</pre></details></article>{% else %}<p class="muted">No operations recorded for this project.</p>{% endfor %}</section>
+    {% elif project_tab == 'settings' %}
+     <section class="content-grid two-thirds"><article class="panel"><div class="eyebrow">SAFETY & SETUP</div><h2>Project settings</h2><div class="action-stack">{% if caps.can_run_runtime_action %}{{ project_action(p.slug,'runtime-health','Environment health','ghost') }}{{ project_action(p.slug,'bootstrap','Set up environment','ghost') }}{{ project_action(p.slug,'codexpro','Set up Codex','ghost') }}{% else %}<button class="button ghost disabled" type="button" disabled title="Runtime actions require a running, ready environment.">Runtime actions unavailable — {{ lifecycle }}</button>{% endif %}{{ project_action(p.slug,'analyze-force','Run safety scan','ghost') }}{{ project_action(p.slug,'backup','Create backup','ghost') }}</div><details class="advanced"><summary>Analyzer and runtime details</summary><pre>{{ {'capabilities':caps,'findings':p.findings|default([],true),'profile':p.profile|default('balanced',true),'analyzer_cache':p.analyzer_cache|default({},true),'backup_status':p.backup_status|default('not-verified',true),'lease':p.lease|default({},true)}|tojson(indent=2) }}</pre></details></article><article class="panel danger-panel"><div class="eyebrow danger-text">DANGER ZONE</div><h2>Delete project</h2><p class="muted">DevFleet will create and verify a backup before permanently deleting the project runtime and workspace.</p><form method="post" action="/projects/{{ p.slug }}/destroy" class="danger-form">{{ csrf() }}<label>Type the project slug<input name="confirm_slug" required placeholder="{{ p.slug }}"></label><label>Type the confirmation phrase<input name="confirm_phrase" required placeholder

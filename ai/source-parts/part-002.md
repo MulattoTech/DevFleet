@@ -1,10 +1,10 @@
 # DevFleet source part 002
 
 Full-source UTF-8 byte interval [46500, 93000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 52430b4d60d8b1b82814a5c9b7db095766888a9deb34a3e339d558c5f867b85f
+Payload SHA-256: 9b784d6854068ed66b6d8b952c7b1abe3006039a5de96aa582cb508770a48298
 
 <!-- BEGIN SOURCE SLICE -->
-Python/MSBuild inputs: compare these first.
+ validators execute extracted Python/MSBuild inputs: compare these first.
 
     A self-consistent attacker-controlled manifest does not make code trusted. Analysis
     remains available for historical/foreign archives that cannot meet this boundary.
@@ -566,7 +566,7 @@ The August 26 recovery record shows an agent-generated random guest password sav
 
 ## FILE: .agents/skills/devfleet-certification-orchestrator/SKILL.md
 
-SHA256: ac4722243f4de7a5e0d6d6e513a37e7b91a55c5fc875c113a5274ef5bb2a252f | Bytes: 11215 | Git mode: 100644
+SHA256: ffda625a8d306d493dce3fdd6dbd668c4149f3e94e89a53f927331c58282b4ba | Bytes: 13054 | Git mode: 100644
 
 ```
 ---
@@ -579,4 +579,4 @@ metadata:
 # DevFleet Certification Orchestrator
 
 ## Current user-authorized fresh campaign — September 26, 2026
-Read [FRESH-CAMPAIGN.md](FRESH-CAM
+Read

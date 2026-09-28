@@ -1,711 +1,1508 @@
 # DevFleet source part 089
 
 Full-source UTF-8 byte interval [4092000, 4138500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: c01338f122a9319e5a75720afbf3ef2f4849e17aaf9b8601c10bc26627e6f866
+Payload SHA-256: 6ac8654b3d9eed3ffc9bc79eb94c712f1c04a3d7c5f5278b477d779888b2d116
 
 <!-- BEGIN SOURCE SLICE -->
-   Check ($LASTEXITCODE -eq 0) "shell syntax is valid for $([IO.Path]::GetFileName($scriptPath))"
-    }
-    function Invoke-InvalidIdentityEntrypoint {
-        param([string]$ScriptPath,[string]$PackageVersion,[string]$NodeRole)
-        $psi=[Diagnostics.ProcessStartInfo]::new();$psi.FileName=$bash;$psi.UseShellExecute=$false;$psi.CreateNoWindow=$true;$psi.RedirectStandardInput=$true;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
-        foreach($argument in @('--noprofile','--norc',(ConvertTo-MsysPath $ScriptPath),'/nonexistent-devfleet-test-payload','--secrets-stdin','--transaction-id','invalid','--payload-sha256',('b'*64),'--bootstrap-max-seconds','30','--package-version',$PackageVersion,'--node-role',$NodeRole)){[void]$psi.ArgumentList.Add($argument)}
-        $process=[Diagnostics.Process]::Start($psi);$stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync();$timer=[Diagnostics.Stopwatch]::StartNew()
-        try{$finished=$process.WaitForExit(3000);$timer.Stop();if(-not$finished){try{$process.Kill($true)}catch{}};[pscustomobject]@{finished=$finished;exitCode=if($finished){$process.ExitCode}else{$null};elapsed=$timer.Elapsed.TotalSeconds}}
-        finally{if(-not$process.HasExited){try{$process.Kill($true)}catch{}};$process.Dispose()}
-    }
-    $computeIdentity=Invoke-InvalidIdentityEntrypoint -ScriptPath $computePath -PackageVersion '1.2.13' -NodeRole 'primary'
-    $vaultIdentity=Invoke-InvalidIdentityEntrypoint -ScriptPath $vaultPath -PackageVersion 'vault' -NodeRole 'vault'
-    Check ($computeIdentity.finished -and $computeIdentity.exitCode -eq 64 -and $computeIdentity.elapsed -lt 2) 'compute entrypoint rejects invalid identity before waiting on withheld stdin'
-    Check ($vaultIdentity.finished -and $vaultIdentity.exitCode -eq 64 -and $vaultIdentity.elapsed -lt 2) 'Vault entrypoint rejects invalid identity before waiting on withheld stdin'
-    $valid=Invoke-InputProbe -InputText '{"kind":"dummy"}'
-    Check ($valid.finished -and $valid.stdout -match 'RC=0;SIZE=16;COUNT=0') 'valid dummy JSON and EOF are captured once and caller cleanup removes the secret file'
-    $empty=Invoke-InputProbe -InputText ''
-    Check ($empty.finished -and $empty.stdout -match 'RC=65;SIZE=0;COUNT=0') 'empty stdin fails distinctly and removes its temporary secret file'
-    $invalid=Invoke-InputProbe -InputText 'not-json'
-    Check ($invalid.finished -and $invalid.stdout -match 'RC=65;SIZE=0;COUNT=0') 'invalid JSON fails distinctly and removes its temporary secret file'
-    $truncated=Invoke-InputProbe -InputText '{"kind":'
-    Check ($truncated.finished -and $truncated.stdout -match 'RC=65;SIZE=0;COUNT=0') 'truncated JSON fails distinctly and removes its temporary secret file'
-    $withheld=Invoke-InputProbe -InputText '' -Withhold -InputSeconds 2 -OuterSeconds 6
-    Check ($withheld.finished -and $withheld.stdout -match 'RC=124;SIZE=0;COUNT=0' -and $withheld.elapsed -lt 4.5) 'withheld stdin is terminated by the same finite input deadline and removes its temporary file'
-} finally {
-    Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
+ontext with include_diff=false. Read .ai-bridge/codexpro-project-instructions.md, .ai-bridge/chatgpt-memory.md, AGENTS.md, and relevant handoffs. Use targeted search/read and diff-oriented review; exclude dependencies, generated assets, caches, models, binaries, and .ai-bridge/local-agent. Continue routine implementation without repeated approval and update a concise handoff before context becomes crowded.
+
+```
+
+
+## FILE: source/templates/shell-automation/.ai-bridge/current-plan.template.md
+
+SHA256: 7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb | Bytes: 69 | Git mode: 100644
+
+```
+# Current plan
+
+Goal:
+Changed files:
+Verification:
+Next safe action:
+
+```
+
+
+## FILE: source/templates/shell-automation/.ai-bridge/prompts/broken-session-recovery.md
+
+SHA256: d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135 | Bytes: 166 | Git mode: 100644
+
+```
+Call server_config, then codexpro_self_test. Reopen the current workspace without a full tree, inspect status and handoffs, and report the precise failed capability.
+
+```
+
+
+## FILE: source/templates/shell-automation/.ai-bridge/prompts/handoff-template.md
+
+SHA256: a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02 | Bytes: 78 | Git mode: 100644
+
+```
+Goal:
+Decisions:
+Changed files:
+Checks run/results:
+Open risks:
+Next action:
+
+
+```
+
+
+## FILE: source/templates/shell-automation/.ai-bridge/prompts/reconnect.md
+
+SHA256: 5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab | Bytes: 105 | Git mode: 100644
+
+```
+Verify server_config and open_current_workspace, then load the latest concise handoff before continuing.
+
+```
+
+
+## FILE: source/templates/shell-automation/.ai-bridge/prompts/session-bootstrap.md
+
+SHA256: 95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd | Bytes: 641 | Git mode: 100644
+
+```
+Use CodexPro. Call server_config first. Run codexpro_self_test only for a fresh, broken, or reconfigured session. Open the current workspace with include_tree=false, include_skills=true, and include_global_skills=true. Load codex_context with include_diff=false. Read .ai-bridge/codexpro-project-instructions.md, .ai-bridge/chatgpt-memory.md, AGENTS.md, and relevant handoffs. Use targeted search/read and diff-oriented review; exclude dependencies, generated assets, caches, models, binaries, and .ai-bridge/local-agent. Continue routine implementation without repeated approval and update a concise handoff before context becomes crowded.
+
+```
+
+
+## FILE: source/templates/shell-automation/.devcontainer/devcontainer.json
+
+SHA256: 445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622 | Bytes: 209 | Git mode: 100644
+
+```
+{
+  "name": "__PROJECT_NAME__",
+  "dockerComposeFile": "../compose.yaml",
+  "service": "dev",
+  "workspaceFolder": "/workspaces/__PROJECT_SLUG__",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "vscode"
 }
 
-[pscustomobject]@{status=if($failed.Count){'FAIL'}else{'PASS'};passed=$passed;failures=@($failed);observed=[ordered]@{valid=$valid.stdout;empty=$empty.stdout;invalid=$invalid.stdout;truncated=$truncated.stdout;withheld=$withheld.stdout}}|ConvertTo-Json -Depth 4
-if($failed.Count){exit 1}
-
 ```
 
 
-## FILE: source/tests/Test-BootstrapTerminalReporting.ps1
+## FILE: source/templates/shell-automation/.devfleet/bootstrap.sh
 
-SHA256: 8c7a792717408ec8048e7941b0d54698402d8832bc91e9e2cfbcc644997a13c9 | Bytes: 5546 | Git mode: 100644
+SHA256: 0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a | Bytes: 116 | Git mode: 100644
 
 ```
-$ErrorActionPreference='Stop'
-$sourceRoot=Split-Path -Parent $PSScriptRoot
-$bash='C:\Program Files\Git\bin\bash.exe'
-if(-not(Test-Path -LiteralPath $bash -PathType Leaf)){throw 'Existing Git for Windows bash is required.'}
-$passed=0;$failed=[Collections.Generic.List[string]]::new()
-function Check([bool]$Condition,[string]$Name){if($Condition){$script:passed++}else{[void]$script:failed.Add($Name)}}
-function UnixPath([string]$Path){$full=[IO.Path]::GetFullPath($Path).Replace('\','/');if($full -match '^([A-Za-z]):/(.*)$'){return '/'+$Matches[1].ToLowerInvariant()+'/'+$Matches[2]};return $full}
-$fixtureRoot=Join-Path ([IO.Path]::GetTempPath()) ('devfleet-bootstrap-terminal-'+[guid]::NewGuid().ToString('N'))
-try{
-    New-Item -ItemType Directory -Path $fixtureRoot|Out-Null
-    foreach($entrypoint in @('bootstrap-compute.sh','bootstrap-vault.sh')){
-        $component=if($entrypoint -eq 'bootstrap-compute.sh'){'rootlessRuntime'}else{'restServer'}
-        $source=Get-Content -LiteralPath (Join-Path $sourceRoot "linux/$entrypoint") -Raw
-        # Execute the production exit/error handlers; replace only their external
-        # progress sink and temporary paths. No bootstrap provisioning is run.
-        $handler=[regex]::Match($source,'(?ms)^(?:finish_bootstrap\(\).*?^\}|trap [^\r\n]+ EXIT)\r?\ntrap [^\r\n]+(?:\r?\ntrap [^\r\n]+)?').Value
-        if(-not $handler){throw "No production terminal handler found in $entrypoint"}
-        $cases=@(
-            @{name='explicit rejection';body='exit 5';rc=5;markers='rootlessRuntime FAILED'},
-            @{name='command failure';body='false';rc=1;markers='rootlessRuntime FAILED'},
-            @{name='already timed out';body='write_progress "$CURRENT_COMPONENT" TIMED_OUT; COMPONENT_TERMINALIZED=1; exit 124';rc=124;markers='rootlessRuntime TIMED_OUT'},
-            @{name='already failed';body='write_progress "$CURRENT_COMPONENT" FAILED; COMPONENT_TERMINALIZED=1; exit 4';rc=4;markers='rootlessRuntime FAILED'},
-            @{name='success';body='CURRENT_COMPONENT=""; exit 0';rc=0;markers=''},
-            @{name='failed progress sink';body='write_progress() { return 17; }; exit 5';rc=5;markers=''},
-            @{name='cleanup failure after completion';body='CURRENT_COMPONENT=""; rm() { command rm "$@"; return 23; }; exit 0';rc=23;markers='bootstrap FAILED'},
-            @{name='cleanup preserves primary failure';body='rm() { command rm "$@"; return 23; }; exit 5';rc=5;markers='rootlessRuntime FAILED'}
-        )
-        foreach($case in $cases){
-            $caseRoot=Join-Path $fixtureRoot ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $caseRoot|Out-Null
-            $preamble=@'
+#!/usr/bin/env bash
 set -Eeuo pipefail
-cd "$1"
-CURRENT_COMPONENT=__COMPONENT__
-COMPONENT_TERMINALIZED=0
-SECRETS_SOURCE="$PWD/secrets"
-SECRETS_ENV_TMP="$PWD/secrets-env-temp"
-DOCKER_KEY="$PWD/docker-key"
-TAILSCALE_KEY="$PWD/tailscale-key"
-NPM_TMP="$PWD/npm-temp"
-touch "$SECRETS_SOURCE" "$DOCKER_KEY" "$TAILSCALE_KEY"
-if [[ __COMPONENT__ == rootlessRuntime ]]; then printf 'fixture secret' > "$SECRETS_ENV_TMP"; fi
-mkdir "$NPM_TMP"
-write_progress() { printf '%s %s\n' "$1" "$2" >> "$PWD/markers"; }
-'@
-            $scriptPath=Join-Path $caseRoot 'probe.sh'
-            [IO.File]::WriteAllText($scriptPath,($preamble.Replace('__COMPONENT__',$component)+"`n"+$handler+"`n"+$case.body+"`n").Replace("`r`n","`n"),[Text.UTF8Encoding]::new($false))
-            $psi=[Diagnostics.ProcessStartInfo]::new();$psi.FileName=$bash;$psi.UseShellExecute=$false;$psi.CreateNoWindow=$true;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
-            foreach($arg in @('--noprofile','--norc',(UnixPath $scriptPath),(UnixPath $caseRoot))){[void]$psi.ArgumentList.Add($arg)}
-            $process=[Diagnostics.Process]::Start($psi);$stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
-            try{
-                if(-not $process.WaitForExit(10000)){ $process.Kill($true);throw "Terminal handler timed out: $entrypoint/$($case.name)" }
-                [void]([Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdout,$stderr)).Wait(3000))
-                $markers=if(Test-Path -LiteralPath (Join-Path $caseRoot 'markers')){(Get-Content -LiteralPath (Join-Path $caseRoot 'markers') -Raw).Trim()}else{''}
-                Check ($process.ExitCode -eq $case.rc -and $markers -ceq $case.markers.Replace('rootlessRuntime',$component)) "$entrypoint $($case.name) preserves original status and one terminal marker"
-                $clean=-not(Test-Path -LiteralPath (Join-Path $caseRoot 'secrets'))
-                if($entrypoint -eq 'bootstrap-compute.sh'){foreach($name in @('secrets-env-temp','docker-key','tailscale-key','npm-temp')){$clean=$clean -and -not(Test-Path -LiteralPath (Join-Path $caseRoot $name))}}
-                Check $clean "$entrypoint $($case.name) cleans owned temporary inputs"
-            }finally{if(-not $process.HasExited){$process.Kill($true)};$process.Dispose()}
-        }
-    }
-    [ordered]@{status=if($failed.Count){'FAIL'}else{'PASS'};passed=$passed;failures=@($failed)}|ConvertTo-Json
-    if($failed.Count){exit 1}
-}finally{
-    $resolved=[IO.Path]::GetFullPath($fixtureRoot);$temp=[IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-    if(-not $resolved.StartsWith($temp,[StringComparison]::OrdinalIgnoreCase) -or (Split-Path -Leaf $resolved) -notlike 'devfleet-bootstrap-terminal-*'){throw 'Fixture cleanup path rejected.'}
-    Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction SilentlyContinue
+echo "Preview template: install dependencies inside this project container."
+
+```
+
+
+## FILE: source/templates/shell-automation/.devfleet/codexpro-bootstrap.sh
+
+SHA256: 18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b | Bytes: 2254 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+root=$(pwd -P)
+workspace_root=${DEVFLEET_WORKSPACES_ROOT:-/workspaces}
+[[ "$workspace_root" == /* && "$workspace_root" != */ ]] || { echo 'DEVFLEET_WORKSPACES_ROOT must be an absolute directory.' >&2; exit 2; }
+[[ "$root" == "$workspace_root"/* ]] || { echo "CodexPro root must be under $workspace_root." >&2; exit 2; }
+project_rel=${root#"$workspace_root"/}
+[[ "$project_rel" != */* && -n "$project_rel" ]] || { echo 'CodexPro root must identify one project.' >&2; exit 2; }
+runtime="$root/.devfleet/runtime"; bridge="$root/.ai-bridge/local-agent"; mkdir -p "$runtime" "$bridge/logs"
+log="$runtime/codexpro-bootstrap.log"; status="$runtime/codexpro-status.json"; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+health_url=${DEVFLEET_CODEXPRO_HEALTH_URL:-http://127.0.0.1:8787/healthz}
+write_status(){ python3 - "$status" "$1" "$2" "$now" <<'PY2'
+import json,sys
+p,state,msg,now=sys.argv[1:];open(p,'w').write(json.dumps({'state':state,'healthy':state=='healthy','message':msg,'updated_at':now},indent=2)+'\n')
+PY2
+}
+if DEVFLEET_CODEXPRO_HEALTH_URL="$health_url" python3 - <<'PY2' >/dev/null 2>&1
+import urllib.request
+import os
+urllib.request.urlopen(os.environ['DEVFLEET_CODEXPRO_HEALTH_URL'],timeout=2)
+PY2
+then write_status healthy 'CodexPro loopback health endpoint is responding.'; echo 'CodexPro is already healthy.' | tee -a "$log"; exit 0; fi
+if ! command -v codexpro >/dev/null 2>&1; then write_status unavailable 'CodexPro executable is not installed in this project container.'; echo 'CodexPro is unavailable. Install it using your verified private/local installation source, then rerun this hook. No credential is embedded.' | tee -a "$log"; exit 0; fi
+export CODEXPRO_TOOL_CARDS=${CODEXPRO_TOOL_CARDS:-1}
+( codexpro start >>"$log" 2>&1 & )
+sleep 2
+if DEVFLEET_CODEXPRO_HEALTH_URL="$health_url" python3 - <<'PY2' >/dev/null 2>&1
+import urllib.request
+import os
+urllib.request.urlopen(os.environ['DEVFLEET_CODEXPRO_HEALTH_URL'],timeout=2)
+PY2
+then write_status healthy 'CodexPro started successfully.'; exit 0; fi
+write_status authorization-required 'CodexPro is installed but not healthy; inspect the log for authorization or configuration requirements.'
+echo "CodexPro did not become healthy. Review $log"; exit 0
+
+```
+
+
+## FILE: source/templates/shell-automation/.devfleet/codexpro-profile.json
+
+SHA256: c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44 | Bytes: 397 | Git mode: 100644
+
+```
+{
+  "defaultRoot": "/workspaces/__PROJECT_SLUG__",
+  "allowedRoots": [
+    "/workspaces/__PROJECT_SLUG__"
+  ],
+  "authEnabled": true,
+  "bashMode": "full",
+  "bashTranscript": "full",
+  "writeMode": "workspace",
+  "toolMode": "full",
+  "inheritEnv": false,
+  "contextDir": ".ai-bridge",
+  "maxReadBytes": 180000,
+  "maxWriteBytes": 1000000,
+  "maxOutputBytes": 120000,
+  "maxSearchResults": 200
 }
 
 ```
 
 
-## FILE: source/tests/Test-ComputePendingRebootHandoff.ps1
+## FILE: source/templates/shell-automation/.devfleet/codexpro.env.example
 
-SHA256: 3f20ae26add6a6e9ac4e733debd795750d1ce3d9ecf73a2b880746c37ea2d50d | Bytes: 7325 | Git mode: 100644
+SHA256: 86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30 | Bytes: 90 | Git mode: 100644
 
 ```
-[CmdletBinding()]
-param()
+# Verified optional UI setting only. Do not store credentials here.
+CODEXPRO_TOOL_CARDS=1
 
-$ErrorActionPreference = 'Stop'
-$sourceRoot = Split-Path -Parent $PSScriptRoot
-$productionScript = Join-Path $sourceRoot 'windows\02-Provision-ComputeNode.ps1'
-$fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('devfleet-compute-reboot-' + [guid]::NewGuid().ToString('N'))
+```
 
-try {
-    $fixtureWindows = Join-Path $fixtureRoot 'windows'
-    $fixturePackage = Join-Path $fixtureRoot 'package'
-    $fixtureState = Join-Path $fixtureRoot 'state'
-    New-Item -ItemType Directory -Path $fixtureWindows, (Join-Path $fixturePackage 'cloud-init'), (Join-Path $fixtureState 'tmp') -Force | Out-Null
-    Copy-Item -LiteralPath $productionScript -Destination (Join-Path $fixtureWindows '02-Provision-ComputeNode.ps1')
-    Set-Content -LiteralPath (Join-Path $fixturePackage 'VERSION') -Value '1.2.13' -Encoding utf8
-    Set-Content -LiteralPath (Join-Path $fixturePackage 'cloud-init\compute.yaml') -Value "node=__NODE_NAME__`nrole=__NODE_ROLE__`nname=__GIT_NAME_SHELL__`nemail=__GIT_EMAIL_SHELL__" -Encoding utf8
 
-    $markerLog = Join-Path $fixtureRoot 'markers.txt'
-    $module = @'
-function Assert-PowerShell7 {}
-function Assert-Administrator {}
-function Get-DevFleetDeadlineContext { [pscustomobject]@{ StageDeadlineUtc = [datetime]::UtcNow.AddMinutes(20) } }
-function Set-DevFleetDeadlineContext { param($TransactionDeadlineUtc,$StageName,$StageBudgetSeconds) }
-function Get-DevFleetStageBudgetSeconds { param($Name) 1200 }
-function Get-DevFleetOperationMaximumSeconds { param($Name) 1200 }
-function Get-DevFleetConfig {
-    [pscustomobject]@{
-        Failover = [pscustomobject]@{ InstanceName='devfleet-failover'; UbuntuImage='24.04'; Cpus=2; Memory='4G'; Disk='20G'; FriendlyName='Failover' }
-        Primary = [pscustomobject]@{ InstanceName='devfleet-primary' }
-        Git = [pscustomobject]@{ UserName='Fixture User'; Email='fixture@example.invalid' }
-    }
-}
-function Get-PackageRootFromState { $env:DEVFLEET_COMPUTE_REBOOT_PACKAGE }
-function Wait-ActiveDevFleetTransaction {
-    param($ExpectedRole)
-    [pscustomobject]@{ transactionId=('a'*32); payloadSha256=('b'*64); action='FreshInstall'; role='Laptop'; preparedUtc='2026-09-22T00:00:00Z' }
-}
-function Test-DevFleetTransactionBinding { $true }
-function New-DevFleetBootstrapBoundary {
-    [pscustomobject]@{
-        multipassResolvedStageName='compute-multipass-resolved'
-        isolationVerifiedStageName='compute-isolation-verified'
-        instancePresentStageName='compute-instance-present'
-        instanceAbsentStageName='compute-instance-absent'
-        instanceLaunchedStageName='compute-instance-launched'
-        instanceStartedStageName='compute-instance-started'
-        instanceReadyStageName='compute-instance-ready'
-        payloadTransferredStageName='compute-payload-transferred'
-        payloadExtractedStageName='compute-payload-extracted'
-        completionStageName='compute-complete'
-        bootstrapMaxSeconds=1200
-        extractionCommand='true'
-        bootstrapCommand='true'
-    }
-}
-function Get-MultipassExe { 'multipass.exe' }
-function Write-StageMarker { param($Name,$Transaction) Add-Content -LiteralPath $env:DEVFLEET_COMPUTE_REBOOT_MARKERS -Value $Name }
-function Assert-MultipassIsolation { param($InstanceNames) }
-function Get-OrCreateSecrets { [pscustomobject]@{} }
-function Get-OrCreateNodeIdentity { param($Role) [pscustomobject]@{} }
-function Test-MultipassInstance { param($Name) $false }
-function Get-DevFleetStateRoot { $env:DEVFLEET_COMPUTE_REBOOT_STATE }
-function ConvertTo-YamlSingleQuotedScalar { param($Value) "'$Value'" }
-function ConvertTo-ShellSingleQuotedScalar { param($Value) "'$Value'" }
-function Invoke-MultipassLaunchWithReadinessRecovery { throw 'fixture launch failed after servicing transition' }
-function Test-PendingReboot { $env:DEVFLEET_COMPUTE_REBOOT_PENDING -eq '1' }
-Export-ModuleMember -Function *
-'@
-    Set-Content -LiteralPath (Join-Path $fixtureWindows 'DevFleet.Common.psm1') -Value $module -Encoding utf8
+## FILE: source/templates/shell-automation/.devfleet/health-check.sh
 
-    $oldPackage = $env:DEVFLEET_COMPUTE_REBOOT_PACKAGE
-    $oldState = $env:DEVFLEET_COMPUTE_REBOOT_STATE
-    $oldMarkers = $env:DEVFLEET_COMPUTE_REBOOT_MARKERS
-    $oldPending = $env:DEVFLEET_COMPUTE_REBOOT_PENDING
-    try {
-        $env:DEVFLEET_COMPUTE_REBOOT_PACKAGE = $fixturePackage
-        $env:DEVFLEET_COMPUTE_REBOOT_STATE = $fixtureState
-        $env:DEVFLEET_COMPUTE_REBOOT_MARKERS = $markerLog
-        $env:DEVFLEET_COMPUTE_REBOOT_PENDING = '1'
-        $pwsh = (Get-Process -Id $PID).Path
-        $process = Start-Process -FilePath $pwsh -ArgumentList @(
-            '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',
-            (Join-Path $fixtureWindows '02-Provision-ComputeNode.ps1'),
-            '-NodeRole','Failover'
-        ) -Wait -PassThru -NoNewWindow
-    } finally {
-        $env:DEVFLEET_COMPUTE_REBOOT_PACKAGE = $oldPackage
-        $env:DEVFLEET_COMPUTE_REBOOT_STATE = $oldState
-        $env:DEVFLEET_COMPUTE_REBOOT_MARKERS = $oldMarkers
-        $env:DEVFLEET_COMPUTE_REBOOT_PENDING = $oldPending
-    }
+SHA256: 04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311 | Bytes: 83 | Git mode: 100644
 
-    if ($process.ExitCode -ne 3010) {
-        throw "Compute launch failure with a new servicing obligation did not hand off as reboot-required: exit=$($process.ExitCode)."
-    }
-    $markers = @(Get-Content -LiteralPath $markerLog)
-    foreach ($required in @('compute-multipass-resolved','compute-isolation-verified','compute-instance-absent')) {
-        if ($markers -notcontains $required) { throw "Production compute path did not reach expected pre-launch marker: $required" }
-    }
-    if ($markers -contains 'compute-instance-ready' -or $markers -contains 'compute-complete') {
-        throw 'Reboot-required compute handoff fabricated readiness or completion.'
-    }
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+test -d .devfleet
+./.devfleet/smoke-test.sh
 
-    $oldPackage = $env:DEVFLEET_COMPUTE_REBOOT_PACKAGE
-    $oldState = $env:DEVFLEET_COMPUTE_REBOOT_STATE
-    $oldMarkers = $env:DEVFLEET_COMPUTE_REBOOT_MARKERS
-    $oldPending = $env:DEVFLEET_COMPUTE_REBOOT_PENDING
-    try {
-        $env:DEVFLEET_COMPUTE_REBOOT_PACKAGE = $fixturePackage
-        $env:DEVFLEET_COMPUTE_REBOOT_STATE = $fixtureState
-        $env:DEVFLEET_COMPUTE_REBOOT_MARKERS = $markerLog
-        $env:DEVFLEET_COMPUTE_REBOOT_PENDING = '0'
-        $nonRebootProcess = Start-Process -FilePath $pwsh -ArgumentList @(
-            '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',
-            (Join-Path $fixtureWindows '02-Provision-ComputeNode.ps1'),
-            '-NodeRole','Failover'
-        ) -Wait -PassThru -NoNewWindow
-    } finally {
-        $env:DEVFLEET_COMPUTE_REBOOT_PACKAGE = $oldPackage
-        $env:DEVFLEET_COMPUTE_REBOOT_STATE = $oldState
-        $env:DEVFLEET_COMPUTE_REBOOT_MARKERS = $oldMarkers
-        $env:DEVFLEET_COMPUTE_REBOOT_PENDING = $oldPending
-    }
-    if ($nonRebootProcess.ExitCode -eq 3010 -or $nonRebootProcess.ExitCode -eq 0) {
-        throw "A non-servicing Multipass failure was incorrectly converted to reboot success: exit=$($nonRebootProcess.ExitCode)."
-    }
+```
 
-    [ordered]@{
-        status = 'PASS'
-        exitCode = $process.ExitCode
-        rebootRequired = $true
-        ordinaryFailureExitCode = $nonRebootProcess.ExitCode
-        ordinaryFailurePreserved = $true
-        fabricatedCompletion = $false
-    } | ConvertTo-Json -Compress
-} finally {
-    if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force }
+
+## FILE: source/templates/shell-automation/.devfleet/project-tools.json
+
+SHA256: 6d77fed1497db4e986303d1ee6eb936453acd4e76b1ae245a53a2207a5d6b3e2 | Bytes: 305 | Git mode: 100644
+
+```
+{
+  "id": "shell-automation",
+  "language": "shell",
+  "framework": "bash",
+  "maturity": "preview",
+  "bootstrap_command": "./.devfleet/bootstrap.sh",
+  "format_command": "true",
+  "lint_command": "true",
+  "test_command": "./.devfleet/smoke-test.sh",
+  "health_command": "./.devfleet/health-check.sh"
 }
 
 ```
 
 
-## FILE: source/tests/Test-DependencyProbeBoundary.ps1
+## FILE: source/templates/shell-automation/.devfleet/smoke-test.sh
 
-SHA256: 5bc9343b93da6d7b99475b22475bd1dd9cbd9047052b5dae71f59b7dc6054a8e | Bytes: 4911 | Git mode: 100644
+SHA256: 95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31 | Bytes: 214 | Git mode: 100644
 
 ```
-$ErrorActionPreference='Stop'
-$root=Split-Path -Parent $PSScriptRoot
-Import-Module (Join-Path $root 'windows\DevFleet.Common.psm1') -Force
-
-$pwsh=(Get-Command pwsh.exe -ErrorAction Stop).Source
-$subject=(Get-AuthenticodeSignature -LiteralPath $pwsh).SignerCertificate.Subject
-$dependency=[pscustomobject]@{
-    id='devfleet-dependency-probe-fixture'
-    minimumSupportedVersion='1.0.0'
-    maximumMajor=9
-    executableProbes=@()
-    knownVendorInstallLocations=@($pwsh)
-    installerAuthenticityPolicy=[pscustomobject]@{
-        allowedSignerSubjectsExact=@($subject)
-        allowedSignerPatterns=@()
-        installedExecutableTrust='signed-installer-locked-path'
-    }
-    versionProbe=[pscustomobject]@{
-        arguments=@('-NoProfile','-NonInteractive','-Command',"Start-Sleep -Seconds 8; Write-Output 'fixture 1.2.3'")
-        regex='fixture\s+(\d+\.\d+\.\d+)'
-    }
-}
-$multipassDependency=[pscustomobject]@{id='multipass'}
-if((Get-DevFleetDependencyProbeAttemptLimit -Dependency $multipassDependency) -ne 8){throw 'Multipass dependency probe did not receive the bounded five-attempt headroom.'}
-if((Get-DevFleetDependencyProbeAttemptLimit -Dependency $dependency) -ne 3){throw 'Non-Multipass dependency probe limit changed unexpectedly.'}
-
-# The production dependency resolver must inherit the existing stage owner.
-# Before the correction its native call ignored this context and ran for the
-# fixture's full eight seconds.
-$transactionDeadline=[datetime]::UtcNow.AddSeconds(30)
-Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'compute' -StageBudgetSeconds 2 | Out-Null
-$timer=[Diagnostics.Stopwatch]::StartNew()
-$status=Get-DependencyStatus -Dependency $dependency
-$timer.Stop()
-if($timer.Elapsed -ge [TimeSpan]::FromSeconds(5)){
-    throw "Dependency version probe escaped its two-second stage deadline ($([math]::Round($timer.Elapsed.TotalSeconds,3)) seconds)."
-}
-if([string]$status.Status -cne 'Broken' -or [string]$status.Detail -notmatch 'bounded version probe failed'){
-    throw 'A timed-out dependency version probe did not return the bounded Broken classification.'
-}
-Remove-Variable -Scope Global -Name DevFleetDeadlineContext -ErrorAction SilentlyContinue
-
-# Exercise the retry controller with fake time while retaining the same
-# immutable deadline. A later compatible result is accepted, while malformed
-# or non-Broken terminal states are never retried into a fabricated success.
-$state=[pscustomobject]@{Now=[datetime]'2026-09-06T12:00:00Z';Calls=0}
-$clock={ $state.Now }.GetNewClosure()
-$sleep={param([double]$Seconds)$state.Now=$state.Now.AddSeconds($Seconds)}.GetNewClosure()
-$provider={
-    param($Dependency,[datetime]$DeadlineUtc,[int]$ProbeTimeoutSeconds)
-    $state.Calls++
-    if($state.Calls -eq 1){return [pscustomobject]@{Status='Broken';Path=$pwsh;Version=$null;Detail='first bounded probe failed'}}
-    return [pscustomobject]@{Status='Compatible';Path=$pwsh;Version=[version]'1.2.3';Detail='second probe passed'}
-}.GetNewClosure()
-$retried=Wait-DevFleetDependencyStatus -Dependency $dependency -DeadlineUtc $state.Now.AddSeconds(10) -MaximumAttempts 3 -StatusProvider $provider -ClockProvider $clock -SleepProvider $sleep
-if([string]$retried.Status -cne 'Compatible' -or $state.Calls -ne 2){throw 'Dependency status retry did not accept the first compatible bounded result.'}
-
-$state.Calls=0
-$terminalProvider={param($Dependency,[datetime]$DeadlineUtc,[int]$ProbeTimeoutSeconds)$state.Calls++;[pscustomobject]@{Status='Unsupported-Major';Path=$pwsh;Version=[version]'10.0.0';Detail='unsupported'}}.GetNewClosure()
-$terminal=Wait-DevFleetDependencyStatus -Dependency $dependency -DeadlineUtc $state.Now.AddSeconds(10) -MaximumAttempts 3 -StatusProvider $terminalProvider -ClockProvider $clock -SleepProvider $sleep
-if([string]$terminal.Status -cne 'Unsupported-Major' -or $state.Calls -ne 1){throw 'A non-Broken dependency result was incorrectly retried.'}
-
-$state.Calls=0
-$state.Now=[datetime]'2026-09-06T12:00:00Z'
-$exhaustedProvider={
-    param($Dependency,[datetime]$DeadlineUtc,[int]$ProbeTimeoutSeconds)
-    $state.Calls++
-    $state.Now=$state.Now.AddSeconds($ProbeTimeoutSeconds)
-    [pscustomobject]@{Status='Broken';Path=$pwsh;Version=$null;Detail='bounded probe failed'}
-}.GetNewClosure()
-$exhausted=Wait-DevFleetDependencyStatus -Dependency $dependency -DeadlineUtc $state.Now.AddSeconds(5) -MaximumAttempts 3 -StatusProvider $exhaustedProvider -ClockProvider $clock -SleepProvider $sleep
-if([string]$exhausted.Status -cne 'Broken' -or $state.Now -gt [datetime]'2026-09-06T12:00:05Z'){
-    throw 'Dependency retries granted fresh time beyond the immutable owner deadline.'
-}
-
-[ordered]@{ok=$true;tests=5;nativeProbeBoundedSeconds=[math]::Round($timer.Elapsed.TotalSeconds,3);multipassRetryHeadroomBounded=$true;retryAcceptedCompatible=$true;nonBrokenNotRetried=$true;sharedDeadlinePreserved=$true}|ConvertTo-Json -Compress
+#!/usr/bin/env bash
+set -Eeuo pipefail
+test -f README.md
+test -f compose.yaml
+test -f .devcontainer/devcontainer.json
+test -f .devfleet/project.json -o -f .devfleet/template.json
+echo "Template smoke test passed."
 
 ```
 
 
-## FILE: source/tests/Test-DependencyTrustedRoot.ps1
+## FILE: source/templates/shell-automation/.devfleet/template.json
 
-SHA256: ee713cc06579ca475c5de829259f295c144484c88a39abf1504577828ceecd83 | Bytes: 1928 | Git mode: 100644
+SHA256: 106197a4db00afb1aebc015fc88ee82f6eb0e9585492a06e32a69b13f3711be8 | Bytes: 645 | Git mode: 100644
 
 ```
-$ErrorActionPreference='Stop'
-$sourcePath=Join-Path (Split-Path -Parent $PSScriptRoot) 'windows\DevFleet.Common.psm1'
-$tokens=$null;$errors=$null
-$ast=[Management.Automation.Language.Parser]::ParseFile($sourcePath,[ref]$tokens,[ref]$errors)
-if($errors){throw "Common module parse failed: $($errors -join '; ')"}
-$definition=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-TrustedSystemRootForExecutable'},$true))
-if($definition.Count -ne 1){throw 'Expected one Get-TrustedSystemRootForExecutable definition.'}
-Invoke-Expression $definition[0].Extent.Text
-
-function Assert-That([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
-$names=@('ProgramFiles','ProgramFiles(x86)','WINDIR')
-$saved=@{};foreach($name in $names){$saved[$name]=[Environment]::GetEnvironmentVariable($name,'Process')}
-try {
-  [Environment]::SetEnvironmentVariable('ProgramFiles','C:\Program Files','Process')
-  [Environment]::SetEnvironmentVariable('ProgramFiles(x86)','C:\Program Files (x86)','Process')
-  [Environment]::SetEnvironmentVariable('WINDIR','C:\Windows','Process')
-  $programFilesRoot=Get-TrustedSystemRootForExecutable 'C:\Program Files\Git\cmd\git.exe'
-  Assert-That ($programFilesRoot -ceq 'C:\Program Files') 'A single matching trusted root was collapsed to its first character.'
-  $windowsRoot=Get-TrustedSystemRootForExecutable 'C:\Windows\System32\msiexec.exe'
-  Assert-That ($windowsRoot -ceq 'C:\Windows') 'The Windows trusted root was not preserved as a full path.'
-  Assert-That ($null -eq (Get-TrustedSystemRootForExecutable 'C:\Untrusted\tool.exe')) 'A path outside the exact trusted roots was accepted.'
-} finally {
-  foreach($name in $names){[Environment]::SetEnvironmentVariable($name,$saved[$name],'Process')}
+{
+  "id": "shell-automation",
+  "language": "shell",
+  "framework": "bash",
+  "maturity": "preview",
+  "bootstrap_command": "./.devfleet/bootstrap.sh",
+  "format_command": "true",
+  "lint_command": "true",
+  "test_command": "./.devfleet/smoke-test.sh",
+  "health_command": "./.devfleet/health-check.sh",
+  "start_command": "docker compose up -d --build",
+  "stop_command": "docker compose down --remove-orphans",
+  "restart_command": "docker compose restart",
+  "rebuild_command": "docker compose build && docker compose up -d",
+  "logs_command": "docker compose logs",
+  "codexpro_command": "./.devfleet/codexpro-bootstrap.sh"
 }
+```
 
-[pscustomobject]@{status='PASS';tests=3;scalarRootPreserved=$true;ancestorWideningRejected=$true}|ConvertTo-Json -Compress
+
+## FILE: source/templates/shell-automation/.editorconfig
+
+SHA256: 05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44 | Bytes: 137 | Git mode: 100644
+
+```
+root = true
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+[*.py]
+indent_size = 4
 
 ```
 
 
-## FILE: source/tests/Test-DevFleetHostAgentCurrent.ps1
+## FILE: source/templates/shell-automation/.gitignore
 
-SHA256: ec2aada5cb00d6e5d1e52e1eb125157ef86ceb0679fdca7ef69df689aeb2a7ca | Bytes: 7807 | Git mode: 100644
+SHA256: 8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe | Bytes: 133 | Git mode: 100644
 
 ```
-$ErrorActionPreference='Stop'
-$root=Split-Path -Parent $PSScriptRoot
-$testRoot=Join-Path ([IO.Path]::GetTempPath()) ("devfleet-current-hostagent-"+[guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $testRoot -Force|Out-Null
-try {
-    $tokenPath=Join-Path $testRoot 'token.txt';[IO.File]::WriteAllText($tokenPath,('x'*48))
-    $configPath=Join-Path $testRoot 'config.json';$sshConfig=Join-Path $testRoot 'ssh-config';$knownHosts=Join-Path $testRoot 'known-hosts'
-    @{HostId='mulattotechbox';HostName='MULATTOTECHBOX';TokenPath=$tokenPath;MultipassPath='multipass.exe';SshConfigPath=$sshConfig;SshKnownHostsPath=$knownHosts;SshPrivateKeyPath=(Join-Path $testRoot 'key')}|ConvertTo-Json|Set-Content -LiteralPath $configPath
-    . (Join-Path $root 'windows\DevFleet-HostAgent.ps1') -ConfigPath $configPath -LibraryOnly
-
-    $shell=(Get-Command powershell.exe -ErrorAction Stop).Source
-    $script:Multipass=$shell
-    $pidPath=Join-Path $testRoot 'hostagent-inherited-pipe.pid';$descendantPid=0
-    try{
-        $escapedPidPath=$pidPath.Replace("'","''")
-        $parentCommand="`$childInfo=[Diagnostics.ProcessStartInfo]::new();`$childInfo.FileName=(Get-Command powershell.exe).Source;`$childInfo.UseShellExecute=`$false;`$childInfo.CreateNoWindow=`$true;`$childInfo.ArgumentList.Add('-NoProfile');`$childInfo.ArgumentList.Add('-NonInteractive');`$childInfo.ArgumentList.Add('-Command');`$childInfo.ArgumentList.Add('Start-Sleep -Seconds 30');`$child=[Diagnostics.Process]::Start(`$childInfo);[IO.File]::WriteAllText('$escapedPidPath',[string]`$child.Id);exit 0"
-        $timer=[Diagnostics.Stopwatch]::StartNew();$blocked=$false
-        try{Invoke-Multipass @('-NoProfile','-NonInteractive','-Command',$parentCommand) 20|Out-Null}catch{if($_.Exception.Message -match 'redirected output was incomplete after the bounded post-exit drain'){$blocked=$true}else{throw}}
-        $timer.Stop()
-        if(-not $blocked -or $timer.Elapsed -ge [TimeSpan]::FromSeconds(15)){throw 'Host Agent Multipass runner did not fail closed within the bounded post-exit drain allowance.'}
-        if(-not(Test-Path -LiteralPath $pidPath) -or -not [int]::TryParse([IO.File]::ReadAllText($pidPath),[ref]$descendantPid)){throw 'Host Agent inherited-handle fixture did not publish its descendant PID.'}
-        $descendant=Get-Process -Id $descendantPid -ErrorAction Stop
-        if($descendant.HasExited){throw 'Host Agent runner killed a descendant merely to manufacture redirected-output EOF.'}
-    }finally{
-        if($descendantPid -gt 0){Stop-Process -Id $descendantPid -Force -ErrorAction SilentlyContinue}
-        Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue
-        $script:Multipass='multipass.exe'
-    }
-
-    $runtime='devfleet-project-demo-project'
-    [IO.File]::WriteAllText($knownHosts,"unrelated.example ssh-ed25519 AAAAunrelated`r`n")
-    $markers=Get-ProjectVmKnownHostMarkers $runtime
-    $first="$($markers.Begin)`r`n$runtime ssh-ed25519 AAAAfirst`r`n$($markers.End)"
-    Set-DevFleetManagedTextBlock $knownHosts $markers.Pattern $first|Out-Null
-    $initial=[IO.File]::ReadAllText($knownHosts)
-    if($initial -notmatch 'AAAAfirst' -or $initial -notmatch 'AAAAunrelated'){throw 'Initial managed host-key pin did not preserve unrelated content.'}
-    Set-DevFleetManagedTextBlock $knownHosts $markers.Pattern $first|Out-Null
-    if([IO.File]::ReadAllText($knownHosts) -cne $initial){throw 'Re-syncing the same host key was not idempotent.'}
-    $second="$($markers.Begin)`r`n$runtime ssh-ed25519 AAAAsecond`r`n$($markers.End)"
-    Set-DevFleetManagedTextBlock $knownHosts $markers.Pattern $second|Out-Null
-    $changed=[IO.File]::ReadAllText($knownHosts)
-    if($changed -match 'AAAAfirst' -or $changed -notmatch 'AAAAsecond' -or $changed -notmatch 'AAAAunrelated'){throw 'Host-key rotation changed unrelated known-host content.'}
-
-    $aliasMarkers=Get-ProjectVmSshMarkers $runtime
-    [IO.File]::WriteAllText($sshConfig,"Host unrelated`r`n    HostName 192.0.2.10`r`n`r`n$($aliasMarkers.Begin)`r`nHost $runtime`r`n$($aliasMarkers.End)`r`n")
-    Remove-ProjectVmSshAlias $runtime '12345678-1234-1234-1234-123456789abc'
-    if((Get-Content -LiteralPath $sshConfig -Raw) -notmatch 'Host unrelated' -or (Get-Content -LiteralPath $sshConfig -Raw) -match [regex]::Escape($runtime)){throw 'Alias removal did not preserve unrelated SSH config.'}
-    if((Get-Content -LiteralPath $knownHosts -Raw) -notmatch 'AAAAunrelated' -or (Get-Content -LiteralPath $knownHosts -Raw) -match 'AAAAsecond'){throw 'Host-key removal did not preserve unrelated entries.'}
-
-    $bad=@{state='ready';managed_by='someone-else';host_id='mulattotechbox';runtime_id=$runtime;vm_name=$runtime;project_id='12345678-1234-1234-1234-123456789abc'}
-    try {Remove-ImportFailedProjectVm 'demo-project' $bad @{backup_verified=$true;backup_id='backup';backup_sha256=('a'*64);local_archive_sha256=('b'*64);cleanup_stage='pre-import'}|Out-Null;throw 'Unowned VM cleanup unexpectedly succeeded.'} catch {if($_.Exception.Message -notmatch 'ownership registry'){throw}}
-
-    $script:Alive=@{}
-    function Get-MultipassVms {return @($script:Alive.GetEnumerator()|Where-Object{$_.Value}|ForEach-Object{[pscustomobject]@{name=$_.Key;state='RUNNING'}})}
-    function Get-ProjectVmInfo {param([string]$VmName);return [pscustomobject]@{state='RUNNING'}}
-    function New-ProvisioningLock {$lock=[pscustomobject]@{};$lock|Add-Member ScriptMethod ReleaseMutex {};$lock|Add-Member ScriptMethod Dispose {};return $lock}
-    function Invoke-Multipass {
-        param([string[]]$ArgumentList,[int]$TimeoutSeconds=120)
-        $vm=[string]$ArgumentList[1]
-        if($ArgumentList[0] -eq 'delete'){$script:Alive[$vm]=$false;return [pscustomobject]@{ExitCode=0;Text=''}}
-        if($ArgumentList[0] -eq 'exec' -and ($ArgumentList -contains '/etc/devfleet/project-runtime.json')){$slug=$vm.Substring('devfleet-project-'.Length);return [pscustomobject]@{ExitCode=0;Text=(@{managed_by='devfleet';slug=$slug;project_id='12345678-1234-1234-1234-123456789abc'}|ConvertTo-Json -Compress)}}
-        if($ArgumentList[0] -eq 'exec' -and ($ArgumentList|Where-Object{$_ -like '*/.devfleet/project.json'})){$slug=$vm.Substring('devfleet-project-'.Length);return [pscustomobject]@{ExitCode=0;Text=(@{slug=$slug;identity=$slug;project_id='12345678-1234-1234-1234-123456789abc'}|ConvertTo-Json -Compress)}}
-        return [pscustomobject]@{ExitCode=0;Text=''}
-    }
-    foreach($case in @(@{slug='pre-import';stage='pre-import'},@{slug='post-import';stage='post-import'})){
-        $vm="devfleet-project-$($case.slug)";$script:Alive[$vm]=$true
-        $record=@{slug=$case.slug;state='ready';managed_by='devfleet';host_id='mulattotechbox';runtime_id=$vm;vm_name=$vm;project_id='12345678-1234-1234-1234-123456789abc';cpus=4;memory_gb=8;disk_gb=80}
-        $registry=Read-Registry;$registry.projects[$case.slug]=$record;Write-Registry $registry
-        $payload=@{backup_verified=$true;backup_id='backup';backup_sha256=('a'*64);local_archive_sha256=('b'*64);import_archive_sha256='';cleanup_stage=$case.stage}
-        $result=Remove-ImportFailedProjectVm $case.slug $record $payload
-        if(-not $result.allocation_released -or $result.state -ne 'destroyed' -or $script:Alive[$vm]){throw "$($case.stage) cleanup did not release its allocation."}
-        if((Read-Registry).projects[$case.slug].state -ne 'destroyed'){throw "$($case.stage) cleanup did not persist the destroyed state."}
-    }
-    [ordered]@{ok=$true;tests=8;bounded_output_drain=$true;initial_pin=$true;idempotent_resync=$true;rotated_pin=$true;unrelated_preserved=$true;selective_remove=$true;unowned_refused=$true;pre_and_post_import_cleanup=$true}|ConvertTo-Json -Compress
-} finally {
-    Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
-}
+.devfleet/runtime/
+.ai-bridge/local-agent/
+.env
+.env.*
+node_modules/
+.venv/
+__pycache__/
+dist/
+build/
+target/
+.next/
+coverage/
+*.log
 
 ```
 
 
-## FILE: source/tests/Test-EncryptedBundlePassphrase.ps1
+## FILE: source/templates/shell-automation/README.md
 
-SHA256: a25a97f7316a0c0d99bee1ecd3ca8da05cf74d20fce6dbf917f142a7240f1f27 | Bytes: 6875 | Git mode: 100644
+SHA256: 305cf1f564905ae68ef5f3d238a0a74f8be6c39f63b0c1707f4db6b0ec31f3cc | Bytes: 359 | Git mode: 100644
 
 ```
-[CmdletBinding()]
-param()
+# __PROJECT_NAME__
 
-$ErrorActionPreference = 'Stop'
-$modulePath = Join-Path (Split-Path -Parent $PSScriptRoot) 'windows\DevFleet.Common.psm1'
-$bundleModule = Import-Module $modulePath -Force -PassThru -DisableNameChecking
-$fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) "devfleet-pairing-passphrase-$([guid]::NewGuid().ToString('N'))"
-$fixtureRoot = [IO.Path]::GetFullPath($fixtureRoot)
-$tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-if (-not $fixtureRoot.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Fixture root escaped the temporary directory.' }
-$checks = [Collections.Generic.List[object]]::new()
-$fixturePassphrase = 'isolated-pairing-passphrase-2026'
-$secure = ConvertTo-SecureString $fixturePassphrase -AsPlainText -Force
-$wrong = ConvertTo-SecureString 'different-isolated-passphrase' -AsPlainText -Force
-$short = ConvertTo-SecureString 'short' -AsPlainText -Force
-$empty = [Security.SecureString]::new()
+Language: `shell`  
+Framework: `bash`  
+DevFleet profile: `__PROJECT_PROFILE__`
 
-function Check([string]$Name, [bool]$Pass) {
-    $checks.Add([pscustomobject]@{name=$Name;pass=$Pass})
-    if (-not $Pass) { throw "Encrypted bundle regression failed: $Name" }
-}
-function Rejects([scriptblock]$Action) {
-    try { & $Action | Out-Null; return $false }
-    catch {
-        if ($_.Exception.Message.Contains($fixturePassphrase)) { throw 'Passphrase was included in an exception.' }
-        return $true
-    }
-}
+Generated by DevFleet. Run `./.devfleet/bootstrap.sh`, `./.devfleet/health-check.sh`, and the test command recorded in `.devfleet/project.json`. Language selection follows Dylan's engineering preferences and is not presented as a scientific model benchmark.
 
-try {
-    New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
-    $payload = Join-Path $fixtureRoot 'payload'; New-Item -ItemType Directory -Path $payload | Out-Null
-    [IO.File]::WriteAllText((Join-Path $payload 'public-fixture.json'), '{"fixture":"isolated-pairing"}', [Text.UTF8Encoding]::new($false))
-    & $bundleModule {
-        param([Security.SecureString]$Value)
-        $script:BundleTestPromptValue = $Value
-        $script:BundleTestPromptCount = 0
-        $script:BundleTestAllowPrompt = $false
-        function script:Read-Host {
-            param([string]$Prompt, [switch]$AsSecureString)
-            $script:BundleTestPromptCount++
-            if (-not $script:BundleTestAllowPrompt -or -not $AsSecureString) { throw 'Unexpected interactive passphrase request.' }
-            return $script:BundleTestPromptValue
-        }
-    } $secure
+```
 
-    Check 'common helper parameters are SecureString' ((Get-Command New-EncryptedBundle).Parameters['Passphrase'].ParameterType -eq [Security.SecureString] -and (Get-Command Expand-EncryptedBundle).Parameters['Passphrase'].ParameterType -eq [Security.SecureString])
-    foreach ($scriptName in @('10-Export-Desktop-Pairing.ps1', 'Complete-Cluster.ps1')) {
-        $command = Get-Command (Join-Path (Split-Path -Parent $modulePath) $scriptName)
-        Check "$scriptName accepts an in-process SecureString" ($command.Parameters['BundlePassphrase'].ParameterType -eq [Security.SecureString])
-    }
 
-    $bundle = Join-Path $fixtureRoot 'supplied.dfe'; $restored = Join-Path $fixtureRoot 'restored'
-    $output = @(& {
-        New-EncryptedBundle -SourceDirectory $payload -OutputPath $bundle -Passphrase $secure
-        Expand-EncryptedBundle -BundlePath $bundle -Destination $restored -Passphrase $secure
-    } *>&1)
-    Check 'supplied passphrase round-trips without prompting' ((& $bundleModule { $script:BundleTestPromptCount }) -eq 0 -and (Get-FileHash (Join-Path $payload 'public-fixture.json')).Hash -ceq (Get-FileHash (Join-Path $restored 'public-fixture.json')).Hash)
-    Check 'caller retains its SecureString and output is passphrase-free' ($secure.Length -eq $fixturePassphrase.Length -and -not (($output | ForEach-Object { [string]$_ }) -join "`n").Contains($fixturePassphrase))
-    Check 'temporary ZIP is removed on successful creation and expansion' (-not (Test-Path -LiteralPath "$bundle.zip.tmp"))
+## FILE: source/templates/shell-automation/compose.yaml
 
-    $wrongDestination = Join-Path $fixtureRoot 'wrong-password'
-    Check 'incorrect passphrase is rejected before extraction' (Rejects { Expand-EncryptedBundle -BundlePath $bundle -Destination $wrongDestination -Passphrase $wrong })
-    Check 'failed authentication leaves no plaintext destination or ZIP' (-not (Test-Path -LiteralPath $wrongDestination) -and -not (Test-Path -LiteralPath "$bundle.zip.tmp"))
-    $tampered = Join-Path $fixtureRoot 'tampered.dfe'; $tamperedBytes = [IO.File]::ReadAllBytes($bundle)
-    $tamperedBytes[$tamperedBytes.Length - 1] = $tamperedBytes[$tamperedBytes.Length - 1] -bxor 1
-    [IO.File]::WriteAllBytes($tampered, $tamperedBytes)
-    Check 'tampered authentication tag remains rejected' (Rejects { Expand-EncryptedBundle -BundlePath $tampered -Destination (Join-Path $fixtureRoot 'tampered-output') -Passphrase $secure })
-    Check 'short explicitly supplied passphrase never falls back to prompting' (Rejects { New-EncryptedBundle -SourceDirectory $payload -OutputPath (Join-Path $fixtureRoot 'short.dfe') -Passphrase $short })
-    Check 'empty explicitly supplied passphrase never falls back to prompting' (Rejects { New-EncryptedBundle -SourceDirectory $payload -OutputPath (Join-Path $fixtureRoot 'empty.dfe') -Passphrase $empty })
-    Check 'failure paths did not prompt' ((& $bundleModule { $script:BundleTestPromptCount }) -eq 0)
+SHA256: e227e63586bddf735ae934ca51587e8f80bf861ab311ea8851486328b3fb84c2 | Bytes: 469 | Git mode: 100644
 
-    & $bundleModule { $script:BundleTestAllowPrompt = $true }
-    $interactive = Join-Path $fixtureRoot 'interactive.dfe'
-    New-EncryptedBundle -SourceDirectory $payload -OutputPath $interactive
-    Expand-EncryptedBundle -BundlePath $interactive -Destination (Join-Path $fixtureRoot 'interactive-output')
-    Check 'omitted passphrases retain both interactive SecureString prompts' ((& $bundleModule { $script:BundleTestPromptCount }) -eq 2)
-    $leakedFiles = @(Get-ChildItem -LiteralPath $fixtureRoot -File -Recurse | Where-Object { [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($_.FullName)).Contains($fixturePassphrase) })
-    Check 'passphrase was never persisted in any fixture file' ($leakedFiles.Count -eq 0)
-    Write-Host "PASS $($checks.Count)/$($checks.Count) encrypted-bundle passphrase checks; temporary files only, no installed state or lab touched."
-} finally {
-    & $bundleModule { Remove-Item Function:script:Read-Host -ErrorAction SilentlyContinue; Remove-Variable BundleTestPromptValue,BundleTestPromptCount,BundleTestAllowPrompt -Scope Script -ErrorAction SilentlyContinue }
-    foreach ($value in @($secure, $wrong, $short, $empty)) { if ($null -ne $value) { $value.Dispose() } }
-    if (Test-Path -LiteralPath $fixtureRoot) {
-        $resolvedFixture = (Get-Item -LiteralPath $fixtureRoot).FullName
-        if (-not $resolvedFixture.Equals($fixtureRoot, [StringComparison]::OrdinalIgnoreCase) -or -not $resolvedFixture.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Refusing cleanup outside the exact fixture root.' }
-        Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
-    }
+```
+services:
+  dev:
+    image: mcr.microsoft.com/devcontainers/base:1-ubuntu-24.04
+    user: "vscode"
+    working_dir: /workspaces/__PROJECT_SLUG__
+    command: sh -lc "sleep infinity"
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - .:/workspaces/__PROJECT_SLUG__:cached
+    healthcheck:
+      test: ["CMD-SHELL", "test -d /workspaces/__PROJECT_SLUG__"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+```
+
+
+## FILE: source/templates/shell-automation/docs/architecture.md
+
+SHA256: 3de1095c5d566f3af270d9c22dd89b2e68ad7a7e92e682198e80c2363023f51a | Bytes: 327 | Git mode: 100644
+
+```
+# Architecture
+
+- Language: `shell`
+- Framework: `bash`
+- Scale/intent/testing/profile are recorded in `.devfleet/project.json`.
+- Rationale: selected from Dylan's DevFleet engineering preferences; this is not a scientific model benchmark.
+- Source remains in one canonical checkout; use Git worktrees for concurrent branches.
+
+```
+
+
+## FILE: source/templates/sql-project/.ai-bridge/chatgpt-memory.md
+
+SHA256: ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f | Bytes: 143 | Git mode: 100644
+
+```
+# Project continuity
+
+Keep this concise: current architecture, active branch, important decisions, and next safe action. Do not store secrets.
+
+```
+
+
+## FILE: source/templates/sql-project/.ai-bridge/codexpro-project-instructions.md
+
+SHA256: 95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd | Bytes: 641 | Git mode: 100644
+
+```
+Use CodexPro. Call server_config first. Run codexpro_self_test only for a fresh, broken, or reconfigured session. Open the current workspace with include_tree=false, include_skills=true, and include_global_skills=true. Load codex_context with include_diff=false. Read .ai-bridge/codexpro-project-instructions.md, .ai-bridge/chatgpt-memory.md, AGENTS.md, and relevant handoffs. Use targeted search/read and diff-oriented review; exclude dependencies, generated assets, caches, models, binaries, and .ai-bridge/local-agent. Continue routine implementation without repeated approval and update a concise handoff before context becomes crowded.
+
+```
+
+
+## FILE: source/templates/sql-project/.ai-bridge/current-plan.template.md
+
+SHA256: 7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb | Bytes: 69 | Git mode: 100644
+
+```
+# Current plan
+
+Goal:
+Changed files:
+Verification:
+Next safe action:
+
+```
+
+
+## FILE: source/templates/sql-project/.ai-bridge/prompts/broken-session-recovery.md
+
+SHA256: d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135 | Bytes: 166 | Git mode: 100644
+
+```
+Call server_config, then codexpro_self_test. Reopen the current workspace without a full tree, inspect status and handoffs, and report the precise failed capability.
+
+```
+
+
+## FILE: source/templates/sql-project/.ai-bridge/prompts/handoff-template.md
+
+SHA256: a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02 | Bytes: 78 | Git mode: 100644
+
+```
+Goal:
+Decisions:
+Changed files:
+Checks run/results:
+Open risks:
+Next action:
+
+
+```
+
+
+## FILE: source/templates/sql-project/.ai-bridge/prompts/reconnect.md
+
+SHA256: 5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab | Bytes: 105 | Git mode: 100644
+
+```
+Verify server_config and open_current_workspace, then load the latest concise handoff before continuing.
+
+```
+
+
+## FILE: source/templates/sql-project/.ai-bridge/prompts/session-bootstrap.md
+
+SHA256: 95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd | Bytes: 641 | Git mode: 100644
+
+```
+Use CodexPro. Call server_config first. Run codexpro_self_test only for a fresh, broken, or reconfigured session. Open the current workspace with include_tree=false, include_skills=true, and include_global_skills=true. Load codex_context with include_diff=false. Read .ai-bridge/codexpro-project-instructions.md, .ai-bridge/chatgpt-memory.md, AGENTS.md, and relevant handoffs. Use targeted search/read and diff-oriented review; exclude dependencies, generated assets, caches, models, binaries, and .ai-bridge/local-agent. Continue routine implementation without repeated approval and update a concise handoff before context becomes crowded.
+
+```
+
+
+## FILE: source/templates/sql-project/.devcontainer/devcontainer.json
+
+SHA256: 445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622 | Bytes: 209 | Git mode: 100644
+
+```
+{
+  "name": "__PROJECT_NAME__",
+  "dockerComposeFile": "../compose.yaml",
+  "service": "dev",
+  "workspaceFolder": "/workspaces/__PROJECT_SLUG__",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "vscode"
 }
 
 ```
 
 
-## FILE: source/tests/Test-ExternalStandardInputBoundary.ps1
+## FILE: source/templates/sql-project/.devfleet/bootstrap.sh
 
-SHA256: b4f3ddb532ed8d70ea694c63bdec8ded08bfc36747f5f79cbee54ba7bbc97a91 | Bytes: 7495 | Git mode: 100644
+SHA256: 0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a | Bytes: 116 | Git mode: 100644
 
 ```
-$ErrorActionPreference = 'Stop'
-if ($PSVersionTable.PSVersion.Major -lt 7) {
-    $pwshPath = (Get-Command pwsh -ErrorAction Stop).Source
-    & $pwshPath -NoProfile -File $PSCommandPath
-    exit $LASTEXITCODE
-}
-$root = Split-Path -Parent $PSScriptRoot
-$modulePath = Join-Path $root 'windows\DevFleet.Common.psm1'
-Import-Module $modulePath -Force
+#!/usr/bin/env bash
+set -Eeuo pipefail
+echo "Preview template: install dependencies inside this project container."
 
-$shell = (Get-Command powershell.exe -ErrorAction Stop).Source
-$pwsh = (Get-Command pwsh -ErrorAction Stop).Source
-$python = Join-Path (Split-Path -Parent $root) '.venv-test\Scripts\python.exe'
-$failures = [System.Collections.Generic.List[string]]::new()
-$passed = 0
+```
 
-function Check {
-    param([bool]$Condition, [string]$Name)
-    if ($Condition) { $script:passed++ } else { [void]$script:failures.Add($Name) }
-}
 
-function Invoke-IsolatedInputProbe {
-    param(
-        [Parameter(Mandatory)][string]$ChildCommand,
-        [Parameter(Mandatory)][int]$InputLength,
-        [Parameter(Mandatory)][int]$OwnerTimeoutSeconds,
-        [Parameter(Mandatory)][int]$OuterTimeoutSeconds
-    )
-    $probeRoot = Join-Path ([IO.Path]::GetTempPath()) ('devfleet-stdin-probe-' + [guid]::NewGuid().ToString('N'))
-    $runnerPath = Join-Path $probeRoot 'runner.ps1'
-    $inputPath = Join-Path $probeRoot 'input.txt'
-    $process = $null
-    try {
-        New-Item -ItemType Directory -Path $probeRoot -Force | Out-Null
-        [IO.File]::WriteAllText($inputPath, ('X' * $InputLength), [Text.UTF8Encoding]::new($false))
-$runner = @'
-$ErrorActionPreference='Stop'
-$ModulePath=$env:DEVFLEET_TEST_MODULE
-$ShellPath=$env:DEVFLEET_TEST_SHELL
-$ChildCommand=$env:DEVFLEET_TEST_CHILD_COMMAND
-$InputPath=$env:DEVFLEET_TEST_INPUT_PATH
-$TimeoutSeconds=[int]$env:DEVFLEET_TEST_TIMEOUT_SECONDS
-Import-Module $ModulePath -Force
-$inputText=[IO.File]::ReadAllText($InputPath)
-try {
-    $result=Invoke-External -FilePath $ShellPath -ArgumentList @('-NoProfile','-NonInteractive','-Command',$ChildCommand) -TimeoutSeconds $TimeoutSeconds -StandardInputText $inputText -Capture
-    [Console]::Out.Write($result)
-    exit 0
-} catch {
-    [Console]::Error.Write($_.Exception.Message)
-    exit 91
+## FILE: source/templates/sql-project/.devfleet/codexpro-bootstrap.sh
+
+SHA256: 18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b | Bytes: 2254 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+root=$(pwd -P)
+workspace_root=${DEVFLEET_WORKSPACES_ROOT:-/workspaces}
+[[ "$workspace_root" == /* && "$workspace_root" != */ ]] || { echo 'DEVFLEET_WORKSPACES_ROOT must be an absolute directory.' >&2; exit 2; }
+[[ "$root" == "$workspace_root"/* ]] || { echo "CodexPro root must be under $workspace_root." >&2; exit 2; }
+project_rel=${root#"$workspace_root"/}
+[[ "$project_rel" != */* && -n "$project_rel" ]] || { echo 'CodexPro root must identify one project.' >&2; exit 2; }
+runtime="$root/.devfleet/runtime"; bridge="$root/.ai-bridge/local-agent"; mkdir -p "$runtime" "$bridge/logs"
+log="$runtime/codexpro-bootstrap.log"; status="$runtime/codexpro-status.json"; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+health_url=${DEVFLEET_CODEXPRO_HEALTH_URL:-http://127.0.0.1:8787/healthz}
+write_status(){ python3 - "$status" "$1" "$2" "$now" <<'PY2'
+import json,sys
+p,state,msg,now=sys.argv[1:];open(p,'w').write(json.dumps({'state':state,'healthy':state=='healthy','message':msg,'updated_at':now},indent=2)+'\n')
+PY2
 }
-'@
-        [IO.File]::WriteAllText($runnerPath, $runner, [Text.UTF8Encoding]::new($false))
-        $psi = [Diagnostics.ProcessStartInfo]::new()
-        $psi.FileName = $pwsh
-        $psi.UseShellExecute = $false
-        $psi.CreateNoWindow = $true
-        $psi.RedirectStandardOutput = $true
-        $psi.RedirectStandardError = $true
-        $psi.Arguments = "-NoProfile -File `"$runnerPath`""
-        $psi.EnvironmentVariables['DEVFLEET_TEST_MODULE'] = $modulePath
-        $psi.EnvironmentVariables['DEVFLEET_TEST_SHELL'] = $shell
-        $psi.EnvironmentVariables['DEVFLEET_TEST_CHILD_COMMAND'] = $ChildCommand
-        $psi.EnvironmentVariables['DEVFLEET_TEST_INPUT_PATH'] = $inputPath
-        $psi.EnvironmentVariables['DEVFLEET_TEST_TIMEOUT_SECONDS'] = [string]$OwnerTimeoutSeconds
-        $process = [Diagnostics.Process]::Start($psi)
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        $timer = [Diagnostics.Stopwatch]::StartNew()
-        $finished = $process.WaitForExit($OuterTimeoutSeconds * 1000)
-        if (-not $finished) {
-            try { $process.Kill($true) } catch {}
-            [void]$process.WaitForExit(5000)
-        }
-        $timer.Stop()
-        [void]([Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdoutTask,$stderrTask)).Wait([TimeSpan]::FromSeconds(5)))
-        return [pscustomobject]@{
-            finished = $finished
-            elapsedSeconds = $timer.Elapsed.TotalSeconds
-            exitCode = if ($finished) { $process.ExitCode } else { $null }
-            stdout = if ($stdoutTask.IsCompletedSuccessfully) { $stdoutTask.Result } else { '' }
-            stderr = if ($stderrTask.IsCompletedSuccessfully) { $stderrTask.Result } else { '' }
-        }
-    } finally {
-        if ($process -and -not $process.HasExited) { try { $process.Kill($true) } catch {} }
-        if ($process) { $process.Dispose() }
-        Remove-Item -LiteralPath $probeRoot -Recurse -Force -ErrorAction SilentlyContinue
-    }
+if DEVFLEET_CODEXPRO_HEALTH_URL="$health_url" python3 - <<'PY2' >/dev/null 2>&1
+import urllib.request
+import os
+urllib.request.urlopen(os.environ['DEVFLEET_CODEXPRO_HEALTH_URL'],timeout=2)
+PY2
+then write_status healthy 'CodexPro loopback health endpoint is responding.'; echo 'CodexPro is already healthy.' | tee -a "$log"; exit 0; fi
+if ! command -v codexpro >/dev/null 2>&1; then write_status unavailable 'CodexPro executable is not installed in this project container.'; echo 'CodexPro is unavailable. Install it using your verified private/local installation source, then rerun this hook. No credential is embedded.' | tee -a "$log"; exit 0; fi
+export CODEXPRO_TOOL_CARDS=${CODEXPRO_TOOL_CARDS:-1}
+( codexpro start >>"$log" 2>&1 & )
+sleep 2
+if DEVFLEET_CODEXPRO_HEALTH_URL="$health_url" python3 - <<'PY2' >/dev/null 2>&1
+import urllib.request
+import os
+urllib.request.urlopen(os.environ['DEVFLEET_CODEXPRO_HEALTH_URL'],timeout=2)
+PY2
+then write_status healthy 'CodexPro started successfully.'; exit 0; fi
+write_status authorization-required 'CodexPro is installed but not healthy; inspect the log for authorization or configuration requirements.'
+echo "CodexPro did not become healthy. Review $log"; exit 0
+
+```
+
+
+## FILE: source/templates/sql-project/.devfleet/codexpro-profile.json
+
+SHA256: c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44 | Bytes: 397 | Git mode: 100644
+
+```
+{
+  "defaultRoot": "/workspaces/__PROJECT_SLUG__",
+  "allowedRoots": [
+    "/workspaces/__PROJECT_SLUG__"
+  ],
+  "authEnabled": true,
+  "bashMode": "full",
+  "bashTranscript": "full",
+  "writeMode": "workspace",
+  "toolMode": "full",
+  "inheritEnv": false,
+  "contextDir": ".ai-bridge",
+  "maxReadBytes": 180000,
+  "maxWriteBytes": 1000000,
+  "maxOutputBytes": 120000,
+  "maxSearchResults": 200
 }
 
-$neverReads = Invoke-IsolatedInputProbe -ChildCommand 'Start-Sleep -Seconds 30' -InputLength (4MB) -OwnerTimeoutSeconds 2 -OuterTimeoutSeconds 7
-Check ($neverReads.finished -and $neverReads.exitCode -eq 91 -and $neverReads.stderr -match 'timed out') 'stdin writer is bounded when the child never reads stdin'
+```
 
-$backpressureCommand = "[Console]::Out.Write(('O'*1048576));[Console]::Error.Write(('E'*1048576));`$text=[Console]::In.ReadToEnd();if(`$text.Length -ne $([int](4MB))){exit 12};[Console]::Out.Write('|INPUT_OK|')"
-$backpressure = Invoke-IsolatedInputProbe -ChildCommand $backpressureCommand -InputLength (4MB) -OwnerTimeoutSeconds 15 -OuterTimeoutSeconds 20
-Check ($backpressure.finished -and $backpressure.exitCode -eq 0 -and $backpressure.stdout -match '\|INPUT_OK\|') 'stdout/stderr drains start before stdin delivery and avoid pipe backpressure deadlock'
 
-$eofResult = Invoke-External -FilePath $shell -ArgumentList @('-NoProfile','-NonInteractive','-Command','$text=[Console]::In.ReadToEnd();[Console]::Out.Write($text.Length)') -TimeoutSeconds 5 -StandardInputText 'dummy-input' -Capture
-Check ($eofResult -eq '11') 'stdin content and EOF are delivered exactly once'
+## FILE: source/templates/sql-project/.devfleet/codexpro.env.example
 
-$earlyExitError = ''
-try {
-    Invoke-External -FilePath $shell -ArgumentList @('-NoProfile','-NonInteractive','-Command','exit 23') -TimeoutSeconds 5 -StandardInputText ('X' * (4MB)) -Capture | Out-Null
-} catch {
-    $earlyExitError = $_.Exception.Message
+SHA256: 86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30 | Bytes: 90 | Git mode: 100644
+
+```
+# Verified optional UI setting only. Do not store credentials here.
+CODEXPRO_TOOL_CARDS=1
+
+```
+
+
+## FILE: source/templates/sql-project/.devfleet/health-check.sh
+
+SHA256: 04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311 | Bytes: 83 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+test -d .devfleet
+./.devfleet/smoke-test.sh
+
+```
+
+
+## FILE: source/templates/sql-project/.devfleet/project-tools.json
+
+SHA256: 1b28716482aa11226702b7e84fc8d5ef3a53288f06994e918ebe946f4107f395 | Bytes: 304 | Git mode: 100644
+
+```
+{
+  "id": "sql-project",
+  "language": "sql",
+  "framework": "migrations",
+  "maturity": "preview",
+  "bootstrap_command": "./.devfleet/bootstrap.sh",
+  "format_command": "true",
+  "lint_command": "true",
+  "test_command": "./.devfleet/smoke-test.sh",
+  "health_command": "./.devfleet/health-check.sh"
 }
-Check ($earlyExitError -match 'failed with exit code 23') 'early child exit preserves direct exit-code semantics instead of surfacing a broken-pipe wrapper'
 
-$brokenPipeError = ''
-$brokenPipeTimer = [Diagnostics.Stopwatch]::StartNew()
-try {
-    Invoke-External -FilePath $python -ArgumentList @('-c','import os,time; os.close(0); time.sleep(30)') -TimeoutSeconds 10 -StandardInputText ('X' * (4MB)) -Capture | Out-Null
-} catch {
-    $brokenPipeError = $_.Exception.Message
-} finally {
-    $brokenPipeTimer.Stop()
+```
+
+
+## FILE: source/templates/sql-project/.devfleet/smoke-test.sh
+
+SHA256: 95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31 | Bytes: 214 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+test -f README.md
+test -f compose.yaml
+test -f .devcontainer/devcontainer.json
+test -f .devfleet/project.json -o -f .devfleet/template.json
+echo "Template smoke test passed."
+
+```
+
+
+## FILE: source/templates/sql-project/.devfleet/template.json
+
+SHA256: 81bf6df419f1fd30533152a31e4177603314989e12c1a2b941777ed5173ee486 | Bytes: 644 | Git mode: 100644
+
+```
+{
+  "id": "sql-project",
+  "language": "sql",
+  "framework": "migrations",
+  "maturity": "preview",
+  "bootstrap_command": "./.devfleet/bootstrap.sh",
+  "format_command": "true",
+  "lint_command": "true",
+  "test_command": "./.devfleet/smoke-test.sh",
+  "health_command": "./.devfleet/health-check.sh",
+  "start_command": "docker compose up -d --build",
+  "stop_command": "docker compose down --remove-orphans",
+  "restart_command": "docker compose restart",
+  "rebuild_command": "docker compose build && docker compose up -d",
+  "logs_command": "docker compose logs",
+  "codexpro_command": "./.devfleet/codexpro-bootstrap.sh"
 }
-Check ($brokenPipeError -match 'input delivery failed' -and $brokenPipeError -notmatch 'timed out after' -and $brokenPipeTimer.Elapsed.TotalSeconds -lt 4) 'a live child that breaks stdin preserves the input transport error and is bounded'
+```
 
-$deadlineError = ''
-$deadlineTimer = [Diagnostics.Stopwatch]::StartNew()
-try {
-    Invoke-External -FilePath $shell -ArgumentList @('-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 3;$null=[Console]::In.ReadToEnd();Start-Sleep -Seconds 30') -TimeoutSeconds 20 -DeadlineUtc ([datetime]::UtcNow.AddSeconds(5)) -StandardInputText ('X' * (4MB)) -Capture | Out-Null
-} catch {
-    $deadlineError = $_.Exception.Message
-} finally {
-    $deadlineTimer.Stop()
+
+## FILE: source/templates/sql-project/.editorconfig
+
+SHA256: 05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44 | Bytes: 137 | Git mode: 100644
+
+```
+root = true
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+[*.py]
+indent_size = 4
+
+```
+
+
+## FILE: source/templates/sql-project/.gitignore
+
+SHA256: 8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe | Bytes: 133 | Git mode: 100644
+
+```
+.devfleet/runtime/
+.ai-bridge/local-agent/
+.env
+.env.*
+node_modules/
+.venv/
+__pycache__/
+dist/
+build/
+target/
+.next/
+coverage/
+*.log
+
+```
+
+
+## FILE: source/templates/sql-project/README.md
+
+SHA256: ae14d31a8c1157b3ab4a2648cce48b2425b24712603c95af613968e07f569e6d | Bytes: 363 | Git mode: 100644
+
+```
+# __PROJECT_NAME__
+
+Language: `sql`  
+Framework: `migrations`  
+DevFleet profile: `__PROJECT_PROFILE__`
+
+Generated by DevFleet. Run `./.devfleet/bootstrap.sh`, `./.devfleet/health-check.sh`, and the test command recorded in `.devfleet/project.json`. Language selection follows Dylan's engineering preferences and is not presented as a scientific model benchmark.
+
+```
+
+
+## FILE: source/templates/sql-project/compose.yaml
+
+SHA256: e227e63586bddf735ae934ca51587e8f80bf861ab311ea8851486328b3fb84c2 | Bytes: 469 | Git mode: 100644
+
+```
+services:
+  dev:
+    image: mcr.microsoft.com/devcontainers/base:1-ubuntu-24.04
+    user: "vscode"
+    working_dir: /workspaces/__PROJECT_SLUG__
+    command: sh -lc "sleep infinity"
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - .:/workspaces/__PROJECT_SLUG__:cached
+    healthcheck:
+      test: ["CMD-SHELL", "test -d /workspaces/__PROJECT_SLUG__"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+```
+
+
+## FILE: source/templates/sql-project/docs/architecture.md
+
+SHA256: f6673cfe04b589f72f7c23400c275e08bbd4371bef3b4c12433901e99b6bbd1e | Bytes: 331 | Git mode: 100644
+
+```
+# Architecture
+
+- Language: `sql`
+- Framework: `migrations`
+- Scale/intent/testing/profile are recorded in `.devfleet/project.json`.
+- Rationale: selected from Dylan's DevFleet engineering preferences; this is not a scientific model benchmark.
+- Source remains in one canonical checkout; use Git worktrees for concurrent branches.
+
+```
+
+
+## FILE: source/templates/typescript-next/.ai-bridge/chatgpt-memory.md
+
+SHA256: ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f | Bytes: 143 | Git mode: 100644
+
+```
+# Project continuity
+
+Keep this concise: current architecture, active branch, important decisions, and next safe action. Do not store secrets.
+
+```
+
+
+## FILE: source/templates/typescript-next/.ai-bridge/codexpro-project-instructions.md
+
+SHA256: 95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd | Bytes: 641 | Git mode: 100644
+
+```
+Use CodexPro. Call server_config first. Run codexpro_self_test only for a fresh, broken, or reconfigured session. Open the current workspace with include_tree=false, include_skills=true, and include_global_skills=true. Load codex_context with include_diff=false. Read .ai-bridge/codexpro-project-instructions.md, .ai-bridge/chatgpt-memory.md, AGENTS.md, and relevant handoffs. Use targeted search/read and diff-oriented review; exclude dependencies, generated assets, caches, models, binaries, and .ai-bridge/local-agent. Continue routine implementation without repeated approval and update a concise handoff before context becomes crowded.
+
+```
+
+
+## FILE: source/templates/typescript-next/.ai-bridge/current-plan.template.md
+
+SHA256: 7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb | Bytes: 69 | Git mode: 100644
+
+```
+# Current plan
+
+Goal:
+Changed files:
+Verification:
+Next safe action:
+
+```
+
+
+## FILE: source/templates/typescript-next/.ai-bridge/prompts/broken-session-recovery.md
+
+SHA256: d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135 | Bytes: 166 | Git mode: 100644
+
+```
+Call server_config, then codexpro_self_test. Reopen the current workspace without a full tree, inspect status and handoffs, and report the precise failed capability.
+
+```
+
+
+## FILE: source/templates/typescript-next/.ai-bridge/prompts/handoff-template.md
+
+SHA256: a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02 | Bytes: 78 | Git mode: 100644
+
+```
+Goal:
+Decisions:
+Changed files:
+Checks run/results:
+Open risks:
+Next action:
+
+
+```
+
+
+## FILE: source/templates/typescript-next/.ai-bridge/prompts/reconnect.md
+
+SHA256: 5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab | Bytes: 105 | Git mode: 100644
+
+```
+Verify server_config and open_current_workspace, then load the latest concise handoff before continuing.
+
+```
+
+
+## FILE: source/templates/typescript-next/.ai-bridge/prompts/session-bootstrap.md
+
+SHA256: 95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd | Bytes: 641 | Git mode: 100644
+
+```
+Use CodexPro. Call server_config first. Run codexpro_self_test only for a fresh, broken, or reconfigured session. Open the current workspace with include_tree=false, include_skills=true, and include_global_skills=true. Load codex_context with include_diff=false. Read .ai-bridge/codexpro-project-instructions.md, .ai-bridge/chatgpt-memory.md, AGENTS.md, and relevant handoffs. Use targeted search/read and diff-oriented review; exclude dependencies, generated assets, caches, models, binaries, and .ai-bridge/local-agent. Continue routine implementation without repeated approval and update a concise handoff before context becomes crowded.
+
+```
+
+
+## FILE: source/templates/typescript-next/.devcontainer/devcontainer.json
+
+SHA256: 2e3f9099163de6f42887fb921741b6c9f0eabbf14c86fc7e4f3ae66123ab577f | Bytes: 207 | Git mode: 100644
+
+```
+{
+  "name": "__PROJECT_NAME__",
+  "dockerComposeFile": "../compose.yaml",
+  "service": "dev",
+  "workspaceFolder": "/workspaces/__PROJECT_SLUG__",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "node"
 }
-Check ($deadlineError -match 'timed out' -and $deadlineTimer.Elapsed.TotalSeconds -lt 5.5) 'one absolute deadline is shared across delayed stdin delivery and execution'
 
-[pscustomobject]@{
-    status = if ($failures.Count) { 'FAIL' } else { 'PASS' }
-    passed = $passed
-    failures = @($failures)
-    neverReadElapsedSeconds = [math]::Round($neverReads.elapsedSeconds, 3)
-    backpressureElapsedSeconds = [math]::Round($backpressure.elapsedSeconds, 3)
-    brokenPipeElapsedSeconds = [math]::Round($brokenPipeTimer.Elapsed.TotalSeconds, 3)
-    sharedDeadlineElapsedSeconds = [math]::Round($deadlineTimer.Elapsed.
+```
+
+
+## FILE: source/templates/typescript-next/.devfleet/bootstrap.sh
+
+SHA256: ab4fc5d4fbbb3c4a680f0ddc19ecf073186cd8a1fbd3599b12abdcb2036b3327 | Bytes: 61 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+npm ci || npm install
+
+```
+
+
+## FILE: source/templates/typescript-next/.devfleet/codexpro-bootstrap.sh
+
+SHA256: 18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b | Bytes: 2254 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+root=$(pwd -P)
+workspace_root=${DEVFLEET_WORKSPACES_ROOT:-/workspaces}
+[[ "$workspace_root" == /* && "$workspace_root" != */ ]] || { echo 'DEVFLEET_WORKSPACES_ROOT must be an absolute directory.' >&2; exit 2; }
+[[ "$root" == "$workspace_root"/* ]] || { echo "CodexPro root must be under $workspace_root." >&2; exit 2; }
+project_rel=${root#"$workspace_root"/}
+[[ "$project_rel" != */* && -n "$project_rel" ]] || { echo 'CodexPro root must identify one project.' >&2; exit 2; }
+runtime="$root/.devfleet/runtime"; bridge="$root/.ai-bridge/local-agent"; mkdir -p "$runtime" "$bridge/logs"
+log="$runtime/codexpro-bootstrap.log"; status="$runtime/codexpro-status.json"; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+health_url=${DEVFLEET_CODEXPRO_HEALTH_URL:-http://127.0.0.1:8787/healthz}
+write_status(){ python3 - "$status" "$1" "$2" "$now" <<'PY2'
+import json,sys
+p,state,msg,now=sys.argv[1:];open(p,'w').write(json.dumps({'state':state,'healthy':state=='healthy','message':msg,'updated_at':now},indent=2)+'\n')
+PY2
+}
+if DEVFLEET_CODEXPRO_HEALTH_URL="$health_url" python3 - <<'PY2' >/dev/null 2>&1
+import urllib.request
+import os
+urllib.request.urlopen(os.environ['DEVFLEET_CODEXPRO_HEALTH_URL'],timeout=2)
+PY2
+then write_status healthy 'CodexPro loopback health endpoint is responding.'; echo 'CodexPro is already healthy.' | tee -a "$log"; exit 0; fi
+if ! command -v codexpro >/dev/null 2>&1; then write_status unavailable 'CodexPro executable is not installed in this project container.'; echo 'CodexPro is unavailable. Install it using your verified private/local installation source, then rerun this hook. No credential is embedded.' | tee -a "$log"; exit 0; fi
+export CODEXPRO_TOOL_CARDS=${CODEXPRO_TOOL_CARDS:-1}
+( codexpro start >>"$log" 2>&1 & )
+sleep 2
+if DEVFLEET_CODEXPRO_HEALTH_URL="$health_url" python3 - <<'PY2' >/dev/null 2>&1
+import urllib.request
+import os
+urllib.request.urlopen(os.environ['DEVFLEET_CODEXPRO_HEALTH_URL'],timeout=2)
+PY2
+then write_status healthy 'CodexPro started successfully.'; exit 0; fi
+write_status authorization-required 'CodexPro is installed but not healthy; inspect the log for authorization or configuration requirements.'
+echo "CodexPro did not become healthy. Review $log"; exit 0
+
+```
+
+
+## FILE: source/templates/typescript-next/.devfleet/codexpro-profile.json
+
+SHA256: c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44 | Bytes: 397 | Git mode: 100644
+
+```
+{
+  "defaultRoot": "/workspaces/__PROJECT_SLUG__",
+  "allowedRoots": [
+    "/workspaces/__PROJECT_SLUG__"
+  ],
+  "authEnabled": true,
+  "bashMode": "full",
+  "bashTranscript": "full",
+  "writeMode": "workspace",
+  "toolMode": "full",
+  "inheritEnv": false,
+  "contextDir": ".ai-bridge",
+  "maxReadBytes": 180000,
+  "maxWriteBytes": 1000000,
+  "maxOutputBytes": 120000,
+  "maxSearchResults": 200
+}
+
+```
+
+
+## FILE: source/templates/typescript-next/.devfleet/codexpro.env.example
+
+SHA256: 86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30 | Bytes: 90 | Git mode: 100644
+
+```
+# Verified optional UI setting only. Do not store credentials here.
+CODEXPRO_TOOL_CARDS=1
+
+```
+
+
+## FILE: source/templates/typescript-next/.devfleet/health-check.sh
+
+SHA256: 04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311 | Bytes: 83 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+test -d .devfleet
+./.devfleet/smoke-test.sh
+
+```
+
+
+## FILE: source/templates/typescript-next/.devfleet/project-tools.json
+
+SHA256: c8b02582ba64ca5e2f2da5843f33f5617da6292c4383c3ffb53578df160a98d0 | Bytes: 330 | Git mode: 100644
+
+```
+{
+  "id": "typescript-next",
+  "language": "typescript",
+  "framework": "nextjs",
+  "maturity": "core",
+  "bootstrap_command": "./.devfleet/bootstrap.sh",
+  "format_command": "npm run format",
+  "lint_command": "npm run lint && npm run typecheck",
+  "test_command": "npm test",
+  "health_command": "./.devfleet/health-check.sh"
+}
+
+```
+
+
+## FILE: source/templates/typescript-next/.devfleet/smoke-test.sh
+
+SHA256: 95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31 | Bytes: 214 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+test -f README.md
+test -f compose.yaml
+test -f .devcontainer/devcontainer.json
+test -f .devfleet/project.json -o -f .devfleet/template.json
+echo "Template smoke test passed."
+
+```
+
+
+## FILE: source/templates/typescript-next/.devfleet/template.json
+
+SHA256: 124e137387a78052c19ada52a067c312b7eead9c9b19ec8f0baea53cd6a7c3ab | Bytes: 670 | Git mode: 100644
+
+```
+{
+  "id": "typescript-next",
+  "language": "typescript",
+  "framework": "nextjs",
+  "maturity": "core",
+  "bootstrap_command": "./.devfleet/bootstrap.sh",
+  "format_command": "npm run format",
+  "lint_command": "npm run lint && npm run typecheck",
+  "test_command": "npm test",
+  "health_command": "./.devfleet/health-check.sh",
+  "start_command": "docker compose up -d --build",
+  "stop_command": "docker compose down --remove-orphans",
+  "restart_command": "docker compose restart",
+  "rebuild_command": "docker compose build && docker compose up -d",
+  "logs_command": "docker compose logs",
+  "codexpro_command": "./.devfleet/codexpro-bootstrap.sh"
+}
+```
+
+
+## FILE: source/templates/typescript-next/.editorconfig
+
+SHA256: 05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44 | Bytes: 137 | Git mode: 100644
+
+```
+root = true
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+[*.py]
+indent_size = 4
+
+```
+
+
+## FILE: source/templates/typescript-next/.gitignore
+
+SHA256: 8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe | Bytes: 133 | Git mode: 100644
+
+```
+.devfleet/runtime/
+.ai-bridge/local-agent/
+.env
+.env.*
+node_modules/
+.venv/
+__pycache__/
+dist/
+build/
+target/
+.next/
+coverage/
+*.log
+
+```
+
+
+## FILE: source/templates/typescript-next/README.md
+
+SHA256: 49723259d20bc66a9a10ed07a2c05cded4da74fc72745e592e6ca1cd20a9c14e | Bytes: 366 | Git mode: 100644
+
+```
+# __PROJECT_NAME__
+
+Language: `typescript`  
+Framework: `nextjs`  
+DevFleet profile: `__PROJECT_PROFILE__`
+
+Generated by DevFleet. Run `./.devfleet/bootstrap.sh`, `./.devfleet/health-check.sh`, and the test command recorded in `.devfleet/project.json`. Language selection follows Dylan's engineering preferences and is not presented as a scientific model benchmark.
+
+```
+
+
+## FILE: source/templates/typescript-next/app/layout.tsx
+
+SHA256: d98ac855ef79a037c60b7d7cf93c8cc25fedefbb9372eb40fbab42d7503c9027 | Bytes: 115 | Git mode: 100644
+
+```
+export default function Layout({children}:{children:React.ReactNode}){return <html><body>{children}</body></html>}
+
+```
+
+
+## FILE: source/templates/typescript-next/app/page.tsx
+
+SHA256: c088d85485b3cee9cd25f5ff1074f09a1fa51c1c173ae9059be58aca3269f117 | Bytes: 78 | Git mode: 100644
+
+```
+export default function Page(){return <main><h1>__PROJECT_NAME__</h1></main>}
+
+```
+
+
+## FILE: source/templates/typescript-next/compose.yaml
+
+SHA256: d9658e7bc420d2dbd0221420035ca9237bddfd4b730560efc58cae0a4f919527 | Bytes: 518 | Git mode: 100644
+
+```
+services:
+  dev:
+    image: mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm
+    user: "node"
+    working_dir: /workspaces/__PROJECT_SLUG__
+    command: sh -lc "sleep infinity"
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - .:/workspaces/__PROJECT_SLUG__:cached
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "test -d /workspaces/__PROJECT_SLUG__"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+```
+
+
+## FILE: source/templates/typescript-next/docs/architecture.md
+
+SHA256: c0dca68b485fe7ffcc73826ba017aae274acad4408251007c89f71fc4701c1b7 | Bytes: 334 | Git mode: 100644
+
+```
+# Architecture
+
+- Language: `typescript`
+- Framework: `nextjs`
+- Scale/intent/testing/profile are recorded in `.devfleet/project.json`.
+- Rationale: selected from Dylan's DevFleet engineering preferences; this is not a scientific model benchmark.
+- Source remains in one canonical checkout; use Git worktrees for concurrent branches.
+
+```
+
+
+## FILE: source/templates/typescript-next/package.json
+
+SHA256: 5b4a58f8bce9ff938e6a155e6d7250d6ca6df23d084cac2f3de15d57100101a2 | Bytes: 520 | Git mode: 100644
+
+```
+{
+  "name": "__PROJECT_SLUG__",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "test": "node --test test/*.test.js",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "prettier": "^3.0.0",
+    "@types/react": "^19.0.0",
+    "@types/node": "^22.0.0"
+  }
+}
+
+```
+
+
+## FILE: source/templates/typescript-next/test/smoke.test.js
+
+SHA256: 774d4a0d76ba5f506257f653647a1b1d79c693af6b87da1a3b3386c874288d05 | Bytes: 108 | Git mode: 100644
+
+```
+import test from "node:test";import assert from "node:assert/strict";test("smoke",()=>assert.equal(2+3,5));
+
+```
+
+
+## FILE: source/templates/typescript-next/tsconfig.json
+
+SHA256: 47702d97e54a4acdb910682fce9e9ed9d00c8d4572971a503bb492b8b107a1cb | Bytes: 226 | Git mode: 100644
+
+```
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "strict": true,
+    "jsx": "preserve",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ]
+}
+
+```
+
+
+## FILE: source/templates/typescript-node/.ai-bridge/chatgpt-memory.md
+
+SHA256: ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f | Bytes: 143 | Git mode: 100644
+
+```
+# Project continuity
+
+Keep this concise: current architecture, active branch, important decisions, and next safe action. Do not store secrets.
+
+```
+
+
+## FILE: source/templates/typescript-node/.ai-bridge/codexpro-project-instructions.md
+
+SHA256: 95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd | Bytes: 641 | Git mode: 100644
+
+```
+Use CodexPro. Call server_config first. Run codexpro_self_test only for a fresh, broken, or reconfigured session. Open the current workspace with include_tree=false, include_skills=true, and include_global_skills=true. Load codex_context with include_diff=false. Read .ai-bridge/codexpro-project-instructions.md, .ai-bridge/chatgpt-memory.md, AGENTS.md, and relevant handoffs. Use targeted search/read and diff-oriented review; exclude dependencies, generated assets, caches, models, binaries, and .ai-bridge/local-agent. Continue routine implementation without repeated approval and update a concise handoff before context becomes crowded.
+
+```
+
+
+## FILE: source/templates/typescript-node/.ai-bridge/current-plan.template.md
+
+SHA256: 7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb | Bytes: 69 | Git mode: 100644
+
+```
+# Current plan
+
+Goal:
+Changed files:
+Verification:
+Next safe action:
+
+```
+
+
+## FILE: source/templates/typescript-node/.ai-bridge/prompts/broken-session-recovery.md
+
+SHA256: d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135 | Bytes: 166 | Git mode: 100644
+
+```
+Call server_config, then codexpro_self_test. Reopen the current workspace without a full tree, inspect status and handoffs, and report the precise failed capability.
+
+```
+
+
+## FILE: source/templates/typescript-node/.ai-bridge/prompts/handoff-template.md
+
+SHA256: a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02 | Bytes: 78 | Git mode: 100644
+
+```
+Goal:
+Decisions:
+Changed files:
+Checks run/results:
+Open risks:
+Next action:
+
+
+```
+
+
+## FILE: source/templates/typescript-node/.ai-bridge/prompts/reconnect.md
+
+SHA256: 5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab | Bytes: 105 | Git mode: 100644
+
+```
+Verify server_config and open_current_workspace, then load the latest concise handoff before continuing.
+
+```
+
+
+## FILE: source/templates/typescript-node/.ai-bridge/prompts/session-bootstrap.md
+
+SHA256: 95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd | Bytes: 641 | Git mode: 100644
+
+```
+Use CodexPro. Call server_config first. Run codexpro_self_test only for a fresh, broken, or reconfigured session. Open the current workspace with include_tree=false, include_skills=true, and include_global_skills=true. Load codex_context with include_diff=false. Read .ai-bridge/codexpro-project-instructions.md, .ai-bridge/chatgpt-memory.md, AGENTS.md, and relevant handoffs. Use targeted search/read and diff-oriented review; exclude dependencies, generated assets, caches, models, binaries, and .ai-bridge/local-agent. Continue routine implementation without repeated approval and update a concise handoff before context becomes crowded.
+
+```
+
+
+## FILE: source/templates/typescript-node/.devcontainer/devcontainer.json
+
+SHA256: 2e3f9099163de6f42887fb921741b6c9f0eabbf14c86fc7e4f3ae66123ab577f | Bytes: 207 | Git mode: 100644
+
+```
+{
+  "name": "__PROJECT_NAME__",
+  "dockerComposeFile": "../compose.yaml",
+  "service": "dev",
+  "workspaceFolder": "/workspaces/__PROJECT_SLUG__",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "node"
+}
+
+```
+
+
+## FILE: source/templates/typescript-node/.devfleet/bootstrap.sh
+
+SHA256: ab4fc5d4fbbb3c4a680f0ddc19ecf073186cd8a1fbd3599b12abdcb2036b3327 | Bytes: 61 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+npm ci || npm install
+
+```
+
+
+## FILE: source/templates/typescript-node/.devfleet/codexpro-bootstrap.sh
+
+SHA256: 18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b | Bytes: 2254 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+root=$(pwd -P)
+workspace_root=${DEVFLEET_WORKSPACES_ROOT:-/workspaces}
+[[ "$workspace_root" == /* && "$workspace_root" != */ ]] || { echo 'DEVFLEET_WORKSPACES_ROOT must be an absolute directory.' >&2; exit 2; }
+[[ "$root" == "$workspace_root"/* ]] || { echo "CodexPro root must be under $workspace_root." >&2; exit 2; }
+project_rel=${root#"$workspace_root"/}
+[[ "$project_rel" != */* && -n "$project_rel" ]] || { echo 'CodexPro root must identify one project.' >&2; exit 2; }
+runtime="$root/.devfleet/runtime"; bridge="$root/.ai-bridge/local-agent"; mkdir -p "$runtime" "$bridge/logs"
+log="$runtime/codexpro-bootstrap.log"; status="$runtime/codexpro-status.json"; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+health_url=${DEVFLEET_CODEXPRO_HEALTH_URL:-http://127.0.0.1:8787/healthz}
+write_status(){ python3 - "$status" "$1" "$2" "$now" <<'PY2'
+import json,sys
+p,state,msg,now=sys.argv[1:];open(p,'w').write(json.dumps({'state':state,'healthy':state=='healthy','message':msg,'updated_at':now},indent=2)+'\n')
+PY2
+}
+if DEVFLEET_CODEXPRO_HEALTH_URL="$health_url" python3 - <<'PY2' >/dev/null 2>&1
+import urllib.request
+import os
+urllib.request.urlopen(os.environ['DEVFLEET_CODEXPRO_HEALTH_URL'],timeout=2)
+PY2
+then write_status healthy 'CodexPro loopback health endpoint is responding.'; echo 'CodexPro is already healthy.' | tee -a "$log"; exit 0; fi
+if ! command -v codexpro >/dev/null 2>&1; then write_status unavailable 'CodexPro executable is not installed in this project container.'; echo 'CodexPro is unavailable. Install it using your verified private/local installation source, then rerun this hook. No credential is embedded.' | tee -a "$log"; exit 0; fi
+export CODEXPRO_TOOL_CARDS=${CODEXPRO_TOOL_CARDS:-1}
+( codexpro start >>"$log" 2>&1 & )
+sleep 2
+if DEVFLEET_CODEXPRO_HEALTH_URL="$health_url" python3 - <<'PY2' >/dev/null 2>&1
+import urllib.request
+import os
+urllib.request.urlopen(os.environ['DEVFLEET_CODEXPRO_HEALTH_URL'],timeout=2)
+PY2
+then write_status healthy 'CodexPro started successfully.'; exit 0; fi
+write_status authorization-required 'CodexPro is installed but not healthy; inspect the log for authorization or configuration requirements.'
+echo "CodexPro did not become healthy. Review $log"; exit 0
+
+```
+
+
+## FILE: source/templates/typescript-node/.devfleet/codexpro-profile.json
+
+SHA256: c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44 | Bytes: 397 | Git mode: 100644
+
+```
+{
+  "defaultRoot": "/workspaces/__PROJECT_SLUG__",
+  "allowedRoots": [
+    "/workspaces/__PROJECT_SLUG__"
+  ],
+  "authEnabled": true,
+  "bashMode": "full",
+  "bashTranscript": "full",
+  "writeMode": "workspace",
+  "toolMode": "full",
+  "inheritEnv": false,
+  "contextDir": ".ai-bridge",
+  "maxReadBytes": 180000,
+  "maxWriteBytes": 1000000,
+  "maxOutputBytes": 120000,
+  "maxSearchResults": 200
+}
+
+```
+
+
+## FILE: source/templates/typescript-node/.devfleet/codexpro.env.example
+
+SHA256: 86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30 | Bytes: 90 | Git mode: 100644
+
+```
+# Verified optional UI setting only. Do not store credentials here.
+CODEXPRO_TOOL_CARDS=1
+
+```
+
+
+## FILE: source/templates/typescript-node/.devfleet/health-check.sh
+
+SHA256: 04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311 | Bytes: 83 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+test -d .devfleet
+./.devfleet/smoke-test.sh
+
+```
+
+
+## FILE: source/templates/typescript-node/.devfleet/project-tools.json
+
+SHA256: 7b12f17c24430177affaa376d274e8b3ede5ef8223aaa996e7400bb4dab50127 | Bytes: 328 | Git mode: 100644
+
+```
+{
+  "id": "typescript-node",
+  "language": "typescript",
+  "framework": "node",
+  "maturity": "core",
+  "bootstrap_command": "./.devfleet/bootstrap.sh",
+  "format_command": "npm run format",
+  "lint_command": "npm run lint && npm run typecheck",
+  "test_command": "npm test",
+  "health_command": "./.devfleet/health-check.sh"
+}
+
+```
+
+
+## FILE: source/templates/typescript-node/.devfleet/smoke-test.sh
+
+SHA256: 95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31 | Bytes: 214 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+test -f README.md
+test -f compose.yaml
+test -f .devcontainer/devcontainer.json
+test -f .devfleet/project.json -o -f .devfleet/template.json
+echo "Template smoke test passed."
+
+```
+
+
+## FILE: source/templates/typescript-node/.devfleet/template.json
+
+SHA256: 83fd3f0f6091706cb92646df66e301bf0d13dad3ab9a8603e819c6695c8947f6 | Bytes: 668 | Git mode: 100644
+
+```
+{
+  "id": "typescript-node",
+  "language": "typescript",
+  "framework": "node",
+  "maturity": "core",
+  "bootstrap_command": "./.devfleet/bootstrap.sh",
+  "format_command": "npm run format",
+  "lint_command": "npm run lint && npm run typecheck",
+  "test_command": "npm test",
+  "health_command": "./.devfleet/health-check.sh",
+  "start_command": "docker compose up -d --build",
+  "stop_command": "docker compose down --remove-orphans",
+  "restart_command": "docker compose restart",
+  "rebuild_command": "docker compose build && docker compose up -d",
+  "logs_command": "docker compose logs",
+  "codexpro_command": "./.devfleet/codexpro-bootstrap.sh"
+}
+```
+
+
+## FILE: source/templates/typescript-node/.editorconfig
+
+SHA256: 05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44 | Bytes: 137 | Git mode: 100644
+
+```
+root = true
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+[*.py]
+indent_size = 4
+
+```
+
+
+## FILE: source/templates/typescript-node/.gitignore
+
+SHA256: 8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe | Bytes: 133 | Git mode: 100644
+
+```
+.devfleet/runtime/
+.ai-bridge/local-agent/
+.env
+.env.*
+node_modules/
+.venv/
+__pycache__/
+dist/
+build/
+target/
+.next/
+coverage/
+*.log
+
+```
+
+
+## FILE: source/templates/typescript-node/README.md
+
+SHA256: 4b4b64b4e946e1eddd2cd6bba36396d82a4038da06c1df950dba31ca58b310ac | Bytes: 364 | Git mode: 100644
+
+```
+# __PROJECT_NAME__
+
+Language: `typescript`  
+Framework: `node`  
+DevFleet profile: `__PROJECT_PROFILE__`
+
+Generated by DevFleet. Run `./.devfleet/bootstrap.sh`, `./.devfleet/health-check.sh`, and the test command recorded in `.devfleet/project.json`. Language selection follows Dylan's engineering preferences and is not presented as a scientific model benchmark.
+
+```
+
+
+## FILE: source/templates/typescript-node/compose.yaml
+
+SHA256: d9658e7bc420d2dbd0221420035ca9237bddfd4b730560efc58cae0a4f919527 | Bytes: 518 | Git mode: 100644
+
+```
+services:
+  dev:
+    image: mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm
+    user: "node"
+    working_dir: /workspaces/__PROJECT_SLUG__
+    command: sh -lc "sleep infinity"
+    init: true
+    cap_drop:
+      - ALL

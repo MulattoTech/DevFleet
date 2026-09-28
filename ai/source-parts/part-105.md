@@ -1,617 +1,835 @@
 # DevFleet source part 105
 
 Full-source UTF-8 byte interval [4836000, 4882500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 3dd5d4cd37e6312cd859b4a4a666eba1f6f2c3c5eecd77054c4d9a384679fa94
+Payload SHA-256: 6bf6ed8514b43b6a8c0f03e4fef98e91bfc0a7fe96a777388f3f7b8a392c90be
 
 <!-- BEGIN SOURCE SLICE -->
-e,
-  [Parameter(Mandatory)][string]$OfflinePackageRoot,
-  [ValidateSet('Offline','Connected')][string]$InstallationMode='Offline',
-  [switch]$SkipWindowsUpdates
-)
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-Assert-PowerShell7; Assert-Administrator
+leetVersion") or ""), str(state.get("installer_version") or candidate.get("installerVersion") or ""))
+    computed_live = _shipping_identity(inventory, live_mode, live_version, live_installer)
+    if candidate_shipping != computed_candidate or live_shipping != computed_live:
+        raise ValueError(
+            "declared shipping-input identity does not match recomputed canonical rows: "
+            f"candidate={candidate_shipping}/{computed_candidate}, live={live_shipping}/{computed_live}"
+        )
+    differing: list[tuple[str, str]] = []
+    if candidate_rows and inventory:
+        # The release fingerprint's own schema-v2 digest is verified below by
+        # _validate_fingerprint_files.  The bundle validator independently
+        # verifies each live inventory byte against SHA256SUMS.  Keep the
+        # PowerShell Sort-Object/culture serialization out of this Python
+        # validator; compare the resulting deterministic rows and declared IDs
+        # instead of silently inventing a second canonicalization contract.
+        differing = sorted({*candidate_rows, *inventory} - {key for key in candidate_rows if candidate_rows.get(key) == inventory.get(key)})
+        if differing:
+            authority = state.get("authorized_correction")
+            allowed = {
+                str(path).replace("\\", "/").lstrip("/")
+                for path in (authority.get("shipping_paths", []) if isinstance(authority, dict) else [])
+            }
+            differing_paths = {f"{root_name}/{path}" for root_name, path in differing}
+            # Generic invalidated-candidate diagnostics must bind the complete
+            # substantive delta, not a stale release-specific allowlist.  The
+            # historical 2739 diagnostic retains its exact seven-path contract
+            # in _historical_provenance above.  Every newer diagnostic is
+            # fail-closed unless the declared paths equal (not merely contain)
+            # the independently recomputed candidate/live row differences.
+            if not allowed or allowed != differing_paths:
+                unexpected = sorted(differing_paths - allowed)
+                stale = sorted(allowed - differing_paths)
+                detail = unexpected[0] if unexpected else stale[0] if stale else "empty authorization"
+                raise ValueError(f"unknown or unclassified shipping change: {detail}")
+            if not bool(state.get("source_changed_since_candidate", manifest.get("sourceChangedSinceCandidate", False))) or not bool(state.get("rebuild_required", manifest.get("rebuildRequired", False))):
+                raise ValueError("classified shipping change requires sourceChangedSinceCandidate and rebuildRequired")
+        elif candidate_shipping != live_shipping:
+            raise ValueError("shipping-input identity differs despite identical deterministic rows")
+    elif candidate_shipping != live_shipping:
+        raise ValueError("shipping-input identity cannot be validated without deterministic shipping rows")
+    source_changed = bool(state.get("source_changed_since_candidate", manifest.get("sourceChangedSinceCandidate", False)))
+    source_identity = state.get("source_identity_matches_candidate")
+    if source_identity is not None and not isinstance(source_identity, bool):
+        raise ValueError("sourceIdentityMatchesCandidate must be a JSON boolean")
+    rows_differ = bool(differing)
+    identity_differ = rows_differ or candidate_shipping != live_shipping
+    if source_identity is not None and source_identity != (not identity_differ):
+        raise ValueError("source identity authority contradicts deterministic shipping rows")
+    if source_changed != identity_differ:
+        raise ValueError("sourceChangedSinceCandidate contradicts shipping-input identity")
+    return {"candidateShippingInputIdentity": candidate_shipping, "liveShippingInputIdentity": live_shipping, "shippingRowsDiffer": identity_differ}
 
-function Test-InstalledCommand([string]$Name) { return [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
-$manifest=Get-CanonicalDependencyManifest -PackageRoot $OfflinePackageRoot
-function Get-OfflinePayload([string]$PackageId) {
-  $manifestPath=Join-Path $OfflinePackageRoot 'OFFLINE-DEPENDENCIES.json'
-  if(-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)){ throw 'Release-bound offline dependency manifest is missing.' }
-  $offline=Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-  if($offline.schemaVersion -ne 2 -or [string]$offline.devfleetVersion -ne '1.2.13' -or -not $offline.releaseBinding){ throw 'Offline dependency manifest is not bound to this DevFleet release.' }
-  $entries=@($offline.payloads)
-  $duplicateDependency=$entries | Group-Object dependencyId | Where-Object Count -ne 1
-  $duplicateFile=$entries | Group-Object filename | Where-Object Count -ne 1
-  if($duplicateDependency -or $duplicateFile){ throw 'Offline dependency manifest contains duplicate payload identities.' }
-  # PowerShell unwraps a one-item pipeline result. Keep the exact-match
-  # collection an array before reading Count so a valid singleton payload
-  # cannot fail with a missing-property error.
-  $entry=@($entries | Where-Object { [string]$_.dependencyId -eq $PackageId })
-  if($entry.Count -ne 1){ throw "No exact release-bound offline payload exists for $PackageId. Connected mode is required for this target." }
-  if([IO.Path]::IsPathRooted([string]$entry[0].filename) -or ([string]$entry[0].filename).Contains('..')){ throw 'Offline payload filename escapes the release package root.' }
-  $payloadPath=Join-Path $OfflinePackageRoot ([string]$entry[0].filename)
-  if(-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)){ throw "Exact offline payload is missing: $($entry[0].filename)." }
-  $item=Get-Item -LiteralPath $payloadPath -Force
-  if([int64]$item.Length -ne [int64]$entry[0].sizeBytes){ throw "Offline payload size mismatch for $($item.Name)." }
-  $actual=(Get-FileHash -LiteralPath $payloadPath -Algorithm SHA256).Hash.ToLowerInvariant()
-  if($actual -ne ([string]$entry[0].sha256).ToLowerInvariant()){ throw "Offline prerequisite hash mismatch for $($item.Name)." }
-  $allFiles=@(Get-ChildItem -LiteralPath $OfflinePackageRoot -File -Recurse | Where-Object Name -ne 'OFFLINE-DEPENDENCIES.json')
-  $allowed=@($entries | ForEach-Object { [IO.Path]::GetFullPath((Join-Path $OfflinePackageRoot ([string]$_.filename))) })
-  if(@($allFiles | Where-Object { $allowed -notcontains $_.FullName }).Count -gt 0){ throw 'Unlisted offline payload files are rejected.' }
-  return $payloadPath
-}
-function Install-OfflinePayload([string]$PackageId,[string[]]$Arguments) {
-  $payload=Get-OfflinePayload $PackageId
-  $dependency=@($manifest.dependencies)|Where-Object id -eq $PackageId|Select-Object -First 1
-  if(-not $dependency){throw "Dependency id is not present in canonical manifest: $PackageId"}
-  $strategy=Get-AuthenticityStrategy $dependency.installerAuthenticityPolicy
-  if($strategy -ne 'VendorReleaseSha256'){Test-OfficialSigner -Path $payload -Policy $dependency.installerAuthenticityPolicy}
-  $ext=[IO.Path]::GetExtension($payload).ToLowerInvariant()
-  if($ext -eq '.msi') { $msiexec=Join-Path $env:WINDIR 'System32\msiexec.exe';if(-not (Test-TrustedExecutableCandidate $msiexec)){throw 'Trusted Windows Installer executable was not found.'};Invoke-External -FilePath $msiexec -ArgumentList (@('/i',$payload,'/qn','/norestart')) -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'dependencyInstall') -AllowedExitCodes @(0,3010) | Out-Null }
-  elseif($ext -eq '.exe') { Invoke-External -FilePath $payload -ArgumentList $Arguments -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'dependencyInstall') -AllowedExitCodes @(0,3010) | Out-Null }
-  else { throw "Unsupported offline installer type for ${PackageId}: $ext" }
-}
-function Ensure-Dependency([string]$Id,[switch]$FeatureRequested) {
-  $dependency=@($manifest.dependencies)|Where-Object id -eq $Id|Select-Object -First 1
-  if(-not $dependency){throw "Dependency id is not present in canonical manifest: $Id"}
-  $detected=if($Id -ceq 'multipass'){
-    Wait-DevFleetDependencyStatus -Dependency $dependency -MaximumAttempts (Get-DevFleetDependencyProbeAttemptLimit -Dependency $dependency)
-  }else{
-    Get-DependencyStatus -Dependency $dependency
-  }
-  Write-Host "$($dependency.displayName): detected=$($detected.Version) path=$($detected.Path) status=$($detected.Status)" -ForegroundColor Cyan
-   if($detected.Status -eq 'Compatible'){Write-Host "Preserving compatible prerequisite: $($dependency.displayName)";return}
-  if(-not $dependency.required -and [string]$dependency.classification -in @('OPTIONAL','RECOMMENDED') -and -not $FeatureRequested){Write-Warning "$($dependency.displayName) is $($dependency.classification.ToLowerInvariant()) for core installation; leaving its feature unavailable rather than forcing acquisition.";return}
-  if($detected.Status -eq 'Unsupported-Major'){throw "$($dependency.displayName) major version $($detected.Version) is outside the supported policy."}
-  if($InstallationMode -eq 'Offline'){
-    if($dependency.required){Install-OfflinePayload $dependency.wingetPackageId @()}
-    else{Write-Warning "Optional prerequisite is absent or incompatible and no local payload was selected: $($dependency.displayName)"}
-  }else{
-    $health=Get-WingetHealth
-    if($health.Status -eq 'Healthy' -and $dependency.wingetPackageId){
-      try { Install-WingetPackage -Id $dependency.wingetPackageId -Upgrade:($detected.Status -eq 'Outdated') }
-      catch {
-        if($_.Exception.Message -notmatch '(?i)External command timed out' -or -not $dependency.directOfficialVendorResolver){throw}
-        Write-Warning "WinGet stalled for $($dependency.displayName); switching to the authenticated official vendor resolver."
-        Install-OfficialDependency -Dependency $dependency
-      }
+
+def _canonical(state: dict[str, Any], manifest: dict[str, Any], root: Path) -> dict[str, Any]:
+    release = str(state.get("releaseFingerprintId") or manifest.get("releaseFingerprintId") or "")
+    tooling = str(state.get("toolingFingerprintId") or manifest.get("toolingFingerprintId") or "")
+    version = str(state.get("release_version") or manifest.get("releaseVersion") or "")
+    installer = str(state.get("installer_version") or manifest.get("installerVersion") or "")
+    repository_head = str(state.get("repository_head") or manifest.get("repositoryHead") or state.get("git_commit") or manifest.get("gitCommit") or "")
+    candidate_commit = str(state.get("candidate_git_commit") or manifest.get("candidateGitCommit") or "")
+    if not release or not tooling or not version or not installer or not repository_head or not candidate_commit:
+        raise ValueError("Canonical finalization state is missing version or fingerprint identity")
+    if any(not re.fullmatch(r"[0-9a-fA-F]{64}", value) or value.lower() == "0" * 64 for value in (release, tooling)):
+        raise ValueError("Canonical release/tooling fingerprint identity is malformed")
+    if state.get("repository_head") and str(state["repository_head"]) != repository_head:
+        raise ValueError("finalization-state.json.repository_head disagrees with repository HEAD identity")
+    if state.get("git_commit") and str(state["git_commit"]) != repository_head:
+        raise ValueError("finalization-state.json.git_commit disagrees with repository HEAD identity")
+    if state.get("candidate_git_commit") and str(state["candidate_git_commit"]) != candidate_commit:
+        raise ValueError("finalization-state.json.candidate_git_commit disagrees with candidate identity")
+    if manifest.get("repositoryHead") and str(manifest["repositoryHead"]) != repository_head:
+        raise ValueError("final-artifact-hashes.json.repositoryHead disagrees with repository HEAD identity")
+    if manifest.get("gitCommit") and str(manifest["gitCommit"]) != repository_head:
+        raise ValueError("final-artifact-hashes.json.gitCommit disagrees with repository HEAD identity")
+    if manifest.get("candidateGitCommit") and str(manifest["candidateGitCommit"]) != candidate_commit:
+        raise ValueError("final-artifact-hashes.json.candidateGitCommit disagrees with candidate identity")
+    if release != str(manifest.get("releaseFingerprintId") or ""):
+        raise ValueError("finalization-state.json and final-artifact-hashes.json disagree on releaseFingerprintId")
+    if tooling != str(manifest.get("toolingFingerprintId") or ""):
+        raise ValueError("finalization-state.json and final-artifact-hashes.json disagree on toolingFingerprintId")
+    source_identity = state.get("source_identity_matches_candidate")
+    artifact_identity = state.get("artifact_tuple_matches_candidate")
+    build_current = state.get("candidate_build_current")
+    if source_identity is None:
+        source_identity = not bool(state.get("source_changed_since_candidate", manifest.get("sourceChangedSinceCandidate", False)))
+    if artifact_identity is None:
+        artifact_identity = bool(state.get("candidate_is_current", manifest.get("candidateIsCurrent", False)))
+    if build_current is None:
+        build_current = bool(state.get("candidate_is_current", manifest.get("candidateIsCurrent", False)))
+    required = {
+        "sourceChangedSinceCandidate": state.get("source_changed_since_candidate"),
+        "rebuildRequired": state.get("rebuild_required"),
+        "candidateIsCurrent": state.get("candidate_is_current"),
+        "sourceIdentityMatchesCandidate": source_identity,
+        "artifactTupleMatchesCandidate": artifact_identity,
+        "candidateBuildCurrent": build_current,
+        "validationEvidenceCurrent": state.get("validation_evidence_current", manifest.get("validationEvidenceCurrent", False)),
+        "fullReleasePassed": state.get("full_release_passed", manifest.get("fullReleasePassed", False)),
+        "physicalSurrogateCertificationCurrent": state.get("physical_surrogate_certification_current", manifest.get("physicalSurrogateCertificationCurrent", False)),
+        "internalPromotionAllowed": state.get("internal_promotion_allowed", manifest.get("internalPromotionAllowed", False)),
+        "publicPromotionAllowed": state.get("public_promotion_allowed", manifest.get("publicPromotionAllowed", False)),
     }
-    else{Write-Warning "WinGet $($health.Status); using direct official fallback for $($dependency.displayName).";Install-OfficialDependency -Dependency $dependency}
-  }
-  $after=if($Id -ceq 'multipass'){
-    Wait-DevFleetDependencyStatus -Dependency $dependency -MaximumAttempts (Get-DevFleetDependencyProbeAttemptLimit -Dependency $dependency)
-  }else{
-    Get-DependencyStatus -Dependency $dependency
-  }
-  if($after.Status -notin @('Compatible')){throw "$($dependency.displayName) did not reach a compatible post-install state: $($after.Status) ($($after.Detail))"}
-  Write-Host "Verified post-install: $($dependency.displayName) $($after.Version) at $($after.Path)" -ForegroundColor Green
-}
-
-function Install-VsCodeExtension([string]$CodeCli,[string]$Extension) {
-  $cmd=Join-Path $env:WINDIR 'System32\cmd.exe'
-  if(-not (Test-TrustedExecutableCandidate $cmd)){throw 'Trusted command interpreter was not found for the optional VS Code integration.'}
-  $quotedCode='"'+$CodeCli.Replace('"','""')+'"'
-  $quotedExtension='"'+$Extension.Replace('"','""')+'"'
-  Invoke-External -FilePath $cmd -ArgumentList @('/d','/s','/c',"$quotedCode --install-extension $quotedExtension --force") -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'vscodeExtension') | Out-Null
-}
-
-function Invoke-MultipassConfigurationProbe([string]$Multipass,[string[]]$Arguments,[string]$FailureMessage) {
-  $context=Get-DevFleetDeadlineContext
-  $operationDeadline=[DateTime]::UtcNow.AddSeconds((Get-DevFleetOperationMaximumSeconds 'multipassConfiguration'))
-  if($context -and ([datetime]$context.StageDeadlineUtc -lt $operationDeadline)){$operationDeadline=[datetime]$context.StageDeadlineUtc}
-  # The configured operation deadline is the finite retry bound. A fixed
-  # attempt count can expire during a transient Multipass daemon/backend
-  # readiness window after a Hyper-V checkpoint restore even though the
-  # inherited 600-second operation budget is still available.
-  while([DateTime]::UtcNow -lt $operationDeadline){
-    $remaining=[int][math]::Floor(($operationDeadline-[DateTime]::UtcNow).TotalSeconds)
-    if($remaining -le 0){break}
-    try {
-      return (Invoke-External $Multipass $Arguments -Capture -TimeoutSeconds ([math]::Min(60,$remaining)) -DeadlineUtc $operationDeadline)
-    } catch {
-      $sleepSeconds=[math]::Min(1,[math]::Max(0,$remaining-1))
-      if($sleepSeconds -gt 0){Start-Sleep -Seconds $sleepSeconds}
+    for name, value in required.items():
+        if value is None:
+            value = manifest.get(name)
+        _bool(value, name, "canonical")
+        required[name] = value
+    if required["rebuildRequired"] and required["candidateBuildCurrent"]:
+        raise ValueError("Canonical state cannot require a rebuild while candidateBuildCurrent is true")
+    if required["candidateIsCurrent"] != (required["sourceIdentityMatchesCandidate"] and required["artifactTupleMatchesCandidate"]):
+        raise ValueError("candidateIsCurrent must be derived from source and artifact identity")
+    if required["fullReleasePassed"] and not required["validationEvidenceCurrent"]:
+        raise ValueError("fullReleasePassed requires current validation evidence")
+    if required["internalPromotionAllowed"] and not required["fullReleasePassed"]:
+        raise ValueError("internalPromotionAllowed requires a passing FullRelease")
+    if required["publicPromotionAllowed"] and (not required["internalPromotionAllowed"] or str(state.get("signing_state", manifest.get("signingState", ""))).upper().startswith("NOT SIGNED")):
+        raise ValueError("publicPromotionAllowed requires internal promotion and signing")
+    production = state.get("production_safety")
+    if not isinstance(production, dict):
+        raise ValueError("Canonical finalization state is missing production_safety")
+    production_unchanged = production.get("production_unchanged")
+    _bool(production_unchanged, "production_unchanged", "canonical.production_safety")
+    touched = production.get("mulattotechsurface_touched", False)
+    _bool(touched, "mulattotechsurface_touched", "canonical.production_safety")
+    gates = state.get("gates")
+    if not isinstance(gates, dict):
+        raise ValueError("Canonical finalization state is missing gates")
+    artifact_rows = _artifact_rows(state, manifest)
+    expected_artifacts: dict[str, dict[str, Any]] = {}
+    for canonical_name, aliases in ARTIFACT_ALIASES.items():
+        row = next((artifact_rows[a] for a in aliases if a in artifact_rows), None)
+        if not row or not str(row.get("sha256") or ""):
+            raise ValueError(f"Canonical artifact hash is missing: {canonical_name}")
+        state_row = next((state.get("candidate", {}).get(alias) for alias in aliases if isinstance(state.get("candidate"), dict) and isinstance(state["candidate"].get(alias), dict)), None)
+        manifest_row = next((item for item in manifest.get("artifacts", []) if isinstance(item, dict) and str(item.get("name") or "").lower().replace("-", "_") in {alias.lower().replace("-", "_") for alias in aliases}), None)
+        if isinstance(state_row, dict) and isinstance(manifest_row, dict):
+            if str(state_row.get("sha256") or "").lower() != str(manifest_row.get("sha256") or "").lower() or int(state_row.get("bytes", -1)) != int(manifest_row.get("bytes", -2)):
+                raise ValueError(f"state and artifact manifest disagree on {canonical_name} tuple")
+        expected_artifacts[canonical_name] = row
+        artifact_path = root / str(row.get("path") or "")
+        if artifact_path.is_file():
+            actual = _sha256(artifact_path)
+            if actual.lower() != str(row["sha256"]).lower():
+                raise ValueError(f"Canonical artifact hash does not match bytes: {artifact_path}")
+    return {
+        "releaseFingerprintId": release,
+        "toolingFingerprintId": tooling,
+        "releaseVersion": version,
+        "installerVersion": installer,
+        "repositoryHead": repository_head,
+        "candidateGitCommit": candidate_commit,
+        "gitCommit": repository_head,
+        **required,
+        "signingState": state.get("signing_state", manifest.get("signingState", "")),
+        "releaseStatus": state.get("release_status", manifest.get("releaseStatus", "BLOCKED")),
+        "productionUnchanged": production_unchanged,
+        "mulattotechsurfaceTouched": touched,
+        "gates": gates,
+        "artifacts": expected_artifacts,
     }
-  }
-  throw $FailureMessage
-}
-
-Write-Host "`nInstalling/updating Windows prerequisites ($InstallationMode) ..." -ForegroundColor Cyan
-Ensure-Dependency 'git'
-Ensure-Dependency 'multipass'
-Ensure-Dependency 'tailscale'
-Ensure-Dependency 'github-cli'
-Ensure-Dependency 'sevenzip'
-Ensure-Dependency 'vscode'
-
-$ssh=Get-WindowsCapability -Online | Where-Object Name -Like 'OpenSSH.Client*' | Select-Object -First 1
-if(-not $ssh){ throw 'Windows OpenSSH Client capability was not found.' }
-if($ssh.State -ne 'Installed'){
-  if($InstallationMode -eq 'Offline'){ throw 'OpenSSH Client is not installed and Windows capability acquisition is not supported by this Full Offline profile.' }
-  Add-WindowsCapability -Online -Name $ssh.Name | Out-Null
-}
-
-$edition=(Get-ComputerInfo -Property WindowsProductName).WindowsProductName
-if($edition -match 'Pro|Enterprise|Education'){
-  $feature=Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All
-  if($feature.State -ne 'Enabled'){
-    Write-Warning 'Enabling Hyper-V. A reboot will be required before VM provisioning.'
-    Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All -All -NoRestart | Out-Null
-  }
-}else{
-  Ensure-Dependency 'virtualbox' -FeatureRequested
-}
-
-if(-not (Test-PendingReboot)){
-  $mp=Get-MultipassExe
-  $desiredDriver=if($edition -match 'Pro|Enterprise|Education'){'hyperv'}else{'virtualbox'}
-  # Verify the restored daemon state before writing it. Re-applying an already
-  # selected driver can restart Multipass while a nested instance is starting,
-  # leaving the control-plane socket unavailable to the following probe.
-  $selectedDriver=([string](Invoke-MultipassConfigurationProbe $mp @('get','local.driver') 'Multipass did not become ready before driver verification.')).Trim()
-  if($selectedDriver -ne $desiredDriver){
-    Invoke-External $mp @('set',"local.driver=$desiredDriver") -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'multipassConfiguration')
-    $selectedDriver=([string](Invoke-MultipassConfigurationProbe $mp @('get','local.driver') 'Multipass did not become ready after the driver setting was applied.')).Trim()
-  }
-  if($selectedDriver -ne $desiredDriver){throw "Multipass did not select the required driver: $selectedDriver (expected $desiredDriver)"}
-  $selectedPrivilegedMounts=([string](Invoke-MultipassConfigurationProbe $mp @('get','local.privileged-mounts') 'Multipass did not become ready before privileged-mount verification.')).Trim()
-  if($selectedPrivilegedMounts -ne 'false'){
-    Invoke-External $mp @('set','local.privileged-mounts=false') -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'multipassConfiguration')
-    Invoke-MultipassConfigurationProbe $mp @('get','local.privileged-mounts') 'Multipass did not become ready after privileged mounts were disabled.'
-  }
-}else{ Write-Warning 'Hypervisor configuration will finish automatically when this installer is re-run after reboot.' }
-
-$code=Get-VsCodeCli
-if($code){
-  $vsixRoot=Join-Path $OfflinePackageRoot 'vsix'
-  foreach($ext in @('ms-vscode-remote.remote-ssh','ms-vscode-remote.remote-containers','ms-vscode.remote-explorer')){
-    if($InstallationMode -eq 'Offline'){
-      $vsix=Get-ChildItem -LiteralPath $vsixRoot -Filter "*$ext*.vsix" -File -ErrorAction SilentlyContinue | Select-Object -First 1
-      if($vsix){ Install-VsCodeExtension $code $vsix.FullName } else { Write-Warning "Optional VS Code extension payload is absent: $ext" }
-    }else{ Install-VsCodeExtension $code $ext }
-  }
-}else{ Write-Warning 'VS Code integration is optional and its CLI is not available.' }
-
-if(-not $SkipWindowsUpdates){ Write-Host 'Windows Update is not forced automatically. Install pending Windows security updates, then reboot if Windows requests it.' -ForegroundColor Yellow }
-# A prerequisite stage is not durably complete while servicing still requires a
-# reboot.  Leaving the marker absent makes the resumed transaction rerun only
-# this idempotent prerequisite stage and then advance normally.
-if(-not (Test-PendingReboot)){ Write-StageMarker "prereqs-$Role" } else { Write-Warning 'Prerequisite stage remains pending until Windows servicing settles; no completion marker was written.' }
-
-```
 
 
-## FILE: source/windows/02-Provision-ComputeNode.ps1
-
-SHA256: e06b31924cb383c9d6383c70376b89b49213248f1f09e61aef5dc15d8afff7d1 | Bytes: 9264 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param(
- [Parameter(Mandatory)][ValidateSet('Primary','Failover')][string]$NodeRole,
- [switch]$ForceReprovision,
- [string]$TransactionId,
- [string]$TransactionPayloadSha256,
- [string]$TransactionAction,
- [string]$TransactionRole,
- [string]$TransactionPreparedUtc
-)
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-Assert-PowerShell7; Assert-Administrator
-$deadlineContext=Get-DevFleetDeadlineContext
-if(-not $deadlineContext){$fallbackDeadline=[DateTime]::UtcNow.AddSeconds((Get-DevFleetStageBudgetSeconds 'compute'));Set-DevFleetDeadlineContext -TransactionDeadlineUtc $fallbackDeadline -StageName 'compute' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'compute') | Out-Null}
-$config=Get-DevFleetConfig
-$node=if($NodeRole -eq 'Primary'){$config.Primary}else{$config.Failover}
-$name=$node.InstanceName
-$package=Get-PackageRootFromState
-$packageVersion=(Get-Content -LiteralPath (Join-Path $package 'VERSION') -Raw).Trim()
-$bootstrapSeconds=Get-DevFleetOperationMaximumSeconds 'guestBootstrap'
-$expectedRole=if($NodeRole -eq 'Primary'){'Desktop'}else{'Laptop'}
-$activeTransaction=Wait-ActiveDevFleetTransaction -ExpectedRole $expectedRole
-if(-not $activeTransaction -and $TransactionId -and $TransactionPayloadSha256 -and $TransactionAction -and $TransactionRole -and $TransactionPreparedUtc){
- $propagated=[pscustomobject]@{transactionId=$TransactionId;payloadSha256=$TransactionPayloadSha256;action=$TransactionAction;role=$TransactionRole;preparedUtc=$TransactionPreparedUtc}
- if(Test-DevFleetTransactionBinding -Transaction $propagated -ExpectedRole $expectedRole){$activeTransaction=$propagated}
-}
-if(-not $activeTransaction) { throw 'Active DevFleet transaction is missing, malformed, or not bound to this compute role.' }
-$bootstrapNodeRole=if($NodeRole -eq 'Failover'){'surrogate'}else{'primary'}
-$bootstrapBoundary=New-DevFleetBootstrapBoundary -Kind compute -InstanceName $name -TransactionId ([string]$activeTransaction.transactionId) -PayloadSha256 ([string]$activeTransaction.payloadSha256) -BootstrapMaxSeconds $bootstrapSeconds -PackageVersion $packageVersion -NodeRole $bootstrapNodeRole
-$mp=Get-MultipassExe
-Write-StageMarker -Name $bootstrapBoundary.multipassResolvedStageName -Transaction $activeTransaction
-Assert-MultipassIsolation -InstanceNames @($name)
-Write-StageMarker -Name $bootstrapBoundary.isolationVerifiedStageName -Transaction $activeTransaction
-$secrets=Get-OrCreateSecrets
-$nodeIdentity=Get-OrCreateNodeIdentity -Role $(if($NodeRole -eq 'Primary'){'Desktop'}else{'Laptop'})
-
-$instancePresent=Test-MultipassInstance $name
-Write-StageMarker -Name $(if($instancePresent){$bootstrapBoundary.instancePresentStageName}else{$bootstrapBoundary.instanceAbsentStageName}) -Transaction $activeTransaction
-if($instancePresent){
- if($ForceReprovision){ throw "Refusing automatic destruction of existing $name. Remove it manually only after verifying backups." }
- Write-Host "$name already exists; updating the DevFleet payload in place." -ForegroundColor Yellow
-  Invoke-External $mp @('start',$name) -IgnoreExitCode
-  Write-StageMarker -Name $bootstrapBoundary.instanceStartedStageName -Transaction $activeTransaction
-  Wait-MultipassReady $name 1200
-}else{
- $cloud=Join-Path (Get-DevFleetStateRoot) "tmp\cloud-$name.yaml"
- $template=Get-Content (Join-Path $package 'cloud-init\compute.yaml') -Raw
- $template=$template.Replace('__NODE_NAME__',(ConvertTo-YamlSingleQuotedScalar $name)).Replace('__NODE_ROLE__',(ConvertTo-YamlSingleQuotedScalar $NodeRole.ToLower())).Replace('__GIT_NAME_SHELL__',(ConvertTo-ShellSingleQuotedScalar $config.Git.UserName)).Replace('__GIT_EMAIL_SHELL__',(ConvertTo-ShellSingleQuotedScalar $config.Git.Email))
- Set-Content $cloud $template -Encoding utf8
-  # PowerShell `if` is a statement, not an expression; resolve the owning
-  # stage deadline before passing it to the fresh-launch recovery helper.
-  $launchDeadline=[datetime]::MinValue
-  if($deadlineContext){$launchDeadline=([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime()}
-  try {
-   Invoke-MultipassLaunchWithReadinessRecovery -InstanceName $name -LaunchArguments @('launch',[string]$node.UbuntuImage,'--name',$name,'--cpus',[string]$node.Cpus,'--memory',[string]$node.Memory,'--disk',[string]$node.Disk,'--cloud-init',$cloud) -ReadinessTimeoutSeconds 1200 -DeadlineUtc $launchDeadline -OnInstanceEstablished { param($launch) Write-StageMarker -Name $bootstrapBoundary.instanceLaunchedStageName -Transaction $activeTransaction }
-  } catch {
-   # Windows servicing can become reboot-pending while Multipass is inside its
-   # bounded launch/recovery envelope. Preserve the original launch error for
-   # the post-reboot attempt, but first return the native 3010 contract so the
-   # installer advances the durable checkpoint instead of treating the stale
-   # Hyper-V state as a terminal compute failure.
-   if(Test-PendingReboot){Write-Warning 'Windows reported a new reboot requirement during compute launch. Re-run this same transaction after reboot; completed stages will be detected.';exit 3010}
-   throw
-  }
-  if(Test-PendingReboot){Write-Warning 'Windows reported a new reboot requirement after compute launch. Re-run this same transaction after reboot; completed stages will be detected.';exit 3010}
-}
-Write-StageMarker -Name $bootstrapBoundary.instanceReadyStageName -Transaction $activeTransaction
-
-$tmp=Join-Path (Get-DevFleetStateRoot) "tmp\payload-$name"
-Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory $tmp -Force | Out-Null
-foreach($d in @('linux','app','templates')){ Copy-Item (Join-Path $package $d) $tmp -Recurse }
-Copy-Item (Join-Path $package 'VERSION') (Join-Path $tmp 'VERSION')
-$nodeSecrets=[ordered]@{
- NodeName=$name; NodeRole=$bootstrapNodeRole; FriendlyName=[string]$node.FriendlyName; PortalPort=$config.Network.PortalPort; DeploymentId=[string]$nodeIdentity.deployment_id; NodeId=[string]$nodeIdentity.node_id; CoordinatorNodeId=[string]$nodeIdentity.coordinator_node_id; ProtocolVersion=[int]$nodeIdentity.protocol_version
- AdminUser=$secrets.PortalAdminUser; AdminPassword=$secrets.PortalAdminPassword; ApiToken=$secrets.NodeApiToken
- GitName=$config.Git.UserName; GitEmail=$config.Git.Email; OllamaBaseUrl=($(if($config.Ollama.PreferredBaseUrl){$config.Ollama.PreferredBaseUrl}else{$config.Ollama.BaseUrl})); OllamaModel=$config.Ollama.Model; OllamaProfile=$config.Ollama.Profile
- DevelopmentProfile=$config.Development.Profile; DockerMode=($(if($NodeRole -eq 'Primary'){$config.Docker.PrimaryMode}else{$config.Docker.FailoverMode}))
- EnableSharedCaches=[bool]$config.Development.EnableSharedBuildCaches; EnableAnalyzerCache=[bool]$config.Development.EnableAnalyzerCache; AutoStartCodexPro=[bool]$config.Development.AutoStartCodexPro; AllowTailnetPorts=[bool]$config.Development.AllowTailnetPortPublishing; BackupBeforeRebuild=[bool]$config.Development.BackupBeforeRebuild; BackupBeforeQuarantine=[bool]$config.Development.BackupBeforeQuarantine
- BackupIntervalMinutes=[int]$config.Backup.IntervalMinutes
- PackageVersion=$packageVersion
-}
-$zip=Join-Path (Get-DevFleetStateRoot) "tmp\payload-$name.zip"
-Remove-Item $zip -Force -ErrorAction SilentlyContinue
-Compress-Archive -Path (Join-Path $tmp '*') -DestinationPath $zip
-$payloadDeadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetOperationMaximumSeconds 'payloadTransfer'))
-$payloadContext=Get-DevFleetDeadlineContext
-if($payloadContext -and ([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime() -lt $payloadDeadline){$payloadDeadline=([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime()}
-try {
- Invoke-External $mp @('transfer',$zip,"${name}:/tmp/devfleet-payload.zip") -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
- Write-StageMarker -Name $bootstrapBoundary.payloadTransferredStageName -Transaction $activeTransaction
- Invoke-External $mp @('exec',$name,'--','bash','-lc',$bootstrapBoundary.extractionCommand) -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
- Write-StageMarker -Name $bootstrapBoundary.payloadExtractedStageName -Transaction $activeTransaction
- $bootstrapDeadline=[datetime]::UtcNow.AddSeconds($bootstrapBoundary.bootstrapMaxSeconds)
- $bootstrapContext=Get-DevFleetDeadlineContext
- if($bootstrapContext -and ([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime() -lt $bootstrapDeadline){$bootstrapDeadline=([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime()}
- Invoke-MultipassWithStandardInput -FilePath $mp -InstanceName $name -CommandArgumentList @('bash','-lc',$bootstrapBoundary.bootstrapCommand) -TimeoutSeconds $bootstrapBoundary.bootstrapMaxSeconds -DeadlineUtc $bootstrapDeadline -StandardInputText ($nodeSecrets | ConvertTo-Json -Compress)
-} finally {
- Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
- Remove-Item $zip -Force -ErrorAction SilentlyContinue
- $nodeSecrets=$null
-}
-Add-LocalSshKeyToInstance -InstanceName $name
-Write-StageMarker -Name $bootstrapBoundary.completionStageName -Transaction $activeTransaction
-Write-Host "$name provisioned. Portal credentials are stored under C:\ProgramData\DevFleet\secrets." -ForegroundColor Green
-
-```
+def _artifact_name(key: str) -> str | None:
+    lower = key.lower().replace("-", "_")
+    for canonical, aliases in ARTIFACT_ALIASES.items():
+        if lower in {a.lower().replace("-", "_") for a in aliases}:
+            return canonical
+    return None
 
 
-## FILE: source/windows/03-Provision-Vault.ps1
+def _validate_fingerprint_files(root: Path, expected: dict[str, Any]) -> list[Path]:
+    """Validate current schema-v2 identity files and their exact artifact tuple.
 
-SHA256: 620c99ab23861ad44f74b5d79ceda9e79eba20feb89ff6694e0e548e2a5308c6 | Bytes: 7647 | Git mode: 100644
+    Schema 1 remains parseable as historical audit evidence, but a file named as
+    the current release/tooling identity may never silently promote it.
+    """
+    checked: list[Path] = []
+    release_path = root / "outputs" / "release-fingerprint.json"
+    if release_path.is_file():
+        release = _load(release_path)
+        if not isinstance(release, dict) or release.get("schemaVersion") not in (1, 2):
+            raise ValueError("Current release fingerprint has an unsupported schema")
+        if release.get("schemaVersion") != 2:
+            raise ValueError("Current release fingerprint must use schemaVersion 2; schema 1 is historical only")
+        if str(release.get("releaseFingerprintId") or "") != expected["releaseFingerprintId"]:
+            raise ValueError("outputs/release-fingerprint.json is stale")
+        if _release_id(release) != str(release.get("releaseFingerprintId") or "").lower():
+            raise ValueError("outputs/release-fingerprint.json releaseFingerprintId does not match canonical rows")
+        tooling = release.get("toolingFingerprint")
+        if not isinstance(tooling, dict) or str(tooling.get("toolingFingerprintId") or "") != expected["toolingFingerprintId"]:
+            raise ValueError("outputs/release-fingerprint.json has a stale tooling fingerprint")
+        rows = release.get("artifacts")
+        if not isinstance(rows, list):
+            raise ValueError("Current release fingerprint is missing its artifact tuple")
+        by_name = {_artifact_name(str(row.get("name") or "")): row for row in rows if isinstance(row, dict)}
+        for name, canonical in expected["artifacts"].items():
+            row = by_name.get(name)
+            if not row or str(row.get("sha256") or "").lower() != str(canonical["sha256"]).lower() or int(row.get("bytes", -1)) != int(canonical.get("bytes", -2)):
+                raise ValueError(f"outputs/release-fingerprint.json has a stale {name} artifact tuple")
+        shipping = _shipping_rows(release.get("shippingInputs"))
+        _validate_row_shape(shipping, "outputs/release-fingerprint.json shipping rows")
+        release_shipping_identity = _shipping_identity(
+            shipping,
+            release.get("shippingModeContract") or {},
+            str(release.get("devfleetVersion") or ""),
+            str(release.get("installerVersion") or ""),
+        )
+        if release_shipping_identity not in {
+            str(expected.get("liveShippingInputIdentity") or "").lower(),
+            str(expected.get("candidateShippingInputIdentity") or "").lower(),
+        }:
+            raise ValueError("outputs/release-fingerprint.json shipping identity is not bound to the current tuple")
+        for (root_name, relative), row in shipping.items():
+            path = root / root_name / relative
+            if not path.is_file() or path.stat().st_size != row["bytes"] or _sha256(path) != row["sha256"]:
+                raise ValueError(f"outputs/release-fingerprint.json shipping row does not match bytes: {root_name}/{relative}")
+        checked.append(release_path)
 
-```
-[CmdletBinding()]
-param(
- [switch]$ForceReprovision,
- [string]$TransactionId,
- [string]$TransactionPayloadSha256,
- [string]$TransactionAction,
- [string]$TransactionRole,
- [string]$TransactionPreparedUtc
-)
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-Assert-PowerShell7;Assert-Administrator
-$deadlineContext=Get-DevFleetDeadlineContext
-if(-not $deadlineContext){$fallbackDeadline=[DateTime]::UtcNow.AddSeconds((Get-DevFleetStageBudgetSeconds 'vault'));Set-DevFleetDeadlineContext -TransactionDeadlineUtc $fallbackDeadline -StageName 'vault' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'vault') | Out-Null}
-$config=Get-DevFleetConfig;$v=$config.Vault;$name=$v.InstanceName;$package=Get-PackageRootFromState
-$activeTransaction=Wait-ActiveDevFleetTransaction -ExpectedRole 'Laptop'
-if(-not $activeTransaction -and $TransactionId -and $TransactionPayloadSha256 -and $TransactionAction -and $TransactionRole -and $TransactionPreparedUtc){
- $propagated=[pscustomobject]@{transactionId=$TransactionId;payloadSha256=$TransactionPayloadSha256;action=$TransactionAction;role=$TransactionRole;preparedUtc=$TransactionPreparedUtc}
- if(Test-DevFleetTransactionBinding -Transaction $propagated -ExpectedRole 'Laptop'){$activeTransaction=$propagated}
-}
-if(-not $activeTransaction){throw 'Active DevFleet transaction is missing, malformed, or not bound to the Vault role.'}
-$bootstrapSeconds=Get-DevFleetOperationMaximumSeconds 'vaultBootstrap'
-$bootstrapBoundary=New-DevFleetBootstrapBoundary -Kind vault -InstanceName $name -TransactionId ([string]$activeTransaction.transactionId) -PayloadSha256 ([string]$activeTransaction.payloadSha256) -BootstrapMaxSeconds $bootstrapSeconds -PackageVersion 'vault' -NodeRole 'vault'
-$mp=Get-MultipassExe
-Write-StageMarker -Name $bootstrapBoundary.multipassResolvedStageName -Transaction $activeTransaction
-Assert-MultipassIsolation -InstanceNames @($name)
-Write-StageMarker -Name $bootstrapBoundary.isolationVerifiedStageName -Transaction $activeTransaction
-$secrets=Get-OrCreateSecrets;$vaultIdentity=Get-OrCreateVaultIdentity
-$instancePresent=Test-MultipassInstance $name
-Write-StageMarker -Name $(if($instancePresent){$bootstrapBoundary.instancePresentStageName}else{$bootstrapBoundary.instanceAbsentStageName}) -Transaction $activeTransaction
-if($instancePresent){
- if($ForceReprovision){throw 'Refusing automatic destruction of an existing backup vault.'}
-  New-DevFleetSnapshotSafe -InstanceName $name -SnapshotName "pre-refresh-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"|Out-Null
-  Invoke-External $mp @('start',$name) -IgnoreExitCode
-  Write-StageMarker -Name $bootstrapBoundary.instanceStartedStageName -Transaction $activeTransaction
- Wait-MultipassReady $name 1200
- Write-Host "$name already exists; refreshing safe configuration." -ForegroundColor Yellow
-}else{
- $cloud=Join-Path (Get-DevFleetStateRoot) "tmp\cloud-$name.yaml"
- $dependencyPolicy=Get-Content -LiteralPath (Join-Path $package 'linux/dependency-policy.json') -Raw|ConvertFrom-Json
- $tailscaleFingerprint=[string]$dependencyPolicy.tailscale.signingKeySha256Fingerprint
- if($tailscaleFingerprint-notmatch'^[A-F0-9]{40}$'){throw 'Canonical Tailscale signing-key fingerprint is invalid.'}
- (Get-Content (Join-Path $package 'cloud-init\vault.yaml') -Raw).Replace('__NODE_NAME__',(ConvertTo-YamlSingleQuotedScalar $name)).Replace('__TAILSCALE_SIGNING_FINGERPRINT__',$tailscaleFingerprint)|Set-Content $cloud -Encoding utf8
-  # PowerShell `if` is a statement, not an expression; resolve the owning
-  # stage deadline before passing it to the fresh-launch recovery helper.
-  $launchDeadline=[datetime]::MinValue
-  if($deadlineContext){$launchDeadline=([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime()}
-  Invoke-MultipassLaunchWithReadinessRecovery -InstanceName $name -LaunchArguments @('launch',[string]$v.UbuntuImage,'--name',$name,'--cpus',[string]$v.Cpus,'--memory',[string]$v.Memory,'--disk',[string]$v.Disk,'--cloud-init',$cloud) -ReadinessTimeoutSeconds 1200 -DeadlineUtc $launchDeadline -OnInstanceEstablished { param($launch) Write-StageMarker -Name $bootstrapBoundary.instanceLaunchedStageName -Transaction $activeTransaction }
-}
-Write-StageMarker -Name $bootstrapBoundary.instanceReadyStageName -Transaction $activeTransaction
-if($instancePresent){
- $client=Invoke-External $mp @('exec',$name,'--','sh','-c','if command -v tailscale >/dev/null 2>&1; then printf PRESENT; else printf ABSENT; fi') -Capture -TimeoutSeconds 20
- if($client-cne'PRESENT'){throw 'The existing Vault is missing its Tailscale client. Restore the client from the verified signed repository before running Repair; the existing Vault and backups have been preserved.'}
-}
-# Vault bootstrap and client configuration require an authenticated tailnet.
-# Fresh cloud-init installs the verified client; pair before transferring secrets
-# or starting bootstrap stages that depend on tailscale0 and its private IP.
-& (Join-Path $PSScriptRoot '04-Connect-Tailscale.ps1') -InstanceName $name
-$tmp=Join-Path (Get-DevFleetStateRoot) 'tmp\vault-payload';Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue;New-Item -ItemType Directory $tmp -Force|Out-Null
-Copy-Item (Join-Path $package 'linux') $tmp -Recurse
-$vaultSecrets=[ordered]@{VaultPort=$config.Network.VaultPort;RestUser=$secrets.VaultRestUser;RestPassword=$secrets.VaultRestPassword;ResticPassword=$secrets.ResticPassword;ClusterName=$config.ClusterName;DeploymentId=$vaultIdentity.deployment_id;NodeId=$vaultIdentity.node_id;NodeName=$vaultIdentity.node_name}|ConvertTo-Json -Compress
-$zip=Join-Path (Get-DevFleetStateRoot) 'tmp\vault-payload.zip';Remove-Item $zip -Force -ErrorAction SilentlyContinue;Compress-Archive -Path (Join-Path $tmp '*') -DestinationPath $zip
-$payloadDeadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetOperationMaximumSeconds 'payloadTransfer'))
-$payloadContext=Get-DevFleetDeadlineContext
-if($payloadContext -and ([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime() -lt $payloadDeadline){$payloadDeadline=([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime()}
-try {
- Invoke-External $mp @('transfer',$zip,"${name}:/tmp/devfleet-vault-payload.zip") -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
- Write-StageMarker -Name $bootstrapBoundary.payloadTransferredStageName -Transaction $activeTransaction
- Invoke-External $mp @('exec',$name,'--','bash','-lc',$bootstrapBoundary.extractionCommand) -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
- Write-StageMarker -Name $bootstrapBoundary.payloadExtractedStageName -Transaction $activeTransaction
- $bootstrapDeadline=[datetime]::UtcNow.AddSeconds($bootstrapBoundary.bootstrapMaxSeconds)
- $bootstrapContext=Get-DevFleetDeadlineContext
- if($bootstrapContext -and ([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime() -lt $bootstrapDeadline){$bootstrapDeadline=([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime()}
- Invoke-MultipassWithStandardInput -FilePath $mp -InstanceName $name -CommandArgumentList @('bash','-lc',$bootstrapBoundary.bootstrapCommand) -TimeoutSeconds $bootstrapBoundary.bootstrapMaxSeconds -DeadlineUtc $bootstrapDeadline -StandardInputText $vaultSecrets
-} finally {
- Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
- Remove-Item $zip -Force -ErrorAction SilentlyContinue
- $vaultSecrets=$null
-}
-Write-StageMarker -Name $bootstrapBoundary.completionStageName -Transaction $activeTransaction;Write-Host "$name provisioned. Do not delete or purge this instance." -ForegroundColor Green
-
-```
+    tooling_path = root / "outputs" / "tooling-fingerprint-current.json"
+    if tooling_path.is_file():
+        tooling = _load(tooling_path)
+        if not isinstance(tooling, dict) or tooling.get("schemaVersion") != 2:
+            raise ValueError("tooling-fingerprint-current.json must use current-record schemaVersion 2")
+        if tooling.get("releaseFingerprintSchemaVersion") != 2:
+            raise ValueError("tooling-fingerprint-current.json is not bound to release fingerprint schema 2")
+        if str(tooling.get("releaseFingerprintId") or "") != expected["releaseFingerprintId"] or str(tooling.get("toolingFingerprintId") or "") != expected["toolingFingerprintId"]:
+            raise ValueError("tooling-fingerprint-current.json is stale")
+        rows = tooling.get("artifacts")
+        if not isinstance(rows, list):
+            raise ValueError("tooling-fingerprint-current.json is missing its current artifact tuple")
+        by_name = {_artifact_name(str(row.get("name") or "")): row for row in rows if isinstance(row, dict)}
+        for name, canonical in expected["artifacts"].items():
+            row = by_name.get(name)
+            if not row or str(row.get("sha256") or "").lower() != str(canonical["sha256"]).lower() or int(row.get("bytes", -1)) != int(canonical.get("bytes", -2)):
+                raise ValueError(f"tooling-fingerprint-current.json has a stale {name} artifact tuple")
+        checked.append(tooling_path)
+    return checked
 
 
-## FILE: source/windows/04-Connect-Tailscale.ps1
-
-SHA256: a8c18e358eeeeb4c00058fc893f165c2d47f90015e06abde8265bd7ae98b077b | Bytes: 1873 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$')][string]$InstanceName)
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Tailscale.psm1') -Force
-$mp=Get-MultipassExe
-$deadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetStageBudgetSeconds 'tailscale'))
-$activeTransaction = $null
-try { $activeTransaction = Get-ActiveDevFleetTransaction } catch { }
-$transactionId = if ($activeTransaction) { [string]$activeTransaction.transactionId } else { '' }
-$payloadSha256 = if ($activeTransaction) { [string]$activeTransaction.payloadSha256 } else { '' }
-$evidenceName = if ($transactionId -match '^[0-9a-fA-F]{32}$') { "setup-tailscale-pairing-$transactionId.log" } else { "setup-tailscale-pairing-pid-$PID.log" }
-$evidencePath = Join-Path (Join-Path $env:ProgramData 'M-TechLabs\DevFleet\Logs') $evidenceName
-$profile=Get-DevFleetTailscaleEnrollmentProfile
-$expectedPeer=if([string]$profile.hostName){[string]$profile.hostName}else{"$env:COMPUTERNAME-devfleet-host"}
-try {
-    $result=Invoke-DevFleetTailscaleOAuthPairing -FilePath $mp -InstanceName $InstanceName -Hostname $InstanceName -ExpectedPeer $expectedPeer -DeadlineUtc $deadline -EvidencePath $evidencePath -RunId ([string]$env:DEVFLEET_RUN_ID) -TransactionId $transactionId -PayloadSha256 $payloadSha256 -StageName 'tailscale' -TargetRole 'Guest' -PendingRebootProvider { Test-PendingReboot }
-} catch {
-    if ([string]$_.Exception.Message -match '^DEVFLEET_REBOOT_REQUIRED:') {
-        Write-Warning "Windows servicing requires a reboot during guest Tailscale stage for $InstanceName; returning 3010 before Vault completion is published."
-        exit 3010
+def _validate_record(location: str, record: dict[str, Any], expected: dict[str, Any]) -> None:
+    if record.get("historical") is True:
+        return
+    candidate_markers = {
+        "releaseFingerprintId",
+        "toolingFingerprintId",
+        "candidateFingerprint",
+        "candidateIsCurrent",
+        "sourceIdentityMatchesCandidate",
+        "artifactTupleMatchesCandidate",
+        "candidateBuildCurrent",
+        "validationEvidenceCurrent",
+        "fullReleasePassed",
+        "physicalSurrogateCertificationCurrent",
+        "internalPromotionAllowed",
+        "publicPromotionAllowed",
+        "sourceChangedSinceCandidate",
+        "rebuildRequired",
+        "productionUnchanged",
+        "production_unchanged",
+        "mulattotechsurfaceTouched",
+        "mulattotechsurface_touched",
+        "candidateVersion",
+        "releaseVersion",
+        "installerVersion",
+        "artifacts",
+        "candidate",
+        "gates",
+        "currentCandidateGates",
     }
-    throw
-}
-Write-Host "$InstanceName authenticated Tailscale IP: $($result.ipv4)" -ForegroundColor Green
+    if not candidate_markers.intersection(record):
+        return
+    for key in ("releaseFingerprintId", "candidateFingerprint"):
+        if key in record and str(record[key]) != expected["releaseFingerprintId"]:
+            raise ValueError(f"{location}.{key} is stale: {record[key]}")
+    candidate_context = ".candidate" in location or location.endswith("CURRENT-CANDIDATE.json")
+    for key in ("gitCommit", "git_commit"):
+        if key in record and str(record[key]) != (expected["candidateGitCommit"] if candidate_context else expected["repositoryHead"]):
+            raise ValueError(f"{location}.{key} is stale")
+    for key in ("candidateGitCommit", "candidate_git_commit", "candidateCommit", "candidate_commit"):
+        if key in record and str(record[key]) != expected["candidateGitCommit"]:
+            raise ValueError(f"{location}.{key} is stale")
+    if "toolingFingerprintId" in record and str(record["toolingFingerprintId"]) != expected["toolingFingerprintId"]:
+        raise ValueError(f"{location}.toolingFingerprintId is stale")
+    for key in ("repositoryHead", "repository_head"):
+        if key in record and str(record[key]) != expected["repositoryHead"]:
+            raise ValueError(f"{location}.{key} is stale")
+    for key in ("shippingInputIdentity", "shipping_input_identity"):
+        if key in record:
+            expected_shipping = expected.get("liveShippingInputIdentity", expected.get("candidateShippingInputIdentity"))
+            if str(record[key]).lower() not in {str(expected_shipping).lower(), str(expected.get("candidateShippingInputIdentity")).lower()}:
+                raise ValueError(f"{location}.{key} is stale")
+    if "candidateShippingInputIdentity" in record and str(record["candidateShippingInputIdentity"]).lower() != str(expected["candidateShippingInputIdentity"]).lower():
+        raise ValueError(f"{location}.candidateShippingInputIdentity is stale")
+    for key, expected_key in (("candidateVersion", "releaseVersion"), ("releaseVersion", "releaseVersion"), ("installerVersion", "installerVersion")):
+        if key in record and str(record[key]) != expected[expected_key]:
+            raise ValueError(f"{location}.{key} disagrees with current candidate")
+    for key, expected_key in (("candidateIsCurrent", "candidateIsCurrent"), ("sourceChangedSinceCandidate", "sourceChangedSinceCandidate"), ("rebuildRequired", "rebuildRequired")):
+        if key in record and _bool(record[key], key, location) != expected[expected_key]:
+            raise ValueError(f"{location}.{key} disagrees with current candidate")
+    for key in ("sourceIdentityMatchesCandidate", "artifactTupleMatchesCandidate", "candidateBuildCurrent", "validationEvidenceCurrent", "fullReleasePassed", "physicalSurrogateCertificationCurrent", "internalPromotionAllowed", "publicPromotionAllowed"):
+        if key in record and _bool(record[key], key, location) != expected[key]:
+            raise ValueError(f"{location}.{key} disagrees with current candidate")
+    for key in ("productionUnchanged", "production_unchanged"):
+        if key in record and _bool(record[key], key, location) != expected["productionUnchanged"]:
+            raise ValueError(f"{location}.{key} disagrees with production safety state")
+    for key in ("mulattotechsurfaceTouched", "mulattotechsurface_touched"):
+        if key in record and _bool(record[key], key, location) != expected["mulattotechsurfaceTouched"]:
+            raise ValueError(f"{location}.{key} disagrees with MulattoTechSurface safety state")
+    for container_key in ("artifacts", "candidate"):
+        container = record.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        for key, row in container.items():
+            if not isinstance(row, dict) or "sha256" not in row:
+                continue
+            name = _artifact_name(str(key))
+            if name and str(row["sha256"]).lower() != str(expected["artifacts"][name]["sha256"]).lower():
+                raise ValueError(f"{location}.{container_key}.{key}.sha256 is stale")
+    for key in ("currentCandidateGates", "gates"):
+        gates = record.get(key)
+        if not isinstance(gates, dict):
+            continue
+        for gate, value in gates.items():
+            if gate in expected["gates"] and str(value) != str(expected["gates"][gate]):
+                raise ValueError(f"{location}.{key}.{gate} disagrees with current gate status")
+
+
+def validate_root(root: Path, mode: str = "release") -> dict[str, Any]:
+    if mode not in {"diagnostic", "release"}:
+        raise ValueError("validator mode must be diagnostic or release")
+    root = root.resolve()
+    state_path = root / "finalization-state.json"
+    manifest_path = root / "outputs" / "final-artifact-hashes.json"
+    if not state_path.is_file() or not manifest_path.is_file():
+        raise ValueError("Bundle is missing finalization-state.json or outputs/final-artifact-hashes.json")
+    state = _load(state_path)
+    manifest = _load(manifest_path)
+    if not isinstance(state, dict) or not isinstance(manifest, dict):
+        raise ValueError("Canonical state and artifact manifest must be JSON objects")
+    candidate_path = root / "CURRENT-CANDIDATE.json"
+    candidate = _load(candidate_path) if candidate_path.is_file() else {}
+    if not isinstance(candidate, dict):
+        raise ValueError("CURRENT-CANDIDATE.json must be a JSON object")
+    audit_manifest = root / "AUDIT-MANIFEST.json"
+    bundle_manifest = _load(audit_manifest) if audit_manifest.is_file() else manifest
+    if not isinstance(bundle_manifest, dict):
+        raise ValueError("AUDIT-MANIFEST.json must be a JSON object")
+    failed_snapshot_path = root / Path(*FAILED_ATTEMPT_SNAPSHOT.split("/"))
+    if failed_snapshot_path.is_file() and mode == "release":
+        raise ValueError("release mode rejects failed replacement-attempt evidence")
+    if mode == "diagnostic":
+        if failed_snapshot_path.is_file():
+            failed = _validate_failed_attempt_freeze(root, state, bundle_manifest, candidate)
+            return {"status": "PASS_WITH_BLOCKER", "bundleMode": "diagnostic", "blockerCode": FAILED_ATTEMPT_BLOCKER, "releaseEligible": False, "candidateIsCurrent": False, "sourceChangedSinceCandidate": True, "rebuildRequired": True, **failed}
+        candidate_id = str(state.get("candidate_git_commit") or state.get("candidateGitCommit") or candidate.get("candidateCommit") or "").lower()
+        if candidate_id == FAILED_ATTEMPT_COMMIT:
+            raise ValueError("failed replacement-attempt snapshot is mandatory for this diagnostic candidate")
+        if candidate_id == HISTORICAL_CANDIDATE:
+            historical = _historical_provenance(root, state, bundle_manifest, candidate)
+            flags = {"candidateIsCurrent": False, "sourceChangedSinceCandidate": True, "rebuildRequired": True}
+        else:
+            # A future coherent candidate may be reviewed diagnostically while
+            # expensive proof is still pending.  It must still pass every
+            # current identity/authority check, but diagnostic output can
+            # never become a promotion decision.
+            expected = _canonical(state, manifest, root)
+            expected.update(_validate_split_identity(root, state, bundle_manifest, candidate))
+            historical = {"candidateShippingInputIdentity": expected["candidateShippingInputIdentity"], "provenanceCommit": candidate_id}
+            flags = {key: expected[key] for key in ("candidateIsCurrent", "sourceChangedSinceCandidate", "rebuildRequired")}
+        # Diagnostic validation is deliberately a terminal, non-release
+        # result.  Do not run the current-candidate authority walk here: those
+        # fields describe the invalidated candidate and are expected to be
+        # stale relative to the live worktree.  The historical verifier above
+        # has independently checked every identity it is allowed to accept.
+        return {"status": "PASS_WITH_BLOCKER", "bundleMode": "diagnostic", "blockerCode": "HISTORICAL_CANDIDATE_REBUILD_REQUIRED" if candidate_id == HISTORICAL_CANDIDATE else "DIAGNOSTIC_PROOF_PENDING", "releaseEligible": False, **flags, **historical}
+    if str(candidate.get("historicalProvenance", {}).get("candidateCommit") if isinstance(candidate.get("historicalProvenance"), dict) else "").lower() == HISTORICAL_CANDIDATE:
+        raise ValueError("release mode rejects historical 2739/f334 diagnostic provenance")
+    expected = _canonical(state, manifest, root)
+    expected.update(_validate_split_identity(root, state, bundle_manifest, candidate))
+    files = [state_path, manifest_path]
+    if candidate_path.is_file():
+        files.append(candidate_path)
+    if audit_manifest.is_file():
+        files.append(audit_manifest)
+    files.extend(_validate_fingerprint_files(root, expected))
+    audit = root / "audit"
+    if audit.is_dir():
+        # The review bundle includes the audit directory's direct evidence
+        # files.  Durable per-run evidence is independently scoped and is not
+        # silently promoted into a bundle by this validator.
+        files.extend(sorted(audit.glob("*.json")))
+    for path in files:
+        value = _load(path)
+        if isinstance(value, dict) and (value.get("historical") is True or str(value.get("schema") or "").startswith("devfleet.pre-")):
+            continue
+        for location, record in _walk(value, path.relative_to(root).as_posix()):
+            _validate_record(location, record, expected)
+    return {"status": "PASS", "filesChecked": len(files), "currentReleaseFingerprintId": expected["releaseFingerprintId"], "currentToolingFingerprintId": expected["toolingFingerprintId"]}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--mode", choices=("diagnostic", "release"), default="release")
+    args = parser.parse_args()
+    try:
+        result = validate_root(args.root, args.mode)
+    except ValueError as exc:
+        print(f"AUDIT COHERENCE FAIL: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 
 ```
 
 
-## FILE: source/windows/04a-Connect-WindowsTailscale.ps1
+## FILE: source/tools/verify_package.py
 
-SHA256: 361255d8773a9de440bac3007db55635a7940e49409d77f9245651df44c3585b | Bytes: 1720 | Git mode: 100644
+SHA256: 24d74c58ed2d13099032cbc4a2ef46a03c819da82b7505762ff2068ed8a1ea9b | Bytes: 21852 | Git mode: 100644
 
 ```
-[CmdletBinding()]
-param()
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Tailscale.psm1') -Force
-Assert-Administrator
-$service=Get-Service -Name Tailscale -ErrorAction SilentlyContinue
-$ts=Get-TailscaleExe
-$deadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetStageBudgetSeconds 'windowsTailscale'))
-$activeTransaction = $null
-try { $activeTransaction = Get-ActiveDevFleetTransaction } catch { }
-$transactionId = if ($activeTransaction) { [string]$activeTransaction.transactionId } else { '' }
-$payloadSha256 = if ($activeTransaction) { [string]$activeTransaction.payloadSha256 } else { '' }
-$evidenceName = if ($transactionId -match '^[0-9a-fA-F]{32}$') { "setup-tailscale-pairing-$transactionId.log" } else { "setup-tailscale-pairing-pid-$PID.log" }
-$evidencePath = Join-Path (Join-Path $env:ProgramData 'M-TechLabs\DevFleet\Logs') $evidenceName
-$hostname = ("{0}-devfleet-host" -f $env:COMPUTERNAME.ToLower())
-try {
-    $result=Invoke-DevFleetTailscaleOAuthPairing -FilePath $ts -Hostname $hostname -DeadlineUtc $deadline -EvidencePath $evidencePath -RunId ([string]$env:DEVFLEET_RUN_ID) -TransactionId $transactionId -PayloadSha256 $payloadSha256 -StageName 'windows-tailscale' -TargetRole 'Host' -PendingRebootProvider { Test-PendingReboot }
-} catch {
-    if ([string]$_.Exception.Message -match '^DEVFLEET_REBOOT_REQUIRED:') {
-        Write-Warning 'Windows servicing requires a reboot during the Tailscale stage; returning 3010 before the stage marker is written.'
-        exit 3010
+#!/usr/bin/env python3
+"""Offline, read-only verification for a DevFleet package or release archive."""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import py_compile
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tarfile
+import tempfile
+import threading
+import time
+import zipfile
+from pathlib import Path, PurePosixPath
+
+import jinja2
+import yaml
+from hook_modes import executable_template_hook_closure, executable_template_hooks, hook_mode_manifest
+
+ROOT = Path(__file__).resolve().parents[1]
+PACKAGE_VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+TRANSIENT_DIRS = {".git", ".pytest_cache", ".test-runtime", "__pycache__", "runtime-migrations"}
+
+
+def is_transient_part(part: str) -> bool:
+    return part in TRANSIENT_DIRS or part.startswith(".venv")
+CHECKSUM_MANIFEST = "CHECKSUMS.sha256"
+REQUIRED = [
+    "VERSION", "README-FIRST.md", "Upgrade-DevFleet.ps1",
+    "DevFleet-v1.1.0-MIGRATION.md", "DevFleet-v1.1.0-VALIDATION.md",
+    "DevFleet-v1.1.0-FILE-CHANGES.md", "BASELINE-v1.0.0-FILES.txt",
+    "config/devfleet.config.json", "config/ollama-profiles.json",
+    "client/Configure-SSH.ps1", "client/Configure-DockerContext.ps1",
+    "client/Configure-VSCode.ps1", "windows/Migrate-Config.ps1",
+    "windows/Configure-Ollama.ps1", "windows/Set-DevFleetDockerMode.ps1",
+    "windows/Test-Ollama.ps1", "linux/bootstrap-compute.sh",
+    "linux/devfleet-switch-docker-mode", "app/devfleet/main.py",
+    "app/devfleet/analyzer.py", "docs/08-DEVELOPMENT-PROFILES.md",
+    "docs/09-LANGUAGE-SELECTION.md", "docs/10-OLLAMA-AND-GPU.md",
+    "docs/11-REMOTE-VSCODE.md", "docs/12-UPGRADING-FROM-1.0.0.md",
+    "docs/13-PERFORMANCE-TUNING.md",
+]
+CORE = {"generic", "python", "python-fastapi", "node", "typescript-node",
+        "typescript-next", "go-service", "dotnet-service", "java-spring", "rust-service"}
+
+
+DEFAULT_EXTERNAL_TIMEOUT_SECONDS = 120
+DEFAULT_EXTERNAL_OUTPUT_LIMIT = 2 * 1024 * 1024
+
+
+def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
+    """Terminate one external hook and descendants without relying on shell quoting."""
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    else:
+        try:
+            import signal
+
+            os.killpg(process.pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+    try:
+        process.kill()
+    except OSError:
+        pass
+
+
+def run_bounded(
+    args: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    timeout: float = DEFAULT_EXTERNAL_TIMEOUT_SECONDS,
+    output_limit: int = DEFAULT_EXTERNAL_OUTPUT_LIMIT,
+    label: str = "external hook",
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    """Run a package hook with a deadline, process-tree kill, and bounded output."""
+    if output_limit <= 0 or timeout <= 0:
+        raise ValueError("run_bounded limits must be positive")
+    creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+    process = subprocess.Popen(
+        args,
+        cwd=cwd,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=os.name != "nt",
+        creationflags=creationflags,
+    )
+    captured: dict[str, bytearray] = {"stdout": bytearray(), "stderr": bytearray()}
+    overflow = threading.Event()
+
+    def drain(name: str, stream: object) -> None:
+        assert hasattr(stream, "read")
+        reader = stream  # type: ignore[assignment]
+        while True:
+            chunk = reader.read(65536)
+            if not chunk:
+                return
+            remaining = output_limit - len(captured[name])
+            if len(chunk) > remaining:
+                if remaining > 0:
+                    captured[name].extend(chunk[:remaining])
+                overflow.set()
+                return
+            captured[name].extend(chunk)
+
+    threads = [
+        threading.Thread(target=drain, args=(name, stream), daemon=True)
+        for name, stream in (("stdout", process.stdout), ("stderr", process.stderr))
+    ]
+    for thread in threads:
+        thread.start()
+    deadline = time.monotonic() + timeout
+    timed_out = False
+    while process.poll() is None:
+        if overflow.is_set():
+            _terminate_process_tree(process)
+            break
+        if time.monotonic() >= deadline:
+            timed_out = True
+            _terminate_process_tree(process)
+            break
+        time.sleep(0.02)
+    if timed_out:
+        reason = f"{label} exceeded {timeout:g}s timeout"
+    elif overflow.is_set():
+        reason = f"{label} exceeded {output_limit} byte output limit"
+    else:
+        reason = ""
+    if reason:
+        process.wait(timeout=10)
+    for thread in threads:
+        thread.join(timeout=10)
+    result = subprocess.CompletedProcess(
+        args,
+        process.returncode,
+        captured["stdout"].decode(errors="replace"),
+        captured["stderr"].decode(errors="replace"),
+    )
+    if reason:
+        raise RuntimeError(f"{reason}; stdout/stderr excerpt: {result.stdout[-1000:]} {result.stderr[-1000:]}")
+    if check and result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, args, result.stdout, result.stderr)
+    return result
+
+
+def is_transient(path: Path, root: Path = ROOT) -> bool:
+    """Return whether a path belongs to generated/test state excluded from a package."""
+    return any(is_transient_part(part) for part in path.relative_to(root).parts)
+
+
+def package_files(root: Path = ROOT) -> set[str]:
+    return {
+        p.relative_to(root).as_posix()
+        for p in root.rglob("*")
+        if p.is_file() and not is_transient(p, root)
     }
-    throw
-}
-Write-Host "Windows host $env:COMPUTERNAME authenticated Tailscale IP: $($result.ipv4)" -ForegroundColor Green
-
-```
 
 
-## FILE: source/windows/05-Configure-LocalVaultClient.ps1
-
-SHA256: 9687c9be4a3bf40a2e1481cd402c7d4118aaa0c4533e9037244b7bb3a25e0c62 | Bytes: 1235 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([Parameter(Mandatory)][string]$InstanceName)
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-$config=Get-DevFleetConfig;$secrets=Get-OrCreateSecrets;$mp=Get-MultipassExe
-$vaultIp=Get-InstanceIPv4 $config.Vault.InstanceName -PreferTailscale
-$pairingMode=if($vaultIp -match '^100\.'){'tailscale'}else{throw 'Authenticated Vault transport requires a Tailscale address; plaintext LAN fallback is disabled.'}
-$obj=[ordered]@{Repository="rest:http://${vaultIp}:$($config.Network.VaultPort)/$($secrets.VaultRestUser)/$($config.ClusterName)";RestUser=$secrets.VaultRestUser;RestPassword=$secrets.VaultRestPassword;ResticPassword=$secrets.ResticPassword;VaultIp=$vaultIp;VaultPort=$config.Network.VaultPort;PairingMode=$pairingMode}
-$tmp=Join-Path (Get-DevFleetStateRoot) 'secrets\vault-client.json';$obj|ConvertTo-Json|Set-Content $tmp -Encoding utf8
-Protect-DevFleetStateAcl
-Invoke-External $mp @('transfer',$tmp,"${InstanceName}:/tmp/vault-client.json")
-Invoke-External $mp @('exec',$InstanceName,'--','sudo','/usr/local/sbin/devfleet-configure-backup','/tmp/vault-client.json')
-Write-Host "Append-only backups configured for $InstanceName." -ForegroundColor Green
-
-```
+def require_files(root: Path = ROOT) -> None:
+    for rel in REQUIRED:
+        assert (root / rel).is_file(), f"missing {rel}"
 
 
-## FILE: source/windows/06-Import-Laptop-Bootstrap.ps1
-
-SHA256: e38b19b780ca0a6ef94aba9a71a225d4a6cc28d5c3fe6c80333f7fa0d00c8452 | Bytes: 2442 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([Parameter(Mandatory)][ValidateScript({Test-Path $_})][string]$BundlePath)
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-$config=Get-DevFleetConfig;$mp=Get-MultipassExe;$dest=Join-Path (Get-DevFleetStateRoot) 'tmp\import-laptop';$peerFile=$null;Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue
-Expand-EncryptedBundle -BundlePath $BundlePath -Destination $dest
-try {
-$vault=Get-Content (Join-Path $dest 'vault-client.json') -Raw|ConvertFrom-Json
-$tmp=Join-Path (Get-DevFleetStateRoot) 'secrets\vault-client.json';$vault|ConvertTo-Json|Set-Content $tmp -Encoding utf8
-Protect-DevFleetStateAcl
-$name=$config.Primary.InstanceName
-Invoke-External $mp @('transfer',$tmp,"${name}:/tmp/vault-client.json")
-Invoke-External $mp @('exec',$name,'--','sudo','/usr/local/sbin/devfleet-configure-backup','/tmp/vault-client.json')
-$peer=Get-Content (Join-Path $dest 'failover-pairing.json') -Raw|ConvertFrom-Json
-$surrogate=Get-Content (Join-Path $dest 'surrogate-node.json') -Raw|ConvertFrom-Json
-$primaryIdentity=Get-OrCreateNodeIdentity -Role Desktop
-if($surrogate.node_role -ne 'surrogate' -or -not $surrogate.node_id -or -not $primaryIdentity.deployment_id){throw 'Surrogate or Primary registration metadata is incomplete.'}
-$surrogate.deployment_id=$primaryIdentity.deployment_id;$surrogate.coordinator_node_id=$primaryIdentity.node_id;$surrogate.protocol_version=$primaryIdentity.protocol_version
-$peerFile=Join-Path (Get-DevFleetStateRoot) 'tmp\peer.json';$peer|ConvertTo-Json|Set-Content $peerFile -Encoding utf8
-Invoke-External $mp @('transfer',$peerFile,"${name}:/tmp/peer.json")
-Invoke-External $mp @('exec',$name,'--','sudo','/usr/local/sbin/devfleet-set-peer','/tmp/peer.json')
-$nodeFile=Join-Path (Get-DevFleetStateRoot) 'tmp\surrogate-node.json';$surrogate|ConvertTo-Json|Set-Content $nodeFile -Encoding utf8
-Invoke-External $mp @('transfer',$nodeFile,"${name}:/tmp/surrogate-node.json")
-Invoke-External $mp @('exec',$name,'--','sudo','/usr/local/sbin/devfleet-register-node','/tmp/surrogate-node.json')
-Add-LocalSshKeyToInstance -InstanceName $name -PublicKeyPath (Join-Path $dest 'laptop-client.pub')
-Write-Host 'Vault and failover peer imported into the primary node.' -ForegroundColor Green
-} finally {
- Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue
- if($peerFile){Remove-Item $peerFile -Force -ErrorAction SilentlyContinue}
-}
-
-```
+def parse_data(root: Path = ROOT) -> None:
+    for rel in package_files(root):
+        p = root / rel
+        if p.suffix == ".json":
+            json.loads(p.read_text(encoding="utf-8"))
+    vscode = root / "client/vscode-settings.jsonc"
+    json.loads(re.sub(r"(?m)^\s*//.*$", "", vscode.read_text(encoding="utf-8")))
+    for p in list((root / "cloud-init").glob("*.yaml")) + list((root / "templates").glob("*/compose.yaml")):
+        assert isinstance(yaml.safe_load(p.read_text(encoding="utf-8")), dict), f"YAML root is not mapping: {p}"
 
 
-## FILE: source/windows/08-Install-Shortcuts.ps1
-
-SHA256: e8295df36470ee12ca2ea696195bbee0e64333ddce1c45f80aae3a2f37844a5f | Bytes: 2685 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([Parameter(Mandatory)][string]$LocalInstanceName)
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-$pkg=Get-PackageRootFromState;$pwsh=Get-DevFleetPowerShell
-$launcher=Join-Path $pkg 'windows\Start-DevFleet.ps1'
-New-DesktopShortcut -Name 'DevFleet - Open Dashboard' -Target $pwsh -Arguments "-NoProfile -ExecutionPolicy Bypass -File `"$launcher`" -InstanceName `"$LocalInstanceName`" -Mode Dashboard" -WorkingDirectory $pkg
-New-DesktopShortcut -Name 'DevFleet - Open VS Code' -Target $pwsh -Arguments "-NoProfile -ExecutionPolicy Bypass -File `"$launcher`" -InstanceName `"$LocalInstanceName`" -Mode VSCode" -WorkingDirectory $pkg -IconLocation 'shell32.dll,220'
-New-DesktopShortcut -Name 'DevFleet - Health Check' -Target $pwsh -Arguments "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $pkg 'windows\Test-DevFleet.ps1')`" -AllLocalInstances" -WorkingDirectory $pkg -IconLocation 'shell32.dll,167'
-New-DesktopShortcut -Name 'DevFleet - Repair Safely' -Target $pwsh -Arguments "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $pkg 'windows\Repair-DevFleet.ps1')`" -InstanceName `"$LocalInstanceName`"" -WorkingDirectory $pkg -IconLocation 'shell32.dll,316'
-New-DesktopShortcut -Name 'DevFleet - Update Safely' -Target $pwsh -Arguments "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $pkg 'windows\Update-DevFleet.ps1')`" -InstanceName `"$LocalInstanceName`"" -WorkingDirectory $pkg -IconLocation 'shell32.dll,238'
-
-New-DesktopShortcut -Name 'DevFleet - Show Credentials' -Target $pwsh -Arguments "-NoExit -NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $pkg 'windows\Show-DevFleet-Credentials.ps1')`"" -WorkingDirectory $pkg -IconLocation 'shell32.dll,48'
-New-DesktopShortcut -Name 'DevFleet - Stop Compute Safely' -Target $pwsh -Arguments "-NoExit -NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $pkg 'windows\Stop-DevFleet.ps1')`" -InstanceName `"$LocalInstanceName`"" -WorkingDirectory $pkg -IconLocation 'shell32.dll,28'
-
-$config=Get-DevFleetConfig
-if(Test-MultipassInstance $config.Vault.InstanceName){
-  New-DesktopShortcut -Name 'DevFleet - Export Offline Vault Copy' -Target $pwsh -Arguments "-NoExit -NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $pkg 'windows\Export-Vault-OfflineCopy.ps1')`"" -WorkingDirectory $pkg -IconLocation 'shell32.dll,167'
-  New-DesktopShortcut -Name 'DevFleet - Update Vault Safely' -Target $pwsh -Arguments "-NoExit -NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $pkg 'windows\Update-Vault.ps1')`"" -WorkingDirectory $pkg -IconLocation 'shell32.dll,238'
-}
-Write-Host 'Desktop shortcuts created.' -ForegroundColor Green
-
-```
+def compile_python_jinja(root: Path = ROOT) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        cache = Path(td)
+        for rel in package_files(root):
+            p = root / rel
+            if p.suffix == ".py":
+                py_compile.compile(str(p), cfile=str(cache / (hashlib.sha256(rel.encode()).hexdigest() + ".pyc")), doraise=True)
+    jinja2.Environment().parse((root / "app/templates/index.html").read_text(encoding="utf-8"))
 
 
-## FILE: source/windows/09-Export-Laptop-Bootstrap.ps1
-
-SHA256: 806d2edbce838681979ac40678aeb452e2f6e0be87b2baafc307adb3813073c4 | Bytes: 2000 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param()
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-$config=Get-DevFleetConfig;$secrets=Get-OrCreateSecrets;$mp=Get-MultipassExe;$identity=Get-OrCreateNodeIdentity -Role Laptop
-$vaultIp=Get-InstanceIPv4 $config.Vault.InstanceName -PreferTailscale
-$failIp=Get-InstanceIPv4 $config.Failover.InstanceName -PreferTailscale
-if($vaultIp -notmatch '^100\.' -or $failIp -notmatch '^100\.' ){throw 'Vault/failover export requires authenticated Tailscale addresses.'}
-$dir=Join-Path (Get-DevFleetStateRoot) 'tmp\export-laptop';Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue;New-Item -ItemType Directory $dir -Force|Out-Null
-[ordered]@{Repository="rest:http://${vaultIp}:$($config.Network.VaultPort)/$($secrets.VaultRestUser)/$($config.ClusterName)";RestUser=$secrets.VaultRestUser;RestPassword=$secrets.VaultRestPassword;ResticPassword=$secrets.ResticPassword;VaultIp=$vaultIp;VaultPort=$config.Network.VaultPort}|ConvertTo-Json|Set-Content (Join-Path $dir 'vault-client.json') -Encoding utf8
-[ordered]@{Name=$config.Failover.InstanceName;Url="http://${failIp}:$($config.Network.PortalPort)";Token=$secrets.NodeApiToken}|ConvertTo-Json|Set-Content (Join-Path $dir 'failover-pairing.json') -Encoding utf8
-[ordered]@{deployment_id=$identity.deployment_id;node_id=$identity.node_id;node_name=$identity.node_name;node_role=$identity.node_role;coordinator_node_id=$identity.coordinator_node_id;protocol_version=$identity.protocol_version}|ConvertTo-Json|Set-Content (Join-Path $dir 'surrogate-node.json') -Encoding utf8
-Copy-Item "$(Get-OrCreateDevFleetSshKey).pub" (Join-Path $dir 'laptop-client.pub')
-$out=Join-Path (Get-DevFleetStateRoot) "exports\devfleet-laptop-bootstrap-$((Get-Date).ToString('yyyyMMdd-HHmmss')).dfe"
-try{New-EncryptedBundle -SourceDirectory $dir -OutputPath $out}finally{Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue}
-Write-Host "Laptop bootstrap bundle: $out" -ForegroundColor Green
-
-```
+def bash_available() -> bool:
+    try:
+        return shutil.which("bash") is not None and run_bounded(["bash", "-c", "exit 0"], timeout=5, label="bash probe", check=False).returncode == 0
+    except (OSError, RuntimeError):
+        return False
 
 
-## FILE: source/windows/10-Export-Desktop-Pairing.ps1
-
-SHA256: a20531c8ca0e0e2a85a720a0089b97fc769410b2246a93443014074e17ea45ee | Bytes: 1877 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([switch]$NonInteractive,[Security.SecureString]$BundlePassphrase)
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-if($NonInteractive -and $null -eq $BundlePassphrase){Write-Warning 'Desktop pairing export was deferred because this installation chain is noninteractive. Run the supported Maintenance pairing workflow to create the encrypted bundle.';return}
-$config=Get-DevFleetConfig;$secrets=Get-OrCreateSecrets;$identity=Get-OrCreateNodeIdentity -Role Desktop
-if(-not $identity.deployment_id -or $identity.node_role -ne 'primary'){throw 'Primary deployment identity is missing or not a Primary.'}
-$ip=Get-InstanceIPv4 $config.Primary.InstanceName -PreferTailscale
-if(-not $ip){throw 'Primary Tailscale address is unavailable.'}
-$dir=Join-Path (Get-DevFleetStateRoot) 'tmp\export-desktop';Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue;New-Item -ItemType Directory $dir -Force|Out-Null
-[ordered]@{Name=$config.Primary.InstanceName;Url="http://${ip}:$($config.Network.PortalPort)";Token=$secrets.NodeApiToken}|ConvertTo-Json|Set-Content (Join-Path $dir 'primary-pairing.json') -Encoding utf8
-[ordered]@{deployment_id=$identity.deployment_id;node_id=$identity.node_id;node_name=$identity.node_name;node_role=$identity.node_role;protocol_version=$identity.protocol_version}|ConvertTo-Json|Set-Content (Join-Path $dir 'primary-node.json') -Encoding utf8
-Copy-Item "$(Get-OrCreateDevFleetSshKey).pub" (Join-Path $dir 'desktop-client.pub')
-$out=Join-Path (Get-DevFleetStateRoot) "exports\devfleet-desktop-pairing-$((Get-Date).ToString('yyyyMMdd-HHmmss')).dfe"
-try{New-EncryptedBundle -SourceDirectory $dir -OutputPath $out -Passphrase $BundlePassphrase}finally{Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue}
-Write-Host "Desktop pairing bundle: $out" -ForegroundColor Green
-
-```
+def bash_syntax(root: Path = ROOT) -> None:
+    if not bash_available():
+        return
+    for rel in package_files(root):
+        p = root / rel
+        if p.suffix == ".sh" or (p.parts and p.parts[-1] == "devfleet-switch-docker-mode"):
+            run_bounded(["bash", "-n", str(p)], label=f"bash syntax check {p}")
 
 
-## FILE: source/windows/Complete-Cluster.ps1
+def linux_executable_hooks(root: Path = ROOT) -> None:
+    """Require every command-referenced template hook to be exactly 0755."""
+    hooks = executable_template_hooks(root)
+    assert hooks, "no executable template hooks were derived from metadata"
+    for rel in sorted(hooks):
+        p = root / rel
+        assert p.is_file(), f"trusted hook is not a regular file: {p}"
+        if os.name != "nt":
+            assert p.stat().st_mode & 0o777 == 0o755, f"template hook mode is not 0755: {p}"
+        first = p.read_text(encoding="utf-8").splitlines()[0] if p.stat().st_size else ""
+        assert first == "#!/usr/bin/env bash", f"trusted hook has invalid shebang: {p}"
 
-SHA256: 0168e428da1749b5ece2d61eb2df324fab835424e3d1de4af9576aea6e4baf74 | Bytes: 4180 | Git mode: 100644
 
-```
-[CmdletBinding()]
-param([Parameter(Mandatory)][ValidateScript({Test-Path $_})][string]$DesktopPairingBundlePath,[Security.SecureString]$BundlePassphrase)
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-$config=Get-DevFleetConfig;$mp=Get-MultipassExe;$dest=Join-Path (Get-DevFleetStateRoot) 'tmp\import-desktop';$tmp=$null;Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue
-try {
-Expand-EncryptedBundle -BundlePath $DesktopPairingBundlePath -Destination $dest -Passphrase $BundlePassphrase
-$peer=Get-Content (Join-Path $dest 'primary-pairing.json') -Raw|ConvertFrom-Json
-$primaryNode=Get-Content (Join-Path $dest 'primary-node.json') -Raw|ConvertFrom-Json
-if($primaryNode.node_role -ne 'primary' -or -not $primaryNode.deployment_id -or -not $primaryNode.node_id){throw 'Primary invitation metadata is incomplete.'}
-$tmp=Join-Path (Get-DevFleetStateRoot) 'tmp\primary-peer.json';$peer|ConvertTo-Json|Set-Content $tmp -Encoding utf8
-$name=$config.Failover.InstanceName
-Invoke-External $mp @('transfer',$tmp,"${name}:/tmp/peer.json")
-Invoke-External $mp @('exec',$name,'--','sudo','/usr/local/sbin/devfleet-set-peer','/tmp/peer.json')
+def powershell_lexical(root: Path = ROOT) -> None:
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    for rel in package_files(root):
+        p = root / rel
+        if p.suffix not in {".ps1", ".psm1"}:
+            continue
+        t = p.read_text(encoding="utf-8-sig")
+        stack: list[str] = []
+        quote = here = None
+        i = 0
+        line = True
+        while i < len(t):
+            if here:
+                end = "'@" if here == "'" else '"@'
+                if line and t.startswith(end, i):
+                    here = None; i += 2; line = False; continue
+                line = t[i] == "\n"; i += 1; continue
+            c = t[i]
+            if quote:
+                if c == "`": i += 2; continue
+                if c == quote:
+                    if quote == "'" and i + 1 < len(t) and t[i + 1] == "'": i += 2; continue
+                    quote = None
+                line = c == "\n"; i += 1; continue
+            if line and t.startswith("@'", i): here = "'"; i += 2; line = False; continue
+            if line and t.startswith('@"', i): here = '"'; i += 2; line = False; continue
+            if c == "#":
+                while i < len(t) and t[i] != "\n": i += 1
+                line = True; continue
+            if c in "'\"": quote = c
+            elif c in pairs: stack.append(c)
+            elif c in pairs.values(): assert stack and pairs[stack.pop()] == c, f"unbalanced {c} in {p}"
+            line = c == "\n"; i += 1
+        assert not stack and quote is None and here is None, f"unbalanced PowerShell structure: {p}"
+
+
+def template_smoke(root: Path = ROOT) -> None:
+    if not bash_available():
+        return
+    for source in (root / "templates").glob("*"):
+        if not source.is_dir() or is_transient(source, root):
+            continue
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "demo"; shutil.copytree(source, dest)
+            for p in dest.rglob("*"):
+                if p.is_file() and not p.is_symlink():
+                    try:
+                        p.write_text(p.read_text().replace("__PROJECT_SLUG__", "demo-project").replace("__PROJECT_NAME__", "Demo Project").replace("__PROJECT_PROFILE__", "balanced").replace("__PROJECT_LANGUAGE__", "test").replace("__PROJECT_FRAMEWORK__", "test").replace("__OLLAMA_BASE_URL__", "http://127.0.0.1:11434/v1").replace("__OLLAMA_MODEL__", "test-model"))
+                    except UnicodeDecodeError:
+                        pass
+            meta = json.loads((dest / ".devfleet/template.json").read_text())
+            smoke = ".devfleet/smoke-test.sh"
+            if (dest / smoke).is_file():
+                run_bounded(["bash", str(dest / smoke)], cwd=dest, label=f"template smoke {source.name}")
+            if source.name in CORE:
+                for key in ("bootstrap_command", "format_command", "lint_command", "test_command", "health_command"):
+                    assert meta.get(key), f"{source.name} missing {key}"
+
+
+def codexpro_guard_tests(root: Path = ROOT) -> None:
+    """Exercise the production /workspaces guard without running CodexPro."""
+    if not bash_available():
+        print("CodexPro guard tests skipped: POSIX bash is unavailable.")
+        return
+    hook = root / "templates/generic/.devfleet/codexpro-bootstrap.sh"
+    with tempfile.TemporaryDirectory() as outside:
+        refused = run_bounded(["bash", str(hook)], cwd=Path(outside), label="CodexPro guard refusal", check=False)
+        assert refused.returncode == 2, "CodexPro hook must refuse a non-/workspaces project root"
+        assert "must be under /workspaces" in refused.stderr
+    workspaces = Path("/workspaces")
+    try:
+        workspaces.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=workspaces) as valid:
+            accepted = run_bounded(["bash", str(hook)], cwd=Path(valid), label="CodexPro guard success", check=False)
+            assert accepted.returncode == 0, accepted.stderr
+    except (OSError, PermissionError):
+        print("CodexPro success-path test skipped: /workspaces is unavailable.")
+
+
+def fastapi_smoke(root: Path = ROOT) -> None:
+    try:
+        import fastapi  # noqa: F401
+    except ModuleNotFoundError as exc:
+        print(f"FastAPI smoke skipped: verification environment does not provide runtime dependency {exc.name}.")
+        return
+    except SystemError as exc:
+        if "pydantic-core version" in str(exc):
+            print("FastAPI smoke skipped: local Python dependency set has an existing pydantic/pydantic-core mismatch.")
+            return
+        raise
+    with tempfile.TemporaryDirectory() as td:
+        b = Path(td); [(b / d).mkdir() for d in ("workspaces", "quarantine", "runtime", "cache")]
+        cfg = {"node_name": "verify", "node_role": "primary", "friendly_name": "CodexDevVM", "portal_port": 8787, "workspaces": str(b / "workspaces"), "quarantine": str(b / "quarantine"), "peer_file": str(b / "peer.json"), "runtime_root": str(b / "runtime"), "cache_root": str(b / "cache"), "development_profile": "balanced", "docker_mode": "rootless", "ollama_base_url": "", "ollama_model": "", "ollama_profile": "stable-interactive", "require_tailscale": False, "public_binding_allowed": True}
+        (b / "config.json").write_text(json.dumps(cfg)); (b / "peer.json").write_text("{}")
+        env = os.environ.copy(); env.update({"PYTHONPATH": str(root / "app"), "DEVFLEET_CONFIG_PATH": str(b / "config.json"), "DEVFLEET_STATIC_DIR": str(root / "app/static"), "DEVFLEET_TEMPLATE_DIR": str(root / "app/templates"), "DEVFLEET_ADMIN_USER": "x", "DEVFLEET_ADMIN_PASSWORD": "y", "DEVFLEET_API_TOKEN": "z"})
+        code = 'from fastapi.testclient import TestClient;from devfleet.main import app;r=TestClient(app).get("/healthz");assert r.status_code==200 and r.json()["agent_version"]=="' + PACKAGE_VERSION + '"'
+        run_bounded([sys.executable, "-c", code], env=env, label="FastAPI smoke")
+
+
+def verify_checksums(root: Path = ROOT) -> None:
+    p = root / CHECKSUM_MANIFEST
+    assert p.is_file(), "missing checksum manifest"
+    entries: dict[str, str] = {}
+    for line in p.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("  ", 1)
+        assert len(parts) == 2 and re.fullmatch(r"[0-9a-fA-F]{64}", parts[0]), f"malformed checksum line: {line}"
+        expected, rel = parts; rel = rel.replace("\\", "/")
+        assert rel != CHECKSUM_MANIFEST and not is_transient(root / rel, root), f"invalid checksum target: {rel}"
+        assert rel not in entries, f"duplicate checksum entry: {rel}"
+        target = root / rel
+        try:
+            target.resolve().relative_to(root.resolve())
+        except ValueError:
+            raise AssertionError(f"checksum target escapes package root: {rel}")
+        assert target.is_file(), f"missing checksum target {rel}"
+        actual = hashlib.sha256(target.read_bytes()).hexdigest().lower()
+        if actual != expected.lower() and target.is_file():
+            # Windows may materialize committed LF text as CRLF. Accept only
+            # the exact LF-normalized bytes; content changes still fail.
+            raw = target.read_bytes()
+            if b"\r" in raw.replace(b"\r\n", b""):
+                normalized = None
+            else:
+                normalized = raw.replace(b"\r\n", b"\n")
+            if normalized is not None:
+                actual = hashlib.sha256(normalized).hexdigest().lower()
+        assert actual == expected.lower(), f"checksum mismatch {rel}"
+        entries[rel] = expected.lower()
+    eligible = package_files(root) - {CHECKSUM_MANIFEST}
+    assert set(entries) == eligible, f"checksum manifest coverage mismatch: missing={sorted(eligible-set(entries))[:10]} extra={sorted(set(entries)-eligible)[:10]}"
+
+
+def no_empty(root: Path = ROOT) -> None:
+    assert not [rel for rel in package_files(root) if (root / rel).stat().st_size == 0 and Path(rel).name != "__init__.py"]
+
+
+def baseline_preserved(root: Path = ROOT) -> None:
+    for rel in (root / "BASELINE-v1.0.0-FILES.txt").read_text(encoding="utf-8").splitlines():
+        if rel.strip(): assert (root / rel).exists(), f"v1 baseline path removed: {rel}"
+
+
+def _safe_member(name: str) -> str:
+    normalized = name.replace("\\", "/")
+    pure = PurePosixPath(normalized)
+    assert normalized and not pure.is_absolute() and ".." not in pure.parts, f"unsafe archive member: {name}"
+    assert not any(is_transient_part(part) for part in pure.parts), f"transient archive member: {name}"
+    return str(pure)
+
+
+def _safe_target(dest: Path, name: str) -> Path:
+    target = dest / name
+    try:
+        target.resolve().relative_to(dest.resolve())
+    except ValueError:
+        raise AssertionError(f"archive member escapes extraction root: {name}")
+    return target
+
+
+def _extract_regular_zip_member(archive: zipfile.ZipFile, info: zipfile.ZipInfo, dest: Path, name: str) -> None:
+    target = _safe_target(dest, name)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    mode = (info.external_attr >> 16) & 0o170000
+    assert mode not in (stat.S_IFLNK, stat.S_IFDIR), f"unsupported ZIP entry type: {name}"
+    with archive.open(info, "r") as source, target.open("xb") as output:
+        shutil.copyfileobj(source, output)
+    archived_mode = (info.external_attr >> 16) & 0o777
+    if archived_mode and os.name != "nt":
+        target

@@ -1,416 +1,634 @@
 # DevFleet source part 078
 
 Full-source UTF-8 byte interval [3580500, 3627000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: fca3a9181e6564d80f4521ce7d5bcb3c9f1fbd3a76f4ffa5efc82a61a2c10858
+Payload SHA-256: e340dc2be44f4cc00edabada67a1a1d88245ad4a8692626bc9c28d98dcb632ff
 
 <!-- BEGIN SOURCE SLICE -->
- Fallback: rollback retains the verified source/backup.`;
-        const ready = Boolean(data.migration_ready);
-        if (preflight) preflight.textContent = ready ? `Preflight ready: inspection, capacity, archive, compose, and worktree checks passed.` : `Preflight not ready: ${(data.blockers || ['unknown blocker']).join(' ')}`;
-        if (confirmButton && stage === 'confirm') confirmButton.disabled = !ready;
-      } catch (error) { lastPreflight = null; if (preflight) preflight.textContent = `Preflight unavailable: ${error.message}. Confirmation is disabled.`; if (confirmButton && stage === 'confirm') confirmButton.disabled = true; }
-    };
-    shell.querySelectorAll('[data-wizard-stage]').forEach((button) => button.addEventListener('click', async () => { setStage(button.dataset.wizardStage); if (stage === 'review' || stage === 'confirm') await loadPreflight(); }));
-    form.addEventListener('change', toggleCustom); toggleCustom();
-    form.addEventListener('submit', async (event) => {
-      copyCustomValues();
-      if (stage !== 'confirm') { event.preventDefault(); setStage(stage === 'environment' ? 'resources' : stage === 'resources' ? 'review' : 'confirm'); if (stage === 'review' || stage === 'confirm') await loadPreflight(); return; }
-      if (!lastPreflight || !lastPreflight.migration_ready) { event.preventDefault(); await loadPreflight(); return; }
-      if (!form.elements.wizard_confirmed) { const confirmed = document.createElement('input'); confirmed.type = 'hidden'; confirmed.name = 'wizard_confirmed'; confirmed.value = 'true'; form.append(confirmed); }
-      const token = form.elements.csrf_token; if (token) token.value = currentCsrf();
-      event.preventDefault();
-      if (confirmButton) confirmButton.disabled = true;
-      try {
-        const response = await fetch(form.action, { method: 'POST', body: new URLSearchParams(new FormData(form)), credentials: 'same-origin', headers: { Accept: 'application/json', 'X-DevFleet-UI': '1' } });
-        const data = await response.json().catch(() => ({})); if (!response.ok || !data.operation_id) throw new Error(data.detail || `HTTP ${response.status}`);
-        if (preflight) preflight.textContent = 'Environment assignment queued. Tracking backup, runtime handling, provisioning, verification, health, lifecycle restoration, and rollback progress…';
-        let pollDelay = 750; let failures = 0;
-        const poll = async () => {
-          try {
-            const response = await fetch(`/ui/operations/${encodeURIComponent(data.operation_id)}`, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const operation = await response.json();
-            const state = operation.state || operation.status || 'unknown';
-            failures = 0;
-            if (preflight) preflight.textContent = operation.message || state || 'Operation running';
-            if (!['completed', 'failed', 'cancelled', 'interrupted'].includes(state)) {
-              pollDelay = 750;
-              setTimeout(poll, pollDelay);
-            }
-          } catch (error) {
-            failures += 1;
-            if (preflight) preflight.textContent = `Operation status temporarily unavailable: ${error.message}`;
-            if (failures <= 5) { pollDelay = Math.min(8000, pollDelay * 2); setTimeout(poll, pollDelay); }
-          }
-        };
-        poll();
-      } catch (error) { if (preflight) preflight.textContent = `Environment assignment was not queued: ${error.message}`; if (confirmButton) confirmButton.disabled = false; }
-    });
-    setStage(stage);
-  }
+09f5 \
+    --hash=sha256:e8afc3f2ccfa24215f8cb28dcf43f0113ac3c37c2f0f0806d8c70e4228c5cf4d \
+    --hash=sha256:e8fc20152abba6b83724d7ff268c249fa196d8259ff481f3b1476383f8f24e42 \
+    --hash=sha256:eaa9599de571d72e2daf60164784109f19978b327a3910d3e9de8c97b5b70cfe \
+    --hash=sha256:ec15a59cf5af7be74194f7ab02d0f59a62bdcf1a537677ce67a2537c9b87fcda \
+    --hash=sha256:f190daf01f13c72eac4efd5c430a8de82489d9cff23c364c3ea822545032993e \
+    --hash=sha256:f34c41761022dd093b4b6896d4810782ffbabe30f2d443ff5f083e0cbbb8c737 \
+    --hash=sha256:f3e98bb3798ead92273dc0e5fd0f31ade220f59a266ffd8a4f6065e0a3ce0523 \
+    --hash=sha256:f42d0984e947b8adf7dd6dde396e720934d12c506ce84eea8476409563607591 \
+    --hash=sha256:f71a396b3bf33ecaa1626c255855702aca4d3d9fea5e051b41ac59a9c1c41edc \
+    --hash=sha256:f9e130248f4462aaa8e2552d547f36ddadbeaa573879158d721bbd33dfe4743a \
+    --hash=sha256:fed51ac40f757d41b7c48425901843666a6677e3e8eb0abcff09e4ba6e664f50
+    # via jinja2
+psutil==7.0.0 \
+    --hash=sha256:101d71dc322e3cffd7cea0650b09b3d08b8e7c4109dd6809fe452dfd00e58b25 \
+    --hash=sha256:1e744154a6580bc968a0195fd25e80432d3afec619daf145b9e5ba16cc1d688e \
+    --hash=sha256:1fcee592b4c6f146991ca55919ea3d1f8926497a713ed7faaf8225e174581e91 \
+    --hash=sha256:39db632f6bb862eeccf56660871433e111b6ea58f2caea825571951d4b6aa3da \
+    --hash=sha256:4b1388a4f6875d7e2aff5c4ca1cc16c545ed41dd8bb596cefea80111db353a34 \
+    --hash=sha256:4cf3d4eb1aa9b348dec30105c55cd9b7d4629285735a102beb4441e38db90553 \
+    --hash=sha256:7be9c3eba38beccb6495ea33afd982a44074b78f28c434a1f51cc07fd315c456 \
+    --hash=sha256:84df4eb63e16849689f76b1ffcb36db7b8de703d1bc1fe41773db487621b6c17 \
+    --hash=sha256:a5f098451abc2828f7dc6b58d44b532b22f2088f4999a937557b603ce72b1993 \
+    --hash=sha256:ba3fcef7523064a6c9da440fc4d6bd07da93ac726b5733c29027d7dc95b39d99
+    # via -r source/app/requirements.txt
+pydantic==2.13.4 \
+    --hash=sha256:45a282cde31d808236fd7ea9d919b128653c8b38b393d1c4ab335c62924d9aba \
+    --hash=sha256:c40756b57adaa8b1efeeced5c196f3f3b7c435f90e84ea7f443901bec8099ef6
+    # via fastapi
+pydantic-core==2.46.4 \
+    --hash=sha256:00c603d540afdd6b80eb39f078f33ebd46211f02f33e34a32d9f053bba711de0 \
+    --hash=sha256:0186750b482eefa11d7f435892b09c5c606193ef3375bcf94aa00ae6bfb66262 \
+    --hash=sha256:041bde0a48fd37cf71cab1c9d56d3e8625a3793fef1f7dd232b3ff37e978ecda \
+    --hash=sha256:0c563b08bca408dc7f65f700633d8442fffb2421fc47b8101377e9fd65051ff0 \
+    --hash=sha256:0cbe8b01f948de4286c74cdd6c667aceb38f5c1e26f0693b3983d9d74887c65e \
+    --hash=sha256:0ce40cd7b21210e99342afafbd4d0f76d784eb5b1d60f3bdc566be4983c6c73b \
+    --hash=sha256:0e96592440881c74a213e5ad528e2b24d3d4f940de2766bed9010ab1d9e51594 \
+    --hash=sha256:10e17cbb10a330363733efc4d7c4d0dd827ac0909b8f6a6542298fed1ea62f29 \
+    --hash=sha256:133878133d271ade3d41d1bfb2a45ec38dbdbda40bc065921c6b04e4630127e2 \
+    --hash=sha256:14d4edf427bdcf950a8a02d7cb44a08614388dd6e1bdcbf4f67504fa7887da9c \
+    --hash=sha256:14f4c5d6db102bd796a627bbb3a17b4cf4574b9ae861d8b7c9a9661c6dd3362d \
+    --hash=sha256:17299feefe090f2caa5b8e37222bb5f663e4935a8bfa6931d4102e5df1a9f398 \
+    --hash=sha256:184c081504d17f1c1066e430e117142b2c77d9448a97f7b65c6ac9fd9aee238d \
+    --hash=sha256:18e5ceec2ab67e6d5f1a9085e5a24c9c4e2ac4545730bfe668680bca05e555f3 \
+    --hash=sha256:19e51f073cd3df251856a8a4189fbdf1de4012c3ebacfb1884f94f1eb406079f \
+    --hash=sha256:1a7dd0b3ee80d90150e3495a3a13ac34dbcbfd4f012996a6a1d8900e91b5c0fb \
+    --hash=sha256:1d8ba486450b14f3b1d63bc521d410ec7565e52f887b9fb671791886436a42f7 \
+    --hash=sha256:2108ba5c1c1eca18030634489dc544844144ee36357f2f9f780b93e7ddbb44b5 \
+    --hash=sha256:228ee9bae8bef5b1e97ec58302f80357c37199e0d0a99174e138d28e6957b9d9 \
+    --hash=sha256:23ace664830ee0bfe014a0c7bc248b1f7f25ed7ad103852c317624a1083af462 \
+    --hash=sha256:2412e734dcb48da14d4e4006b82b46b74f2518b8a26ee7e58c6844a6cd6d03c4 \
+    --hash=sha256:29c61fc04a3d840155ff08e475a04809278972fe6aef51e2720554e96367e34b \
+    --hash=sha256:2f84c03c8607173d16b5a854ec68a2f9079ae03237a54fb506d13af47e1d018d \
+    --hash=sha256:3009f12e4e90b7f88b4f9adb1b0c4a3d58fe7820f3238c190047209d148026df \
+    --hash=sha256:3245406455a5d98187ec35530fd772b1d799b26667980872c8d4614991e2c4a2 \
+    --hash=sha256:3447661d99f75a3683a4cf5c87da72f2161964611864dbbeac7fbb118bb4bfc0 \
+    --hash=sha256:372429a130e469c9cd698925ce5fc50940b7a1336b0d82038e63d5bbc4edc519 \
+    --hash=sha256:395aebd9183f9d112f569aeb5b2214d1a10a33bec8456447f7fbdfa51d38d4cd \
+    --hash=sha256:3a233125ac121aa3ffba9a2b59edfc4a985a76092dc8279586ab4b71390875e7 \
+    --hash=sha256:3be77f45df024d789a672ae34f8b06fb346c4f9f46ea714956660ea4862e89ac \
+    --hash=sha256:3bf92c5d0e00fefaab325a4d27828fe6b6e2a21848686b5b60d2d9eeb09d76c6 \
+    --hash=sha256:3ecbc122d18468d06ca279dc26a8c2e2d5acb10943bb35e36ae92096dc3b5565 \
+    --hash=sha256:3fb702cd90b0446a3a1c5e470bfa0dd23c0233b676a9099ddcc964fa6ca13898 \
+    --hash=sha256:428e04521a40150c85216fc8b85e8d39fece235a9cf5e383761238c7fa9b96fb \
+    --hash=sha256:432c179df7874eeb73307aad2df0755e1ae0efa61ff0ea89b93e194411ae3928 \
+    --hash=sha256:4a05d69cba51d852c5c3e92758653245a50c0b646ced0cf05bd793ed592839d6 \
+    --hash=sha256:4c63ebc82684aa89d9a3bcbd13d515b3be44250dc68dd3bd81526c1cb31286c3 \
+    --hash=sha256:4fc73cb559bdb54b1134a706a2802a4cddd27a0633f5abb7e53056268751ac6a \
+    --hash=sha256:4fcbe087dbc2068af7eda3aa87634eba216dbda64d1ae73c8684b621d33f6596 \
+    --hash=sha256:56cb4851bcaf3d117eddcef4fe66afd750a50274b0da8e22be256d10e5611987 \
+    --hash=sha256:5855698a4856556d86e8e6cd8434bc3ac0314ee8e12089ae0e143f64c6256e4e \
+    --hash=sha256:5a4330cdbc57162e4b3aa303f588ba752257694c9c9be3e7ebb11b4aca659b5d \
+    --hash=sha256:5b712b53160b79a5850310b912a5ef8e57e56947c8ad690c227f5c9d7e561712 \
+    --hash=sha256:5d5902252db0d3cedf8d4a1bc68f70eeb430f7e4c7104c8c476753519b423008 \
+    --hash=sha256:617d7e2ca7dcb8c5cf6bcb8c59b8832c94b36196bbf1cbd1bfb56ed341905edd \
+    --hash=sha256:62f875393d7f270851f20523dd2e29f082bcc82292d66db2b64ea71f64b6e1c1 \
+    --hash=sha256:633147d34cf4550417f12e2b1a0383973bdf5cdfde212cb09e9a581cf10820be \
+    --hash=sha256:66ce7632c22d837c95301830e111ad0128a32b8207533b60896a96c4915192ea \
+    --hash=sha256:6b3ace8194b0e5204818c92802dcdca7fc6d88aabbb799d7c795540d9cd6d292 \
+    --hash=sha256:6f2eeda33a839975441c86a4119e1383c50b47faf0cbb5176985565c6bb02c33 \
+    --hash=sha256:7027560ee92211647d0d34e3f7cd6f50da56399d26a9c8ad0da286d3869a53f3 \
+    --hash=sha256:7283d57845ecf5a163403eb0702dfc220cc4fbdd18919cb5ccea4f95ee1cdab4 \
+    --hash=sha256:7a5f930472650a82629163023e630d160863fce524c616f4e5186e5de9d9a49b \
+    --hash=sha256:7bfb192b3f4b9e8a89b6277b6ce787564f62cfd272055f6e685726b111dc7826 \
+    --hash=sha256:811ff8e9c313ab425368bcbb36e5c4ebd7108c2bbf4e4089cfbb0b01eff63fac \
+    --hash=sha256:8233f2947cf85404441fd7e0085f53b10c93e0ee78611099b5c7237e36aacbf7 \
+    --hash=sha256:82cf5301172168103724d49a1444d3378cb20cdee30b116a1bd6031236298a5d \
+    --hash=sha256:8358a950c8909158e3df31538a7e4edc2d7265a7c54b47f0864d9e5bae9dcebf \
+    --hash=sha256:85bb3611ff1802f3ee7fdd7dbff26b56f343fb432d57a4728fdd49b6ef35e2f4 \
+    --hash=sha256:86e1a4418c6cd97d60c95c71164158eaf7324fae7b0923264016baa993eba6fc \
+    --hash=sha256:8b9bab013d1c7a79d3501ff86d0bc9c31bf587db4551677b96bec07df78c6b15 \
+    --hash=sha256:8c5dac79fa1614d1e06ca695109c6105923bd9c7d1d6c918d4e637b7e6b32fd3 \
+    --hash=sha256:8d0820e8192167f80d88d64038e609c31452eeca865b4e1d9950a27a4609b00b \
+    --hash=sha256:8daafc69c93ee8a0204506a3b6b30f586ef54028f52aeeeb5c4cfc5184fd5914 \
+    --hash=sha256:9037063db01f09b09e237c282b6792bd4da634b5402c4e7f0c61effed7701a04 \
+    --hash=sha256:905a0ed8ea6f2d61c1738835f99b699348d7857379083e5fc497fa0c967a407c \
+    --hash=sha256:90884113d8b48f760e9587002789ddd741e76ab9f89518cd1e43b1f1a52ec44b \
+    --hash=sha256:91a06d2e259ecfbd8c901d70c3c507900458498142b3026a296b7de4d1322cc9 \
+    --hash=sha256:926c9541b14b12b1681dca8a0b75feb510b06c6341b70a8e500c2fdcff837cce \
+    --hash=sha256:9401557acd873c3a7f3eb9383edef8ac4968f9510e340f4808d427e75667e7b4 \
+    --hash=sha256:9551187363ffc0de2a00b2e47c25aeaeb1020b69b668762966df15fc5659dd5a \
+    --hash=sha256:962ccbab7b642487b1d8b7df90ef677e03134cf1fd8880bf698649b22a69371f \
+    --hash=sha256:97e7cf2be5c77b7d1a9713a05605d49460d02c6078d38d8bef3cbe323c548424 \
+    --hash=sha256:9aa768456404a8bf48a4406685ac2bec8e72b62c69313734fa3b73cf33b3a894 \
+    --hash=sha256:9bc519fbf2b7578398853d815009ae5e4d4603d12f4e3f91da8c06852d3da3e9 \
+    --hash=sha256:9d56801be94b86a9da183e5f3766e6310752b99ff647e38b09a9500d88e46e76 \
+    --hash=sha256:9f444c499b3eefd3a92e348059471ea0c3a6e303d9c1cec09fa748fd9f895201 \
+    --hash=sha256:9fa8ae11da9e2b3126c6426f147e0fba88d96d65921799bb30c6abd1cb2c97fb \
+    --hash=sha256:a0f62d0a58f4e7da165457e995725421e0064f2255d8eccebc49f41bbc23b109 \
+    --hash=sha256:a396dcc17e5a0b164dbe026896245a4fa9ff402edca1dff0be3d53a517f74de4 \
+    --hash=sha256:aaa2a54443eff1950ba5ddc6b6ccda0d9c84a364276a62f969bdf2a390650848 \
+    --hash=sha256:ad785e92e6dc634c21555edc8bd6b64957ab844541bcb96a1366c202951ae526 \
+    --hash=sha256:af8244b2bef6aaad6d92cda81372de7f8c8d36c9f0c3ea36e827c60e7d9467a0 \
+    --hash=sha256:b078afbc25f3a1436c7a1d2cd3e322497ee99615ba97c563566fdf46aff1ee01 \
+    --hash=sha256:b2f69dec1725e79a012d920df1707de5caf7ed5e08f3be4435e25803efc47458 \
+    --hash=sha256:b8458003118a712e66286df6a707db01c52c0f52f7db8e4a38f0da1d3b94fc4e \
+    --hash=sha256:bb63e0198ca18aad131c089b9204c23079c3afa95487e561f4c522d519e55aba \
+    --hash=sha256:bfec22eab3c8cc2ceec0248aec886624116dc079afa027ecc8ad4a7e62010f8a \
+    --hash=sha256:c1747f85cee84c26985853c6f3d9bd3e75da5212912443fa111c113b9c246f39 \
+    --hash=sha256:c1b3f518abeca3aa13c712fd202306e145abf59a18b094a6bafb2d2bbf59192c \
+    --hash=sha256:c50f2528cf200c5eed56faf3f4e22fcd5f38c157a8b78576e6ba3168ec35f000 \
+    --hash=sha256:c68fcd102d71ea85c5b2dfac3f4f8476eff42a9e078fd5faefff6d145063536b \
+    --hash=sha256:c7a7bd4e39e8e4c12c39cd480356842b6a8a06e41b23a55a5e3e191718838ddf \
+    --hash=sha256:c94f0688e7b8d0a67abf40e57a7eaaecd17cc9586706a31b76c031f63df052b4 \
+    --hash=sha256:cbaf13819775b7f769bf4a1f066cb6df7a28d4480081a589828ef190226881cd \
+    --hash=sha256:cd2213145bcc2ba85884d0ac63d222fece9209678f77b9b4d76f054c561adb28 \
+    --hash=sha256:ce5c1d2a8b27468f433ca974829c44060b8097eedc39933e3c206a90ee49c4a9 \
+    --hash=sha256:d396ec2b979760aaf3218e76c24e65bd0aca24983298653b3a9d7a45f9e47b30 \
+    --hash=sha256:d51026d73fcfd93610abc7b27789c26b313920fcfb20e27462d74a7f8b06e983 \
+    --hash=sha256:d80ee3d731373b24cebbc10d689ca4ee1875caf0d5703a245db18efd4dd37fc1 \
+    --hash=sha256:d995260fdf4e1db774581b4900e0f832abe3c7c84996726bbc161b19c8f29e76 \
+    --hash=sha256:da4b951fe36dc7c3a1ccb4e3cd1747c3542b8c9ceede8fc86cae054e764485f5 \
+    --hash=sha256:daa27d92c36f24388fe3ad306b174781c747627f134452e4f128ea00ce1fe8c4 \
+    --hash=sha256:db06ffe51636ffe9ca531fe9023dd64bdd794be8754cb5df57c5498ae5b518a7 \
+    --hash=sha256:e0d65b8c354be7fb5f720c3caa8bc940bc2d20ce749c8e06135f07f8ed95dd7c \
+    --hash=sha256:e68b7a074f65a2fd746c52a7ce6142ab7006074ac269ace0c25cd8ba171f8066 \
+    --hash=sha256:e739fee756ba1010f8bcccb534252e85a35fe45ae92c295a06059ce58b74ccd3 \
+    --hash=sha256:e846ae7835bf0703ae43f534ab79a867146dadd59dc9ca5c8b53d5c8f7c9ef02 \
+    --hash=sha256:e9c26f834c65f5752f3f06cb08cb86a913ceb7274d0db6e267808a708b46bc89 \
+    --hash=sha256:ea793e075b70290d89d8142074262885d3f7da19634845135751bd6344f73b50 \
+    --hash=sha256:f027324c56cd5406ca49c124b0db10e56c69064fec039acc571c29020cc87c76 \
+    --hash=sha256:f13a646d65d09fbf1bc6b3a9635d30095c8e7e5cc419ff35ecc563c5fd04cd49 \
+    --hash=sha256:f47286a97f0bc9b8859519809077b91b2cefe4ae47fcbf5e466a009c1c5d742b \
+    --hash=sha256:f747929cf940cddb5b3668a390056ddd5ba2e5010615ea2dcf4f9c4f3ab8791d \
+    --hash=sha256:f99626688942fb746e545232e7726926f3be91b5975f8b55327665fafda991c7 \
+    --hash=sha256:f9fa868638bf362d3d138ea55829cefb3d5f4b0d7f142234382a15e2485dbec4 \
+    --hash=sha256:fbdb89b3e1c94a30cc5edfce477c6e6a5dc4d8f84665b455c27582f211a1c72c \
+    --hash=sha256:fc010ab034c8c7452522748bf937df58020d256ccae0874463d1f4d01758af8e \
+    --hash=sha256:fc3e9034a63de20e15e8ade85358bc6efc614008cab72898b4b4952bea0509ff \
+    --hash=sha256:fd8b3d9fd264be37976686c7f65cd52a83f5e84f4bfd2adf9c1d469676bbb6ae
+    # via pydantic
+python-dotenv==1.2.3 \
+    --hash=sha256:904552145e8bfed22162c09dab1c2b9b54fefa7b23ba780f4f26ca0316b0f0d9 \
+    --hash=sha256:a20a594dabeaa385725aa239d5244871c143ecb356add8a20fcf23773a6c3a35
+    # via uvicorn
+python-multipart==0.0.32 \
+    --hash=sha256:be54b7f3fa167bb83e4fcd936b887b708f4e57fe75911c02aebf53efaf8d938e \
+    --hash=sha256:ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23
+    # via -r source/app/requirements.txt
+pyyaml==6.0.2 \
+    --hash=sha256:01179a4a8559ab5de078078f37e5c1a30d76bb88519906844fd7bdea1b7729ff \
+    --hash=sha256:0833f8694549e586547b576dcfaba4a6b55b9e96098b36cdc7ebefe667dfed48 \
+    --hash=sha256:0a9a2848a5b7feac301353437eb7d5957887edbf81d56e903999a75a3d743086 \
+    --hash=sha256:0b69e4ce7a131fe56b7e4d770c67429700908fc0752af059838b1cfb41960e4e \
+    --hash=sha256:0ffe8360bab4910ef1b9e87fb812d8bc0a308b0d0eef8c8f44e0254ab3b07133 \
+    --hash=sha256:11d8f3dd2b9c1207dcaf2ee0bbbfd5991f571186ec9cc78427ba5bd32afae4b5 \
+    --hash=sha256:17e311b6c678207928d649faa7cb0d7b4c26a0ba73d41e99c4fff6b6c3276484 \
+    --hash=sha256:1e2120ef853f59c7419231f3bf4e7021f1b936f6ebd222406c3b60212205d2ee \
+    --hash=sha256:1f71ea527786de97d1a0cc0eacd1defc0985dcf6b3f17bb77dcfc8c34bec4dc5 \
+    --hash=sha256:23502f431948090f597378482b4812b0caae32c22213aecf3b55325e049a6c68 \
+    --hash=sha256:24471b829b3bf607e04e88d79542a9d48bb037c2267d7927a874e6c205ca7e9a \
+    --hash=sha256:29717114e51c84ddfba879543fb232a6ed60086602313ca38cce623c1d62cfbf \
+    --hash=sha256:2e99c6826ffa974fe6e27cdb5ed0021786b03fc98e5ee3c5bfe1fd5015f42b99 \
+    --hash=sha256:39693e1f8320ae4f43943590b49779ffb98acb81f788220ea932a6b6c51004d8 \
+    --hash=sha256:3ad2a3decf9aaba3d29c8f537ac4b243e36bef957511b4766cb0057d32b0be85 \
+    --hash=sha256:3b1fdb9dc17f5a7677423d508ab4f243a726dea51fa5e70992e59a7411c89d19 \
+    --hash=sha256:41e4e3953a79407c794916fa277a82531dd93aad34e29c2a514c2c0c5fe971cc \
+    --hash=sha256:43fa96a3ca0d6b1812e01ced1044a003533c47f6ee8aca31724f78e93ccc089a \
+    --hash=sha256:50187695423ffe49e2deacb8cd10510bc361faac997de9efef88badc3bb9e2d1 \
+    --hash=sha256:5ac9328ec4831237bec75defaf839f7d4564be1e6b25ac710bd1a96321cc8317 \
+    --hash=sha256:5d225db5a45f21e78dd9358e58a98702a0302f2659a3c6cd320564b75b86f47c \
+    --hash=sha256:6395c297d42274772abc367baaa79683958044e5d3835486c16da75d2a694631 \
+    --hash=sha256:688ba32a1cffef67fd2e9398a2efebaea461578b0923624778664cc1c914db5d \
+    --hash=sha256:68ccc6023a3400877818152ad9a1033e3db8625d899c72eacb5a668902e4d652 \
+    --hash=sha256:70b189594dbe54f75ab3a1acec5f1e3faa7e8cf2f1e08d9b561cb41b845f69d5 \
+    --hash=sha256:797b4f722ffa07cc8d62053e4cff1486fa6dc094105d13fea7b1de7d8bf71c9e \
+    --hash=sha256:7c36280e6fb8385e520936c3cb3b8042851904eba0e58d277dca80a5cfed590b \
+    --hash=sha256:7e7401d0de89a9a855c839bc697c079a4af81cf878373abd7dc625847d25cbd8 \
+    --hash=sha256:80bab7bfc629882493af4aa31a4cfa43a4c57c83813253626916b8c7ada83476 \
+    --hash=sha256:82d09873e40955485746739bcb8b4586983670466c23382c19cffecbf1fd8706 \
+    --hash=sha256:8388ee1976c416731879ac16da0aff3f63b286ffdd57cdeb95f3f2e085687563 \
+    --hash=sha256:8824b5a04a04a047e72eea5cec3bc266db09e35de6bdfe34c9436ac5ee27d237 \
+    --hash=sha256:8b9c7197f7cb2738065c481a0461e50ad02f18c78cd75775628afb4d7137fb3b \
+    --hash=sha256:9056c1ecd25795207ad294bcf39f2db3d845767be0ea6e6a34d856f006006083 \
+    --hash=sha256:936d68689298c36b53b29f23c6dbb74de12b4ac12ca6cfe0e047bedceea56180 \
+    --hash=sha256:9b22676e8097e9e22e36d6b7bda33190d0d400f345f23d4065d48f4ca7ae0425 \
+    --hash=sha256:a4d3091415f010369ae4ed1fc6b79def9416358877534caf6a0fdd2146c87a3e \
+    --hash=sha256:a8786accb172bd8afb8be14490a16625cbc387036876ab6ba70912730faf8e1f \
+    --hash=sha256:a9f8c2e67970f13b16084e04f134610fd1d374bf477b17ec1599185cf611d725 \
+    --hash=sha256:bc2fa7c6b47d6bc618dd7fb02ef6fdedb1090ec036abab80d4681424b84c1183 \
+    --hash=sha256:c70c95198c015b85feafc136515252a261a84561b7b1d51e3384e0655ddf25ab \
+    --hash=sha256:cc1c1159b3d456576af7a3e4d1ba7e6924cb39de8f67111c735f6fc832082774 \
+    --hash=sha256:ce826d6ef20b1bc864f0a68340c8b3287705cae2f8b4b1d932177dcc76721725 \
+    --hash=sha256:d584d9ec91ad65861cc08d42e834324ef890a082e591037abe114850ff7bbc3e \
+    --hash=sha256:d7fded462629cfa4b685c5416b949ebad6cec74af5e2d42905d41e257e0869f5 \
+    --hash=sha256:d84a1718ee396f54f3a086ea0a66d8e552b2ab2017ef8b420e92edbc841c352d \
+    --hash=sha256:d8e03406cac8513435335dbab54c0d385e4a49e4945d2909a581c83647ca0290 \
+    --hash=sha256:e10ce637b18caea04431ce14fabcf5c64a1c61ec9c56b071a4b7ca131ca52d44 \
+    --hash=sha256:ec031d5d2feb36d1d1a24380e4db6d43695f3748343d99434e6f5f9156aaa2ed \
+    --hash=sha256:ef6107725bd54b262d6dedcc2af448a266975032bc85ef0172c5f059da6325b4 \
+    --hash=sha256:efdca5630322a10774e8e98e1af481aad470dd62c3170801852d752aa7a783ba \
+    --hash=sha256:f753120cb8181e736c57ef7636e83f31b9c0d1722c516f7e86cf15b7aa57ff12 \
+    --hash=sha256:ff3824dc5261f50c9b0dfb3be22b4567a6f938ccce4587b38952d85fd9e9afe4
+    # via
+    #   -r source/app/requirements.txt
+    #   uvicorn
+starlette==1.6.0 \
+    --hash=sha256:a86dd39d14bb45f85a3d18525215a9ef0cfd1f192ac793220e72598c90335f0c \
+    --hash=sha256:d4e3ac5e546444960c710297a3c9fc3f7ebae1b7e963f3d36173b49da535be9b
+    # via fastapi
+typing-extensions==4.16.0 \
+    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8 \
+    --hash=sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5
+    # via
+    #   anyio
+    #   fastapi
+    #   pydantic
+    #   pydantic-core
+    #   starlette
+    #   typing-inspection
+typing-inspection==0.4.4 \
+    --hash=sha256:547274fa6b0a561ccf549cc9524b999a578e737d015d8709d021f9d0d13bea47 \
+    --hash=sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147
+    # via
+    #   fastapi
+    #   pydantic
+uvicorn[standard]==0.52.4 \
+    --hash=sha256:73acfee47a0b133c5de13d219492d62d8a31e935f4fe6e41a232451a15379f86 \
+    --hash=sha256:f86e41a149d7d05a9969337e3946a9c171c06a5d42680896daaba624aeac8da1
+    # via -r source/app/requirements.txt
+uvloop==0.22.1; sys_platform != "win32" \
+    --hash=sha256:017bd46f9e7b78e81606329d07141d3da446f8798c6baeec124260e22c262772 \
+    --hash=sha256:0530a5fbad9c9e4ee3f2b33b148c6a64d47bbad8000ea63704fa8260f4cf728e \
+    --hash=sha256:05e4b5f86e621cf3927631789999e697e58f0d2d32675b67d9ca9eb0bca55743 \
+    --hash=sha256:0ae676de143db2b2f60a9696d7eca5bb9d0dd6cc3ac3dad59a8ae7e95f9e1b54 \
+    --hash=sha256:1489cf791aa7b6e8c8be1c5a080bae3a672791fcb4e9e12249b05862a2ca9cec \
+    --hash=sha256:17d4e97258b0172dfa107b89aa1eeba3016f4b1974ce85ca3ef6a66b35cbf659 \
+    --hash=sha256:1cdf5192ab3e674ca26da2eada35b288d2fa49fdd0f357a19f0e7c4e7d5077c8 \
+    --hash=sha256:1f38ec5e3f18c8a10ded09742f7fb8de0108796eb673f30ce7762ce1b8550cad \
+    --hash=sha256:286322a90bea1f9422a470d5d2ad82d38080be0a29c4dd9b3e6384320a4d11e7 \
+    --hash=sha256:297c27d8003520596236bdb2335e6b3f649480bd09e00d1e3a99144b691d2a35 \
+    --hash=sha256:37554f70528f60cad66945b885eb01f1bb514f132d92b6eeed1c90fd54ed6289 \
+    --hash=sha256:3879b88423ec7e97cd4eba2a443aa26ed4e59b45e6b76aabf13fe2f27023a142 \
+    --hash=sha256:3b7f102bf3cb1995cfeaee9321105e8f5da76fdb104cdad8986f85461a1b7b77 \
+    --hash=sha256:40631b049d5972c6755b06d0bfe8233b1bd9a8a6392d9d1c45c10b6f9e9b2733 \
+    --hash=sha256:481c990a7abe2c6f4fc3d98781cc9426ebd7f03a9aaa7eb03d3bfc68ac2a46bd \
+    --hash=sha256:4a968a72422a097b09042d5fa2c5c590251ad484acf910a651b4b620acd7f193 \
+    --hash=sha256:4baa86acedf1d62115c1dc6ad1e17134476688f08c6efd8a2ab076e815665c74 \
+    --hash=sha256:512fec6815e2dd45161054592441ef76c830eddaad55c8aa30952e6fe1ed07c0 \
+    --hash=sha256:51eb9bd88391483410daad430813d982010f9c9c89512321f5b60e2cddbdddd6 \
+    --hash=sha256:535cc37b3a04f6cd2c1ef65fa1d370c9a35b6695df735fcff5427323f2cd5473 \
+    --hash=sha256:53c85520781d84a4b8b230e24a5af5b0778efdb39142b424990ff1ef7c48ba21 \
+    --hash=sha256:55502bc2c653ed2e9692e8c55cb95b397d33f9f2911e929dc97c4d6b26d04242 \
+    --hash=sha256:561577354eb94200d75aca23fbde86ee11be36b00e52a4eaf8f50fb0c86b7705 \
+    --hash=sha256:56a2d1fae65fd82197cb8c53c367310b3eabe1bbb9fb5a04d28e3e3520e4f702 \
+    --hash=sha256:57df59d8b48feb0e613d9b1f5e57b7532e97cbaf0d61f7aa9aa32221e84bc4b6 \
+    --hash=sha256:6c84bae345b9147082b17371e3dd5d42775bddce91f885499017f4607fdaf39f \
+    --hash=sha256:6cde23eeda1a25c75b2e07d39970f3374105d5eafbaab2a4482be82f272d5a5e \
+    --hash=sha256:6e2ea3d6190a2968f4a14a23019d3b16870dd2190cd69c8180f7c632d21de68d \
+    --hash=sha256:700e674a166ca5778255e0e1dc4e9d79ab2acc57b9171b79e65feba7184b3370 \
+    --hash=sha256:7b5b1ac819a3f946d3b2ee07f09149578ae76066d70b44df3fa990add49a82e4 \
+    --hash=sha256:7cd375a12b71d33d46af85a3343b35d98e8116134ba404bd657b3b1d15988792 \
+    --hash=sha256:80eee091fe128e425177fbd82f8635769e2f32ec9daf6468286ec57ec0313efa \
+    --hash=sha256:93f617675b2d03af4e72a5333ef89450dfaa5321303ede6e67ba9c9d26878079 \
+    --hash=sha256:a592b043a47ad17911add5fbd087c76716d7c9ccc1d64ec9249ceafd735f03c2 \
+    --hash=sha256:ac33ed96229b7790eb729702751c0e93ac5bc3bcf52ae9eccbff30da09194b86 \
+    --hash=sha256:b31dc2fccbd42adc73bc4e7cdbae4fc5086cf378979e53ca5d0301838c5682c6 \
+    --hash=sha256:b45649628d816c030dba3c80f8e2689bab1c89518ed10d426036cdc47874dfc4 \
+    --hash=sha256:b76324e2dc033a0b2f435f33eb88ff9913c156ef78e153fb210e03c13da746b3 \
+    --hash=sha256:b91328c72635f6f9e0282e4a57da7470c7350ab1c9f48546c0f2866205349d21 \
+    --hash=sha256:badb4d8e58ee08dad957002027830d5c3b06aea446a6a3744483c2b3b745345c \
+    --hash=sha256:bc5ef13bbc10b5335792360623cc378d52d7e62c2de64660616478c32cd0598e \
+    --hash=sha256:c1955d5a1dd43198244d47664a5858082a3239766a839b2102a269aaff7a4e25 \
+    --hash=sha256:c3e5c6727a57cb6558592a95019e504f605d1c54eb86463ee9f7a2dbd411c820 \
+    --hash=sha256:c60ebcd36f7b240b30788554b6f0782454826a0ed765d8430652621b5de674b9 \
+    --hash=sha256:daf620c2995d193449393d6c62131b3fbd40a63bf7b307a1527856ace637fe88 \
+    --hash=sha256:e047cc068570bac9866237739607d1313b9253c3051ad84738cbb095be0537b2 \
+    --hash=sha256:ea721dd3203b809039fcc2983f14608dae82b212288b346e0bfe46ec2fab0b7c \
+    --hash=sha256:ef6f0d4cc8a9fa1f6a910230cd53545d9a14479311e87e3cb225495952eb672c \
+    --hash=sha256:fe94b4564e865d968414598eea1a6de60adba0c040ba4ed05ac1300de402cd42
+    # via uvicorn
+watchfiles==1.2.0 \
+    --hash=sha256:01859b11fd9fbca670f4d5da00fbac282cfea9bd67a2125d8b2833a3b5617ea9 \
+    --hash=sha256:01ea8d66f0693b9b60a6541c8d10263091ca9a9060d242f3c1f3143f9aad2c98 \
+    --hash=sha256:027ae72bfdfd254862065d8b3e2a815c6ab9b1853ce41e6648ece84afd34a551 \
+    --hash=sha256:03b14855c6f35539e2d95c442ae9530a75762f1e26567152b9ed05f96534a74d \
+    --hash=sha256:054dc20fd2e3132b4c3883b4a00d72fd6e1f56fdaf89fccd12e8057d74cd74d7 \
+    --hash=sha256:094b9b70103d4e963499bdea001ee3c2697b144cd9ae6218a62c0f89ec9e31db \
+    --hash=sha256:0a105bc2283f67e8fbec74253ec2d94925de92ed72c0393f1206bf326b7b7b69 \
+    --hash=sha256:0a37faaed405c67e28e6be45a1fa4f206ef5a2860f27c237db9fa30704c38242 \
+    --hash=sha256:0c4997d4e4a55f0d02b6cde327322daf3a0400e5df6c6b15948994bf72497925 \
+    --hash=sha256:0cb4d80e212f116474a545c21c912b445f16bb0cef9e6a73a498164223e14e2f \
+    --hash=sha256:0d191c054d0715c3c95c99df9b8dbf6fd096d8c1e021e8f212e1bd8bc444ccb5 \
+    --hash=sha256:0e831a271c035d89789cffc386b6aa1375f39f1cd25eb7ca0997e4970d152fc5 \
+    --hash=sha256:10d86db20695afe7997ac9e1717637d6714a8d0220458c33f3d2061f54cec427 \
+    --hash=sha256:11743adfa510bfffebe97659fb280182b5c9b238708f667e866f308c3430dc19 \
+    --hash=sha256:1bc6195825b7dcd217968bb1f801a60fd4c16e8eeab5bedc7fe917d7d5995ab4 \
+    --hash=sha256:204f299afcbd65918ab78dbc52626b0ae45e9d8cef403fdbf33ecf9e40eac66e \
+    --hash=sha256:20aa0e708b920bde876a4aa82dc7dd6ebea228a63a67cda6632c2fc87b787efa \
+    --hash=sha256:23282a321c8baf9b3a3c4afff673f9fe65eb7fdc2338d765ccad9d3d1916a5ba \
+    --hash=sha256:24b2405c0a46738dd9e1cf7135aa5dbdb9d42d024628651b3b13d5117e99f8df \
+    --hash=sha256:2581a94056e55d7d0a31a823ea92bf73749c489ca2285bfdc0fbe6b2bb49d50c \
+    --hash=sha256:2995c176de7692b86a2e4c58d9ec718f753150a979cb4a754e2b4ffa38e70906 \
+    --hash=sha256:2b37d10b5a63bd4d87e18472d80fa525bd670586fae62e5dd580452764879b65 \
+    --hash=sha256:2cb93af48550faf1cea04c303107c8b75833de7013e57ce27d3b8d21d8d0f58c \
+    --hash=sha256:2d95ddc1eb6914154253d239089900813f6a767e174b8e6a50e7fdacb7e4236c \
+    --hash=sha256:3416ff151bb6b5a8d8d11664974fbef4d9305b9b2957839ab5a270468fd8df30 \
+    --hash=sha256:3651aa7058595e9cfb75d35dd5ada2bf9f48a5b8a0f3562821d3e210c507e077 \
+    --hash=sha256:37a6721cdf3f65dbb13aa9503510ccb4451603ac837e44d265d7992a597e1374 \
+    --hash=sha256:41bc1199f7523b3f82843c88cbb979180c949caef0342cf90968f178e5d49b01 \
+    --hash=sha256:43d818978d06062d9b22c4fab2ebe44cf5213d42dc8e62bda8c2760cfa2eeb33 \
+    --hash=sha256:4429f3b105524a10b72c3a819b091c495d2811d419c1e1e8df773a5a5974f831 \
+    --hash=sha256:4543579a9bdb0c9560039b4ffddbdb39545707659fbc430ce4c10f3f68d557f9 \
+    --hash=sha256:4674d49eb94706dfe666c069fc0a1b646ffcf920473492e209f6d5f60d3f0cc2 \
+    --hash=sha256:4c887eba18b7945ac73067a8b4a66f21cd46c2539b2bc68588f7be6c7eb6d26b \
+    --hash=sha256:4e4ff8e37f99cf1da89e255e07c9c4b37c214038c4283707bdec308cb1b0ea1f \
+    --hash=sha256:4f34e26a19f91f710c08e0183429f0d1d15df734e6bc78c31e77b9ea9c433658 \
+    --hash=sha256:5327989a465505f05cfe06f04fa9d0c2fd5432bb243e10e6f012b1bdca3c8579 \
+    --hash=sha256:53b2290c92e0506d102cd448fbc610d87079553f86caa39d67440856a8b8bba5 \
+    --hash=sha256:56d8641cf834c2836922899105bd3ce3d0dfc69291d52edf0b4d0436829b34c0 \
+    --hash=sha256:57a2d9fa4fb4c2ecae57b13dfff2c7ab53e21a2ba674fe9f05506680fcdcc0d7 \
+    --hash=sha256:63ac26eefbf4af1741247d6fb68b11c49a25b2f7413fbd318a83a12aaa9cf666 \
+    --hash=sha256:6543cf55d170003296d185c0af981f3e1311564907e1f4e08671fc7693a890a5 \
+    --hash=sha256:704fd259e332e01f9b9c178f4bce9e49027e5587cc2600eeeaf8e76e1c846201 \
+    --hash=sha256:71283b39fd17e5408eb123bd37aeecfd9d54c81fc184421943208aadb879d103 \
+    --hash=sha256:71cd71740ed2c15211ebb237ced4e39a1cdf6f80566e5fe95428da1626f4fde6 \
+    --hash=sha256:7571e4464cb6e434958f867f7f730b8ab0b75e3f8e5eac0499168486ab3c33a8 \
+    --hash=sha256:772b80df316480d894a0e3165fdd19cf77f5d17f9a787f94029465ad0e3529d1 \
+    --hash=sha256:77a0feab9af4c021c581f695258c642b3d10c5fd4c676e33a0d8606425d82631 \
+    --hash=sha256:7a2cffd17d27d2ecbb310c2b1d8174f222a5495b1a721894afa88ec11e25b898 \
+    --hash=sha256:7a7ce236284f002a156f70add88efe5c70879cccbb658be0822c54b1306fc09d \
+    --hash=sha256:7ba0480b9a74af058f43b337e937a451e109295c420916d68ad24e3dc02f5e44 \
+    --hash=sha256:8520a4ab0e37f770afc34459c4f8f7019e153f9124dc101c15538365875d1ab2 \
+    --hash=sha256:86bc13c25a8d1fcd70b51d0ce7c9b65e90de5666fcbfd3e34957cc73ee19aeb5 \
+    --hash=sha256:89d8c2394a065ca86f5d2910ff263ae67c127e1376ccc4f9fc35c71db879f80a \
+    --hash=sha256:8c520725602756229f045b032a1ff33d7ef0f7404189d62f6c2438cb6d8ef6a1 \
+    --hash=sha256:8f200104103feb097de4cab8fe4f5dd18a2026934c7dea98c55a2f5fd6d5a33b \
+    --hash=sha256:8f70d8b291ef6e88d19b1f297a6905ddb978888d9272b0d05e6f53309856bcfc \
+    --hash=sha256:8fa585ede612ee9f9e91b18bebf9ba11b9ae29a4e3a0d0cf6fca3e382133f0d5 \
+    --hash=sha256:922c0e019fe68b3ae392965a766b02a71ba1168c932cebc3733cd52c5fe5b377 \
+    --hash=sha256:9342472aff9b093c5acd4f6d8f70ae0937964ab56542502bcf5579782da69ae8 \
+    --hash=sha256:9649193aa27bd9ff2e80ff29bfaa93085496c7a3a377592823cc58b77ee88add \
+    --hash=sha256:9f04b092229ad2c50126dd3c922c8822e51e605993764a33058d4a791ab42281 \
+    --hash=sha256:a0f27f01bee51861392bb6b7c4fdb290b27d1eb194e9e28788d68102a0e898d9 \
+    --hash=sha256:a16ffe19bf5cf9f5edaa1ad1dd830c5a816e8feec430c522302ab55483a4b994 \
+    --hash=sha256:a204794696ffb8f9b10fba6f7cb5216d42f3b2b71860ccac6b6e42f5f10973b0 \
+    --hash=sha256:a711b51aec4370d0dcda5b6c09463206f133a5759341d7744b953a7b62e1100e \
+    --hash=sha256:a88fc94e647bc4eec523f1caa540258eb71d14278b9daf72fa1e2658a98df0f0 \
+    --hash=sha256:ae99b14c5f21e026e0e9d96f40e07d8570ebee6cafd9d8fc318354606daa7a28 \
+    --hash=sha256:b0ef001f8c25ad0fa9529f914c1600647ecd0f542d11c19b7894768c67b6acb7 \
+    --hash=sha256:b141a4891c995a039cd89e9a49e62df1dc8a559a5d1a6e4c7106d16c12777a55 \
+    --hash=sha256:b4e77f6a55f858504069abd35d336a637555c09bca453dde1ee1e5ada8a6a1fb \
+    --hash=sha256:b62f042afde2dde21ec1d2c1a74361e804673df86f51e418a999c9acfe671b07 \
+    --hash=sha256:b718bf356bbc15e559bd8ef41782b573b8ae0e3f177ab244b440568d7ea02cfb \
+    --hash=sha256:b8c8358484d5fa12ef34f05b7f4168eaf1932f408725ff6d023c33ec17bd79d4 \
+    --hash=sha256:b974946a10af379d425e2eef5b62f5c6ebeaccf91d45eaad6f5b27ecd4f91aa0 \
+    --hash=sha256:b9909cc2b48468b575eefa944919e1fe8a36c5849d5c7c168f80a8c1db69398e \
+    --hash=sha256:b9f732dc58b2dbe69e464ccf8fff7a03b0dd0be439da4c0720d3558527d3d6b4 \
+    --hash=sha256:bb68bf4df85abebe5efddc53cf2075520f243a59868d9b3973278b23e76962a9 \
+    --hash=sha256:bb7e52ecf68ba46d22df23467b87cffeb2146908aa523ebfe803019618cfda06 \
+    --hash=sha256:bc13eb17538be00c874699dc0abe4ee2bc8d50bb1166a6b9e175ef3fd7eb8f26 \
+    --hash=sha256:c0db965c5f79aa49fe672d297cf1febc5ad149b658594944f49a54a2b96270a7 \
+    --hash=sha256:c16cb06dd17d43b9d185094268459eac92c9538356f050e55b54e82cf700e1d4 \
+    --hash=sha256:c525543d91961c6955b2636b308569e84a1d1c5f5f2932041ab9ef46422f43e3 \
+    --hash=sha256:c5c19526f4e54a00f2666a6c0e9e40d582c09e865055ea7378bf0009aab857b3 \
+    --hash=sha256:c995fba777f1ea992f090f9236e9284cf7a5d1a0130dd5a3d82c598cacd76838 \
+    --hash=sha256:ca148d73dea36c9763aaa351e4d7a51780ec1584217c45276f4fe8239c768b71 \
+    --hash=sha256:cee9d5efd929efdac5f7e58f72b3376f676b64050a91c5b99a7094c5b2317488 \
+    --hash=sha256:d158cd89df6053823533e06fb1d73c549133bff5f0396170c0e53d9559340717 \
+    --hash=sha256:d20029a60a71a052a24c4db7673bc4de39ab89adbaccbfb5d67987c5d73f424d \
+    --hash=sha256:d413349d565dab74297f2a63e84a097936be69bf8f3b3801f27f380e32040f44 \
+    --hash=sha256:d4a4b147f5dca2a5d325a06a832fb43f345751adfbc63204aec30e0d9ca965a2 \
+    --hash=sha256:d516b3283a758e087841aedb8031549fb41ced08f3db10aa6d2bf32dc042525b \
+    --hash=sha256:d73a585accffa5ae39c17264c36ec3166d2fad7000c780f5ef83b2722afb9dd2 \
+    --hash=sha256:dbd6c97045dad81227c8d040173da044c1de08de64a5ea8b555da4aee1d5fa22 \
+    --hash=sha256:e0618518f282c4ebff60f5e5b1247b6d91bb8b9f4476947563a1e74acc66f3c6 \
+    --hash=sha256:e140ed30ebde76796b686e67c182cff10ea2fbab186fafd1560f74bb5a473a6e \
+    --hash=sha256:e1cfd51e97e13ff3bd047c140764d277fc9b95b7cb5da59e46a47d167adab310 \
+    --hash=sha256:e2ca07fa7d89195ec0865d3d285666286740bfa83d83e5cee204043a31ecc165 \
+    --hash=sha256:e53a384f76b631c3ae5334ce6a52f0baa3a911eb94a4eac7f160079868b716d5 \
+    --hash=sha256:eb283ee99e21ad6443c8cdb06ac5b34b1308c329cbdf03fa02b445363714c799 \
+    --hash=sha256:eb72919d93e3a16fc451d3aa3d4b1698423daca1b382d3d959c9ac51297c12a8 \
+    --hash=sha256:ecb47f183a8025b2aa18b546725c3657e542112ae9c0613a2af79b4fa8d04ad7 \
+    --hash=sha256:f155b3a1b2a5fc89cdc70d47ee5d54e3b75e88efa34982028a35daef9ba00379 \
+    --hash=sha256:f22943b7770483f6ea0721c6b11d022947a98eb0acae14694de034f4d0d38925 \
+    --hash=sha256:f28b2725eb8cce327b9b3ab02415c853011dc55c95832fe90de6bc56f5315f72 \
+    --hash=sha256:f88af53d6ddaf72179ef613ddc905e6f4785f712b49b80b3bef9f3525e6194b4 \
+    --hash=sha256:faea288b6f0ab1902ef08f4ca6de005dccf856c4e0c4f21b8c5fce02d90a1b08 \
+    --hash=sha256:fff610d7bb2256a317bb1e96f0d7862c7aa8076733ee5df0fd41bbe76a24a4f4
+    # via uvicorn
+websockets==17.0.1 \
+    --hash=sha256:02ed63bf26dda9fa27df730a41f6664586c4ee05972c8fb667ce1725b3fd13d3 \
+    --hash=sha256:02f0b037a737d0cb0c33866c97bcd1a0b73170dfbf42d69d8fb86f51002fd5ae \
+    --hash=sha256:038cfad5d5417f8bb09295abe986029a26d22f34bda622ccc79b670efd4dab56 \
+    --hash=sha256:07abc3bd196a48af476a82fd47f3f79a6a3f70937a9f930cef703cfa0c9d83b6 \
+    --hash=sha256:07d78a509c3333f5908c83d7f78144ea68a6c9ec28110f5c54d81d8fcdc262c4 \
+    --hash=sha256:0b52c76b8a870b141b7ca0705289452183ce7a523101954ccfe29a25986a673f \
+    --hash=sha256:10b1587c599fa0f2c89154587c80e0fda98ade6c9fa8c0260a2823fb1800b685 \
+    --hash=sha256:10f461191125c63902ea7394ae9e752b1b5785641850c1d365bb30b0f88bc53f \
+    --hash=sha256:15920057a6b723f84734f0641403bca163a4b176e5af809ee4f0c4a1e75e9fed \
+    --hash=sha256:17ac37716c0244e82c9e384c41653c090b1864c6610224ca3857e7f7b58fce10 \
+    --hash=sha256:18ded646ce98cdd3c0235825b3252f1df55765ba49b616bb10282f758667b4d0 \
+    --hash=sha256:1b363bfd72a52c0658a3154a4cff219f15a474b35a235057d38853bf151acce7 \
+    --hash=sha256:1bdd8c4be420905dd732e00dcd669852d8128cc723efa585a0c0e51adb00a28a \
+    --hash=sha256:1d4cf7e8e5b8b1fa40758ac7524843a00237b124ab217e227542cafcfeb7a946 \
+    --hash=sha256:1df81d174c1561292de9e40b141cafc04f69077272f6c352afe1d743e20810df \
+    --hash=sha256:20a92f78ac8250984ed459faa9ca48c285adbfc0038ddc3fdac6046990a9c9ed \
+    --hash=sha256:22bd00f8bae2bccdb5dbe41e20f58ba44ca9fff0b4b561aaf39099c35da762ed \
+    --hash=sha256:2437d4ca208cc0f246d3a2297ae7474b4ba18261aaf5b9c79c84c031ecf348e1 \
+    --hash=sha256:246927ae9ae06ca0d42a483a4bdb80d4862e1ee5b4cab37c354a5e1ad8356448 \
+    --hash=sha256:2503c7e2a5049a12d5dac917a46d5d52591283a766165b8176bb167560421b38 \
+    --hash=sha256:2604de7228506b13a44a256a9d223943340c0e725af5d367dc068e192b027761 \
+    --hash=sha256:28012a54510fe8301bb893ef143cec30a2780a2d3bc20b7bbdf4379d7a63945d \
+    --hash=sha256:2a855b6dfe21c4d3420be265ae031829ba8ba0be0ea350d9f7c3ef30ae63ebe2 \
+    --hash=sha256:2abb1ba0a5133b7d2ef3c1c9f4b0c1e8a101012dce0b594ab2b2888d9a64820e \
+    --hash=sha256:2b3f3020171202b135ca078e20434977c6b2b02af647130d6980c9e39b9462e3 \
+    --hash=sha256:2bc14b481e05e331811108daa1aeb41a5e237a5564ef2f02ec5a356a0f102f78 \
+    --hash=sha256:2fa2cb465a131c347ba6717a78c887746e73edb1c131d01c982d6ef0d68b82e0 \
+    --hash=sha256:409d93efcaa14f7a99592c5baaef5ec6ca94fba0f5aec1a86f693977c69c9c1c \
+    --hash=sha256:41d6aa06b5ab832aee72fedf47a149535b121ac900b6bb4d3fe14712afac9a79 \
+    --hash=sha256:49266e4488309b38783257293a38298942b9a03aa106fcb45195377a77c0c1e2 \
+    --hash=sha256:4d1d99db29b5444e3982f1ce2ba8a833508ad44b2f1fbd0bd99e81d825c0b461 \
+    --hash=sha256:4d41c0a1d47a478bc432b3b9068097bee1ce0c5b19327ea6f75c2ab34ab1f2fb \
+    --hash=sha256:5033ffe6804dd53afafa7d08e8c3eef2d2431f34d58ca30507a8442dd04a033a \
+    --hash=sha256:53b90c00bc6201ab6695c7ff51a04d0e425514c37515e9eeecd2c1b978ac6c0e \
+    --hash=sha256:54cdcaa56f5d3eafd57058f0fa4a3de93a310b43a3c4699f06efc4c0bd054a5a \
+    --hash=sha256:5508f38c98ac29def9e747b87543b008a58b075df6da70b2cf2e0b47073d33bb \
+    --hash=sha256:55383d8177b3c99fd873ee5db0e0193f4c1dd4a3feaccf1a4a03c1b7cf539cac \
+    --hash=sha256:55b12e47dcee83673a40d07686cfb6f9d6dfc285976ade9463f61d2bef3fad22 \
+    --hash=sha256:5661f868ef191d33dfc6a0cc7c5b3d495f0cc8bb3f8b30d87bda8755c61c95f5 \
+    --hash=sha256:57d2ee9b24b404ce75f3814f92073c0ed88106c950148d2427fe8d25ca254d1f \
+    --hash=sha256:599b03beb77633bffc095334338fad79cafc2b01fbd58953838130a9ae967d7b \
+    --hash=sha256:5baa9bc0dfbae8c507e51c8cf1b6d4628086f7a87bbd3a9952bd5f035451f1cc \
+    --hash=sha256:5f33a649bfcb8312524173cc4bbafa7dbb236e18eee9aa31a1d324ca0ddda28c \
+    --hash=sha256:6740be6d1bab69f08ab52cb15b08f76c143b6fe61c580ba62bd929f3ab7a1d42 \
+    --hash=sha256:6a434e59962a4fb9016bea327e1d14d6cd67670ecfb8942b4f4a0c24036634ce \
+    --hash=sha256:6db9e5bf3649ab506c6ae8a3ac85a00fb1ae3816d75962771b2df8adbc5d40d2 \
+    --hash=sha256:6fd88365da261c53d3e943fb37e0d0721b9cde119f6b2e3fc84369b6ab234d63 \
+    --hash=sha256:7002d5f9e1c3ddd991cdfdbfee18cc8c8b196b2445022892badacd6cb338bbbc \
+    --hash=sha256:70d438268e49f1a4bd096b6b6f7010f3ab48b5db2574dbf7d8c864c46ce7a06a \
+    --hash=sha256:72d7f2a5aeb4e82daa4ee18f125b4277f427033359be5c745ad709608446cc2c \
+    --hash=sha256:733e3cc7171fa1b899edbe725ef9382d0e960657dc1fd933f3281ae910c01dab \
+    --hash=sha256:734d20364dc2cfe03674883cafcf580b6e431c5ce42b476312b9285310230cf9 \
+    --hash=sha256:759adeb5b0c5775b563254ec63b5b79089fc0045b479143a0b1b8c0ebaae1253 \
+    --hash=sha256:769ce7e2acfd9a89f2bed3a9c0da229459516bbc00bd4c9e2ca492c613ae4861 \
+    --hash=sha256:810cb3fb5fa6e447216f4e82d9a85cb8aed0929ae3538153ddfe8a6e3121a58d \
+    --hash=sha256:81ce19c6046ace11da7001781be7317bb1dc389f399af4b2ed962190f76f9add \
+    --hash=sha256:846a4a8b0833e3cad57523d9e3bd50ec8ea05ab9d06c582f82a1340ba096af5f \
+    --hash=sha256:872273e629ca7e3d35f16a2dc6ede84e1d5c831e616b8277de6e4f83114e7c58 \
+    --hash=sha256:8848c207049ad49d318e5f64a3d4d7bb189f8328d0d98e65647788f2a085785c \
+    --hash=sha256:884af729b8ab50486acd94d9768c2b60914bf39b579ebba0a5cb73bfdfd61fd2 \
+    --hash=sha256:8c07f145d0b9e90cbd96035f31fb79199aef4da1872854e36ebeb258e3d57594 \
+    --hash=sha256:8cd3369e42c0246afaf9d669cfc19797e3a49e8c0a639544459c57597108b966 \
+    --hash=sha256:8e387adb0c692c6b5571bdeafc8ac9d1901ea30f10309134780b16ecd35e6605 \
+    --hash=sha256:90246fa9e6cb192a778ce6ce024057ec54317a894db7899c922dcdc1f4cbf6a5 \
+    --hash=sha256:90973a3a00f23afdfd1c9b06fb84289bf0220f247ef8a62501a1967c7af54f7b \
+    --hash=sha256:9493314a99e599163c854fb5900ad7f7ea38c5cb9d9103aa30b3c6b8181c01fa \
+    --hash=sha256:9f7747d3daa41a11f25f7cca5dc988fc51da97b311bed4c9d843860f79779283 \
+    --hash=sha256:a39ce3a7b0e6059be093213d637963101380157bcbad355916738fafb490698d \
+    --hash=sha256:a60fa1a25cca1bcc2bf87b8d6be37a741f0a3239fb5e9cfb7a37173b68ffcf87 \
+    --hash=sha256:a68e604c6d1b0338e46652e2688cbce8096ad9c03548b075fda9e2ea19a9b7dd \
+    --hash=sha256:a8af570fc29cd998a921c7131c8ac81d9434466d6d25300cb12a690fb56a8a08 \
+    --hash=sha256:aadc298969ad229d8e3029fc5cc751fdad286696230f9cf014e90ff9cd8e6ea0 \
+    --hash=sha256:ab56439c9f74c52770690c7b2f616b3bf775cb3920453ee355ac765c032d8bbf \
+    --hash=sha256:ab9f962a5b64a5c3c845d556b7dc4e6fb683f7b67179f8205e814bb2e0213ffe \
+    --hash=sha256:afbce6e3f0fac32dc87c2a0d84869d1a706460d64f39f3889386413e6e4d3d26 \
+    --hash=sha256:b3ff0ad440ad52dda64138f16895f66403f40192365e39b1010e889f289746b0 \
+    --hash=sha256:b580794e926cab7ff42ee4371ef14e0b22cb2bb722a607f77769136468f49a3f \
+    --hash=sha256:b85b960a4507b0714c0a1246d031be9118d908ee974dc085257297a955205f1d \
+    --hash=sha256:b98860aefbd3d9bc8e3c7f0eefb83b11142b16110739c68cd33d3b4d6e84e536 \
+    --hash=sha256:bb31f42ea095ea826463c770829aa188a86c9a5c976b1467cbbf583c811de833 \
+    --hash=sha256:bc0bca48ba24c6c866847fd20478a51dd547fa0ad258dab9615c414ec534bbc0 \
+    --hash=sha256:bd1470d2c53fe53269bf5619da7725d30dd9b9693f1689f7a85eab8dea734442 \
+    --hash=sha256:c09e097d0e46e3c289bedab9a475ae344b70c30ff5646e46af22b4e6fdc97b21 \
+    --hash=sha256:c1bec5d6a19f5fbe87e4940739cfc65e7bb53d8b353e1029b8037a1653b321bc \
+    --hash=sha256:c1c118a6b0e25bfc9a6802075d748fa6321714ffbdf3c88d29d9a0e3c7386c75 \
+    --hash=sha256:c23e532c8a2325a1e7486de8763a60dc43e83f01bcaeca07e3ba79652c156db1 \
+    --hash=sha256:c356dbddab0a529ed7574f78f559d75a223735c321c28f6f587fbf02b11ed301 \
+    --hash=sha256:c38515cb54902f7e97d0239e81ef46c4444f9475f4807fb9bbdb789b4089abcf \
+    --hash=sha256:c395bda8e7d8f51a02e80261fb57127979e5c472675d9a96b2860619ad47da48 \
+    --hash=sha256:c6be9cba65c65cc76dfa3d4619e359ff02a4476c74e179b215236c11a0b32345 \
+    --hash=sha256:cd526c8228e759c1006c4b7c9ac71dc4e925ced1a6a6a5a8e94643709738f63e \
+    --hash=sha256:cddc675ec31bca65473321f9a9794e488b43b3b8de5d02c8ef4810c5d5792163 \
+    --hash=sha256:cffc84ddec6da7f447677266fee2a3c40ecc78172f00752aa1150b8a8d65df1d \
+    --hash=sha256:d41e9845514754a42d1d83b2fca9d27fee2ca7b3b0bee6843ba5a9bb2b6e25ac \
+    --hash=sha256:d69fd559f9f0e8a52d2fce6f04ee143f86e70df0a189cd95164eddac599e810f \
+    --hash=sha256:d7d72843691f50b91127c50688df10cb72ec6f4c4b1d7e2c11ab33b16acf8e51 \
+    --hash=sha256:d9aac6081513f02eac3f8caace800dbfc5c608b69e4a7bef69e414eabfc95aa1 \
+    --hash=sha256:dbfae8e75b342e31fc6fd1a8bbb393b7cbb91d6cfd581650300a94381e7b7e2b \
+    --hash=sha256:e8208f2729cba030ff872a92064c97584eeb9502f53d32a05a0f05d5a17ca6c6 \
+    --hash=sha256:e95e321d0d763f2b6633512605f6112ebd70d5746f3ce05c941909d4a25233f2 \
+    --hash=sha256:e98ec9ec61cce5bc4b8b218322ad090b0994eb060bb04da704c62ef0a3d864e6 \
+    --hash=sha256:eab6de8a98b9a7772cf686d00b4de439fc7efb8ab05ae106ef227291d06f87c5 \
+    --hash=sha256:efe0ae052a8d023b87198921e8a7ce1dc7768816bcd2fbc20df171ac73a04891 \
+    --hash=sha256:f11a398d8170b7ac5000baf7f258dcda579ef3ea744e0cc6a165e0dfbc0d3198 \
+    --hash=sha256:f3fd9a1f87f8f0f3f8e9f9bd0195f7516562d13f5b178db8c5784d1f60b60bed \
+    --hash=sha256:f47b0815af3948ec6a440b3afa02f05b18cc0939549e91b5c677b5d9c2c8472a \
+    --hash=sha256:f991247276797d0c61ab7770bc9791eadc16f683b4d83517f624932adc1a8bab \
+    --hash=sha256:ffad64ce7ad3703d652a3fd9af26238377d24ce52c6ad8ff35d26d82f61f493f
+    # via uvicorn
 
-  function initProjectActions() {
-    if (window.__devfleetProjectActionsBound) return;
-    window.__devfleetProjectActionsBound = true;
-    document.addEventListener('submit', async (event) => {
-      const form = event.target.closest('form.project-action-form');
-      if (!form) return;
-      // One document-level listener covers SPA replacement and dynamic backup forms.
-      event.preventDefault();
-      if (form.dataset.pending === '1') return;
-      form.dataset.pending = '1';
-      const button = form.querySelector('button[type="submit"]') || form.querySelector('button');
-      const action = form.dataset.projectAction || new URL(form.action, location.href).pathname.split('/').pop() || 'action';
-      const slug = new URL(form.action, location.href).pathname.split('/')[2] || '';
-      const originalLabel = button?.textContent || '';
-      const status = form.querySelector('[data-project-action-status]') || document.createElement('span');
-      status.dataset.projectActionStatus = '1'; status.className = 'project-action-status'; status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
-      if (!status.parentElement) form.append(status);
-      if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); button.textContent = `${action.charAt(0).toUpperCase()}${action.slice(1)}…`; }
-      status.textContent = `${action.charAt(0).toUpperCase()}${action.slice(1)} queued…`;
-      try {
-        const body = new URLSearchParams(new FormData(form)); body.set('csrf_token', currentCsrf());
-        const response = await fetch(form.action, { method: 'POST', body, credentials: 'same-origin', headers: { Accept: 'application/json', 'X-DevFleet-UI': '1', 'Idempotency-Key': `project-action:${slug}:${action}` } });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok || !data.operation_id) throw new Error(data.detail || `HTTP ${response.status}`);
-        status.textContent = 'Operation queued. Tracking progress…';
-        const target = `/projects/${encodeURIComponent(slug)}?tab=${encodeURIComponent(new URL(location.href).searchParams.get('tab') || 'overview')}&operation=${encodeURIComponent(data.operation_id)}`;
-        navigate(target);
-      } catch (error) {
-        form.dataset.pending = '0'; status.textContent = `${action.charAt(0).toUpperCase()}${action.slice(1)} failed. ${error.message}`; status.classList.add('error');
-        if (button) { button.disabled = false; button.removeAttribute('aria-busy'); button.textContent = originalLabel; }
-        const detail = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Technical detail'; const pre = document.createElement('pre'); pre.textContent = String(error.stack || error.message || error); detail.append(summary, pre); form.append(detail);
-      }
-    });
-  }
+```
 
-  function initializeView() {
-    syncNavigation();
-    initProjectActions();
-    initEnvironmentWizard();
-    initExistingEnvironmentWizard();
-    initBackupHistory();
-    initOperationProgress();
-    initProjectLogs();
-    initInfrastructure();
-    requestAnimationFrame(() => { if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView(); });
-  }
 
-  function initBackupHistory() {
-    const panel = document.querySelector('[data-backup-history]');
-    if (!panel || panel.dataset.enhanced === '1') return;
-    panel.dataset.enhanced = '1'; const list = panel.querySelector('[data-backup-list]'); const slug = panel.dataset.projectSlug;
-    fetch(`/ui/projects/${encodeURIComponent(slug)}/backups`, { cache: 'no-store', credentials: 'same-origin', headers: { Accept: 'application/json' } })
-      .then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); })
-      .then((data) => {
-        list.replaceChildren(); const backups = data.backups || [];
-        if (!backups.length) { list.textContent = 'No local verified restore points are recorded yet.'; return; }
-        backups.forEach((backup) => {
-          const row = document.createElement('div'); row.className = 'backup-history-row';
-          const details = document.createElement('span'); details.textContent = `${backup.backup_id} · ${backup.status} · ${backup.archive_sha256 || 'no hash'}`;
-          row.append(details);
-          if (backup.status === 'eligible') {
-            const form = document.createElement('form'); form.method = 'post'; form.action = `/projects/${encodeURIComponent(slug)}/restore-backup`; form.className = 'project-action-form';
-            const csrf = document.createElement('input'); csrf.type = 'hidden'; csrf.name = 'csrf_token'; form.append(csrf);
-            [['backup_id', backup.backup_id], ['confirm_restore', 'true']].forEach(([name, value]) => { const input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = value; form.append(input); });
-            const overwrite = document.createElement('label'); overwrite.className = 'checkbox-label'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.name = 'allow_overwrite'; checkbox.value = 'true'; overwrite.append(checkbox, document.createTextNode(' Allow overwrite')); form.append(overwrite);
-            const button = document.createElement('button'); button.type = 'submit'; button.className = 'button ghost'; button.textContent = 'Restore'; form.append(button); row.append(form);
-          }
-          list.append(row);
-        });
-        initProjectActions();
-      }).catch((error) => { list.textContent = `Backup history unavailable: ${error.message}`; });
-  }
+## FILE: source/app/requirements.txt
 
-  function initOperationProgress() {
-    const banner = document.querySelector('.operation-banner[data-operation-id]');
-    if (!banner || banner.dataset.enhanced === '1') return;
-    banner.dataset.enhanced = '1';
-    const id = banner.dataset.operationId;
-    const message = banner.querySelector('[data-operation-message]');
-    const progress = banner.querySelector('[data-operation-progress]');
-    const meta = banner.querySelector('[data-operation-meta]');
-    let timer = null;
-    let retry = 0;
-    const load = async () => {
-      try {
-        const response = await fetch(`/operations/${encodeURIComponent(id)}`, { cache: 'no-store', credentials: 'same-origin', headers: { Accept: 'application/json' } });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const op = await response.json();
-        if (message) message.textContent = op.message || '';
-        if (progress) { progress.style.width = `${Number(op.progress || 0)}%`; }
-         if (meta) meta.textContent = `${op.progress || 0}% · ${op.state || 'unknown'}`;
-         retry = 0;
-         if (!['completed', 'failed', 'cancelled', 'interrupted'].includes(op.state)) timer = setTimeout(load, 1500);
-         else if (banner.dataset.refreshed !== '1') { banner.dataset.refreshed = '1'; timer = setTimeout(() => { const refreshed = new URL(location.href); refreshed.searchParams.delete('operation'); navigate(refreshed.toString(), true); }, 500); }
-       } catch (_) {
-         retry = Math.min(retry + 1, 5); timer = setTimeout(load, Math.min(10000, 500 * (2 ** retry)));
-       }
-    };
-    load();
-    banner._devfleetOperationCleanup = () => { if (timer) clearTimeout(timer); };
-  }
+SHA256: f9a988a58e9e3b9df6e7e78963ec1a074a5642b77fb6541f4463592f6eee6346 | Bytes: 124 | Git mode: 100644
 
-  function initProjectLogs() {
-    const output = document.querySelector('.log-output[data-project-logs]');
-    if (!output || output.dataset.enhanced === '1') return;
-    output.dataset.enhanced = '1';
-    const slug = output.dataset.projectLogs;
-    const controls = document.createElement('div'); controls.className = 'log-controls';
-    const tail = document.createElement('select'); tail.setAttribute('aria-label', 'Log lines');
-    [50, 150, 300, 500].forEach((value) => { const option = new Option(`Last ${value} lines`, value); tail.add(option); });
-    tail.value = localStorage.getItem('devfleet.project-log-tail') || '150';
-    const refresh = document.createElement('button'); refresh.type = 'button'; refresh.className = 'button ghost'; refresh.textContent = 'Refresh';
-    const pause = document.createElement('button'); pause.type = 'button'; pause.className = 'button ghost'; pause.textContent = 'Pause';
-    const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'button ghost'; copy.textContent = 'Copy';
-    controls.append(tail, refresh, pause, copy); output.before(controls);
-    let paused = false; let request = null; let activeController = null;
-    const load = async () => {
-      if (paused || request) return;
-      // Human UI logs use the session-authenticated endpoint.  The machine API
-      // intentionally remains token-protected and must never receive its token
-      // through browser JavaScript.
-      activeController = new AbortController();
-      request = fetchWithTimeout(`/ui/projects/${encodeURIComponent(slug)}/logs?tail=${encodeURIComponent(tail.value)}`, { cache: 'no-store', credentials: 'same-origin', headers: { Accept: 'application/json' }, controller: activeController }, 10000)
-        .then(async (response) => { const data = await response.json().catch(() => ({})); if (response.status === 409) { paused = true; return data; } if (!response.ok) throw new Error(`HTTP ${response.status}`); return data; })
-        .then((data) => { output.textContent = data.logs || 'No logs.'; })
-        .catch((error) => { output.textContent = error.name === 'AbortError' ? 'Log request ended — the runtime changed state or the 10-second timeout was reached.' : `Logs failed: ${error.message}`; })
-        .finally(() => { request = null; });
-      await request;
-    };
-    tail.addEventListener('change', () => { localStorage.setItem('devfleet.project-log-tail', tail.value); load(); });
-    refresh.addEventListener('click', load);
-    pause.addEventListener('click', () => { paused = !paused; pause.textContent = paused ? 'Resume' : 'Pause'; if (!paused) load(); });
-    copy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(output.textContent); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy'; }, 1200); } catch (_) { copy.textContent = 'Copy unavailable'; } });
-    load();
-    output._devfleetLogCleanup = () => { paused = true; activeController?.abort('navigation-or-state-change'); };
-  }
+```
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+jinja2==3.1.6
+python-multipart==0.0.32
+PyYAML==6.0.2
+httpx==0.28.1
+psutil==7.0.0
 
-  function initInfrastructure() {
-  const nodesHost = document.getElementById('cluster-nodes');
-  const table = document.querySelector('#container-table tbody');
-  const nodeFilter = document.getElementById('container-node-filter');
-  const refreshSelect = document.getElementById('refresh-interval');
-  const refreshButton = document.getElementById('refresh-cluster');
-  const updated = document.getElementById('cluster-updated');
-  const details = document.getElementById('container-details');
-  const detailsTitle = document.getElementById('container-details-title');
-  const inspect = document.getElementById('container-inspect');
-  const logs = document.getElementById('container-logs');
-  const closeDetails = document.getElementById('close-container-details');
-  if (!nodesHost && !table) return;
-  window.__devfleetStopInfrastructure?.();
+```
 
-  const savedInterval = localStorage.getItem('devfleet.refresh.interval');
-  if (refreshSelect && savedInterval && [...refreshSelect.options].some((o) => o.value === savedInterval)) refreshSelect.value = savedInterval;
-  let timer = null;
-  let cluster = { nodes: [], containers: [] };
-  try { const seed = JSON.parse(document.getElementById('devfleet-cluster-data')?.textContent || '{}'); if (seed && typeof seed === 'object') cluster = seed; } catch (_) { /* retain empty snapshot */ }
 
-  const text = (value) => document.createTextNode(String(value ?? ''));
-  const cell = (value, className) => { const el = document.createElement('td'); if (className) el.className = className; el.append(text(value)); return el; };
-  const metric = (label, value) => {
-    const el = document.createElement('div'); el.className = 'metric';
-    const nameEl = document.createElement('span'); nameEl.className = 'metric-label'; nameEl.append(text(label));
-    const valueEl = document.createElement('strong'); valueEl.append(text(value));
-    el.append(nameEl, valueEl); return el;
+## FILE: source/app/static/app.js
+
+SHA256: 8e100c7cc4c96993212aaabfc30e7ed1bbc1167b8f2eb5db840671aee6b0599a | Bytes: 35603 | Git mode: 100644
+
+```
+(() => {
+  const currentCsrf = () => document.getElementById('devfleet-csrf')?.dataset.token || '';
+  const fetchWithTimeout = async (url, options = {}, timeoutMs = 10000) => {
+    const controller = options.controller || new AbortController();
+    const timer = setTimeout(() => controller.abort('timeout'), timeoutMs);
+    try { return await fetch(url, { ...options, controller: undefined, signal: controller.signal }); }
+    finally { clearTimeout(timer); }
   };
+  const cleanupProjectRequests = () => {
+    document.querySelectorAll('[data-project-logs]').forEach((node) => node._devfleetLogCleanup?.());
+    document.querySelectorAll('.operation-banner').forEach((node) => node._devfleetOperationCleanup?.());
+  };
+  // The UI endpoint is optional; the same-origin operation endpoint remains the source of truth.
 
-  function renderNodes() {
-    if (!nodesHost) return;
-    nodesHost.replaceChildren();
-    (cluster.nodes || []).forEach((node) => {
-      const card = document.createElement('article'); card.className = 'node-card';
-      const heading = document.createElement('div'); heading.className = 'node-heading';
-      const title = document.createElement('h3'); title.append(text(node.friendly_name || node.id));
-      const online = node.status === 'online' && node.reachable !== false;
-      const badge = document.createElement('span'); badge.className = `status-badge ${online ? 'ok' : 'bad'}`; badge.append(text(online ? 'Available' : 'Offline — unavailable'));
-      heading.append(title, badge); card.append(heading);
-      const sub = document.createElement('p'); sub.className = 'muted'; sub.append(text(`${node.node || node.id} · ${node.role || 'node'}`)); card.append(sub);
-      const metrics = document.createElement('div'); metrics.className = 'metrics';
-      const system = node.system || {}; const docker = node.docker || {};
-      metrics.append(metric('CPU', `${system.cpu_percent ?? '—'}%`), metric('Memory', `${system.memory_percent ?? '—'}%`), metric('Disk free', `${system.disk_free_gb ?? '—'} GB`), metric('Containers', String((node.containers || []).length)));
-      card.append(metrics);
-      const runtime = document.createElement('p'); runtime.className = 'node-runtime';
-      runtime.append(text(node.role === 'vault' ? `Vault listener: ${(node.vault || {}).status || 'unknown'}` : `Docker: ${docker.ok ? (docker.mode || 'ready') : 'unavailable'}`)); card.append(runtime);
-      if (node.error) { const error = document.createElement('p'); error.className = 'error'; error.append(text(node.error)); card.append(error); }
-      if (node.role !== 'vault' && !online) { const note = document.createElement('p'); note.className = 'muted'; note.append(text('Destination selection disabled until this node is reachable.')); card.append(note); }
-      nodesHost.append(card);
+  // Navigation is deliberately limited to same-origin document links. Forms,
+  // API links, external links, downloads, and modified clicks keep browser semantics.
+  const main = document.querySelector('.app-main');
+  const viewCache = new Map();
+  let currentUrl = location.href;
+  const isDocumentLink = (link, event) => {
+    if (!link || !link.href || event.defaultPrevented || event.button !== 0 ||
+        event.metaKey || event.ctrlKey || event.shiftKey || event.altKey ||
+        link.target && link.target !== '_self' || link.hasAttribute('download') ||
+        link.closest('form') || link.href.startsWith(`${location.origin}/api/`)) return false;
+    const url = new URL(link.href, location.href);
+    return url.origin === location.origin && url.protocol === location.protocol &&
+      url.hash === '' || (url.origin === location.origin && url.protocol === location.protocol &&
+      url.hash !== '' && url.pathname + url.search !== location.pathname + location.search);
+  };
+  const cacheCurrentView = () => {
+    if (main) viewCache.set(currentUrl, { html: main.innerHTML, title: document.title, bodyClass: document.body.className });
+  };
+  const syncNavigation = () => {
+    const params = new URL(location.href).searchParams;
+    const view = params.get('view') || (location.pathname.startsWith('/projects/') ? 'project' : 'overview');
+    document.querySelectorAll('.primary-nav a').forEach((link) => {
+      const linkView = new URL(link.href, location.href).searchParams.get('view');
+      link.classList.toggle('active', linkView === view || (view === 'project' && linkView === 'projects'));
     });
-    if (!cluster.nodes?.length) { const empty = document.createElement('p'); empty.className = 'muted'; empty.append(text('No cluster data returned.')); nodesHost.append(empty); }
-  }
-
-  function renderNodeFilter() {
-    if (!nodeFilter) return;
-    const current = nodeFilter.value || 'all';
-    const options = [{ id: 'all', label: 'All nodes' }, ...(cluster.nodes || []).filter((n) => n.role !== 'vault').map((n) => ({ id: n.id, label: n.friendly_name || n.id }))];
-    nodeFilter.replaceChildren();
-    options.forEach((item) => { const option = document.createElement('option'); option.value = item.id; option.append(text(item.label)); nodeFilter.append(option); });
-    nodeFilter.value = options.some((o) => o.id === current) ? current : 'all';
-  }
-
-  function renderContainers() {
-    if (!table || !nodeFilter) return;
-    table.replaceChildren();
-    const filter = nodeFilter.value || 'all';
-    const rows = (cluster.containers || []).filter((item) => filter === 'all' || item.node_id === filter);
-    if (!rows.length) { const row = document.createElement('tr'); const empty = cell('No containers are registered on this node. A healthy empty node is different from an unavailable node.', 'muted'); empty.colSpan = 8; row.append(empty); table.append(row); return; }
-    rows.forEach((item) => {
-      const row = document.createElement('tr');
-      row.append(cell(item.node_name || item.node_id), cell(item.name), cell(item.image), cell(`${item.state} · ${item.status}`), cell(item.cpu_percent), cell(`${item.memory_usage} (${item.memory_percent})`), cell(item.network_io));
-      const actions = document.createElement('td'); actions.className = 'container-actions';
-      ['start','stop','restart','pause','unpause'].forEach((action) => {
-        const button = document.createElement('button'); button.type = 'button'; button.className = 'container-action'; button.dataset.action = action; button.dataset.ref = item.id; button.dataset.scope = item.control_scope; button.append(text(action)); actions.append(button);
-      });
-      const inspectButton = document.createElement('button'); inspectButton.type = 'button'; inspectButton.className = 'container-inspect'; inspectButton.dataset.ref = item.id; inspectButton.dataset.name = item.name; inspectButton.dataset.scope = item.control_scope; inspectButton.append(text('details')); actions.append(inspectButton);
-      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'container-action danger'; remove.dataset.action = 'remove'; remove.dataset.ref = item.id; remove.dataset.scope = item.control_scope; remove.append(text('remove')); actions.append(remove);
-      row.append(actions); table.append(row);
-    });
-  }
-
-  async function refreshCluster() {
-    if (refreshButton) refreshButton.disabled = true;
+  };
+  const applyDocument = (doc, url, replace = false) => {
+    if (!main) return;
+    cacheCurrentView();
+    const nextMain = doc.querySelector('.app-main');
+    if (!nextMain) { location.href = url; return; }
+    cleanupProjectRequests(); window.__devfleetStopInfrastructure?.();
+    main.replaceChildren(...Array.from(nextMain.childNodes).map((node) => node.cloneNode(true)));
+    document.title = doc.title;
+    document.body.className = doc.body.className;
+    const nextCsrf = doc.getElementById('devfleet-csrf')?.dataset.token;
+    if (nextCsrf !== undefined) document.getElementById('devfleet-csrf')?.setAttribute('data-token', nextCsrf);
+    if (replace) history.replaceState({}, '', url); else history.pushState({}, '', url);
+    currentUrl = location.href;
+    viewCache.set(currentUrl, { html: main.innerHTML, title: document.title, bodyClass: document.body.className });
+    initializeView();
+    requestAnimationFrame(() => { if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView(); });
+  };
+  const navigate = async (url, replace = false) => {
+    cacheCurrentView();
+    const cached = viewCache.get(url);
+    if (cached && main) {
+      cleanupProjectRequests(); window.__devfleetStopInfrastructure?.();
+      main.innerHTML = cached.html; document.title = cached.title; document.body.className = cached.bodyClass;
+      if (replace) history.replaceState({}, '', url); else history.pushState({}, '', url);
+      currentUrl = location.href; initializeView();
+      return;
+    }
     try {
-      const response = await fetch('/cluster/status', { cache: 'no-store', credentials: 'same-origin' });
+      const response = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'text/html' } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      cluster = await response.json(); renderNodes(); renderNodeFilter(); renderContainers();
-      if (updated) updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
-    } catch (error) {
-      if (updated) updated.textContent = `Refresh failed: ${error.message}`;
-    } finally { if (refreshButton) refreshButton.disabled = false; }
-  }
+      applyDocument(await response.text().then((html) => new DOMParser().parseFromString(html, 'text/html')), url, replace);
+    } catch (_) { location.href = url; }
+  };
+  document.addEventListener('click', (event) => {
+    const link = event.target.closest('a');
+    if (!isDocumentLink(link, event)) return;
+    const url = new URL(link.href, location.href);
+    if (url.href === location.href) return;
+    event.preventDefault(); navigate(url.href);
+  });
+  window.addEventListener('popstate', () => navigate(location.href, true));
+  syncNavigation();
 
-  function scheduleRefresh() {
-    if (!refreshSelect) return;
-    if (timer) clearInterval(timer); timer = null;
-    localStorage.setItem('devfleet.refresh.interval', refreshSelect.value);
-    const seconds = Number(refreshSelect.value);
-    if (seconds > 0) timer = setInterval(refreshCluster, seconds * 1000);
-  }
-
-  async function showDetails(ref, name, scope) {
-    details.hidden = false; detailsTitle.textContent = `${name || ref} · details`; inspect.textContent = 'Loading inspect…'; logs.textContent = 'Loading logs…';
-    const prefix = scope === 'peer' ? '/peer' : '';
-    try { const r = await fetch(`${prefix}/containers/${encodeURIComponent(ref)}/inspect`, { cache: 'no-store' }); if (!r.ok) throw new Error(`HTTP ${r.status}`); inspect.textContent = JSON.stringify(await r.json(), null, 2); } catch (e) { inspect.textContent = `Inspect failed: ${e.message}`; }
-    try { const r = await fetch(`${prefix}/containers/${encodeURIComponent(ref)}/logs?tail=200`, { cache: 'no-store' }); if (!r.ok) throw new Error(`HTTP ${r.status}`); logs.textContent = (await r.json()).logs || 'No logs.'; } catch (e) { logs.textContent = `Logs failed: ${e.message}`; }
-  }
-
-  document.addEventListener('click', async (event) => {
-    const inspectButton = event.target.closest('.container-inspect');
-    if (inspectButton) return showDetails(inspectButton.dataset.ref, inspectButton.dataset.name, inspectButton.dataset.scope);
-    const actionButton = event.target.closest('.container-action');
-    if (!actionButton) return;
-    const action = actionButton.dataset.action; const ref = actionButton.dataset.ref; const scope = actionButton.dataset.scope;
-    if (action === 'remove' && !window.confirm('Remove this container? This cannot be undone.')) return;
-    actionButton.disabled = true;
-    try {
-      const prefix = scope === 'peer' ? '/peer' : '';
-       const body = new URLSearchParams({ csrf_token: currentCsrf() }); if (action === 'remove') body.set('confirm_remove', 'true');
-      const response = await fetch(`${prefix}/containers/${encodeURIComponent(ref)}/${action}`, { method: 'POST', body, credentials: 'same-origin' });
-      if (!response.ok) throw new Error((await response.text()).slice(-500));
-      await refreshCluster();
-    } catch (error) { window.alert(`Container action failed: ${error.message}`); }
-    finally { actionButton.disabled = false; }
+  document.querySelectorAll('form[method="post"]').forEach((form) => {
+    if (form.querySelector('input[name="csrf_token"]')) return;
+    const input = document.createElement('input');
+    input.type = 'hidden'; input.name = 'csrf_token'; input.value = currentCsrf();
+    form.prepend(input);
   });
 
-  nodeFilter?.addEventListener('change', renderContainers);
-  refreshButton?.addEventListener('click', refreshCluster);
-  refreshSelect?.addEventListener('change', scheduleRefresh);
-  closeDetails?.addEventListener('click', () => { details.hidden = true; });
-  renderNodes(); renderNodeFilter(); renderContainers();
-  const shouldRefresh = new URL(location.href).searchParams.get('view') === 'infrastructure';
-  if (shouldRefresh) refreshCluster();
-  scheduleRefresh();
-  window.__devfleetStopInfrastructure = () => { if (timer) clearInterval(timer); timer = null; };
-  }
-
-  initializeView();
-})();
-
-```
-
-
-## FILE: source/app/static/style.css
-
-SHA256: 9e95e0103e58d5d59f47b099381beb3f0e9af60b34a9a30fe00c121c04833128 | Bytes: 20663 | Git mode: 100644
-
-```
-:root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0b1020;color:#f3f6ff;--bg:#0b1020;--surface:#131a2c;--surface-2:#18233a;--line:#2a3857;--muted:#8e9bb7;--text:#f3f6ff;--blue:#5b8cff;--blue-2:#2e63d2;--green:#35d49a;--yellow:#f0c96a;--red:#ed6b7a;--shadow:0 18px 50px rgba(0,0,0,.22)}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% -10%,#1c2b55 0,#0b1020 42%);color:var(--text)}a{color:#a9c5ff;text-decoration:none}a:hover{color:#d6e3ff}button,.button,input,select{font:inherit}button,.button{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid transparent;border-radius:9px;padding:10px 14px;background:var(--blue-2);color:#fff;cursor:pointer;font-weight:650;text-decoration:none;transition:.18s ease}button:hover,.button:hover{filter:brightness(1.12);transform:translateY(-1px)}button:disabled,.button.disabled{opacity:.45;cursor:not-allowed;transform:none;filter:none}.button.ghost,button.ghost{background:#172542;border-color:#3a4d74;color:#d9e5ff}.button.danger,button.danger{background:#8f3046;border-color:#c2576a}.icon-button{padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#172542;color:#a9c5ff}.app-shell{display:flex;min-height:100vh}.sidebar{position:sticky;top:0;width:248px;height:100vh;display:flex;flex-direction:column;padding:26px 16px;border-right:1px solid rgba(89,111,160,.24);background:rgba(10,16,32,.82);backdrop-filter:blur(16px)}.brand{display:flex;align-items:center;gap:11px;padding:0 10px 34px;color:var(--text)}.brand-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#709bff,#385fd0);font-weight:800;font-size:.8rem;box-shadow:0 8px 24px rgba(58,102,220,.35)}.brand strong,.brand small{display:block}.brand small{margin-top:3px;color:var(--muted);font-size:.68rem}.primary-nav{display:grid;gap:5px}.primary-nav a{display:flex;align-items:center;gap:12px;padding:12px 13px;border-radius:9px;color:#aebbd5;font-size:.91rem}.primary-nav a span{width:18px;text-align:center;color:#8295bc}.primary-nav a:hover,.primary-nav a.active{background:#1a2948;color:#fff}.primary-nav a.active span{color:#78a1ff}.sidebar-footer{margin-top:auto;display:grid;gap:16px;padding:15px 10px 0;border-top:1px solid rgba(89,111,160,.22)}.node-presence{display:flex;align-items:center;gap:8px}.node-presence strong,.node-presence small{display:block}.node-presence small{margin-top:3px;color:var(--muted);font-size:.68rem}.presence-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(53,212,154,.13)}.version-label{color:#63708b;font-size:.68rem}.app-main{width:min(100%,1460px);margin:0 auto;padding:0 42px 70px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:22px;padding:34px 0 30px}.topbar h1{margin:4px 0 0;font-size:1.85rem;letter-spacing:-.03em}.topbar-actions{display:flex;align-items:center;gap:12px}.connection-pill{display:flex;align-items:center;gap:8px;padding:9px 13px;border:1px solid #2b4866;border-radius:999px;background:rgba(24,40,68,.55);color:#c4d4f1;font-size:.78rem}.eyebrow{margin:0;color:#7296ed;font-size:.68rem;font-weight:800;letter-spacing:.13em}.muted{color:var(--muted)}.error{color:#ff9daa}.danger-text{color:#ff8796}.hero-grid,.content-grid,.stats-grid,.node-grid,.project-card-grid,.summary-grid,.details-grid{display:grid;gap:16px}.hero-grid{grid-template-columns:minmax(0,1.6fr) minmax(280px,.8fr)}.content-grid.two-thirds{grid-template-columns:minmax(0,1.35fr) minmax(280px,.8fr)}.stats-grid{grid-template-columns:repeat(4,minmax(0,1fr));margin:18px 0}.panel,.hero-card,.health-card,.project-card,.stat-card,.empty-state{border:1px solid var(--line);border-radius:15px;background:linear-gradient(145deg,rgba(22,31,53,.96),rgba(15,23,40,.96));box-shadow:var(--shadow)}.panel{padding:22px;margin:16px 0}.hero-card{min-height:250px;padding:34px;background:linear-gradient(130deg,#203c7a,#17294e 57%,#111b31)}.hero-card h2{max-width:580px;margin:12px 0 10px;font-size:2.25rem;line-height:1.08;letter-spacing:-.04em}.hero-card p{max-width:610px;color:#b8c9e8;line-height:1.6}.hero-actions,.quick-actions,.card-actions,.quick-links,.action-stack,.actions{display:flex;align-items:center;flex-wrap:wrap;gap:9px}.hero-actions{margin-top:28px}.health-card{padding:24px}.card-heading,.section-heading,.project-card-top,.project-hero-row{display:flex;align-items:center;justify-content:space-between;gap:14px}.icon-tile{display:grid;place-items:center;width:38px;height:38px;border-radius:11px;font-weight:800}.icon-tile.green{background:rgba(53,212,154,.14);color:var(--green)}.health-card .card-heading{justify-content:flex-start}.health-card h3{margin:0}.health-score{margin:34px 0 7px;color:var(--green);font-size:1.65rem;font-weight:750}.health-card a{display:block;margin-top:21px;font-weight:650}.stat-card{display:grid;gap:5px;padding:18px 20px}.stat-card strong{font-size:1.75rem;letter-spacing:-.03em}.stat-card small,.stat-label{color:var(--muted);font-size:.75rem}.stat-label{color:#9eb2d9;text-transform:uppercase;letter-spacing:.08em;font-weight:700}.section-heading{margin-bottom:18px}.section-heading h2,.page-intro h2,.panel h2{margin:4px 0 0;font-size:1.28rem;letter-spacing:-.025em}.project-list{display:grid}.project-row{display:flex;align-items:center;gap:12px;padding:13px 5px;border-bottom:1px solid rgba(67,87,127,.35)}.project-row:last-child{border-bottom:0}.project-avatar{display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:10px;background:#263a68;color:#bcd0ff;font-weight:800}.project-avatar.large{width:44px;height:44px;font-size:1.1rem}.project-avatar.huge{width:64px;height:64px;font-size:1.45rem}.project-row-copy{display:grid;gap:4px;min-width:0;flex:1}.project-row-copy strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.project-row-copy small{color:var(--muted);font-size:.76rem}.chevron{color:#8094be;font-size:1.35rem}.status-badge{display:inline-flex;align-items:center;width:max-content;border-radius:999px;padding:4px 9px;font-size:.68rem;font-weight:750;text-transform:capitalize;white-space:nowrap}.status-badge.ok{background:rgba(53,212,154,.14);color:#66e2b2}.status-badge.warn{background:rgba(240,201,106,.14);color:#f3d47e}.status-badge.bad{background:rgba(237,107,122,.14);color:#ff9aa6}.activity-row{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid rgba(67,87,127,.35)}.activity-row:last-child{border-bottom:0}.activity-row span:nth-child(2){display:grid;gap:3px;min-width:0;flex:1}.activity-row small,.activity-row time{color:var(--muted);font-size:.73rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.activity-row time{max-width:125px}.activity-dot{display:inline-block;width:8px;height:8px;flex:none;border-radius:50%}.activity-dot.ok{background:var(--green)}.activity-dot.warn{background:var(--yellow)}.activity-dot.bad{background:var(--red)}.page-intro{display:flex;align-items:end;justify-content:space-between;gap:20px;margin:8px 0 25px}.page-intro h2{font-size:2rem}.page-intro p{margin:9px 0 0}.project-card-grid{grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}.project-card{padding:20px}.project-card-top{align-items:flex-start}.project-card-top h3{margin:2px 0 4px}.project-card-top>div{flex:1}.project-facts,.environment-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:22px 0;padding:13px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.project-facts div,.environment-summary div,.summary-grid div{display:grid;gap:5px}.project-facts small,.environment-summary small,.summary-grid small{color:var(--muted);font-size:.7rem}.project-facts strong,.environment-summary strong,.summary-grid strong{font-size:.82rem}.project-summary{min-height:22px;font-size:.8rem}.wizard-panel{scroll-margin-top:20px}.wizard-form{display:grid;gap:23px}.form-step{display:grid;grid-template-columns:32px 1fr;gap:14px;padding-bottom:21px;border-bottom:1px solid var(--line)}.step-number{display:grid;place-items:center;width:27px;height:27px;border-radius:50%;background:#263e78;color:#c9d9ff;font-size:.76rem;font-weight:800}.form-step h3{margin:2px 0 13px;font-size:.96rem}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:13px}.form-grid label,.environment-form label,.danger-form label{display:grid;gap:6px;color:#b8c8e3;font-size:.78rem}.checkbox-label{display:flex!important;align-items:center;grid-template-columns:none!important}.checkbox-label input{width:auto}input,select{width:100%;padding:10px 11px;border:1px solid #3d4e73;border-radius:8px;background:#0e172a;color:#f4f7ff;outline:none}input:focus,select:focus{border-color:#70a0ff;box-shadow:0 0 0 3px rgba(91,140,255,.15)}.review-note{display:grid;gap:5px;padding:13px 15px;border:1px solid #3a4e78;border-radius:10px;background:rgba(28,48,88,.45);color:#c8d5ed;font-size:.78rem}.review-note span{color:var(--muted);line-height:1.5}.form-advanced{margin:0}.project-hero{margin:0 0 18px;padding:10px 0}.back-link{display:inline-block;margin-bottom:22px;color:#9bb8f7;font-size:.82rem}.project-hero-row{justify-content:flex-start}.project-hero-row>div:nth-child(2){flex:1}.project-hero h2{margin:4px 0;font-size:2rem;letter-spacing:-.04em}.hero-status{display:grid;justify-items:end;gap:8px}.hero-status small{color:var(--muted);font-size:.74rem}.quick-actions{margin-top:23px}.tabs{display:flex;gap:22px;margin:0 -2px 19px;border-bottom:1px solid var(--line)}.tabs a{padding:11px 3px;color:var(--muted);font-size:.82rem;font-weight:700;border-bottom:2px solid transparent}.tabs a.active,.tabs a:hover{color:#dce7ff;border-color:#6f9bff}.environment-form{display:grid;gap:15px;max-width:520px}.action-stack{display:grid;justify-items:start;align-items:start}.action-stack form{width:100%}.action-stack button{width:100%;justify-content:flex-start}.danger-panel{border-color:#6c3348;background:linear-gradient(145deg,rgba(56,27,47,.75),rgba(25,20,38,.95))}.danger-form{display:grid;gap:13px}.advanced{margin-top:14px;color:#a9bce0}.advanced summary{cursor:pointer;color:#8fa8d7;font-size:.76rem;font-weight:700}.advanced pre,pre{white-space:pre-wrap;word-break:break-word;max-height:430px;overflow:auto}.advanced pre{margin:10px 0 0;padding:13px;border:1px solid rgba(67,87,127,.5);border-radius:8px;background:#0a1222;color:#aebed9;font-size:.7rem}.summary-grid{grid-template-columns:repeat(4,1fr);margin:4px 0 2px}.node-grid{grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}.node-card{margin:0;padding:17px;border:1px solid var(--line);border-radius:12px;background:#111b30}.node-heading{display:flex;align-items:center;justify-content:space-between;gap:9px}.node-heading h3{margin:0;font-size:.96rem}.node-card .metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:15px 0}.metric{padding:9px;border-radius:7px;background:#0d1629}.metric-label{display:block;color:var(--muted);font-size:.68rem}.metric strong{font-size:.88rem}.node-runtime{margin:0;padding-top:10px;border-top:1px solid var(--line);color:#b7c8e7;font-size:.76rem}.container-panel{overflow:hidden}.monitor-controls{display:flex;align-items:end;gap:9px}.monitor-controls label{display:grid;gap:5px;color:var(--muted);font-size:.72rem}.monitor-controls select{padding:9px}.table-wrap{overflow:auto}.container-panel table{width:100%;min-width:950px;border-collapse:collapse}.container-panel th,.container-panel td{padding:11px 9px;border-bottom:1px solid rgba(67,87,127,.4);text-align:left;vertical-align:top;font-size:.75rem}.container-panel th{color:#96acd5;font-size:.67rem;letter-spacing:.08em;text-transform:uppercase}.container-actions{display:flex;flex-wrap:wrap;gap:5px}.container-actions button{padding:6px 8px;font-size:.68rem}.container-details{margin-top:18px}.details-grid{grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}.operation-banner{display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:13px;margin:0 0 18px;padding:14px 16px;border:1px solid #385da1;border-radius:12px;background:#15284d}.operation-banner.failed{border-color:#8d4054;background:#3a1e32}.operation-banner.complete{border-color:#2d8b6b;background:#163d39}.operation-icon{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#2d5ab0;font-weight:800}.operation-banner.failed .operation-icon{background:#9c3d55}.operation-banner.complete .operation-icon{background:#238568}.operation-copy{display:grid;gap:6px}.operation-copy span{color:#b8c9e8;font-size:.78rem}.operation-meta{text-align:right;color:#adbfdf;font-size:.72rem}.progress-track{height:5px;overflow:hidden;border-radius:99px;background:#0d172a}.progress-track span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#5688ff,#65d4bb)}.operation-details{margin:0}.operation-row{display:flex;align-items:flex-start;gap:13px;padding:16px 0;border-bottom:1px solid var(--line)}.operation-row:last-child{border-bottom:0}.operation-main{flex:1}.operation-main p{margin:5px 0 10px;color:var(--muted);font-size:.78rem}.operation-row .advanced{margin:0}.activity-panel{padding:22px}.empty-state{text-align:center;padding:45px 20px;color:var(--muted)}.empty-state h3{color:var(--text)}.code,code{padding:3px 6px;border-radius:5px;background:#0d1628;color:#b9d0ff;font-size:.78rem}
-@media(max-width:980px){.sidebar{width:205px}.app-main{padding:0 24px 60px}.hero-grid,.content-grid.two-thirds{grid-template-columns:1fr}.stats-grid{grid-template-columns:repeat(2,1fr)}.summary-grid{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:680px){.app-shell{display:block}.sidebar{position:relative;width:auto;height:auto;padding:15px 16px;border-right:0;border-bottom:1px solid rgba(89,111,160,.24)}.brand{padding:0 0 15px}.primary-nav{display:flex;overflow:auto}.primary-nav a{padding:9px 11px;white-space:nowrap}.sidebar-footer{display:none}.app-main{padding:0 15px 45px}.topbar{align-items:flex-start;flex-direction:column;padding:23px 0}.topbar-actions{width:100%;justify-content:space-between}.topbar h1{font-size:1.55rem}.hero-card{padding:25px 21px}.hero-card h2{font-size:1.8rem}.stats-grid{gap:9px}.stat-card{padding:14px}.stat-card strong{font-size:1.35rem}.project-card-grid{grid-template-columns:1fr}.project-facts,.environment-summary{grid-template-columns:1fr 1fr}.project-hero-row{align-items:flex-start;flex-wrap:wrap}.hero-status{margin-left:78px;justify-items:start}.quick-actions .button,.quick-actions form{flex:1 1 auto}.operation-banner{grid-template-columns:auto 1fr}.operation-meta{grid-column:2;text-align:left}.operation-details{grid-column:2}.page-intro{align-items:flex-start;flex-direction:column}.page-intro h2{font-size:1.65rem}.section-heading{align-items:flex-start;flex-direction:column}.monitor-controls{width:100%;align-items:stretch}.monitor-controls label{flex:1}.monitor-controls button{align-self:end}.form-step{grid-template-columns:25px 1fr}.summary-grid{grid-template-columns:1fr 1fr}.tabs{gap:14px;overflow:auto}.tabs a{white-space:nowrap}}
-/* 1.2.0 accessibility, advanced-mode, and runtime-state additions */
-.icon-sprite{position:absolute;width:0;height:0;overflow:hidden}.primary-nav a svg{width:18px;height:18px;flex:none;color:#8295bc}.primary-nav a:hover svg,.primary-nav a.active svg{color:#78a1ff}.status-badge.neutral{background:rgba(142,155,183,.16);color:#b6c1d6}.advanced{display:none}.advanced-mode .advanced{display:block}.preference-panel{display:flex;align-items:center;justify-content:space-between;gap:14px}.preference-toggle{color:#c8d5ed!important}.help-text{font-size:.72rem;margin:.35rem 0 0}.logs-panel .log-output{min-height:280px;margin:0;padding:16px;border:1px solid var(--line);border-radius:10px;background:#091120;color:#c7d7f3;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.success{color:#66e2b2}.warning{color:#f3d47e}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}.safety-list{display:grid;gap:5px;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}.safety-list p{margin:0;color:#c6d3e9;font-size:.8rem}.danger-panel{position:relative}.button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid #9ab8ff;outline-offset:2px}
-/* DevFleet login landing page */
-.login-page{min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 15% 15%,rgba(67,118,255,.18),transparent 38%),#08101f;color:#eef4ff}
-.login-shell{width:min(920px,calc(100% - 32px));display:grid;grid-template-columns:1fr minmax(320px,420px);gap:48px;align-items:center}
-.login-brand h1{font-size:clamp(3rem,8vw,6rem);letter-spacing:-.07em;margin:.1em 0}.login-brand>p:not(.eyebrow){max-width:34rem;color:#a7b7d4;font-size:1.15rem;line-height:1.6}.eyebrow{color:#71a3ff;font-size:.72rem;font-weight:800;letter-spacing:.16em}
-.login-card{background:rgba(18,31,56,.92);border:1px solid rgba(141,174,232,.25);border-radius:20px;padding:32px;box-shadow:0 28px 80px rgba(0,0,0,.35)}.login-card h2{margin:.25rem 0 1.5rem}.login-card label{display:block;margin:1rem 0 .35rem;color:#c6d3e8}.login-card input:not([type=checkbox]){width:100%;box-sizing:border-box;border:1px solid #41577d;border-radius:9px;background:#0b1528;color:#fff;padding:.75rem}.login-remember{display:flex!important;align-items:center;gap:.5rem;font-size:.9rem}.login-submit{width:100%;margin-top:1rem}.login-error{padding:.7rem;border-radius:8px;background:#4b1d2a;color:#ffb8c4}.login-footer{text-align:center;color:#8da0bf;margin:1.5rem 0 0;font-size:.85rem}
-@media (max-width:720px){.login-shell{grid-template-columns:1fr;gap:18px}.login-brand{text-align:center}.login-brand h1{font-size:4rem}}
-.inline-form{display:inline-flex;margin:0}.inline-form button{font:inherit}
-.custom-resource-controls{margin:0;padding:15px;border:1px solid var(--line);border-radius:10px;background:rgba(12,22,41,.45)}.custom-resource-controls legend{padding:0 7px;color:#b9cbed;font-size:.8rem;font-weight:750}.wizard-review{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 15px;border:1px solid #4669a4;border-radius:10px;background:rgba(28,48,88,.4)}.wizard-review div{display:grid;gap:5px}.wizard-review span:not(.status-badge){color:#b8c9e8;font-size:.78rem;line-height:1.45}.workspace-link{white-space:nowrap}.resource-allocation{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:16px 0;padding:15px;border:1px solid var(--line);border-radius:10px;background:rgba(12,22,41,.45)}.resource-allocation div{display:grid;gap:4px}.resource-allocation small{color:var(--muted);font-size:.7rem}.resource-allocation strong{font-size:.82rem}.resource-telemetry{font-size:.75rem}.workspace-readiness-note,.project-action-status{display:block;margin-top:7px;color:var(--muted);font-size:.72rem;line-height:1.35}.project-action-status.error{color:#ff9daa}.project-action-form details{margin-top:8px}@media(max-width:680px){.resource-allocation{grid-template-columns:1fr 1fr}}
-/* v1.2.11 authoritative stopped/transitioning project states */
-.project-state-banner{display:flex;align-items:center;justify-content:space-between;gap:22px;margin:0 0 22px;padding:18px 20px;border:2px solid #7185a9;border-radius:14px;background:#17223a;box-shadow:var(--shadow)}.project-state-banner strong{display:block;font-size:1.1rem;letter-spacing:.01em}.project-state-banner p{max-width:720px;margin:6px 0 0;color:#d7e0f1;line-height:1.5}.project-state-banner.stopped{border-color:#a8b6ce;background:linear-gradient(120deg,#28334a,#192338)}.project-state-banner.transitioning{border-color:#f0c96a;background:#302b24}.project-state-banner.error{border-color:#ed6b7a;background:#3a202c}.strong-state .status-badge{padding:7px 12px;border:1px solid currentColor;font-size:.76rem;font-weight:850;letter-spacing:.08em;text-transform:uppercase}.state-stopped .status-badge{background:#c7d0df;color:#182238}.state-starting .status-badge,.state-stopping .status-badge,.state-provisioning .status-badge{background:#f0c96a;color:#211c12}.state-running .status-badge{background:#35d49a;color:#082419}.state-error .status-badge,.state-unreachable .status-badge{background:#ed6b7a;color:#2b0c13}.runtime-unavailable{margin:12px 0;padding:18px;border:1px dashed #7185a9;border-radius:10px;background:#111a2c;color:#dbe4f5}.runtime-unavailable p{margin:6px 0 0;color:var(--muted)}
-@media(max-width:680px){.project-state-banner{align-items:flex-start;flex-direction:column}.project-state-banner form,.project-state-banner button{width:100%}}
-
-```
-
-
-## FILE: source/app/systemd/devfleet-backup.service
-
-SHA256: 4262827dc7134b7a52088898b25c35eba6359089ca24b4149acc5053c5c877c9 | Bytes: 390 | Git mode: 100644
-
-```
-[Unit]
-Description=DevFleet encrypted workspace backup
-After=network-online.target tailscaled.service
-[Service]
-Type=oneshot
-User=devfleet-backup
-Group=devfleet-backup
-ExecStart=/usr/local/bin/devfleet-backup
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/run/lock /var/lib/devfleet/backup-status
-ReadOnlyPaths=__WORKSPACES__ __QUARANTINE__
-
-```
-
-
-## FILE: source/app/systemd/devfleet-backup.timer
-
-SHA256: 52148ce1d51758771ea6aa53c5168ab750af865b40a4b084334359f800796a7e | Bytes: 207 | Git mode: 100644
-
-```
-[Unit]
-Description=Run DevFleet workspace backup every 15 minutes
-[Timer]
-OnBootSec=5min
-OnUnitActiveSec=__BACKUP_INTERVAL_MINUTES__min
-RandomizedDelaySec=60
-Persistent=true
-[Install]
-WantedBy=timers.target
-
-```
-
-
-## FILE: source/app/systemd/devfleet-vault-broker.socket
-
-SHA256: 9bfd790f5f2152ac43bdc78fb56efc3924c1f10975f31c0995a1cb690d64836f | Bytes: 331 | Git mode: 100644
-
-```
-[Unit]
-Description=DevFleet bounded Vault operation socket
-
-[Socket]
-ListenStream=/run/devfleet-vault-broker.sock
-SocketUser=root
-SocketGroup=devfleet-control
-SocketMode=0660
-Accept=yes
-MaxConnections=1
-MaxConnectionsPerSource=1
-TriggerLimitIntervalSe
+  const name = document.querySelector('input[name="display_name"]');
+  const slug = document.querySelector('input[name="slug"]');
+  if (name && slug)

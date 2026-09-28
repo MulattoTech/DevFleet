@@ -2564,7 +2564,7 @@ function Get-DevFleetNestedPrimaryReadinessScriptBlock {
             $serviceCommand=[Environment]::ExpandEnvironmentVariables([string]$service.PathName)
             if($serviceCommand -notmatch [regex]::Escape($expectedDaemon)){throw 'Multipass service executable does not match the trusted installation.'}
             if([string]$service.StartName -notin @('LocalSystem','NT AUTHORITY\SYSTEM')){throw 'Multipass service identity is not LocalSystem.'}
-            $before=[string]$service.State;$initialPid=[int]$service.ProcessId;$forced=$false
+            $before=[string]$service.State;$initialPid=[int]$service.ProcessId;$forced=$false;$autoRestarted=$false
             if($before -ne 'Stopped'){& $ServiceControlProvider 'stop'}
             $stopDeadline=([datetime](& $ClockProvider)).AddSeconds(20);if($OwnerDeadlineUtc -lt $stopDeadline){$stopDeadline=$OwnerDeadlineUtc}
             do{$service=@(& $ServiceLookupProvider);if($service.Count -ne 1){throw "Expected exactly one Multipass service during stop; found $($service.Count)."};$service=$service[0];if([string]$service.State -eq 'Stopped'){break};& $SleepProvider 250}while([datetime](& $ClockProvider) -lt $stopDeadline)
@@ -2578,14 +2578,24 @@ function Get-DevFleetNestedPrimaryReadinessScriptBlock {
                 & $DaemonStopProvider $daemonPid;$forced=$true
                 $forcedDeadline=([datetime](& $ClockProvider)).AddSeconds(10);if($OwnerDeadlineUtc -lt $forcedDeadline){$forcedDeadline=$OwnerDeadlineUtc}
                 do{& $SleepProvider 250;$service=@(& $ServiceLookupProvider);if($service.Count -ne 1){throw "Expected exactly one Multipass service after daemon termination; found $($service.Count)."};$service=$service[0]}while([string]$service.State -ne 'Stopped' -and [datetime](& $ClockProvider) -lt $forcedDeadline)
-                if([string]$service.State -ne 'Stopped'){throw "Multipass service did not reach Stopped after exact daemon termination; state=$([string]$service.State)."}
+                if([string]$service.State -eq 'Running'){
+                    # SCM may restart the service immediately after its exact daemon exits.
+                    # Accept only a distinct trusted daemon; the caller must still re-probe
+                    # Multipass JSON inventory and the configured Primary's SSH readiness.
+                    $replacementPid=[int]$service.ProcessId
+                    if($replacementPid -le 0 -or $replacementPid -eq $daemonPid){throw 'Multipass service is Running without a new exact daemon PID after termination.'}
+                    $replacement=& $DaemonLookupProvider $replacementPid
+                    $replacementPath='';try{$replacementPath=[string]$replacement.Path}catch{}
+                    if([string]$replacement.ProcessName -cne 'multipassd' -or [string]::IsNullOrWhiteSpace($replacementPath) -or [IO.Path]::GetFullPath($replacementPath) -cne [IO.Path]::GetFullPath($expectedDaemon)){throw 'Multipass service auto-restarted outside the trusted daemon identity.'}
+                    $autoRestarted=$true
+                }elseif([string]$service.State -ne 'Stopped'){throw "Multipass service did not reach Stopped after exact daemon termination; state=$([string]$service.State)."}
             }
             if([datetime](& $ClockProvider) -ge $OwnerDeadlineUtc){throw 'Multipass control-plane recovery exhausted the readiness deadline before restart.'}
-            & $ServiceControlProvider 'start'
+            if(-not $autoRestarted){& $ServiceControlProvider 'start'}
             $startDeadline=([datetime](& $ClockProvider)).AddSeconds(45);if($OwnerDeadlineUtc -lt $startDeadline){$startDeadline=$OwnerDeadlineUtc}
             do{$service=@(& $ServiceLookupProvider);if($service.Count -ne 1){throw "Expected exactly one Multipass service during start; found $($service.Count)."};$service=$service[0];if([string]$service.State -eq 'Running'){break};& $SleepProvider 250}while([datetime](& $ClockProvider) -lt $startDeadline)
             if([string]$service.State -ne 'Running'){throw "Multipass service did not return to Running before the readiness deadline; state=$([string]$service.State)."}
-            [pscustomobject]@{status='PASS';service='Multipass';reason=$Reason;stateBefore=$before;stateAfter=[string]$service.State;forcedDaemonTermination=$forced;trustedDaemonPath=$expectedDaemon;ownerDeadlineUtc=$OwnerDeadlineUtc.ToUniversalTime().ToString('o')}
+            [pscustomobject]@{status='PASS';service='Multipass';reason=$Reason;stateBefore=$before;stateAfter=[string]$service.State;forcedDaemonTermination=$forced;trustedDaemonPath=$expectedDaemon;autoRestarted=$autoRestarted;ownerDeadlineUtc=$OwnerDeadlineUtc.ToUniversalTime().ToString('o')}
         }
         function Get-ExactNestedPrimaryVm {
             param([Parameter(Mandatory)][string]$ExpectedName)
@@ -2608,10 +2618,13 @@ function Get-DevFleetNestedPrimaryReadinessScriptBlock {
         # remain mandatory below. The recovery is confined to the exact
         # product Primary inside this disposable L1.
         $primaryReadiness=$null;$controlPlaneRecovery=$null;$inventoryResult=$null;$inventoryError=''
+        # Retain only categorical readiness telemetry on failure. Raw guest output,
+        # service command lines, addresses, and credentials do not belong here.
+        $readinessTrace=[ordered]@{inventory='UNVERIFIED';controlPlane='NONE';hyperVBefore='UNVERIFIED';hyperVCycle='NONE';infoAttempts=0;infoTimeouts=0;lastInfoClass='NOT_RUN'}
         try{$inventoryResult=& $probeInvoker @('list','--format','json') 30}catch{$inventoryError=$_.Exception.Message}
         if($inventoryError -or $inventoryResult.exitCode -ne 0){
             $failureClass=if($inventoryError){'TIMEOUT_OR_TRANSPORT_ERROR'}else{"NONZERO_EXIT_$([int]$inventoryResult.exitCode)"}
-            try{$controlPlaneRecovery=& $controlPlaneRecoveryInvoker $failureClass $readinessDeadline}catch{throw "MULTIPASS_CONTROL_PLANE_RECOVERY_FAILED: $($_.Exception.Message)"}
+            try{$controlPlaneRecovery=& $controlPlaneRecoveryInvoker $failureClass $readinessDeadline;$readinessTrace.controlPlane='RECOVERED'}catch{throw "MULTIPASS_CONTROL_PLANE_RECOVERY_FAILED: $($_.Exception.Message)"}
             $remaining=[int][Math]::Floor(($readinessDeadline-[datetime](& $ClockProvider)).TotalSeconds)
             if($remaining -le 0){throw 'MULTIPASS_CONTROL_PLANE_RECOVERY_FAILED: recovery exhausted the 180-second readiness deadline.'}
             $inventoryResult=$null;$inventoryError=''
@@ -2623,22 +2636,26 @@ function Get-DevFleetNestedPrimaryReadinessScriptBlock {
         $inventory=($inventoryRaw -join "`n")|ConvertFrom-Json
         $instances=@($inventory.list|Where-Object name -ceq $primary)
         if($instances.Count -ne 1){throw "Expected exactly one configured Primary instance inside L1; found $($instances.Count)."}
+        $readinessTrace.inventory='PASS'
         if(-not $primaryReadiness){$primaryReadiness=[ordered]@{initialMultipassState=[string]$instances[0].state;initialInfoExitCode=$null;recovery=if($controlPlaneRecovery){'bounded-Multipass-control-plane-recovery'}else{'none'};controlPlaneRecovery=$controlPlaneRecovery;hyperVStateBefore=$null;ipv4=$null;ready=$false}}else{$primaryReadiness.initialMultipassState=[string]$instances[0].state}
         $infoResult=$null;$infoError=''
         $remaining=[int][Math]::Floor(($readinessDeadline-[datetime](& $ClockProvider)).TotalSeconds)
-        if($remaining -gt 0){try{$infoResult=& $probeInvoker @('info',$primary) ([Math]::Min(90,$remaining))}catch{$infoError=$_.Exception.Message}}else{$infoError='readiness deadline exhausted before initial info probe'}
+        if($remaining -gt 0){$readinessTrace.infoAttempts++;try{$infoResult=& $probeInvoker @('info',$primary) ([Math]::Min(90,$remaining))}catch{$infoError=$_.Exception.Message;if($infoError -like 'Nested Multipass operation timed out*'){$readinessTrace.infoTimeouts++}}}else{$infoError='readiness deadline exhausted before initial info probe'}
         $primaryReadiness.initialInfoExitCode=if($infoResult){$infoResult.exitCode}else{$null}
         $infoText=if($infoResult){@($infoResult.stdout)-join "`n"}else{$infoError}
         $ipv4Match=[regex]::Match($infoText,'(?im)^\s*IPv4:\s*(?<ip>\S+)\s*$')
         $infoReady=($infoResult -and $infoResult.exitCode -eq 0 -and $ipv4Match.Success -and $ipv4Match.Groups['ip'].Value -notmatch '^(--|-)$')
+        $readinessTrace.lastInfoClass=if($infoReady){'READY'}elseif($infoResult -and $infoResult.exitCode -ne 0){'NONZERO'}elseif($infoResult){'NO_IPV4'}elseif($infoError -like 'Nested Multipass operation timed out*'){'TIMEOUT'}else{'TRANSPORT_ERROR'}
         # Checkpoint restore may preserve Hyper-V Running state without a
         # usable Multipass management address.  Reset only the nested VM in
         # this disposable L1, then wait for Multipass to report IPv4/SSH.
         if(-not $infoReady -or [string]$instances[0].state -ceq 'Stopped'){
             $primaryVm=Get-ExactNestedPrimaryVm -ExpectedName $primary
             $primaryReadiness.hyperVStateBefore=$primaryVm.State.ToString()
+            $readinessTrace.hyperVBefore=$primaryVm.State.ToString()
             if($primaryVm.State -ne 'Off'){& $VmStopProvider $primaryVm}
             & $VmStartProvider (& $VmLookupProvider -Id ([guid]$primaryVm.Id))|Out-Null
+            $readinessTrace.hyperVCycle='PASS'
             $primaryReadiness.recovery='bounded-disposable-nested-HyperV-powercycle'
         }
         $ready=$infoReady;$lastInfo=$infoText
@@ -2646,14 +2663,16 @@ function Get-DevFleetNestedPrimaryReadinessScriptBlock {
         while(-not $ready -and [datetime](& $ClockProvider) -lt $readinessDeadline){
             $remaining=[int][Math]::Floor(($readinessDeadline-[datetime](& $ClockProvider)).TotalSeconds);if($remaining -le 0){break}
             $infoResult=$null
-            try{$infoResult=& $probeInvoker @('info',$primary) ([Math]::Min(30,$remaining));$lastInfo=@($infoResult.output)-join "`n"}catch{$lastInfo=$_.Exception.Message}
+            $readinessTrace.infoAttempts++
+            try{$infoResult=& $probeInvoker @('info',$primary) ([Math]::Min(30,$remaining));$lastInfo=@($infoResult.output)-join "`n"}catch{$lastInfo=$_.Exception.Message;if($lastInfo -like 'Nested Multipass operation timed out*'){$readinessTrace.infoTimeouts++}}
             if($infoResult){$infoStdout=@($infoResult.stdout)-join "`n";$ipv4Match=[regex]::Match($infoStdout,'(?im)^\s*IPv4:\s*(?<ip>\S+)\s*$')}else{$ipv4Match=$null}
+            $readinessTrace.lastInfoClass=if(-not $infoResult){if($lastInfo -like 'Nested Multipass operation timed out*'){'TIMEOUT'}else{'TRANSPORT_ERROR'}}elseif($infoResult.exitCode -ne 0){'NONZERO'}elseif(-not $ipv4Match.Success -or $ipv4Match.Groups['ip'].Value -match '^(--|-)$'){'NO_IPV4'}else{'READY'}
             if($infoResult -and $infoResult.exitCode -eq 0 -and $ipv4Match.Success -and $ipv4Match.Groups['ip'].Value -notmatch '^(--|-)$'){
                 $ready=$true;$primaryReadiness.ipv4=$ipv4Match.Groups['ip'].Value;break
             }
             $remaining=[int][Math]::Floor(($readinessDeadline-[datetime](& $ClockProvider)).TotalSeconds);if($remaining -gt 0){& $SleepProvider ([Math]::Min(5000,$remaining*1000))}
         }
-        if(-not $ready){throw "Configured Primary did not become Multipass/SSH-ready within 180 seconds. Last info: $lastInfo"}
+        if(-not $ready){$traceText=@($readinessTrace.GetEnumerator()|ForEach-Object{"$($_.Key)=$($_.Value)"}) -join ';';throw "Configured Primary did not become Multipass/SSH-ready within 180 seconds. READINESS_TRACE: $traceText"}
         $primaryReadiness.ready=$true
         return $primaryReadiness
     }

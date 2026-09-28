@@ -1,669 +1,855 @@
 # DevFleet source part 062
 
 Full-source UTF-8 byte interval [2836500, 2883000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 5119922de84f36ddc678fc1c3042e979aa3fef486cd6ec1d82e296fedae14771
+Payload SHA-256: 2a1d37bd65c95d3a5e5508c8161cf840223587344536ef9c92709d1a9d15e4b9
 
 <!-- BEGIN SOURCE SLICE -->
-iptRoot 'PrivateSelfSignedSigning.psm1') -Force
-$identity = Initialize-DevFleetPrivateSigningIdentity -TrustSigningHost:$RequireTrusted
-$certificate = Get-Item -LiteralPath "Cert:\CurrentUser\My\$($identity.thumbprint)"
-$scratchRoot = Join-Path $env:LOCALAPPDATA 'Temp\DevFleet-PrivateSigningProbe'
-New-Item -ItemType Directory -Path $scratchRoot -Force | Out-Null
-$probe = Join-Path $scratchRoot "probe-$([guid]::NewGuid().ToString('N')).exe"
-$tampered = Join-Path $scratchRoot "tampered-$([guid]::NewGuid().ToString('N')).exe"
-try {
-    Copy-Item -LiteralPath $source -Destination $probe
-    $setResult = Set-AuthenticodeSignature -LiteralPath $probe -Certificate $certificate -HashAlgorithm SHA256
-    $signature = Get-AuthenticodeSignature -LiteralPath $probe
-    $chainValid = $setResult.Status -eq 'Valid' -and $signature.Status -eq 'Valid'
-    if ($RequireTrusted -and -not $chainValid) { throw "Private signing probe did not validate: set=$($setResult.Status); verify=$($signature.Status); message=$($signature.StatusMessage)" }
-    if ($signature.SignerCertificate.Thumbprint -cne [string]$identity.thumbprint) { throw 'Private signing probe used an unexpected certificate.' }
-    if ('1.3.6.1.5.5.7.3.3' -notin @($signature.SignerCertificate.EnhancedKeyUsageList | ForEach-Object { [string]$_.ObjectId })) { throw 'Private signing probe certificate lacks Code Signing EKU.' }
-
-    Copy-Item -LiteralPath $probe -Destination $tampered
-    $stream = [IO.File]::Open($tampered, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
-    try {
-        $stream.Position = 4096
-        $originalByte = $stream.ReadByte()
-        $stream.Position = 4096
-        $stream.WriteByte(($originalByte -bxor 1))
-    } finally {
-        $stream.Dispose()
+-feature-or-virtualbox", "metadataUri": "https://documentation.ubuntu.com/multipass/latest/how-to-guides/install-multipass", "allowedHosts": ["documentation.ubuntu.com"], "assetRegex": null },
+      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US", "CN=Oracle Corporation, O=Oracle Corporation, L=Redwood City, S=California, C=US"], "extensions": [] },
+      "silentInstallArguments": [],
+      "rebootSemantics": "feature-dependent",
+      "versionProbe": { "arguments": ["/FO", "LIST"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
+      "postInstallExecutableDiscovery": "verify Hyper-V capability or VirtualBox installation and Multipass driver",
+      "postInstallVersionVerification": "backend capability and selected driver are usable"
+    },
+    {
+      "id": "virtualbox",
+      "displayName": "Oracle VirtualBox",
+      "classification": "FEATURE_REQUIRED",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["multipass", "windows-home"],
+      "minimumSupportedVersion": "7.0.0",
+      "maximumMajor": null,
+      "executableProbes": ["VBoxManage.exe"],
+      "registryProbes": ["HKLM:\\SOFTWARE\\Oracle\\VirtualBox", "HKLM:\\SOFTWARE\\WOW6432Node\\Oracle\\VirtualBox"],
+      "appPathsProbes": ["VBoxManage.exe"],
+      "knownVendorInstallLocations": ["%ProgramFiles%\\Oracle\\VirtualBox\\VBoxManage.exe", "%ProgramFiles(x86)%\\Oracle\\VirtualBox\\VBoxManage.exe"],
+      "wingetPackageId": "Oracle.VirtualBox",
+      "directOfficialVendorResolver": { "type": "official-download-page", "metadataUri": "https://www.virtualbox.org/wiki/Downloads", "allowedHosts": ["www.virtualbox.org", "download.virtualbox.org"], "assetRegex": "(?i)^VirtualBox-[0-9.]+-Win\\.exe$" },
+      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Oracle Corporation, O=Oracle Corporation, L=Redwood City, S=California, C=US"], "extensions": [".exe"] },
+      "silentInstallArguments": ["--silent", "--msiparams", "REBOOT=ReallySuppress"],
+      "rebootSemantics": "0-or-3010",
+      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
+      "postInstallExecutableDiscovery": "rediscover VBoxManage from HKLM App Paths and canonical Oracle machine locations",
+      "postInstallVersionVerification": "VBoxManage --version >= minimum and Multipass virtualbox driver is selected"
+    },
+    {
+      "id": "tailscale",
+      "displayName": "Tailscale",
+      "classification": "ROLE_REQUIRED",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["network-pairing", "failover", "vault"],
+      "minimumSupportedVersion": "1.60.0",
+      "maximumMajor": 1,
+      "executableProbes": ["tailscale.exe"],
+      "registryProbes": ["HKLM:\\SOFTWARE\\Tailscale"],
+      "appPathsProbes": ["tailscale.exe"],
+      "knownVendorInstallLocations": ["%ProgramFiles%\\Tailscale\\tailscale.exe", "%ProgramFiles(x86)%\\Tailscale\\tailscale.exe"],
+      "wingetPackageId": "Tailscale.Tailscale",
+      "directOfficialVendorResolver": { "type": "official-download-page", "metadataUri": "https://tailscale.com/download/windows", "allowedHosts": ["tailscale.com", "pkgs.tailscale.com"], "assetRegex": "(?i)^tailscale-setup-latest\\.(exe|msi)$" },
+      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Tailscale Inc., O=Tailscale Inc., L=Toronto, S=Ontario, C=CA, SERIALNUMBER=1131559-5, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.3=CA"], "extensions": [".exe", ".msi"] },
+      "silentInstallArguments": ["/quiet"],
+      "rebootSemantics": "0-or-3010",
+      "versionProbe": { "arguments": ["version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
+      "postInstallExecutableDiscovery": "rediscover command, App Paths, registry and known locations",
+      "postInstallVersionVerification": "tailscale version succeeds; auth remains explicit/deferred"
+    },
+    {
+      "id": "vscode",
+      "displayName": "VS Code",
+      "classification": "RECOMMENDED",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["editor", "remote-development"],
+      "minimumSupportedVersion": "1.90.0",
+      "maximumMajor": null,
+      "executableProbes": ["code.cmd", "code.exe"],
+      "registryProbes": ["HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"],
+      "appPathsProbes": ["code.exe"],
+      "knownVendorInstallLocations": ["%ProgramFiles%\\Microsoft VS Code\\bin\\code.cmd", "%LocalAppData%\\Programs\\Microsoft VS Code\\bin\\code.cmd"],
+      "wingetPackageId": "Microsoft.VisualStudioCode",
+      "directOfficialVendorResolver": { "type": "official-download-page", "metadataUri": "https://code.visualstudio.com/Download", "directUri": "https://update.code.visualstudio.com/latest/win32-x64/stable", "allowedHosts": ["code.visualstudio.com", "update.code.visualstudio.com", "vscode.download.prss.microsoft.com"], "assetRegex": "(?i)^VSCodeSetup-x64-[0-9.]+\\.exe$" },
+      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".exe"] },
+      "silentInstallArguments": ["/VERYSILENT", "/NORESTART"],
+      "rebootSemantics": "0-or-3010",
+      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
+      "postInstallExecutableDiscovery": "rediscover code.cmd/code.exe via PATH, registry and known locations",
+      "postInstallVersionVerification": "code --version >= minimum"
+    },
+    {
+      "id": "github-cli",
+      "displayName": "GitHub CLI",
+      "classification": "RECOMMENDED",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["GitHub integration"],
+      "minimumSupportedVersion": "2.40.0",
+      "maximumMajor": null,
+      "executableProbes": ["gh.exe"],
+      "registryProbes": [],
+      "appPathsProbes": ["gh.exe"],
+      "knownVendorInstallLocations": ["%ProgramFiles%\\GitHub CLI\\gh.exe", "%LocalAppData%\\Programs\\GitHub CLI\\gh.exe"],
+      "wingetPackageId": "GitHub.cli",
+      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/cli/cli/releases/latest", "allowedHosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"], "assetRegex": "(?i)^gh_.*_windows_amd64\\.msi$" },
+      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=GitHub, Inc., O=GitHub, Inc., L=San Francisco, S=California, C=US"], "extensions": [".msi"] },
+      "silentInstallArguments": ["/qn", "/norestart"],
+      "rebootSemantics": "0-or-3010",
+      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
+      "postInstallExecutableDiscovery": "rediscover command, App Paths and known locations",
+      "postInstallVersionVerification": "gh --version >= minimum"
+    },
+    {
+      "id": "sevenzip",
+      "displayName": "7-Zip",
+      "classification": "OPTIONAL",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["encrypted-transfer-bundle"],
+      "minimumSupportedVersion": "23.0.0",
+      "maximumMajor": null,
+      "executableProbes": ["7z.exe"],
+      "registryProbes": ["HKLM:\\SOFTWARE\\7-Zip", "HKLM:\\SOFTWARE\\WOW6432Node\\7-Zip"],
+      "appPathsProbes": ["7z.exe"],
+      "knownVendorInstallLocations": ["%ProgramFiles%\\7-Zip\\7z.exe", "%ProgramFiles(x86)%\\7-Zip\\7z.exe"],
+      "wingetPackageId": "7zip.7zip",
+      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/ip7z/7zip/releases/latest", "officialPageUri": "https://www.7-zip.org/download.html", "expectedOwner": "ip7z", "expectedRepository": "7zip", "allowedHosts": ["api.github.com", "github.com", "release-assets.githubusercontent.com"], "assetRegex": "(?i)^7z\\d+-x64\\.exe$", "officialPageAssetRegex": "(?i)^7z\\d+-x64\\.exe$" },
+      "installerAuthenticityPolicy": { "strategy": "VendorReleaseSha256", "required": true, "allowedSignerSubjectsExact": ["CN=Igor Pavlov"], "extensions": [".exe"] },
+      "silentInstallArguments": ["/S"],
+      "rebootSemantics": "0",
+      "versionProbe": { "arguments": [], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
+      "postInstallExecutableDiscovery": "rediscover command, registry and known locations",
+      "postInstallVersionVerification": "7z executable is present and responds"
+    },
+    {
+      "id": "remote-ssh-extension",
+      "displayName": "Remote SSH extension",
+      "classification": "FEATURE_REQUIRED",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["remote-development"],
+      "minimumSupportedVersion": "0.0.0",
+      "maximumMajor": null,
+      "executableProbes": ["code.cmd"],
+      "registryProbes": [],
+      "appPathsProbes": [],
+      "knownVendorInstallLocations": [],
+      "wingetPackageId": null,
+      "directOfficialVendorResolver": { "type": "vscode-extension", "metadataUri": "https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-ssh", "allowedHosts": ["marketplace.visualstudio.com"], "assetRegex": null },
+      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".vsix"] },
+      "silentInstallArguments": ["--install-extension", "ms-vscode-remote.remote-ssh", "--force"],
+      "rebootSemantics": "0",
+      "versionProbe": { "arguments": [], "regex": null },
+      "postInstallExecutableDiscovery": "resolve VS Code CLI and inspect extension list",
+      "postInstallVersionVerification": "code --list-extensions contains ms-vscode-remote.remote-ssh"
+    },
+    {
+      "id": "remote-explorer-extension",
+      "displayName": "Remote Explorer extension",
+      "classification": "FEATURE_REQUIRED",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["remote-development"],
+      "minimumSupportedVersion": "0.0.0",
+      "maximumMajor": null,
+      "executableProbes": ["code.cmd"],
+      "registryProbes": [],
+      "appPathsProbes": [],
+      "knownVendorInstallLocations": [],
+      "wingetPackageId": null,
+      "directOfficialVendorResolver": { "type": "vscode-extension", "metadataUri": "https://marketplace.visualstudio.com/items?itemName=ms-vscode.remote-explorer", "allowedHosts": ["marketplace.visualstudio.com"], "assetRegex": null },
+      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".vsix"] },
+      "silentInstallArguments": ["--install-extension", "ms-vscode.remote-explorer", "--force"],
+      "rebootSemantics": "0",
+      "versionProbe": { "arguments": [], "regex": null },
+      "postInstallExecutableDiscovery": "resolve VS Code CLI and inspect extension list",
+      "postInstallVersionVerification": "code --list-extensions contains ms-vscode.remote-explorer"
+    },
+    {
+      "id": "dev-containers-extension",
+      "displayName": "Dev Containers extension",
+      "classification": "FEATURE_REQUIRED",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["remote-development", "containers"],
+      "minimumSupportedVersion": "0.0.0",
+      "maximumMajor": null,
+      "executableProbes": ["code.cmd"],
+      "registryProbes": [],
+      "appPathsProbes": [],
+      "knownVendorInstallLocations": [],
+      "wingetPackageId": null,
+      "directOfficialVendorResolver": { "type": "vscode-extension", "metadataUri": "https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers", "allowedHosts": ["marketplace.visualstudio.com"], "assetRegex": null },
+      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".vsix"] },
+      "silentInstallArguments": ["--install-extension", "ms-vscode-remote.remote-containers", "--force"],
+      "rebootSemantics": "0",
+      "versionProbe": { "arguments": [], "regex": null },
+      "postInstallExecutableDiscovery": "resolve VS Code CLI and inspect extension list",
+      "postInstallVersionVerification": "code --list-extensions contains ms-vscode-remote.remote-containers"
     }
-    $tamperedSignature = Get-AuthenticodeSignature -LiteralPath $tampered
-    if ($tamperedSignature.Status -eq 'Valid') { throw 'Tampered private signing probe unexpectedly validated.' }
-    [ordered]@{
-        status = if ($chainValid) { 'PASS' } else { 'BLOCKED — TRUST' }
-        sourceStatus = [string]$sourceSignature.Status
-        signedStatus = [string]$signature.Status
-        subject = $signature.SignerCertificate.Subject
-        thumbprint = $signature.SignerCertificate.Thumbprint
-        codeSigningEkuVerified = $true
-        timestampState = if ($signature.TimeStamperCertificate) { 'PRESENT' } else { 'NOT TIMESTAMPED' }
-        tamperedCopyStatus = [string]$tamperedSignature.Status
-        privateKeyExported = $false
-    } | ConvertTo-Json -Depth 4
-} finally {
-    foreach ($path in @($probe, $tampered)) {
-        if (Test-Path -LiteralPath $path -PathType Leaf) { Remove-Item -LiteralPath $path -Force }
-    }
+  ]
 }
 
 ```
 
 
-## FILE: installer-source/Test-ReleaseClosure.ps1
+## FILE: installer-source/FACTORY-RESET.md
 
-SHA256: 813c9f586ed8d49213ee87dfd7cef43388534b6c24eb1e81ec701353f56dc902 | Bytes: 2436 | Git mode: 100644
+SHA256: e1c8f955b9b807a059d0c5545f0d308ffd56ca2055e090bbd82da2bd4d935392 | Bytes: 411 | Git mode: 100644
+
+```
+# Factory Reset
+
+Control-plane removal requires `DELETE DEVFLEET`. Project data is off by default and additionally requires `DELETE DEVFLEET PROJECT DATA`, individual VERIFIED project selection, independently verified ownership, a restore-eligible exact backup whose archive hash and identities match, and submission of that exact backup ID/SHA to the Host Agent. Ambiguous or unrelated VMs cannot be selected.
+
+```
+
+
+## FILE: installer-source/Fast-Rebuild-Installer.ps1
+
+SHA256: 7b5fd125f969ae691b2af65e11f5ecb222cad8cca7f92eb30d2f046bb36f0d4d | Bytes: 1057 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([Parameter(Mandatory)][string]$OutputDirectory,[string]$DotNet='dotnet',[switch]$UnsignedDeveloperBuild)
+$ErrorActionPreference='Stop';$root=$PSScriptRoot;$version=(Get-Content -LiteralPath (Join-Path $root '..\source\VERSION') -Raw -ErrorAction Stop).Trim();if(-not $version){throw 'Source VERSION is empty.'}
+if(-not $UnsignedDeveloperBuild){throw 'Fast rebuild is developer-only and requires -UnsignedDeveloperBuild; it never produces a release artifact.'}
+$publish=Join-Path $OutputDirectory 'publish-fast';New-Item -ItemType Directory -Path $publish -Force|Out-Null
+& $DotNet publish (Join-Path $root 'DevFleet.Setup\DevFleet.Setup.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o $publish
+if($LASTEXITCODE){throw 'Fast installer rebuild failed.'}
+Copy-Item -LiteralPath (Join-Path $publish 'DevFleet.Setup.exe') -Destination (Join-Path $OutputDirectory "DevFleet-Setup-v$version-win-x64.exe") -Force
+Write-Warning "Fast installer rebuild complete as an explicitly unsigned developer artifact."
+
+```
+
+
+## FILE: installer-source/INSTALLER-ARCHITECTURE.md
+
+SHA256: 1ad6db013cc9910bf74852c5de3b365f89183d94df9c82efaf2ed2257ffd10b1 | Bytes: 483 | Git mode: 100644
+
+```
+# Installer Architecture
+
+The wizard is a native WPF shell around bounded services: preflight, payload hash verification, staging, TAR extraction, recovery packaging, atomic ledger writes, ownership-aware plan generation, and selective cleanup. The embedded DevFleet TAR is verified before it is staged or extracted.
+
+The application does not use a browser UI, winget, runtime network downloads, broad VM wildcards, or the user's entire SSH/VS Code configuration as cleanup targets.
+
+```
+
+
+## FILE: installer-source/INSTALLER-BUILD-MANIFEST.json
+
+SHA256: daec80a6ce234bbdf9c29b823e98b8d4878a5181203afe2a5162efbe8b126cb5 | Bytes: 594 | Git mode: 100644
+
+```
+{
+  "installerProduct": "DevFleet Setup",
+  "installerVersion": "1.4.1",
+  "devfleetVersion": "1.2.13",
+  "targetRuntime": "win-x64",
+  "framework": "net8.0-windows",
+  "selfContained": true,
+  "singleFile": true,
+  "payload": {
+    "name": "devfleet-v1.2.13.tar.gz",
+    "sha256": "e3176c500f652d6023dcb611ccd580567ed9448da343a5fd4c3649214ca0b654"
+  },
+  "signing": "PRIVATE SELF-SIGNED AUTHENTICODE — exact candidate signing and verification required before release eligibility",
+  "runtimeNetworkDownloads": false,
+  "productionMutationPerformed": false,
+  "releaseInputsPrepared": true
+}
+
+```
+
+
+## FILE: installer-source/INSTALLER-OWNERSHIP-MODEL.md
+
+SHA256: 8a8ddc95b7204e0cfb2a934d57e0b66064361ba179d0ed699a6b32e99050cd70 | Bytes: 342 | Git mode: 100644
+
+```
+# Ownership Model
+
+The ledger records files, shortcuts, registry entries, prerequisites installed by DevFleet, and DevFleet resource references. A ledger entry is not sufficient by itself for project VM deletion: project ID, resource identity, provider metadata, and backup identity must agree. Ambiguity means manual review and no deletion.
+
+```
+
+
+## FILE: installer-source/INSTALLER-RECOVERY-MODEL.md
+
+SHA256: cfce34a874dc2598aca6fa6fc09481f219ea075edcd7c9d9abb9bd3f7925baca | Bytes: 343 | Git mode: 100644
+
+```
+# Recovery Model
+
+Clean Reinstall, Uninstall, and Factory Reset create a metadata-only recovery ZIP before mutation. The package contains the ledger, payload hash, transaction ID, and instructions, never raw reusable private secrets. The operation log exposes failure and rollback limitations rather than claiming a hidden rollback succeeded.
+
+```
+
+
+## FILE: installer-source/INSTALLER-REMOVAL-SAFETY.md
+
+SHA256: 36bd15741d36375c356ed67dc2a2e11fd3e79644d7ddd47ba2d5c1381d8c9f06 | Bytes: 401 | Git mode: 100644
+
+```
+# Removal Safety
+
+Uninstall and Factory Reset remove only paths listed in the installer ledger and confined under the installed DevFleet root. Project-data deletion is separately gated by typed confirmation, a verified backup, and an independently proven project ownership record. Unrelated VMs, SSH entries, VS Code mappings, firewall rules, and shared prerequisites remain outside the action scope.
+
+```
+
+
+## FILE: installer-source/INSTALLER-THREAT-MODEL.md
+
+SHA256: 4d567512f3cf645aa23661e5331bef819e3d30ccfc0d8c62e85ae6c70e4600a2 | Bytes: 792 | Git mode: 100644
+
+```
+# Installer Threat Model
+
+- Corrupted embedded payload: rejected by SHA-256 before staging and again before extraction.
+- Ambiguous ownership: destructive project-data scope is blocked unless a ledger resource has an explicit project ID and DevFleet ownership proof.
+- Accidental cleanup: Factory Reset requires exact phrases; Clean Reinstall defaults to preservation.
+- Interrupted mutation: transaction and log state are written before and after bounded operations; recovery packages are created before reinstall/removal.
+- Secret leakage: recovery content is metadata-only and logs redact bearer tokens; private keys and reusable credentials are excluded.
+- Supply chain: no third-party binaries are bundled; the build records the official SDK source and installer is explicitly unsigned.
+
+```
+
+
+## FILE: installer-source/INSTALLER_VERSION
+
+SHA256: 7d072b48526b023950e4c48db01e8c273554a6401119f5691e7589ba9bc65d9d | Bytes: 6 | Git mode: 100644
+
+```
+1.4.1
+
+```
+
+
+## FILE: installer-source/MAINTENANCE.md
+
+SHA256: cc39483c6b9f4a10009a752c3740b3cef7143ff644c65adc15f91bd6bd01524a | Bytes: 329 | Git mode: 100644
+
+```
+# Maintenance
+
+The installed launcher supports Diagnostics, Repair, Local Update, Recovery Package, Clean Reinstall, Uninstall, Factory Reset, and deferred network pairing. Repair invokes the production install orchestrator. Local Update accepts an explicitly selected trusted local release; no unsecured update URL is invented.
+
+```
+
+
+## FILE: installer-source/MULTIPASS-E2E.md
+
+SHA256: 621ea3f6cd12b061299b84d8bfc253fbdc61a3df6ae219adf49a73388a975e26 | Bytes: 328 | Git mode: 100644
+
+```
+# Multipass E2E
+
+The mandatory clean-room gate requires real `multipass version`, `multipass list`, and
+`multipass launch` on disposable Windows. Record backend, Ubuntu image, cloud-init,
+guest bootstrap, Docker/runtime, SSH, service health, dashboard, stop/start, and cleanup.
+Production VMs are never used for destructive QA.
+
+```
+
+
+## FILE: installer-source/OFFLINE-DEPENDENCIES.json
+
+SHA256: ebae2e37de6de3d13ca931db09e4e88b96cf3ea2da6adea1400ce4cfb6937afa | Bytes: 811 | Git mode: 100644
+
+```
+{
+  "schemaVersion": 2,
+  "installerRevision": "1.4.1",
+  "devfleetVersion": "1.2.13",
+  "releaseBinding": "This manifest is part of the exact DevFleet release payload; the trusted internal release channel supplies the final release fingerprint.",
+  "payloads": [],
+  "bundledThirdPartyInstallers": [],
+  "applicationNuGetDependencies": [],
+  "buildSdk": {
+    "product": ".NET SDK",
+    "version": "8.0.424",
+    "officialSource": "https://dotnet.microsoft.com/download/dotnet/8.0",
+    "usedForBuildOnly": true
+  },
+  "offlineContract": "Offline installation accepts only an exact payload entry in this release-bound manifest. A sibling checksum file, duplicate, near-name candidate, or unsigned local replacement is never an authority. No offline dependency payloads are included in this private release."
+}
+
+```
+
+
+## FILE: installer-source/OFFLINE-PAYLOAD-SHA256.txt
+
+SHA256: c5841878571b984f9c696efc951eecf48e7035f218771a726e29dd858cfe93d3 | Bytes: 98 | Git mode: 100644
+
+```
+e3176c500f652d6023dcb611ccd580567ed9448da343a5fd4c3649214ca0b654  Payload/devfleet-v1.2.13.tar.gz
+
+```
+
+
+## FILE: installer-source/Prepare-ReleaseInputs.ps1
+
+SHA256: abae53b5f93d9d403d089c9e8e99e2918d3a66e3d164072212fe660542b25b47 | Bytes: 15390 | Git mode: 100644
 
 ```
 [CmdletBinding()]
 param(
+  [ValidateSet('Prepare','Verify')][string]$Mode = 'Prepare',
   [Parameter(Mandatory)][string]$SourceRoot,
   [Parameter(Mandatory)][string]$PreviousPortableZip,
-  [Parameter(Mandatory)][string]$OutputDirectory
+  [Parameter(Mandatory)][string]$OutputDirectory,
+  [ValidateSet('PublicTrusted','PrivateSelfSigned')][string]$SigningProfile = 'PrivateSelfSigned',
+  [string]$CandidateCommit,
+  [switch]$ProveIdempotent
 )
 $ErrorActionPreference = 'Stop'
-$workspace = (Resolve-Path -LiteralPath $SourceRoot).Path | Split-Path -Parent
-$commit = (git -C $workspace rev-parse HEAD).Trim()
-if ($commit -notmatch '^[0-9a-fA-F]{40}$') { throw 'Release closure regression requires an explicit candidate commit.' }
-$tool = Join-Path $workspace 'tools\compute_shipping_input_identity.py'
-$candidateJson = & python $tool --workspace $workspace --candidate-commit $commit | Select-Object -Last 1
-if ($LASTEXITCODE) { throw 'Could not compute candidate shipping identity.' }
-$candidate = $candidateJson | ConvertFrom-Json
-$verifyJson = & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Prepare-ReleaseInputs.ps1') -Mode Verify -SourceRoot $SourceRoot -PreviousPortableZip $PreviousPortableZip -OutputDirectory $OutputDirectory -SigningProfile PrivateSelfSigned -CandidateCommit $commit | Select-Object -Last 1
-if ($LASTEXITCODE) { throw 'Frozen release-input verification failed.' }
-$verify = $verifyJson | ConvertFrom-Json
-$beforeJson = & python $tool --source-root $verify.sourceRoot --installer-root $verify.installerRoot | Select-Object -Last 1
-$before = $beforeJson | ConvertFrom-Json
-$closureOutput = Join-Path $verify.outputDirectory 'closure-build'
-New-Item -ItemType Directory -Path $closureOutput -Force | Out-Null
-& python (Join-Path $verify.sourceRoot 'tools\build_release.py') --source $verify.sourceRoot --old-portable $PreviousPortableZip --output-dir $closureOutput
-if ($LASTEXITCODE) { throw 'Prepared-commit build simulation failed.' }
-$afterJson = & python $tool --source-root $verify.sourceRoot --installer-root $verify.installerRoot | Select-Object -Last 1
-$after = $afterJson | ConvertFrom-Json
-if ([string]$before.shippingInputIdentity -cne [string]$after.shippingInputIdentity -or [string]$before.shippingInputIdentity -cne [string]$candidate.candidateShippingInputIdentity) {
-  throw 'FINAL BUILD AGAINST A PREPARED COMMIT failed: shipping identity before != after or candidate.'
-}
-[ordered]@{ status = 'PASS'; candidateCommit = $commit; shippingIdentityBefore = $before.shippingInputIdentity; shippingIdentityAfter = $after.shippingInputIdentity; candidateShippingIdentity = $candidate.candidateShippingInputIdentity } | ConvertTo-Json -Compress
 
-```
-
-
-## FILE: installer-source/UNINSTALL.md
-
-SHA256: 7d993247762902ce9b79c712e2ffdc899e913c98680f7bd22aaeadbf2f83d1d5 | Bytes: 386 | Git mode: 100644
-
-```
-# Uninstall
-
-Uninstall first creates recovery metadata, then removes only ledger-listed files, exact DevFleet tasks/services/firewall rules, the marked SSH block, the DevFleet VS Code reference file, exact shortcuts, and the Installed Apps entry. Project data and unrelated prerequisites remain unless separately authorized. The stable launcher schedules exact self-removal after exit.
-
-```
-
-
-## FILE: installer-source/WINGET-RECOVERY.md
-
-SHA256: c1c5bae6e37edfde8026eccf9f09b8eb8397552427689a405c3fc931b80f199a | Bytes: 482 | Git mode: 100644
-
-```
-# WinGet recovery
-
-WinGet is healthy only when version, `source list`, and an exact package search succeed.
-Missing, Broken, SourceBroken, or incompatible WinGet is not silently treated as healthy.
-The supported Microsoft repair path uses Microsoft.WinGet.Client and
-`Repair-WinGetPackageManager -Force -Latest`; source reset is conservative and requires
-administrator authority. If repair remains unavailable, mandatory dependencies use
-their allowlisted official-vendor resolver.
-
-```
-
-
-## FILE: installer-source/third-party-license-inventory.json
-
-SHA256: d74c0e92be53d174675bb68c2354e7f7f1751983a90ccb1e17860682e8bb8201 | Bytes: 198 | Git mode: 100644
-
-```
-{
-  "bundledThirdPartyInstallers": [],
-  "notes": ["No third-party runtime binary is redistributed by this build.", "DevFleet application source remains subject to its repository license files."]
+function Write-Utf8NoBom([string]$Path, [string]$Text) {
+  $normalized = [regex]::Replace($Text, "`r`n|`r", "`n")
+  [IO.File]::WriteAllText($Path, $normalized, (New-Object Text.UTF8Encoding($false)))
 }
 
-```
+function Get-Bytes([string]$Path) {
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+  return [IO.File]::ReadAllBytes($Path)
+}
 
+function Get-Snapshot([string]$Source, [string]$Installer) {
+  $version = (Get-Content -LiteralPath (Join-Path $Source 'VERSION') -Raw).Trim()
+  $payload = Join-Path $Installer "DevFleet.Setup\Payload\devfleet-v$version.tar.gz"
+  $relative = @(
+    'source/CHECKSUMS.sha256',
+    'installer-source/DevFleet.Setup/dependencies.json',
+    'installer-source/OFFLINE-PAYLOAD-SHA256.txt',
+    'installer-source/DevFleet.Setup/PayloadManifest.cs',
+    'installer-source/DevFleet.Setup/DevFleet.Setup.csproj',
+    'installer-source/DevFleet.Setup/app.manifest',
+    'installer-source/INSTALLER-BUILD-MANIFEST.json',
+    "installer-source/DevFleet.Setup/Payload/devfleet-v$version.tar.gz"
+  )
+  $snapshot = [ordered]@{}
+  foreach ($item in $relative) {
+    $path = Join-Path (Split-Path -Parent $Source) ($item.Replace('/', '\'))
+    if ($item.StartsWith('source/')) { $path = Join-Path $Source $item.Substring(7).Replace('/', '\') }
+    elseif ($item.StartsWith('installer-source/')) { $path = Join-Path $Installer $item.Substring(17).Replace('/', '\') }
+    $bytes = Get-Bytes $path
+    $snapshot[$item] = if ($null -eq $bytes) { $null } else { [Convert]::ToBase64String($bytes) }
+  }
+  return $snapshot
+}
 
-## FILE: installer-source/third-party-signature-verification.json
+function Invoke-Prepare([string]$Source, [string]$Installer, [string]$Previous, [string]$Outputs) {
+  $devfleetVersion = (Get-Content -LiteralPath (Join-Path $Source 'VERSION') -Raw).Trim()
+  $installerVersion = (Get-Content -LiteralPath (Join-Path $Installer 'INSTALLER_VERSION') -Raw).Trim()
+  if ($devfleetVersion -notmatch '^\d+\.\d+\.\d+$') { throw "Release source VERSION is not semantic: $devfleetVersion" }
+  if ($installerVersion -notmatch '^\d+\.\d+\.\d+$') { throw "Installer VERSION is not semantic: $installerVersion" }
+  New-Item -ItemType Directory -Path $Outputs -Force | Out-Null
 
-SHA256: 6ca692d68b18e596e9739f81d839238c9dcb98eee159bc983bed19ea2481dac2 | Bytes: 340 | Git mode: 100644
+  $sourceDependencies = Join-Path $Source 'dependencies.json'
+  $installerDependencies = Join-Path $Installer 'DevFleet.Setup\dependencies.json'
+  Copy-Item -LiteralPath $sourceDependencies -Destination $installerDependencies -Force
+  if ((Get-FileHash -LiteralPath $sourceDependencies -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $installerDependencies -Algorithm SHA256).Hash) {
+    throw 'Installer dependency manifest is not byte-identical to the canonical source manifest.'
+  }
 
-```
+  & python (Join-Path $Source 'tools\build_release.py') --source $Source --old-portable $Previous --output-dir $Outputs
+  if ($LASTEXITCODE) { throw 'DevFleet TAR/portable release build failed while preparing release inputs.' }
+  $tar = Join-Path $Outputs "devfleet-v$devfleetVersion.tar.gz"
+  $hash = (Get-FileHash -LiteralPath $tar -Algorithm SHA256).Hash.ToLowerInvariant()
+  $payload = Join-Path $Installer 'DevFleet.Setup\Payload'
+  Get-ChildItem -LiteralPath $payload -Filter '*.tar.gz' -File -ErrorAction SilentlyContinue | Remove-Item -Force
+  Copy-Item -LiteralPath $tar -Destination (Join-Path $payload (Split-Path -Leaf $tar)) -Force
+
+  $manifestText = @"
+namespace DevFleet.Setup;
+
+internal static class PayloadManifest
 {
-  "bundledThirdPartyBinaries": [],
-  "verification": "Not applicable: no third-party prerequisite binary is embedded.",
-  "sdk": {
-    "product": ".NET SDK 8.0.408",
-    "officialSource": "https://dotnet.microsoft.com/download/dotnet/8.0",
-    "signerVerification": "Build toolchain metadata recorded; final installer is unsigned."
+    public const string DevFleetVersion = "$devfleetVersion";
+    public const string InstallerVersion = "$installerVersion";
+    public const string PayloadName = "devfleet-v$devfleetVersion.tar.gz";
+    public const string PayloadSha256 = "$hash";
+}
+"@
+  Write-Utf8NoBom (Join-Path $Installer 'DevFleet.Setup\PayloadManifest.cs') $manifestText
+
+  $project = Join-Path $Installer 'DevFleet.Setup\DevFleet.Setup.csproj'
+  $projectText = Get-Content -LiteralPath $project -Raw
+  $projectText = [regex]::Replace($projectText, '<Version>[^<]+</Version>', "<Version>$installerVersion</Version>")
+  $projectText = [regex]::Replace($projectText, '<FileVersion>[^<]+</FileVersion>', "<FileVersion>$installerVersion.0</FileVersion>")
+  $projectText = [regex]::Replace($projectText, '<InformationalVersion>[^<]+</InformationalVersion>', "<InformationalVersion>DevFleet Setup $installerVersion for DevFleet $devfleetVersion</InformationalVersion>")
+  $projectText = [regex]::Replace($projectText, '<EmbeddedResource Include="Payload\\devfleet-v[^"]+\.tar\.gz" />', "<EmbeddedResource Include=`"Payload\devfleet-v$devfleetVersion.tar.gz`" />")
+  $projectText = [regex]::Replace($projectText, '<EmbeddedResource Include="dependencies\.json"[^>]*/>', '<EmbeddedResource Include="dependencies.json" LogicalName="DevFleet.Setup.dependencies.json" />')
+  Write-Utf8NoBom $project ($projectText.TrimEnd("`r", "`n") + [Environment]::NewLine)
+
+  $applicationManifest = Join-Path $Installer 'DevFleet.Setup\app.manifest'
+  $applicationManifestText = Get-Content -LiteralPath $applicationManifest -Raw
+  $assemblyVersion = "$installerVersion.0"
+  $applicationManifestText = [regex]::Replace($applicationManifestText, '(<assemblyIdentity\s+version=")[^"]+("\s+name="MTechLabs\.DevFleet\.Setup"\s*/>)', ("`${1}" + $assemblyVersion + '$2'))
+  Write-Utf8NoBom $applicationManifest $applicationManifestText
+
+  $offline = "$( $hash )  Payload/devfleet-v$devfleetVersion.tar.gz`n"
+  Write-Utf8NoBom (Join-Path $Installer 'OFFLINE-PAYLOAD-SHA256.txt') $offline
+
+  $signing = if ($SigningProfile -eq 'PrivateSelfSigned') {
+    'PRIVATE SELF-SIGNED AUTHENTICODE — exact candidate signing and verification required before release eligibility'
+  } else {
+    'PUBLIC TRUSTED AUTHENTICODE — exact candidate signing and verification required before release eligibility'
+  }
+  $buildManifest = [ordered]@{
+    installerProduct = 'DevFleet Setup'
+    installerVersion = $installerVersion
+    devfleetVersion = $devfleetVersion
+    targetRuntime = 'win-x64'
+    framework = 'net8.0-windows'
+    selfContained = $true
+    singleFile = $true
+    payload = [ordered]@{ name = "devfleet-v$devfleetVersion.tar.gz"; sha256 = $hash }
+    signing = $signing
+    runtimeNetworkDownloads = $false
+    productionMutationPerformed = $false
+    releaseInputsPrepared = $true
+  }
+  Write-Utf8NoBom (Join-Path $Installer 'INSTALLER-BUILD-MANIFEST.json') (($buildManifest | ConvertTo-Json -Depth 8) + [Environment]::NewLine)
+  return [pscustomobject]@{ Version = $devfleetVersion; Tar = $tar; Portable = (Join-Path $Outputs "DevFleet-v$devfleetVersion-Portable-Codebase-Verified-r1.zip"); TarSha256 = $hash }
+}
+
+function Assert-SameSnapshot($Before, $After, [string]$Label) {
+  foreach ($key in $Before.Keys) {
+    if ($Before[$key] -ne $After[$key]) { throw "Release input preparation is not idempotent ($Label): $key changed." }
   }
 }
 
-```
-
-
-## FILE: source/.test-runtime/config.json
-
-SHA256: 8d52563b8a721ed66650dfa8a684751e481790e47a9690b00cd63db06e2f903c | Bytes: 1292 | Git mode: 100644
-
-```
-{"node_name": "test-node", "deployment_id": "deployment-123", "node_role": "primary", "friendly_name": "CodexDevVM", "portal_port": 8787, "workspaces": "C:\\Users\\Dylan\\Documents\\Codex\\2026-08-12\\ex-2\\work\\DevFleet-v1.2.13-development\\source\\.test-runtime\\workspaces", "quarantine": "C:\\Users\\Dylan\\Documents\\Codex\\2026-08-12\\ex-2\\work\\DevFleet-v1.2.13-development\\source\\.test-runtime\\quarantine", "peer_file": "C:\\Users\\Dylan\\Documents\\Codex\\2026-08-12\\ex-2\\work\\DevFleet-v1.2.13-development\\source\\.test-runtime\\peer.json", "runtime_root": "C:\\Users\\Dylan\\Documents\\Codex\\2026-08-12\\ex-2\\work\\DevFleet-v1.2.13-development\\source\\.test-runtime\\runtime", "cache_root": "C:\\Users\\Dylan\\Documents\\Codex\\2026-08-12\\ex-2\\work\\DevFleet-v1.2.13-development\\source\\.test-runtime\\cache", "ollama_base_url": "http://127.0.0.1:11434/v1", "ollama_model": "test-model", "ollama_profile": "stable-interactive", "development_profile": "balanced", "docker_mode": "rootless", "enable_shared_caches": true, "enable_analyzer_cache": true, "auto_start_codexpro": true, "allow_tailnet_ports": true, "backup_before_rebuild": false, "backup_before_quarantine": true, "require_tailscale": false, "tailnet_cidr": "100.64.0.0/10", "public_binding_allowed": true}
-```
-
-
-## FILE: source/.test-runtime/peer.json
-
-SHA256: 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a | Bytes: 2 | Git mode: 100644
-
-```
-{}
-```
-
-
-## FILE: source/BASELINE-v1.0.0-FILES.txt
-
-SHA256: 7c52807b9916d34cb980d01c85049e1443be953d813106b7931fe8e8d02feb50 | Bytes: 2825 | Git mode: 100644
-
-```
-Bootstrap-Install.ps1
-CHANGELOG.md
-CHECKSUMS.sha256
-INSTALL-CHECKLIST.txt
-Install-DevFleet.ps1
-README-FIRST.md
-SECURITY-NOTES.txt
-START-HERE-DESKTOP.cmd
-START-HERE-LAPTOP.cmd
-app/devfleet/__init__.py
-app/devfleet/analyzer.py
-app/devfleet/auth.py
-app/devfleet/core.py
-app/devfleet/main.py
-app/devfleet/projects.py
-app/devfleet/status.py
-app/requirements.txt
-app/static/style.css
-app/systemd/devfleet-backup.service
-app/systemd/devfleet-backup.timer
-app/systemd/devfleet.service
-app/templates/index.html
-cloud-init/compute.yaml
-cloud-init/vault.yaml
-config/devfleet.config.json
-docs/00-HARD-STOPS-AND-ASSUMPTIONS.md
-docs/01-ARCHITECTURE.md
-docs/02-INSTALL-ORDER.md
-docs/03-DAILY-USE.md
-docs/04-RECOVERY.md
-docs/05-SECURITY-MODEL.md
-docs/06-CODEXPRO-INTEGRATION.md
-docs/07-OFFICIAL-SOURCES.md
-linux/bootstrap-compute.sh
-linux/bootstrap-vault.sh
-linux/devfleet-backup
-linux/devfleet-configure-backup
-linux/devfleet-health
-linux/devfleet-purge-quarantine
-linux/devfleet-repair
-linux/devfleet-restore-project
-linux/devfleet-safe-update
-linux/devfleet-set-peer
-linux/devfleet-user-repair
-linux/devfleet-vault-health
-linux/devfleet-vault-maintenance
-templates/generic/.devcontainer/devcontainer.json
-templates/generic/.devfleet/codexpro-bootstrap.sh
-templates/generic/.devfleet/codexpro.env.example
-templates/generic/.gitignore
-templates/generic/README.md
-templates/generic/compose.yaml
-templates/node/.devcontainer/devcontainer.json
-templates/node/.devfleet/codexpro-bootstrap.sh
-templates/node/.devfleet/codexpro.env.example
-templates/node/.gitignore
-templates/node/README.md
-templates/node/compose.yaml
-templates/node/package.json
-templates/python/.devcontainer/devcontainer.json
-templates/python/.devfleet/codexpro-bootstrap.sh
-templates/python/.devfleet/codexpro.env.example
-templates/python/.gitignore
-templates/python/README.md
-templates/python/compose.yaml
-templates/python/pyproject.toml
-templates/python/src/app/__init__.py
-tests/test_analyzer.py
-tools/Verify-Package.ps1
-tools/verify_package.py
-windows/00-Preflight.ps1
-windows/01-Install-Prerequisites.ps1
-windows/02-Provision-ComputeNode.ps1
-windows/03-Provision-Vault.ps1
-windows/04-Connect-Tailscale.ps1
-windows/04a-Connect-WindowsTailscale.ps1
-windows/05-Configure-LocalVaultClient.ps1
-windows/06-Import-Laptop-Bootstrap.ps1
-windows/08-Install-Shortcuts.ps1
-windows/09-Export-Laptop-Bootstrap.ps1
-windows/10-Export-Desktop-Pairing.ps1
-windows/Complete-Cluster.ps1
-windows/Configure-GitHub.ps1
-windows/DevFleet.Common.psm1
-windows/Export-Diagnostics.ps1
-windows/Export-Vault-OfflineCopy.ps1
-windows/Invoke-Quarantine-Maintenance.ps1
-windows/Invoke-Vault-Maintenance.ps1
-windows/Repair-DevFleet.ps1
-windows/Show-DevFleet-Credentials.ps1
-windows/Start-DevFleet.ps1
-windows/Stop-DevFleet.ps1
-windows/Test-DevFleet.ps1
-windows/Update-DevFleet.ps1
-windows/Update-Vault.ps1
-
-```
-
-
-## FILE: source/Bootstrap-Install.ps1
-
-SHA256: 30f522b051e90266c8307537a661b458cfb8ddd092e30e0c0e6e2fc04f7e0554 | Bytes: 8139 | Git mode: 100644
-
-```
-# Compatible with Windows PowerShell 5.1. It bootstraps PowerShell 7 for a
-# connected clean-room installation from an official Microsoft release.
-[CmdletBinding()]
-param(
-  [Parameter(Mandatory)][ValidateSet('Laptop','Desktop')][string]$Role,
-  [string]$BootstrapBundlePath,
-  [string]$PackageRoot,
-  [ValidateSet('Connected')][string]$InstallationMode='Connected',
-  [switch]$NonInteractive,
-  [switch]$SkipWindowsUpdates,
-  [switch]$DeferNetworkPairing,
-  [switch]$AcknowledgeRootfulDocker,
-  [string]$TransactionDeadlineUtc,
-  [string]$TransactionId,
-  [string]$TransactionPayloadSha256,
-  [string]$TransactionAction,
-  [string]$TransactionRole,
-  [string]$TransactionPreparedUtc,
-  [string]$DeadlinePolicyVersion = '1.0.0'
-)
-$ErrorActionPreference='Stop'
-$root=Split-Path -Parent $MyInvocation.MyCommand.Path
-$packageRoot=if($PackageRoot){(Resolve-Path -LiteralPath $PackageRoot).Path}else{$root}
-$manifestPath=Join-Path $packageRoot 'dependencies.json'
-if(-not(Test-Path -LiteralPath $manifestPath)){throw "Canonical dependency manifest is missing: $manifestPath"}
-Import-Module (Join-Path $root 'windows\DevFleet.Common.psm1') -Force
-if($DeadlinePolicyVersion -ne '1.0.0'){throw "Unsupported deadline policy version: $DeadlinePolicyVersion"}
-$transactionDeadline = if($TransactionDeadlineUtc){try{[datetime]::Parse($TransactionDeadlineUtc).ToUniversalTime()}catch{throw 'Transaction deadline is not a valid UTC timestamp.'}}else{[datetime]::UtcNow.AddSeconds((Get-DevFleetTransactionBudgetSeconds $Role))}
-Set-DevFleetDeadlineContext -TransactionDeadlineUtc $transactionDeadline -StageName 'bootstrap' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'bootstrap') | Out-Null
-$manifest=Get-Content -LiteralPath $manifestPath -Raw|ConvertFrom-Json
-$powershellDependency=@($manifest.dependencies)|Where-Object id -eq 'powershell7'|Select-Object -First 1
-if(-not $powershellDependency){throw 'Canonical PowerShell 7 dependency record is missing.'}
-function Find-Pwsh {
-  foreach($base in @(${env:ProgramFiles},${env:ProgramFiles(x86)})){
-    if(-not $base){continue};$known=Join-Path $base 'PowerShell\7\pwsh.exe';if(Test-Path -LiteralPath $known){return $known}
+function Normalize-TextTree([string]$Root) {
+  foreach ($file in Get-ChildItem -LiteralPath $Root -Recurse -File) {
+    $bytes = [IO.File]::ReadAllBytes($file.FullName)
+    if ($bytes -contains 0) { continue }
+    try { $text = [Text.Encoding]::UTF8.GetString($bytes) } catch { continue }
+    if ($text.IndexOf([char]0) -ge 0) { continue }
+    $normalized = [regex]::Replace($text, "`r`n|`r", "`n")
+    if ($normalized -cne $text) { Write-Utf8NoBom $file.FullName $normalized }
   }
-  return $null
 }
-function Get-OfficialPowerShellPayload {
-  $context=Get-DevFleetDeadlineContext
-  $remaining=if($context){[int][math]::Floor(([datetime]$context.StageDeadlineUtc-[datetime]::UtcNow).TotalSeconds)}else{60}
-  if($remaining -le 0){throw 'Bootstrap stage deadline expired before resolving the PowerShell payload.'}
-  $release=Invoke-RestMethod -UseBasicParsing -TimeoutSec ([math]::Min(60,$remaining)) -Uri $powershellDependency.directOfficialVendorResolver.metadataUri -Headers @{'User-Agent'='DevFleet-Setup/1.4.1'}
-  if(-not $release.tag_name -or $release.prerelease -or $release.draft){throw 'The official PowerShell stable release metadata was not usable.'}
-  $asset=$release.assets|Where-Object name -Match $powershellDependency.directOfficialVendorResolver.assetRegex|Select-Object -First 1
-  if(-not $asset -or ([Uri]$asset.browser_download_url).Host -notin @($powershellDependency.directOfficialVendorResolver.allowedHosts)){throw 'The official PowerShell x64 MSI asset was not found on an allowlisted host.'}
-  $directory=Join-Path $env:ProgramData 'DevFleet\InstallerCache\Bootstrap';New-Item -ItemType Directory -Path $directory -Force|Out-Null
-  & icacls.exe $directory /inheritance:r /grant:r 'BUILTIN\Administrators:(OI)(CI)(F)' 'NT AUTHORITY\SYSTEM:(OI)(CI)(F)' | Out-Null
-  if($LASTEXITCODE -ne 0){throw 'Unable to establish the protected PowerShell staging ACL.'}
-  $payload=Join-Path $directory $asset.name
-  $assetUri=[Uri]$asset.browser_download_url
-  $assetName=[IO.Path]::GetFileName($assetUri.AbsolutePath)
-  if($assetName -ne [string]$asset.name -or $assetName -notmatch $powershellDependency.directOfficialVendorResolver.assetRegex -or [IO.Path]::GetExtension($assetName) -ne '.msi'){throw 'The resolved PowerShell payload is not the canonical x64 MSI asset.'}
-  Save-AllowlistedHttpsDownload -Uri $assetUri -AllowedHosts @($powershellDependency.directOfficialVendorResolver.allowedHosts) -Path $payload
-  if(-not (Test-Path -LiteralPath $payload) -or (Get-Item -LiteralPath $payload).Length -lt 1){throw 'Official PowerShell MSI download failed or produced an empty payload.'}
-  Test-OfficialSigner -Path $payload -Policy $powershellDependency.installerAuthenticityPolicy
-  return $payload
+
+function Copy-ReleaseTree([string]$Source, [string]$Destination) {
+  $excluded = @('.git', '.test-runtime', '.pytest_cache', '__pycache__', 'runtime-migrations', 'bin', 'obj')
+  foreach ($file in Get-ChildItem -LiteralPath $Source -Recurse -File) {
+    $relative = $file.FullName.Substring($Source.Length).TrimStart('\')
+    $parts = $relative -split '\\'
+    if ($parts | Where-Object { $excluded -contains $_ -or $_ -like '.venv*' }) { continue }
+    $target = Join-Path $Destination $relative
+    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+    Copy-Item -LiteralPath $file.FullName -Destination $target -Force
+  }
 }
-$pwsh=Find-Pwsh
-function Get-PwshVersion([string]$Path) {
-  $context=Get-DevFleetDeadlineContext
-  $remaining=if($context){[int][math]::Floor(([datetime]$context.StageDeadlineUtc-[datetime]::UtcNow).TotalSeconds)}else{60}
-  if($remaining -le 0){throw 'Bootstrap stage deadline expired before querying PowerShell.'}
-  $psi=New-Object Diagnostics.ProcessStartInfo
-  $psi.FileName=$Path;$psi.UseShellExecute=$false;$psi.CreateNoWindow=$true;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
-  $psi.Arguments='-NoProfile -NonInteractive -Command "' + '$PSVersionTable.PSVersion.ToString()' + '"'
-  $process=New-Object Diagnostics.Process
-  $process.StartInfo=$psi
+
+function Copy-PreparedShippingInputs([string]$PreparedSource, [string]$PreparedInstaller, [string]$Source, [string]$Installer) {
+  $version = (Get-Content -LiteralPath (Join-Path $PreparedSource 'VERSION') -Raw).Trim()
+  $copyPairs = @(
+    @{ From = (Join-Path $PreparedSource 'CHECKSUMS.sha256'); To = (Join-Path $Source 'CHECKSUMS.sha256') },
+    @{ From = (Join-Path $PreparedInstaller 'DevFleet.Setup\dependencies.json'); To = (Join-Path $Installer 'DevFleet.Setup\dependencies.json') },
+    @{ From = (Join-Path $PreparedInstaller 'OFFLINE-PAYLOAD-SHA256.txt'); To = (Join-Path $Installer 'OFFLINE-PAYLOAD-SHA256.txt') },
+    @{ From = (Join-Path $PreparedInstaller 'DevFleet.Setup\PayloadManifest.cs'); To = (Join-Path $Installer 'DevFleet.Setup\PayloadManifest.cs') },
+    @{ From = (Join-Path $PreparedInstaller 'DevFleet.Setup\DevFleet.Setup.csproj'); To = (Join-Path $Installer 'DevFleet.Setup\DevFleet.Setup.csproj') },
+    @{ From = (Join-Path $PreparedInstaller 'DevFleet.Setup\app.manifest'); To = (Join-Path $Installer 'DevFleet.Setup\app.manifest') },
+    @{ From = (Join-Path $PreparedInstaller 'INSTALLER-BUILD-MANIFEST.json'); To = (Join-Path $Installer 'INSTALLER-BUILD-MANIFEST.json') },
+    @{ From = (Join-Path $PreparedInstaller "DevFleet.Setup\Payload\devfleet-v$version.tar.gz"); To = (Join-Path $Installer "DevFleet.Setup\Payload\devfleet-v$version.tar.gz") }
+  )
+  foreach ($pair in $copyPairs) { Copy-Item -LiteralPath $pair.From -Destination $pair.To -Force }
+}
+
+function Assert-ReleaseStagePath([string]$Path,[string]$Parent,[string]$LeafPattern) {
+  $resolved=[IO.Path]::GetFullPath($Path)
+  $expectedParent=[IO.Path]::GetFullPath($Parent).TrimEnd('\','/')
+  if((Split-Path -Parent $resolved) -cne $expectedParent -or (Split-Path -Leaf $resolved) -cnotmatch $LeafPattern){throw 'Release staging path escaped its owned parent.'}
+  foreach($candidate in @($expectedParent,$resolved)){
+    if((Test-Path -LiteralPath $candidate) -and ((Get-Item -LiteralPath $candidate -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Release staging path is a reparse point.'}
+  }
+}
+
+function Invoke-NormalizedPrepare([string]$Source, [string]$Installer, [string]$Previous, [string]$Outputs) {
+  $root = Join-Path ([IO.Path]::GetTempPath()) "devfleet-release-prepare-$([guid]::NewGuid().ToString('N'))"
+  $preparedSource = Join-Path $root 'source'
+  $preparedInstaller = Join-Path $root 'installer-source'
+  $preparedOutputs = Join-Path $root 'outputs'
   try {
-    if(-not $process.Start()){throw "Unable to start PowerShell executable: $Path"}
-    $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
-    if(-not $process.WaitForExit([math]::Min(60,$remaining)*1000)){try{$process.Kill()}catch{};throw "PowerShell version query exceeded its bootstrap deadline: $Path"}
-    [void]([Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdout,$stderr)).Wait([TimeSpan]::FromSeconds(5)))
-    $text=(($stdout.GetAwaiter().GetResult())+"`n"+($stderr.GetAwaiter().GetResult()))
-  } finally { $process.Dispose() }
-  $match=[regex]::Match($text,'(?<!\d)(\d+\.\d+(?:\.\d+){0,2})')
-  if(-not $match.Success){return $null}
-  return [Version]$match.Groups[1].Value
+    Assert-ReleaseStagePath $root ([IO.Path]::GetTempPath()) '^devfleet-release-prepare-[0-9a-f]{32}$'
+    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    Copy-ReleaseTree $Source $preparedSource
+    Copy-ReleaseTree $Installer $preparedInstaller
+    Normalize-TextTree $preparedSource
+    Normalize-TextTree $preparedInstaller
+    New-Item -ItemType Directory -Path $preparedOutputs -Force | Out-Null
+    $result = Invoke-Prepare $preparedSource $preparedInstaller $Previous $preparedOutputs
+    Copy-PreparedShippingInputs $preparedSource $preparedInstaller $Source $Installer
+    Copy-Item -Path (Join-Path $preparedOutputs '*') -Destination $Outputs -Force -Recurse
+    return [pscustomobject]@{ Version = $result.Version; Tar = (Join-Path $Outputs (Split-Path -Leaf $result.Tar)); Portable = (Join-Path $Outputs (Split-Path -Leaf $result.Portable)); TarSha256 = $result.TarSha256 }
+  } finally {
+    Assert-ReleaseStagePath $root ([IO.Path]::GetTempPath()) '^devfleet-release-prepare-[0-9a-f]{32}$'
+    if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+  }
 }
-$minimumPowerShell=[Version]$powershellDependency.minimumSupportedVersion
-$pwshVersion=if($pwsh){Get-PwshVersion $pwsh}else{$null}
-if(-not $pwsh -or -not $pwshVersion -or $pwshVersion -lt $minimumPowerShell){
-  $payload=Get-OfficialPowerShellPayload
-  $msiexec=Join-Path $env:WINDIR 'System32\msiexec.exe'
-  if(-not (Test-Path -LiteralPath $msiexec)){throw 'Trusted Windows Installer executable was not found.'}
-  $context=Get-DevFleetDeadlineContext
-  $remaining=if($context){[int][math]::Floor(([datetime]$context.StageDeadlineUtc-[datetime]::UtcNow).TotalSeconds)}else{60}
-  if($remaining -le 0){throw 'Bootstrap stage deadline expired before installing PowerShell.'}
-  $p=Start-Process $msiexec -ArgumentList @('/i',$payload,'/qn','/norestart') -PassThru
-  if(-not $p.WaitForExit([math]::Min(60,$remaining)*1000)){try{$p.Kill()}catch{};throw 'PowerShell MSI installation exceeded its bootstrap deadline.'}
-  if($p.ExitCode -notin @(0,3010)){throw "PowerShell 7 bootstrap failed with exit code $($p.ExitCode)."}
-  $pwsh=Find-Pwsh
-  if(-not $pwsh){throw 'PowerShell 7 installer completed but pwsh.exe was not found.'}
-  $pwshVersion=Get-PwshVersion $pwsh
+
+if ($Mode -eq 'Prepare') {
+  $source = (Resolve-Path -LiteralPath $SourceRoot).Path
+  $installer = $PSScriptRoot
+  $previous = (Resolve-Path -LiteralPath $PreviousPortableZip).Path
+  $output = (Resolve-Path -LiteralPath (New-Item -ItemType Directory -Path $OutputDirectory -Force)).Path
+  $first = Invoke-NormalizedPrepare $source $installer $previous $output
+  if ($ProveIdempotent) {
+    $afterFirst = Get-Snapshot $source $installer
+    [void](Invoke-NormalizedPrepare $source $installer $previous $output)
+    $afterSecond = Get-Snapshot $source $installer
+    Assert-SameSnapshot $afterFirst $afterSecond 'second prepare pass'
+    Write-Output 'RELEASE_INPUT_PREPARE_IDEMPOTENCE=PASS'
+  }
+  [ordered]@{ mode = 'Prepare'; version = $first.Version; tar = $first.Tar; portable = $first.Portable; tarSha256 = $first.TarSha256 } | ConvertTo-Json -Compress
+  exit 0
 }
-if(-not $pwshVersion -or $pwshVersion -lt $minimumPowerShell){throw "Resolved PowerShell is below the supported minimum ${minimumPowerShell}: $pwshVersion"}
-$args=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',(Join-Path $root 'Install-DevFleet.ps1'),'-Role',$Role,'-InstallationMode',$InstallationMode,'-PackageRoot',$packageRoot,'-TransactionDeadlineUtc',$transactionDeadline.ToString('o'),'-DeadlinePolicyVersion',$DeadlinePolicyVersion)
-if($TransactionId -and $TransactionPayloadSha256 -and $TransactionAction -and $TransactionRole -and $TransactionPreparedUtc){$args+=@('-TransactionId',$TransactionId,'-TransactionPayloadSha256',$TransactionPayloadSha256,'-TransactionAction',$TransactionAction,'-TransactionRole',$TransactionRole,'-TransactionPreparedUtc',$TransactionPreparedUtc)}
-if($BootstrapBundlePath){$args+=@('-BootstrapBundlePath',$BootstrapBundlePath)}
-if($NonInteractive){$args+='-NonInteractive'}
-if($SkipWindowsUpdates){$args+='-SkipWindowsUpdates'}
-if($DeferNetworkPairing){$args+='-DeferNetworkPairing'}
-if($AcknowledgeRootfulDocker){$args+='-AcknowledgeRootfulDocker'}
-& $pwsh @args
-exit $LASTEXITCODE
+
+if ($ProveIdempotent) { throw '-ProveIdempotent is valid only with -Mode Prepare.' }
+$sourcePath = (Resolve-Path -LiteralPath $SourceRoot).Path
+$workspace = Split-Path -Parent $sourcePath
+if ($CandidateCommit -notmatch '^[0-9a-fA-F]{40}$') { throw 'Verify mode requires an explicit 40-character candidate commit.' }
+$previous = (Resolve-Path -LiteralPath $PreviousPortableZip).Path
+$verificationRoot = Join-Path ((Resolve-Path -LiteralPath (New-Item -ItemType Directory -Path $OutputDirectory -Force)).Path) '.release-input-stage'
+Assert-ReleaseStagePath $verificationRoot ((Resolve-Path -LiteralPath $OutputDirectory).Path) '^\.release-input-stage$'
+if (Test-Path -LiteralPath $verificationRoot) { Remove-Item -LiteralPath $verificationRoot -Recurse -Force }
+New-Item -ItemType Directory -Path $verificationRoot -Force | Out-Null
+$archive = Join-Path $verificationRoot 'candidate.tar'
+& git -C $workspace -c core.autocrlf=false archive --format=tar --output=$archive $CandidateCommit source installer-source tools automation
+if ($LASTEXITCODE) { throw "Could not materialize candidate commit $CandidateCommit for release-input verification." }
+$candidateTree = Join-Path $verificationRoot 'candidate'
+$buildTree = Join-Path $verificationRoot 'build'
+New-Item -ItemType Directory -Path $candidateTree,$buildTree -Force | Out-Null
+& tar -xf $archive -C $candidateTree
+if ($LASTEXITCODE) { throw 'Candidate shipping tree extraction failed during release-input verification.' }
+Copy-Item -LiteralPath (Join-Path $candidateTree 'source') -Destination $buildTree -Recurse
+Copy-Item -LiteralPath (Join-Path $candidateTree 'installer-source') -Destination $buildTree -Recurse
+Copy-Item -LiteralPath (Join-Path $candidateTree 'tools') -Destination $buildTree -Recurse -ErrorAction SilentlyContinue
+Copy-Item -LiteralPath (Join-Path $candidateTree 'automation') -Destination $buildTree -Recurse -ErrorAction SilentlyContinue
+$buildSource = Join-Path $buildTree 'source'
+$buildInstaller = Join-Path $buildTree 'installer-source'
+$buildOutputs = Join-Path $verificationRoot 'artifacts'
+$expected = Get-Snapshot $candidateTree\source $candidateTree\installer-source
+[void](Invoke-Prepare $buildSource $buildInstaller $previous $buildOutputs)
+$actual = Get-Snapshot $buildSource $buildInstaller
+Assert-SameSnapshot $expected $actual 'candidate commit'
+[ordered]@{ mode = 'Verify'; candidateCommit = $CandidateCommit; sourceRoot = $buildSource; installerRoot = $buildInstaller; outputDirectory = $buildOutputs; status = 'PASS' } | ConvertTo-Json -Compress
 
 ```
 
 
-## FILE: source/CHANGELOG.md
+## FILE: installer-source/PrivateSelfSignedSigning.psm1
 
-SHA256: 349fbb021aae248702a626433c983e6b1aeadb42da92323f0f6df7c53383188d | Bytes: 3950 | Git mode: 100644
-
-```
-# Changelog
-
-## 1.2.5
-
-- Added safe legacy lifecycle-command resolution and preflight reporting for dedicated-VM migrations.
-- Corrected stopped-source VM lifecycle preservation and identity-safe pre/post-import rollback cleanup.
-- Added managed Ed25519 SSH host-key pinning with authenticated alias verification and fixed cloud-init permission typing.
-
-## 1.2.4
-
-- Completed safe dedicated-VM creation, project SSH alias management, and early worktree rejection.
-- Added confirmed, capacity-aware environment migration with lifecycle preservation, transactional rollback, and retained previous-environment metadata.
-- Added provider-aware VM backup history, inspection, staged restore with safety backup, and generated-directory archive exclusions.
-- Reduced the canonical `devfleet-primary` control-plane memory allocation from 32G to 12G without changing project VM profiles or host reserve policy.
-
-## 1.2.3
-
-- Fixed asynchronous project-action submission, session throttling, and status-probe concurrency.
-- Added transactional environment assignment verification, explicit rollback-incomplete state, workspace restore, backup history/restore, and the existing-project environment wizard.
-- Added runtime-aware VS Code Remote-SSH workspace links and regenerated release identity.
-
-## 1.2.1
-- Removed synchronous infrastructure, peer, Docker, Git, analyzer, and Host Agent probes from ordinary navigation with cached stale-while-revalidate snapshots.
-- Replaced browser Basic Auth challenges with a DevFleet login page, opaque session cookies, session CSRF, logout, and safe redirects while preserving token-authenticated APIs.
-- Added persistent client navigation, in-page log controls, and cache-aware infrastructure refresh behavior.
-
-## 1.2.0
-- Added provider-routed project commands, verified VM workspace archives, backup-bound destruction gates, and safe VM workspace export.
-- Added runtime-versus-application health semantics and normalized host capacity for the dashboard.
-
-## 1.1.0
-- Preserved every v1.0.0 path, the three-VM recovery architecture, and internal instance names.
-- Added schema-2 migration with configuration backup and stopped-state Multipass snapshots.
-- Added Strict, Balanced, and Fast Trusted profiles.
-- Added rootless/rootful Docker selection, reports, explicit acknowledgement, stopped-state snapshots, and non-destructive switching.
-- Added BuildKit and dependency-manager caches through trusted controller overrides.
-- Added language policy and 20 templates, including 10 core templates.
-- Replaced the CodexPro no-op with a verified project-scoped adapter and status view.
-- Added auto-refreshing operation IDs/progress/logs, analyzer caching, ownership leases, guided transfer, peer controls, and preserved non-destructive repair.
-- Added Windows Ollama profiles/testing and remote SSH/Docker-context/VS Code client setup.
-
-## 1.0.0
-Original safe remote-development baseline, preserved separately.
-## 1.2.6
-
-- Reconcile owned Multipass project VM IPv4 addresses after create/start/restart without reprovisioning.
-- Preserve deterministic HostKeyAlias/known-host pinning while refreshing managed SSH host addresses.
-- Make stopped Dedicated VM runtime/status health inspection side-effect-free.
-- Add explicit running-only Open Workspace refresh semantics and portable verification documentation.
-## v1.2.7 — Project UX and readiness hotfix
-
-- Fixed project action controls after SPA navigation with one delegated submit handler and lifecycle idempotency keys.
-- Added exact-port same-origin validation, transition-aware lifecycle metadata, and operation progress continuity.
-- Added canonical dedicated-VM workspace readiness with managed SSH/host-key/authentication proofs.
-- Gated Open workspace until readiness is verified and exposed live allocation cards, including VM PID semantics.
-- Added Host Agent-owned stable/Insiders VS Code `remote.SSH.remotePlatform` reconciliation with JSONC-safe backups.
+SHA256: 7f60833369394740699c4fbc6ef410e1f302844c5b53bfe70dcd3b57b33afc11 | Bytes: 8933 | Git mode: 100644
 
 ```
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
+$script:PrivateSigningSubject = 'CN=DevFleet Private Personal Code Signing'
+$script:CodeSigningEku = '1.3.6.1.5.5.7.3.3'
 
-## FILE: source/CHECKSUMS.sha256
+function Get-PrivateKeyExportable {
+    param([Parameter(Mandatory)]$Certificate)
+    $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Certificate)
+    if ($null -eq $rsa) { throw 'DevFleet private signing certificate does not expose an RSA private key.' }
+    try {
+        if ($rsa -is [System.Security.Cryptography.RSACng]) {
+            $policy = $rsa.Key.ExportPolicy
+            return [bool](
+                ($policy -band [System.Security.Cryptography.CngExportPolicies]::AllowExport) -or
+                ($policy -band [System.Security.Cryptography.CngExportPolicies]::AllowPlaintextExport)
+            )
+        }
+        if ($rsa -is [System.Security.Cryptography.RSACryptoServiceProvider]) {
+            return [bool]$rsa.CspKeyContainerInfo.Exportable
+        }
+        throw "Unsupported RSA private-key provider: $($rsa.GetType().FullName)"
+    } finally {
+        $rsa.Dispose()
+    }
+}
 
-SHA256: 2d7eb896c3b391816e8d8cd892a99b54641d99918ce22cd1d393103a348abf23 | Bytes: 77861 | Git mode: 100644
+function Test-UsablePrivateSigningCertificate {
+    param([Parameter(Mandatory)]$Certificate)
+    $eku = @($Certificate.EnhancedKeyUsageList | ForEach-Object { [string]$_.ObjectId })
+    if ($Certificate.Subject -cne $script:PrivateSigningSubject) { return $false }
+    if (-not $Certificate.HasPrivateKey) { return $false }
+    if ($Certificate.NotBefore -gt (Get-Date)) { return $false }
+    if ($Certificate.NotAfter -le (Get-Date).AddDays(30)) { return $false }
+    if ($script:CodeSigningEku -notin $eku) { return $false }
+    return -not (Get-PrivateKeyExportable -Certificate $Certificate)
+}
+
+function Assert-PrivateSigningCertificate {
+    param([Parameter(Mandatory)]$Certificate)
+    if (-not (Test-UsablePrivateSigningCertificate -Certificate $Certificate)) {
+        throw 'DevFleet private signing certificate failed exact subject, validity, EKU, private-key, or non-exportable-key policy.'
+    }
+    if ([int]$Certificate.PublicKey.Key.KeySize -lt 3072) {
+        throw 'DevFleet private signing certificate RSA key is smaller than 3072 bits.'
+    }
+}
+
+function Import-PublicCertificateForPrivateTrust {
+    param(
+        [Parameter(Mandatory)][string]$PublicCertificatePath,
+        [Parameter(Mandatory)][string]$Thumbprint
+    )
+    foreach ($storeName in @('TrustedPublisher')) {
+        $storePath = "Cert:\CurrentUser\$storeName"
+        $present = Get-ChildItem -LiteralPath $storePath | Where-Object { $_.Thumbprint -ceq $Thumbprint }
+        if (-not $present) {
+            & (Join-Path $env:SystemRoot 'System32\certutil.exe') -user -f -addstore $storeName $PublicCertificatePath | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "certutil failed to install the DevFleet public certificate in CurrentUser/$storeName." }
+        }
+        $verified = Get-ChildItem -LiteralPath $storePath | Where-Object { $_.Thumbprint -ceq $Thumbprint }
+        if (-not $verified) { throw "DevFleet public signing certificate was not installed in CurrentUser/$storeName." }
+    }
+    $trustedRoot = @(Get-ChildItem -LiteralPath 'Cert:\CurrentUser\Root' | Where-Object { $_.Thumbprint -ceq $Thumbprint })
+    if ($trustedRoot.Count -ne 1) {
+        throw "USER ACTION REQUIRED — Windows requires interactive consent before trusting DevFleet private signing certificate $Thumbprint in CurrentUser/Root."
+    }
+}
+
+function Initialize-DevFleetPrivateSigningIdentity {
+    [CmdletBinding()]
+    param(
+        [string]$StateRoot = (Join-Path $env:LOCALAPPDATA 'DevFleet\Signing\PrivateSelfSigned'),
+        [switch]$TrustSigningHost,
+        [string]$RequiredThumbprint,
+        [switch]$RequireExisting
+    )
+
+    New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
+    $metadataPath = Join-Path $StateRoot 'identity.json'
+    $publicCertificatePath = Join-Path $StateRoot 'DevFleet-Private-Personal-Code-Signing.cer'
+    $persisted = $null
+    if (Test-Path -LiteralPath $metadataPath -PathType Leaf) {
+        try { $persisted = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json }
+        catch { throw "DevFleet private signing identity metadata is malformed: $($_.Exception.Message)" }
+        if ([string]$persisted.subject -cne $script:PrivateSigningSubject) {
+            throw 'DevFleet private signing identity metadata has an unexpected subject.'
+        }
+        if ([string]$persisted.thumbprint -notmatch '^[0-9A-Fa-f]{40}$') {
+            throw 'DevFleet private signing identity metadata has an invalid thumbprint.'
+        }
+    }
+
+    $store = 'Cert:\CurrentUser\My'
+    $exactSubject = @(Get-ChildItem -LiteralPath $store | Where-Object { $_.Subject -ceq $script:PrivateSigningSubject })
+    $certificate = $null
+    $rolloverFrom = $null
+    $created = $false
+    if ($persisted) {
+        $rolloverFrom = ([string]$persisted.thumbprint).ToUpperInvariant()
+        $candidate = @($exactSubject | Where-Object { $_.Thumbprint -ceq $rolloverFrom })
+        if ($candidate.Count -gt 1) { throw 'Multiple certificates matched the persisted DevFleet private signing thumbprint.' }
+        if ($candidate.Count -eq 1 -and (Test-UsablePrivateSigningCertificate -Certificate $candidate[0])) {
+            $certificate = $candidate[0]
+            $rolloverFrom = $null
+        }
+    } else {
+        $usable = @($exactSubject | Where-Object { Test-UsablePrivateSigningCertificate -Certificate $_ })
+        if ($usable.Count -gt 1) {
+            throw 'Multiple usable DevFleet private signing identities exist without persisted exact-thumbprint authority.'
+        }
+        if ($usable.Count -eq 1) { $certificate = $usable[0] }
+    }
+
+    if ($RequireExisting) {
+        if (-not $RequiredThumbprint -or $RequiredThumbprint -notmatch '^[0-9A-Fa-f]{40}$') {
+            throw 'DevFleet private signing requires an explicit existing certificate thumbprint.'
+        }
+        $required = @(Get-ChildItem -LiteralPath $store | Where-Object { $_.Thumbprint -ceq $RequiredThumbprint.ToUpperInvariant() })
+        if ($required.Count -ne 1 -or -not (Test-UsablePrivateSigningCertificate -Certificate $required[0])) {
+            throw "RELEASE BLOCKED — required existing DevFleet signing certificate $RequiredThumbprint is unavailable or fails policy; replacement creation is forbidden."
+        }
+        $certificate = $required[0]
+        if ($persisted -and ([string]$persisted.thumbprint).ToUpperInvariant() -cne $certificate.Thumbprint.ToUpperInvariant()) {
+            throw 'Persisted DevFleet private signing identity does not match the required existing certificate thumbprint.'
+        }
+    }
+    if (-not $certificate) {
+        $certificate = New-SelfSignedCertificate `
+            -Type CodeSigningCert `
+            -Subject $script:PrivateSigningSubject `
+            -FriendlyName 'DevFleet PRIVATE/PERSONAL Code Signing' `
+            -CertStoreLocation $store `
+            -KeyAlgorithm RSA `
+            -KeyLength 3072 `
+            -HashAlgorithm SHA256 `
+            -KeyExportPolicy NonExportable `
+            -NotAfter (Get-Date).AddYears(3)
+        $created = $true
+    }
+
+    Assert-PrivateSigningCertificate -Certificate $certificate
+    Export-Certificate -Cert $certificate -FilePath $publicCertificatePath -Force | Out-Null
+    if ($TrustSigningHost) {
+        Import-PublicCertificateForPrivateTrust -PublicCertificatePath $publicCertificatePath -Thumbprint $certificate.Thumbprint
+    }
+
+    $metadata = [ordered]@{
+        schemaVersion = 1
+        profile = 'PRIVATE_SELF_SIGNED'
+        subject = $certificate.Subject
+        thumbprint = $certificate.Thumbprint
+        codeSigningEku = $script:CodeSigningEku
+        notBefore = $certificate.NotBefore.ToUniversalTime().ToString('o')
+        notAfter = $certificate.NotAfter.ToUniversalTime().ToString('o')
+        keyAlgorithm = $certificate.PublicKey.Oid.FriendlyName
+        keySize = [int]$certificate.PublicKey.Key.KeySize
+        privateKeyExportable = $false
+        privateKeyExported = $false
+        publicCertificatePath = $publicCertificatePath
+        trustStores = if ($TrustSigningHost) { @('CurrentUser/Root', 'CurrentUser/TrustedPublisher') } else { @() }
+        createdThisRun = $created
+        rolloverFromThumbprint = $rolloverFrom
+        updatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+    }
+    $temporary = "$metadataPath.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [IO.File]::WriteAllText($temporary, (($metadata | ConvertTo-Json -Depth 6) + [Environment]::NewLine), (New-Object Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $temporary -Destination $metadataPath -Force
+    } finally {
+        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+    }
+    return [pscustomobject]$metadata
+}
+
+Export-ModuleMember -Function Initialize-DevFleetPrivateSigningIdentity
 
 ```
-7c52807b9916d34cb980d01c85049e1443be953d813106b7931fe8e8d02feb50  BASELINE-v1.0.0-FILES.txt
-30f522b051e90266c8307537a661b458cfb8ddd092e30e0c0e6e2fc04f7e0554  Bootstrap-Install.ps1
-349fbb021aae248702a626433c983e6b1aeadb42da92323f0f6df7c53383188d  CHANGELOG.md
-1bf9481ca5be5676e0070de024f05e66fa60a6e817c1999b71d3194ac79af892  DevFleet-v1.1.0-FILE-CHANGES.md
-28666495394ce7fa029bbf0c0d0949512333328d28181fb238bd901345af30f2  DevFleet-v1.1.0-MIGRATION.md
-9b3a513c9e8dc3a351bcb721eaf6ab05044f1d0583c61f2eaff41e1c88abcd38  DevFleet-v1.1.0-VALIDATION.md
-1eaa7f8e5513960dce8b9ef1501f9d1f6a60383aa6f0529c906666a08b04a163  INSTALL-CHECKLIST.txt
-a6eb7b82456f5de4c0d9446aa1901b70311e2dc8adf8bd8311affa25688d494e  Install-DevFleet.ps1
-16dcbabf33e13d0f8c66db25e104366f877d8c99e0eff2933aad90ab47272fcc  MIGRATION-ROLLBACK.md
-5ec4487ad07cec2145a6ade137e641047c19769957c03628978218a06dfb05a4  README-FIRST.md
-85ba7a2aa2c127e12f830f96aa1787f237598fae20e3ae7543828552b161f469  SECURITY-NOTES.txt
-155b462f564dd1c2ae210029544d39194c14c0c85fb8062d31eb2a614e84d42f  START-HERE-DESKTOP.cmd
-97b7b3a91ffa320f1729e1662da3d615bf82bc6aa116e276c2bf373d0b6fd065  START-HERE-LAPTOP.cmd
-3905ac18b10325246b765a33daac907f548c000372a1144ef736f44ef9136b2a  Upgrade-DevFleet.ps1
-c21698334b1e2308b8556ac1d10402342b8d3e837f65fa1c431eb23392824b1d  VERSION
-2736ff45f82f5c2ae6fd243801f786562d4ddfa6326f19cce66a72c6b9e28602  app/devfleet/__init__.py
-0ebb618f06b728c84a5e8cfeeb04485536824f11bce37e752f5ed9c9a160e785  app/devfleet/analyzer.py
-9810905e7e2ab9d1f1a426ffb9644e2c388de5d199aedf9848f953918ff7cb3d  app/devfleet/auth.py
-9772d26aae5fa5d81142a9e1e29361886b9effbaa92f3eef8a99724bd985441d  app/devfleet/caches.py
-30b25cb2a5e7479b08aeb3e1b161fe5b53d6eafe21f6b53ea6d2b827df5689a4  app/devfleet/codexpro.py
-3ad7879d81b09b62d176c5483204281caf4d7f81a57d03d6fd77cf9a7f4c1ee1  app/devfleet/configuration.py
-56dc9aa80609796d45523c4d701e05afde736cccbc9a925fab4f8d50304dc600  app/devfleet/containers.py
-244499e96e005ac615042edbe10082a93110f186de8340cdc8a77c95341ac77c  app/devfleet/core.py
-cd69e5b29293e828ef6c7cfcbc4538e73456e3ac3041fffb3ce2059375f81e5d  app/devfleet/failover.py
-47b084d09edea59545bad7d16bf197892edfd2fd1905e06f8fb418e5a466ce53  app/devfleet/host_control.py
-d3c417f349ee93e1aefe323f09233c8e4e8d3f612914e97f0b9e32df5b81b289  app/devfleet/language_policy.py
-968255eb2ab9f4121cb561dc474a382b3c47e7dcbe8c08936cda7022abfb7b31  app/devfleet/leases.py
-1da87d821f4910f3d0e86f39592593a351b55ab83a62174b90ffa62a80add618  app/devfleet/main.py
-188ee5ed02c51d802e85cfa75a1017e9fc2c5a897a51083ba4a09bd564afd290  app/devfleet/metadata_io.py
-ffd562d4c2685dacea1e183e708530ea4ccf04c20f19e2969d827190b286600b  app/devfleet/node_registry.py
-5805e067353f237924b00fff0b0c595db779ccea061b7ad5e34186052dec0e6e  app/devfleet/ollama.py
-d60334d923abed24439342e38ce4061e702b76a64813082718d29946e6832437  app/devfleet/operations.py
-1cd0b8e2b31ac2ff724837205ac8f83d2ee6cb0916a679512f543b8557f2dcc5  app/devfleet/profiles.py
-6ff44e69f1eb4219d8ba2f0a4bc8416c11c7378ce3cdabfcb7f8e78ee33e272b  app/devfleet/projects.py
-5162c54a20a1dfa99eea6eeed3773127a7f4714d067e7f5455b3adff1632f83a  app/devfleet/request_guards.py
-9bec3c14f6019fe4439065f8419dd7f11cc2de01ed9e9bd15bbbc5bf94102eb1  app/devfleet/resource_profiles.py
-0fde1265ee3895e9dd1b0369256eca1e55fa51532ff1918982ad03ee4f5e4aad  app/devfleet/runtime.py
-d5c260df7828b383aa6c7f1d6ff2735783430e5db5457bdd2d5989316164607c  app/devfleet/status.py
-a0a9c477ebd09f6fa0713427174d3f86c685de2004badcd8f0c8dfc039dd4251  app/devfleet/version.py
-fcc44f267e3c4d0e8f9a674fa52a1675d46a5cb9877af27f8bc3868643605c0f  app/devfleet/workspace_archives.py
-fe238c807b668a2f7e0f2b929e24859260e6a7f76bd6762ac7b6b10ad7daac33  app/requirements-hashed.txt
-f9a988a58e9e3b9df6e7e78963ec1a074a5642b77fb6541f4463592f6eee6346  app/requirements.txt
-8e100c7cc4c96993212aaabfc30e7ed1bbc1167b8f2eb5db840671aee6b0599a  app/static/app.js
-9e95e0103e58d5d59f47b099381beb3f0e9af60b34a9a30fe00c121c04833128  app/static/style.css
-4262827dc7134b7a52088898b25c35eba6359089ca24b4149acc5053c5c877c9  app/systemd/devfleet-backup.service
-52148ce1d51758771ea6aa53c5168ab750af865b40a4b084334359f800796a7e  app/systemd/devfleet-backup.timer
-9bfd790f5f2152ac43bdc78fb56efc3924c1f10975f31c0995a1cb690d64836f  app/systemd/devfleet-vault-broker.socket
-4431ccb294f011419df43b9475954cfed6ff3f570d600074b4b5bda5037ef1da  app/systemd/devfleet-vault-broker@.service
-f33f84cc58fc18f2217a064cc40d9a55bbb14a008a664609b29d0518183a5cca  app/systemd/devfleet.service
-00862e8161b5dbe817a5e4a4e2ce662c67b43fa45c160a9070b5b624db1f8069  app/systemd/mutable-paths.json
-0fdd41703ebacd3f0231d7f18a74d908dbdc19f629f120d6af65c49b3707e559  app/templates/index.html
-2545054327bb69d476b2fdb4b28ed75b12e1d30222a34cab8a46ebb82d2af4d1  app/templates/login.html
-d27ae17fba723ce41695a05d644d6ac5e4eb99557f6ff9296005e23e8e587058  client/Configure-DockerContext.ps1
-9376560ad72753307bf3ce174039807ad00e2bb13b12b9f6c2087ff630e141dc  client/Configure-SSH.ps1
-38e8948c6ae1e6f3c9b5d605d5650666939fbe477d23b9b2c9329fdc22b92ad1  client/Configure-VSCode.ps1
-f299ee1509445c514d3faf5d91db10f071768f6f62b5cc90223856bf2afbdeff  client/ssh-config.example
-4cd73e74d6ab46ccbe37cb08c46200aa203747f3b6ac79bb823a1c03226911c1  client/vscode-extensions-core.txt
-56eee44c27cdc6b543a8f58f580629bc9197a7123a74d4f05f063aac54745eb9  client/vscode-extensions-enterprise.txt
-aaa364399deda68c33ac158dbf32dad3dc4a4a522f66567df618d7bb3a48e131  client/vscode-extensions-python.txt
-25b7b8985b0071eeaa9a69e1304dec94beb5919b14f1303a6353124d2c3455c8  client/vscode-extensions-systems.txt
-8eefa88fd78c091f9ac23130aef1399a649929fc6a895a05be4f3742c0aa874d  client/vscode-extensions-web.txt
-c5b88bbcff8c96b667cb46ea26eaabfb7336f2d7b5243f7a528553b825da0cf9  client/vscode-settings.jsonc
-00316cd0d11900a961163b07a24f26e9ebfc71830100847ce2cc10ef650ea4cf  cloud-init/compute.yaml
-02799e2f3cac7df71db945030cce0d122d3663564db761197ade7e34d09f18ca  cloud-init/vault.yaml
-e2db65056b5030e3547c8659563bdb0db197d71d6c6dfd50a609efddbd514279  config/compose-security-policy.json
-e6d6d298e5437f994eeab4579253b1ef1bf49fe2ebeeffe01cd6e9ca30c65b5d  config/devfleet.config.json
-3e3b592adfe477dbc58c3995f8f34602f14d4145ef01b9b4cad117053c32b148  config/ollama-profiles.json
-8e93275c24263491338ac3939a808acdf07f15c3d0c45badda90edb51646de8d  config/resource-policy.json
-b939c07de544806e87b8324c050a1a3aff6baac8b36fac57201d917ea8810b46  dependencies.json
-95f36460eee2e88d097ca0dc1f7cb4062292fc24e9702aaf2c28326127934c8f  docs/00-HARD-STOPS-AND-ASSUMPTIONS.md
-6b2d8c54bdef789c3fd80a6b6512a38d657c38bfb1a2e9a0b8bddd86809f3dc9  docs/01-ARCHITECTURE.md
-4ed32904f5194bf15804565bbd254bcb91479b7b87552780723c737f6b92d75e  docs/02-INSTALL-ORDER.md
-9c528be76c5285ec85c9eb2ae71fb68ac551dff06c54aef64d5b5c4f67013eb4  docs/03-DAILY-USE.md
-ab36d4634d1477f69ef0c4b910dcfa16b6eb157e7e72b081066ce643f36ce2e3  docs/04-RECOVERY.md
-cc5a849cfe183f417cc6ee4600c0605e5258dddf9e3fc71f7de9451a7019bf2c  docs/05-SECURITY-MODEL.md
-04a3d4244d99396de9a9b17ed21567aa4a491e724a551b8b211cd556de88fe80  docs/06-CODEXPRO-INTEGRATION.md
-24dc3b375dd5380ad3eef4d4a2b9ea3c90f02352136ceee936edde8865773429  docs/07-OFFICIAL-SOURCES.md
-78cdead576d5def42520f8276f09d14ebacd60fc19edf3e29f79d98a9fc1a02d  docs/08-DEVELOPMENT-PROFILES.md
-fc1505fce91fcbc2c07793e56e49d1b1595c8fe1d1c5d0a06d61ce99d61dc9a1  docs/09-LANGUAGE-SELECTION.md
-1c62c6d556381f532b86eb7fe737d9e39a5726a4a457127e1adfe4a8404d9992  docs/10-OLLAMA-AND-GPU.md
-adf463bf6333f1ff118433701d9bccb9038dc12c1c512a95f2932b46f5e3ad6b  docs/11-REMOTE-VSCODE.md
-28666495394ce7fa029bbf0c0d0949512333328d28181fb238bd901345af30f2  docs/12-UPGRADING-FROM-1.0.0.md
-04264853da9e3a2d5baa1002ccf43018df4af3c2d79bbf8236909e262a44501f  docs/13-PERFORMANCE-TUNING.md
-0e83ab1f2f01961b14ddc261a76128fa8f27ad35c04c63e732ef5824620ec80f  docs/RELEASE-FINGERPRINT-SCHEMA.md
-b7c8271409e747cc03a5214b7d082b9673e3e69131edd6a534db613bf6bb8faf  docs/host-agent-portability.md
-512bc920be2372e2211f897ba6b83dcfa72b4c5c8973f5f8f548363425880645  linux/bootstrap-compute.sh
-9f91b7f6d75029c4fbe47004e5ba85a11442eb92cbabc053fbb857b78be984ad  linux/bootstrap-input.sh
-08899264e01566206e13f36f04cffda80991c39bc54babfa75f593ae09e7102c  linux/bootstrap-vault.sh
-81a515050e5d312ac4a453fa1bdaa999cfc11ad6a652659776bf5747c6b69168  linux/dependency-advisory-allowlist.json
-9754d4c72b9a3c608f1ed1efda0d1ff7ae12f8d6be555ccd618466b8125c9269  linux/dependency-policy.json
-c1334694748167d8781713b3a74fe184b8a549dfde457a500233a97999e8f644  linux/devfleet-backup
-f12c94fa0f12ba9482cbf8b10de3dfc5211d46f01863498af2a1a5d14849479e  linux/devfleet-configure-backup
-ad369c63d0363aa359ce1e34d37deeeb2947fc7d90f8a137cc4c14756b3e0017  linux/devfleet-docker-mode-report
-11e17775c3f5a9dc5a59e79d70aeb2adcb0f25a0a1a6b4ecaafb1feefd1fd78a  linux/devfleet-health
-9a542f43851dfe31cc37928d650463e5724e6f0156fbe484b95a101645ec16cf  linux/devfleet-join-deployment
-cf80700961b1878e3de64867c67b293c44832cb0b70e59510081cbe7bfc487a1  linux/devfleet-purge-quarantine
-2d46e7a6e2797b33eb61c8c7aa516cad8f735a65725ff4819ce6abd5516d9b13  linux/devfleet-register-node
-0a3bc23dcf346c88d89fcc37bea30033b7d94b2f5649df6ab23e9721aefe32f5  linux/devfleet-repair
-426640f394e023de9d6f9be723b58d1ac2a42c83c528e0221a7c1a7018f13c23  linux/devfleet-restore-project
-226ad81de29d261ac0cfb014556729cb97004305cf151c60261ca5ae1505d09e  linux/devfleet-rotate-compute-secrets
-31cffd4c26ea1fd3e50ca108f7dced492159e5504673a17b6b7c0a624f347724  linux/devfleet-rotate-vault-secrets
-4a64a44a1d8a921bdededc65b093541ebd7c613430b414e0ea0445af4c04a7a6  linux/devfleet-safe-update
-502799d1a0beca07f2605b1b767aaf8babc938c8e55f6d8af0ff4827b08fa830  linux/devfleet-set-peer
-6773950522775354abe07a698c24bdce8b7f73b458e5963e308e8b64f44cf056  linux/devfleet-switch-docker-mode
-eb6f98d1459e8fdae8b0bc3f7c8ba7d0164ce964a86d9d8c7277f936430c6e5a  linux/devfleet-user-repair
-fcdfdcd5762286fafa0b2ce8a14353f9bf404717472515a8d43efa4f3e3a54b9  linux/devfleet-vault-broker
-aef4f5a6daa89f7a2e669a1e773e32e358801c242458b4a36da0e02769114763  linux/devfleet-vault-health
-bd9c01d8bf3ae54bbeba5f37b23d7dedc7e0a4a0778559d9c388f1b085e0c073  linux/devfleet-vault-maintenance
-245458f58ef1a87ffd19abe2d6e3112e812d9b4ca6151158658be5f32b563fbb  linux/devfleet-vault-request
-f754f18cf80416026dea3f0a0b37772b419751aaec0198fd914c1ab87d8b5aec  linux/upgrade-compute.sh
-6a96ba0e2d5a8296fb90f474da9d2f0173d3e41eba18965513f711104155f913  pytest.ini
-ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f  templates/cpp-cmake/.ai-bridge/chatgpt-memory.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/cpp-cmake/.ai-bridge/codexpro-project-instructions.md
-7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb  templates/cpp-cmake/.ai-bridge/current-plan.template.md
-d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135  templates/cpp-cmake/.ai-bridge/prompts/broken-session-recovery.md
-a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02  templates/cpp-cmake/.ai-bridge/prompts/handoff-template.md
-5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab  templates/cpp-cmake/.ai-bridge/prompts/reconnect.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/cpp-cmake/.ai-bridge/prompts/session-bootstrap.md
-445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622  templates/cpp-cmake/.devcontainer/devcontainer.json
-0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a  templates/cpp-cmake/.devfleet/bootstrap.sh
-18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b  templates/cpp-cmake/.devfleet/codexpro-bootstrap.sh
-c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44  templates/cpp-cmake/.devfleet/codexpro-profile.json
-86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30  templates/cpp-cmake/.devfleet/codexpro.env.example
-04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311  templates/cpp-cmake/.devfleet/health-check.sh
-cd4d78db29dabe909a6929b0a1dfb066d98d2b80bd59e490c1bd10a4fd6a0cb5  templates/cpp-cmake/.devfleet/project-tools.json
-95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31  templates/cpp-cmake/.devfleet/smoke-test.sh
-e8b1109631cc35fe43568d05bcea8b28ce2128bbd52569515296c481a901ab95  templates/cpp-cmake/.devfleet/template.json
-05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44  templates/cpp-cmake/.editorconfig
-8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe  templates/cpp-cmake/.gitignore
-228588bd8182b53ca0721b1342685e32c7afcb7f681cb513b87ab3e705cc8850  templates/cpp-cmake/README.md
-0aa515e43796e07025f2cfdcb121e0d6edad4cfea877399c65fa066a4ced6231  templates/cpp-cmake/compose.yaml
-7f2df08e2676a8a97abf899c5b7c2caa96209ba308a6fde7c1fd527cb09fea23  templates/cpp-cmake/docs/architecture.md
-ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f  templates/data-r/.ai-bridge/chatgpt-memory.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/data-r/.ai-bridge/codexpro-project-instructions.md
-7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb  templates/data-r/.ai-bridge/current-plan.template.md
-d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135  templates/data-r/.ai-bridge/prompts/broken-session-recovery.md
-a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02  templates/data-r/.ai-bridge/prompts/handoff-template.md
-5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab  templates/data-r/.ai-bridge/prompts/reconnect.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/data-r/.ai-bridge/prompts/session-bootstrap.md
-31743d0b403e9a20eb3dffd87c5033c90bd0c28a0f522633bef1b18235b2c065  templates/data-r/.devcontainer/devcontainer.json
-0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a  templates/data-r/.devfleet/bootstrap.sh
-18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b  templates/data-r/.devfleet/codexpro-bootstrap.sh
-c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44  templates/data-r/.devfleet/codexpro-profile.json
-86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30  templates/data-r/.devfleet/codexpro.env.example
-04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311  templates/data-r/.devfleet/health-check.sh
-808c6a308c2e68d82e7f1c74e27f98b5dbf5903e1bfac70b9f777c890ca22ba2  templates/data-r/.devfleet/project-tools.json
-95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31  templates/data-r/.devfleet/smoke-test.sh
-dea898a52612bca2c9967c01ec0b59e60d44992986a9ec64fbdde3045321573c  templates/data-r/.devfleet/template.json
-05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44  templates/data-r/.editorconfig
-8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe  templates/data-r/.gitignore
-ec91ebe76515639ed04056aa7dfe14f3c47c5c3c776de81f647565c4d6acfacd  templates/data-r/README.md
-1c84cd5554f19af11ea76022af21546d1e08f6bb4abb34bf8ad42ec3b6009581  templates/data-r/compose.yaml
-6cd72cb5a51cac627cba6256f617c70778cdb34113460b0fb596310a276240f8  templates/data-r/docs/architecture.md
-ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f  templates/dotnet-service/.ai-bridge/chatgpt-memory.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/dotnet-service/.ai-bridge/codexpro-project-instructions.md
-7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb  templates/dotnet-service/.ai-bridge/current-plan.template.md
-d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135  templates/dotnet-service/.ai-bridge/prompts/broken-session-recovery.md
-a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02  templates/dotnet-service/.ai-bridge/prompts/handoff-template.md
-5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab  templates/dotnet-service/.ai-bridge/prompts/reconnect.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/dotnet-service/.ai-bridge/prompts/session-bootstrap.md
-445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622  templates/dotnet-service/.devcontainer/devcontainer.json
-ec1e677581abb22ca7a86b4ef7e3c86708659f0784584daf6afb44125415a074  templates/dotnet-service/.devfleet/bootstrap.sh
-18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b  templates/dotnet-service/.devfleet/codexpro-bootstrap.sh
-c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44  templates/dotnet-service/.devfleet/codexpro-profile.json
-86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30  templates/dotnet-service/.devfleet/codexpro.env.example
-04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311  templates/dotnet-service/.devfleet/health-check.sh
-26721a1313e9b66ca20366a2046829a6e9525653ad509d68f5349c5ccd7c5e4d  templates/dotnet-service/.devfleet/project-tools.json
-95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31  templates/dotnet-service/.devfleet/smoke-test.sh
-cc65f3a10f3a1bf7574b82bccbba88dddb891571c56be4cf007cc42a7efb012c  templates/dotnet-service/.devfleet/template.json
-05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44  templates/dotnet-service/.editorconfig
-8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe  templates/dotnet-service/.gitignore
-ebbdb3332b9556c2f914c704d8a0a5505ca9ef9c39d79b2d77f06773e8d040d4  templates/dotnet-service/README.md
-27689cd9a2e39c77afbea11502beea583dbb5f7cb4f88038b7e6e3f88f9aee84  templates/dotnet-service/compose.yaml
-f8838fa8b3ba83bd35d7e14664bdfe8cfea7adbd3292b689e2550908d388eb8b  templates/dotnet-service/docs/architecture.md
-cd8b60226e846d3819569814d937322bc3b4d055cb2cf2ef1a9fb9f345786f60  templates/dotnet-service/src/App/App.csproj
-f899d19a0c23035a24153fa695bd5cf9043ff229ae0536dbb1ddceb2084da6dc  templates/dotnet-service/src/App/Program.cs
-66340917c9ec77aec68f1e42cbf5180ee73c216f16236a9053d2a4f6afc05da0  templates/dotnet-service/tests/Smoke/Smoke.csproj
-051b9b53201d40216dc80ea93710787582710326e80459bd4d2eb5bf96bd1712  templates/dotnet-service/tests/Smoke/SmokeTest.cs
-ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f  templates/elixir-phoenix/.ai-bridge/chatgpt-memory.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/elixir-phoenix/.ai-bridge/codexpro-project-instructions.md
-7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb  templates/elixir-phoenix/.ai-bridge/current-plan.template.md
-d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135  templates/elixir-phoenix/.ai-bridge/prompts/broken-session-recovery.md
-a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02  templates/elixir-phoenix/.ai-bridge/prompts/handoff-template.md
-5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab  templates/elixir-phoenix/.ai-bridge/prompts/reconnect.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/elixir-phoenix/.ai-bridge/prompts/session-bootstrap.md
-445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622  templates/elixir-phoenix/.devcontainer/devcontainer.json
-0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a  templates/elixir-phoenix/.devfleet/bootstrap.sh
-18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b  templates/elixir-phoenix/.devfleet/codexpro-bootstrap.sh
-c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44  templates/elixir-phoenix/.devfleet/codexpro-profile.json
-86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30  templates/elixir-phoenix/.devfleet/codexpro.env.example
-04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311  templates/elixir-phoenix/.devfleet/health-check.sh
-9aa617fd91e8ba76c0289c8eef2f41033531e497c1f7020aeebc779140215e32  templates/elixir-phoenix/.devfleet/project-tools.json
-95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31  templates/elixir-phoenix/.devfleet/smoke-test.sh
-084a180cb376f59626de68b16c7591031cce8840903d1ca2495cfb96eb046a50  templates/elixir-phoenix/.devfleet/template.json
-05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44  templates/elixir-phoenix/.editorconfig
-8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe  templates/elixir-phoenix/.gitignore
-86ac907798e2475ece41e4da3add7768efcbd3d7b749ae764028af6d18556446  templates/elixir-phoenix/README.md
-c2d252c95c1ba4c3349ebed46c7e0cc154558a18b6daa7c3cbfa9623e9999dda  templates/elixir-phoenix/compose.yaml
-298034dab1c6a31f18a15c36c070df7f1e1abf1c9fcf3de0a366eed366d74f43  templates/elixir-phoenix/docs/architecture.md
-ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f  templates/flutter/.ai-bridge/chatgpt-memory.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/flutter/.ai-bridge/codexpro-project-instructions.md
-7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb  templates/flutter/.ai-bridge/current-plan.template.md
-d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135  templates/flutter/.ai-bridge/prompts/broken-session-recovery.md
-a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02  templates/flutter/.ai-bridge/prompts/handoff-template.md
-5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab  templates/flutter/.ai-bridge/prompts/reconnect.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/flutter/.ai-bridge/prompts/session-bootstrap.md
-31743d0b403e9a20eb3dffd87c5033c90bd0c28a0f522633bef1b18235b2c065  templates/flutter/.devcontainer/devcontainer.json
-0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a  templates/flutter/.devfleet/bootstrap.sh
-18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b  templates/flutter/.devfleet/codexpro-bootstrap.sh
-c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44  templates/flutter/.devfleet/codexpro-profile.json
-86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30  templates/flutter/.devfleet/codexpro.e
+
+
+## FILE: installer-source/RELEASING.md
+
+SHA256: c06c804c4fdb8c8262ea4d6993b1e3785eb07df8799b00deb34ee4a18f32607f | Bytes: 399 | Git mode: 100644
+
+```
+# Releasing
+
+The canonical sequence is source tests, the current `VERSION` TAR, portable ZIP, unsigned build and
+self-test, clean-room and maintenance E2E, Authenticode signing and timestamping,
+signature verification, signed self-test, final hashes, installer-source ZIP, and audit
+ZIP. A release stops on signing or required E2E failure. Fast rebuild is explicitly
+unsigned developer output only.
+
+```
+
+
+## FILE: installer-source/TAILSCALE-AUTH.md
+
+SHA256: bb622751864f369df29b393cf085d839af3df2c3e9d7d4270d25d67cbbd8b754 | Bytes: 2219 | Git mode: 100644
+
+````
+# Tailscale authentication
+
+Installation and authentication are separate. The normal automated provider is the
+DPAPI-bound `OAuthClientSecretStore` in the existing DevFleet E2E/local secret store.
+When authentication is genuinely needed, DevFleet passes the secret through 

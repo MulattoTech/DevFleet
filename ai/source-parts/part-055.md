@@ -1,496 +1,623 @@
 # DevFleet source part 055
 
 Full-source UTF-8 byte interval [2511000, 2557500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: bc02e9b6a8da3b4a5d0b66570341666c536f443687137aba6a3d3f43c1b63132
+Payload SHA-256: 94e731e1ce1c21e9477e0539d05fba98caf9d0faec8a222467c824b10e0da60a
 
 <!-- BEGIN SOURCE SLICE -->
-lf-test");
-    try
-    {
-        TestEnvironment.EnableForSelfTest(selfTestAclRoot);
-        var selfTestAcl = SecureStagingService.BuildDirectorySecurity(selfTestCache);
-        var selfTestSids = selfTestAcl.GetAccessRules(true, false, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>().Select(rule => rule.IdentityReference.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var currentSid = WindowsIdentity.GetCurrent().User?.Value ?? throw new InvalidOperationException("Test caller has no Windows SID.");
-        Assert(selfTestSids.SetEquals(["S-1-5-18", "S-1-5-32-544", currentSid]), "Self-test staging ACL must add only the exact current-user SID.");
-        Assert(!selfTestSids.Overlaps(["S-1-1-0", "S-1-5-11", "S-1-5-32-545"]), "Self-test staging ACL must not grant Everyone, Authenticated Users, or Users.");
-        SecureStagingService.EnsureDirectory(selfTestCache);
-        SecureStagingService.EnsureDirectory(selfTestTransaction);
-        var writeProbe = Path.Combine(selfTestTransaction, "write-probe.txt");
-        File.WriteAllText(writeProbe, "exact-current-user-only");
-        Assert(File.ReadAllText(writeProbe) == "exact-current-user-only", "Self-test caller could not use the secured transaction directory.");
-        Console.WriteLine("PASS production and exact-current-user self-test staging ACL profiles");
-    }
-    finally
-    {
-        try { if (Directory.Exists(selfTestAclRoot)) Directory.Delete(selfTestAclRoot, true); } catch { }
-        TestEnvironment.ClearSelfTestRoot();
-    }
+ it only through Dylan's explicit adoption/goal instruction. It records his
+September 6 answers: diagnostic checkpoint YES; consolidated bounded diagnosis and
+repair YES; Desktop-only preview NO; targeted disposable-VM console observation YES.
+His new delegation authorization supersedes the old six-created-helper ceiling.
+
+## Entry sequence
+
+1. Read `AUTHORIZATION.md`, `ORCHESTRATION.md`, and `LOOP.md` in this directory.
+   Read the installed `docs/ai/devfleet-release/SAFETY-AND-AUTHORITY.md` and `DONE.md`.
+   E overrides only the older procedural restrictions explicitly listed in AUTHORIZATION.
+   Platform restrictions and all unchanged safety/release conditions remain binding.
+2. Reconcile sole coordinator/lab ownership and live Git, candidate and current proof
+   authority. Read the current native handoff and small memory CURRENT/ATTEMPTS/HELPERS.
+   Do not reload every historical transcript or treat this offline packet as live evidence.
+3. Create or resume E's state under `audit/agent-memory/campaigns/DF-STABLE-20260906-E/`
+   using `MEMORY-TEMPLATES.md`. Preserve any existing E state and every historical A–D run.
+   Add navigation links to existing memory; do not replace it with these templates.
+4. Verify actual root, helper model routing, native concurrency and goal support once.
+   The launcher's requested settings are not proof of the effective runtime settings.
+5. Give useful independent questions to Luna helpers. Sol performs root integration and
+   is the ONLY live lab operator. Follow DIAGNOSTICS before another complete proof.
+6. Continue the evidence-driven loop to the full installed DONE contract, or stop safely
+   for one of LOOP's concrete escalation conditions. Do not stop at writing these files.
+
+## Offline orientation — verify live; do not rebind to these values
+
+| Field | Uploaded D closeout |
+|---|---|
+| Repository/tooling HEAD | `1678a2547efa5ab2192d46a51d7e793171e4970f` |
+| Candidate build commit | `bf8ee64179dfa2dd36b2772fdbd1608c4408415e` |
+| Shipping identity | `a26130c7b023106b1e78f068d4610fea443196624a342bd8a6ec352b0f65ae9f` |
+| Release fingerprint | `908daa6058dbbca3edc69fde1d0ca953ceb439040585335178088e96814b5635` |
+| Tooling fingerprint | `b921fd9a3b1af567e14a4b0c630f4583f67a3713b6309c03b074f9c903629351` |
+| Last failed proof | `e2e-exact-candidate-proof-stable-20260906-p1-supplement-d1` |
+| Proof credit | 0/2; FullRelease not run for current candidate |
+| Shipping/build | Recorded unchanged; rebuildRequired=false |
+
+Both signed WPF legs returned OBSERVER_HANDOFF. The Desktop observer accepted five
+markers with zero role/identity errors, ending at
+`stage-compute-devfleet-primary-instance-absent.complete`. Subsequent inventory was
+INVENTORY_TIMEOUT; 164 samples ended at the unchanged 1,800-second semantic deadline.
+No complete product installation was established. Multipass launch/daemon readiness is
+the unresolved boundary, not a proven root cause. Recorded cleanup was L1 OFF/L2 ABSENT.
+
+Keep solved launch-mode, interactive-login, role identity, checkpoint acknowledgement,
+stdin/dependency deadline and post-exit drain corrections unless new evidence contradicts
+them. The configuration and chronology needed to reproduce the last boundary matter more
+than rereading the original WPF investigation. Sources and verification limits: SOURCES.md.
+
+```
+
+
+## FILE: docs/ai/devfleet-release/templates/ATTEMPT.md
+
+SHA256: 49cd4f7aab1fe95fa5444b5a191a80856e815519b5f3dfa2a0b8ded5386e5093 | Bytes: 1193 | Git mode: 100644
+
+```
+# <RunId> — attempt reservation and result
+
+Policy: DF-STABLE-20260905-A
+Class: READINESS | PRODUCT_FIRST_EXECUTION | CORRECTIVE_REPLAY | SOURCE_ONLY
+Status: RESERVED | RUNNING | PASS | FAIL | BLOCKED | CANCELLED | UNKNOWN
+Reserved UTC: <time>
+Slot: <readiness 1..3, required phase identity, or shared replay 1..2>
+Historical predecessor: <old/new attempt path; do not rewrite it>
+
+## Question and prerequisites
+Hypothesis / specific missing observation:
+Changed inputs and focused regression justifying a retry:
+HEAD / candidate / shipping / release / tooling:
+Entrypoint, actual parameters, runtime and script SHA-256:
+HOST-SAFETY record/hash and exact L1/CLEAN/owned L2 fence:
+Owner process identity and cleanup owner:
+Operation/child/parent deadlines and terminalization margin:
+Expected semantic observations and stop rule:
+
+## Actual result
+Started/completed UTC:
+Product started: true | false | unknown (with evidence)
+Last durable boundary and run/launch/transaction/payload identities:
+Exit code, status and primary error:
+Evidence paths/SHA-256:
+L1 / L2 / owned workers/helpers (state, method, time, continuity):
+Effect on counters and dependent proof validity:
+Next exact action:
+
+```
+
+
+## FILE: docs/ai/devfleet-release/templates/INCIDENT.md
+
+SHA256: 8b1dfaa39db730d4a56b7a30794cd340a28ef9ae979f654cee061ee0c64b6fa2 | Bytes: 536 | Git mode: 100644
+
+```
+# <stable incident ID and short title>
+
+Status: HYPOTHESIS | PROVEN_SOURCE_DEFECT | FIX_IMPLEMENTED | LOCAL_TESTED | LIVE_VALIDATED | RELEASE_CERTIFIED | FALSIFIED | HISTORICAL | SUPERSEDED
+Observed UTC:
+Scope / relevant source-tooling tuple:
+Symptom and distinguishing boundary:
+Evidence paths/hashes or exact symbols:
+Proven cause (or explicitly unproven hypothesis):
+Correction and commit:
+Regression and actual result:
+Live validation / missing observation:
+Do not repeat:
+Reopen only when:
+Supersedes / superseded by:
+Next action:
+
+```
+
+
+## FILE: docs/ai/devfleet-release/templates/SESSION.md
+
+SHA256: 12178ac191d569e826eb87f35355834e2476b8e1c22b49dce09d99f5fcbe4009 | Bytes: 501 | Git mode: 100644
+
+```
+# Session boundary — <UTC/session ID>
+
+Boundary: PAUSE | BLOCKER | RELEASE
+Live HEAD / candidate / shipping / release / tooling:
+Milestone and exact blocker:
+Changed files by classification:
+Tests/runs completed with evidence:
+Readiness/replay reservations and consumption; historical ledger pointer:
+Helper slots used/reserved/active and native ledger:
+Owned process / L1 / L2 terminal evidence:
+Uncommitted work preserved:
+Audit path/hash/mode when required:
+Single next action and prerequisites:
+
+```
+
+
+## FILE: installer-source/Assets/README.md
+
+SHA256: 2078e9a68c7d64bc6d228479cc67bca8d96c453ba18029732515d034784f2821 | Bytes: 248 | Git mode: 100644
+
+```
+# Branding Assets
+
+This build does not include a third-party or fabricated trust/logo asset. The WPF shell uses its product text and conservative native controls. A legitimate M-TechLabs icon can be added later without changing installer behavior.
+
+```
+
+
+## FILE: installer-source/BUILD-INSTRUCTIONS.md
+
+SHA256: 2e12dc6c44bcaf136d8d67b812bd9610b4142073f4de32a71d0d2dad8f8a4e15 | Bytes: 1024 | Git mode: 100644
+
+```
+# DevFleet v1.2.13 Installer Build
+
+The installer is a .NET 8 WPF, self-contained `win-x64` application with `PublishSingleFile=true`. The build intentionally has no NuGet application dependencies. A clean build machine needs the .NET 8 SDK and the Windows Desktop targeting pack.
+
+1. Prepare and prove idempotence with `Prepare-ReleaseInputs.ps1 -Mode Prepare -ProveIdempotent` before committing the shipping inputs.
+2. After the candidate commit is frozen, use `Build-Release.ps1 -VerifyFrozenInputs`; it verifies the commit-sourced generated bytes before restore/build/sign.
+3. Restore with an explicitly approved NuGet source: `dotnet restore DevFleet.Setup/DevFleet.Setup.csproj --source https://api.nuget.org/v3/index.json --runtime win-x64`.
+4. Run `DevFleet.Setup.Tests` for the destructive-safety plan tests and the published EXE with `--self-test` using test-only state/install roots.
+
+The final binary is architecture-specific and unsigned in this build. No fake trust root or self-signed certificate is created.
+
+```
+
+
+## FILE: installer-source/BUILDING.md
+
+SHA256: 94ee82f0cfc9a58725f0669ff8dcb4354945ba094ac92deef902b0649c2595bb | Bytes: 824 | Git mode: 100644
+
+````
+# Building DevFleet Setup
+
+Use a workspace-local .NET 8 SDK. The target PC does not need .NET because the published WPF installer is self-contained, single-file, and `win-x64`.
+
+Full release:
+
+```powershell
+ .\Prepare-ReleaseInputs.ps1 -Mode Prepare -SourceRoot <source> -PreviousPortableZip <previous-portable.zip> -OutputDirectory <outputs> -SigningProfile PrivateSelfSigned -ProveIdempotent
+ # Commit the prepared shipping inputs, then build only from the frozen commit.
+ .\Build-Release.ps1 -SourceRoot <source> -PreviousPortableZip <previous-portable.zip> -OutputDirectory <outputs> -DotNet <dotnet.exe> -SigningProfile PrivateSelfSigned -VerifyFrozenInputs
+```
+
+Installer-only iteration after the embedded TAR is current:
+
+```powershell
+.\Fast-Rebuild-Installer.ps1 -OutputDirectory <outputs> -DotNet <dotnet.exe>
+```
+
+````
+
+
+## FILE: installer-source/Build-Release.ps1
+
+SHA256: 591d8b8a2684ab5f772d27c15db2637b0f19e702fbe73331d03d4444a4bb7647 | Bytes: 32505 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param(
+  [Parameter(Mandatory)][string]$SourceRoot,
+  [Parameter(Mandatory)][string]$PreviousPortableZip,
+  [Parameter(Mandatory)][string]$OutputDirectory,
+  [string]$DotNet = 'dotnet',
+  [switch]$UnsignedDeveloperBuild,
+  [switch]$VerifyFrozenInputs,
+  [switch]$PrepareReleaseInputs,
+  [string]$SignToolPath,
+  [string]$SigningDlibPath,
+  [string]$SigningMetadataPath,
+  [string]$CertificateThumbprint,
+  [string]$OsvScannerPath = '',
+  [ValidateSet('PublicTrusted','PrivateSelfSigned')][string]$SigningProfile = 'PublicTrusted',
+  [string]$TimestampUrl = 'http://timestamp.acs.microsoft.com'
+)
+$ErrorActionPreference='Stop'
+if($UnsignedDeveloperBuild -and $PSBoundParameters.ContainsKey('SigningProfile')){throw 'UnsignedDeveloperBuild cannot be combined with an explicit signing profile.'}
+$installerRoot=$PSScriptRoot
+$releasePowerShell = @((Join-Path $PSHOME 'powershell.exe'),(Join-Path $PSHOME 'pwsh.exe')) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+if (-not $releasePowerShell) { throw "Trusted build PowerShell executable was not found under $PSHOME" }
+if($PrepareReleaseInputs){
+  & $releasePowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $installerRoot 'Prepare-ReleaseInputs.ps1') -Mode Prepare -SourceRoot $SourceRoot -PreviousPortableZip $PreviousPortableZip -OutputDirectory $OutputDirectory -SigningProfile $SigningProfile -ProveIdempotent
+  if($LASTEXITCODE){throw 'Release-input preparation failed.'}
+  exit 0
 }
-
-// Integration branch proofs are safe and read-only with respect to protected
-// roots.  They run only on Windows, where ACL and Authenticode APIs exist.
-if (OperatingSystem.IsWindows())
-{
-    var trustedExecutable = new[] {
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet", "dotnet.exe"),
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "where.exe"),
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-    }.FirstOrDefault(File.Exists);
-    Assert(trustedExecutable is not null, "ACL regression N requires a real existing executable beneath Program Files or Windows.");
-    Assert(OwnedPathSafety.TryGetTrustedSystemRoot(trustedExecutable!, out var trustedRoot), "ACL regression N could not resolve the exact trusted root.");
-    Assert(Path.GetFullPath(trustedExecutable!).StartsWith(Path.GetFullPath(trustedRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "Trusted executable is not below its exact trusted root.");
-    var priorPath = Environment.GetEnvironmentVariable("PATH");
-    try
-    {
-        Environment.SetEnvironmentVariable("PATH", Environment.GetFolderPath(Environment.SpecialFolder.System) + Path.PathSeparator + priorPath);
-        var trustedRunner = new RecordingProcessRunner();
-        trustedRunner.QueueResult(new ProcessResult(1, "", "unsigned fixture is accepted by explicit test policy"));
-        trustedRunner.QueueResult(new ProcessResult(0, "9.9.9", ""));
-        var trustedDetection = new DependencyService(trustedRunner).Detect(new DependencyDefinition {
-            Id = "acl-safe-existing", DisplayName = "ACL safe existing fixture", ExecutableProbes = [Path.GetFileName(trustedExecutable!)], KnownVendorInstallLocations = [trustedExecutable!],
-            MinimumSupportedVersion = "1.0.0", VersionProbe = new VersionProbe { Regex = "(\\d+\\.\\d+)" },
-            InstallerAuthenticityPolicy = new InstallerAuthenticityPolicy { InstalledExecutableTrust = "signed-installer-locked-path" }
-        });
-        Assert(trustedDetection.Found && trustedDetection.Compatible && trustedDetection.Version is not null && trustedRunner.Invocations.Count >= 2,
-            $"ACL regression N did not reach signer/version branch: found={trustedDetection.Found}, compatible={trustedDetection.Compatible}, version={trustedDetection.Version}, invocations={trustedRunner.Invocations.Count}, path={trustedDetection.ExecutablePath}.");
-        Assert(trustedRunner.Invocations.Any(i => i.Arguments.Any(a => a.Contains("Authenticode", StringComparison.OrdinalIgnoreCase))), "ACL regression N signer probe was not reached.");
-    Assert(trustedRunner.Invocations.Any(i => string.Equals(i.FileName, trustedExecutable, StringComparison.OrdinalIgnoreCase)), "ACL regression N version probe did not execute the real trusted executable.");
-    Console.WriteLine("PASS ACL safe trusted-root executable signer/version branch proof N");
-
-    // WinGet package-root structure is fail-closed: only the exact physical
-    // package root beneath Program Files\\WindowsApps may supply winget.exe.
-    var approvedWindowsApps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "WindowsApps");
-    string? package = null;
-    if (Directory.Exists(approvedWindowsApps))
-    {
-        try
-        {
-            package = Directory.EnumerateDirectories(approvedWindowsApps, "Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe", SearchOption.TopDirectoryOnly)
-                .Where(path => !new DirectoryInfo(path).Attributes.HasFlag(FileAttributes.ReparsePoint))
-                .FirstOrDefault(path => File.Exists(Path.Combine(path, "winget.exe")));
+if(-not $VerifyFrozenInputs){throw 'Build-Release requires -VerifyFrozenInputs; tracked release inputs must be prepared and committed before build/sign.'}
+$privateIdentityPreflight=$null
+if(-not $UnsignedDeveloperBuild -and $SigningProfile -eq 'PrivateSelfSigned'){
+  if($CertificateThumbprint -cne 'DE42CD7369A01E9357BDA13597C0173E5E703E9D'){throw 'RELEASE BLOCKED — the authorized existing DevFleet signing thumbprint must be supplied exactly.'}
+  Import-Module (Join-Path $installerRoot 'PrivateSelfSignedSigning.psm1') -Force
+  $privateIdentityPreflight=Initialize-DevFleetPrivateSigningIdentity -TrustSigningHost -RequiredThumbprint $CertificateThumbprint -RequireExisting
+}
+$source=(Resolve-Path -LiteralPath $SourceRoot).Path
+$previous=(Resolve-Path -LiteralPath $PreviousPortableZip).Path
+New-Item -ItemType Directory -Path $OutputDirectory -Force|Out-Null
+$outputs=(Resolve-Path -LiteralPath $OutputDirectory).Path
+$workspaceRoot=Split-Path -Parent $source
+$priorStatePath=Join-Path $workspaceRoot 'finalization-state.json'
+$authorizedCorrection=[ordered]@{shipping_paths=@()}
+if(Test-Path -LiteralPath $priorStatePath -PathType Leaf){
+  try{$priorState=Get-Content -LiteralPath $priorStatePath -Raw|ConvertFrom-Json -ErrorAction Stop}catch{throw 'RELEASE BLOCKED — prior finalization authority is unreadable.'}
+  [string[]]$authorizedPaths=@($priorState.authorized_correction.shipping_paths|ForEach-Object{([string]$_).Trim().Replace('\','/').TrimStart('/')}|Where-Object{$_}|Sort-Object -Unique)
+  # Machine-readable path inventories use ordinal ordering, not the host's
+  # culture-sensitive collation (which places CHECKSUMS after lowercase app).
+  [Array]::Sort($authorizedPaths,[StringComparer]::Ordinal)
+  foreach($authorizedPath in $authorizedPaths){
+    if($authorizedPath -notmatch '^(source|installer-source)/' -or $authorizedPath -match '(^|/)\.\.(/|$)' -or [IO.Path]::IsPathRooted($authorizedPath)){throw "RELEASE BLOCKED — authorized correction path is invalid: $authorizedPath"}
+  }
+  $authorizedCorrection.shipping_paths=@($authorizedPaths)
+}
+$releasePythonCandidate=Join-Path $workspaceRoot 'source\.venv-test\Scripts\python.exe'
+$releasePython=if(Test-Path -LiteralPath $releasePythonCandidate -PathType Leaf){$releasePythonCandidate}else{(Get-Command python.exe -ErrorAction Stop).Source}
+$releaseToolingRequirements=Join-Path $workspaceRoot 'tools\release-tooling-requirements.txt'
+if(-not (Test-Path -LiteralPath $releaseToolingRequirements -PathType Leaf)){throw 'RELEASE BLOCKED — pinned release-tooling requirements are missing.'}
+& $releasePython -c "import packaging, cvss; assert packaging.__version__ == '26.3'; assert cvss.__version__ == '3.6'"
+if($LASTEXITCODE){throw 'RELEASE BLOCKED — the pinned packaging/cvss release-tool dependencies are unavailable.'}
+$shippingIdentityTool=Join-Path $workspaceRoot 'tools\compute_shipping_input_identity.py'
+$candidateGitCommit=(& git -C $workspaceRoot rev-parse HEAD 2>$null).Trim()
+$verificationMarker = & $releasePowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $installerRoot 'Prepare-ReleaseInputs.ps1') -Mode Verify -SourceRoot $source -PreviousPortableZip $previous -OutputDirectory $outputs -SigningProfile $SigningProfile -CandidateCommit $candidateGitCommit | Select-Object -Last 1
+if($LASTEXITCODE){throw 'RELEASE BLOCKED — prepared shipping inputs do not reproduce exactly from the candidate commit.'}
+$verification = $verificationMarker | ConvertFrom-Json
+if($verification.status -ne 'PASS'){throw 'RELEASE BLOCKED — frozen release-input verification did not PASS.'}
+$buildSource=[string]$verification.sourceRoot
+$buildInstaller=[string]$verification.installerRoot
+$candidateIdentityJson = & $releasePython $shippingIdentityTool --workspace $workspaceRoot --candidate-commit $candidateGitCommit | Select-Object -Last 1
+if($LASTEXITCODE){throw 'RELEASE BLOCKED — candidate shipping identity could not be computed.'}
+$candidateIdentity = $candidateIdentityJson | ConvertFrom-Json
+function Normalize-CrlfOnly([byte[]]$Bytes) {
+  $out = New-Object System.Collections.Generic.List[byte]
+  for($i=0; $i -lt $Bytes.Length; $i++) {
+    if($Bytes[$i] -eq 13) {
+      if($i + 1 -ge $Bytes.Length -or $Bytes[$i + 1] -ne 10) { throw 'RELEASE BLOCKED — live shipping input contains a lone CR; only CRLF materialization is permitted.' }
+      [void]$out.Add(10); $i++; continue
+    }
+    [void]$out.Add($Bytes[$i])
+  }
+  return $out.ToArray()
+}
+function Test-ByteArrayEqual([byte[]]$Left,[byte[]]$Right) {
+  if($Left.Length -ne $Right.Length){return $false}
+  for($i=0;$i -lt $Left.Length;$i++){if($Left[$i] -ne $Right[$i]){return $false}}
+  return $true
+}
+$candidateKeys=@($candidateIdentity.candidateShippingInputs | ForEach-Object { "$($_.root)/$($_.path)" })
+$liveKeys=@($candidateIdentity.liveShippingInputs | ForEach-Object { "$($_.root)/$($_.path)" })
+if($candidateKeys.Count -ne $liveKeys.Count -or @((Compare-Object -ReferenceObject $candidateKeys -DifferenceObject $liveKeys -IncludeEqual:$false)).Count -ne 0){throw 'RELEASE BLOCKED — live and candidate shipping input row sets differ.'}
+foreach($row in @($candidateIdentity.candidateShippingInputs)) {
+  $rootPath = if([string]$row.root -ceq 'source'){$source}else{Join-Path $workspaceRoot 'installer-source'}
+  $candidateRoot = if([string]$row.root -ceq 'source'){$buildSource}else{$buildInstaller}
+  $livePath = Join-Path $rootPath ([string]$row.path).Replace('/','\')
+  $candidatePath = Join-Path $candidateRoot ([string]$row.path).Replace('/','\')
+  if(-not (Test-Path -LiteralPath $livePath -PathType Leaf) -or -not (Test-Path -LiteralPath $candidatePath -PathType Leaf)){throw "RELEASE BLOCKED — shipping input is missing from live or candidate tree: $($row.root)/$($row.path)"}
+  $liveBytes=[IO.File]::ReadAllBytes($livePath); $candidateBytes=[IO.File]::ReadAllBytes($candidatePath)
+  if(-not (Test-ByteArrayEqual $liveBytes $candidateBytes)) {
+    $normalizedLive=Normalize-CrlfOnly $liveBytes
+    if(-not (Test-ByteArrayEqual $normalizedLive $candidateBytes)){throw "RELEASE BLOCKED — live checkout shipping input differs substantively from the candidate commit: $($row.root)/$($row.path)"}
+  }
+}
+$stageIdentityJson = & $releasePython $shippingIdentityTool --source-root $buildSource --installer-root $buildInstaller | Select-Object -Last 1
+if($LASTEXITCODE){throw 'RELEASE BLOCKED — staged shipping identity could not be computed.'}
+$stageIdentity = $stageIdentityJson | ConvertFrom-Json
+if([string]$stageIdentity.shippingInputIdentity -cne [string]$candidateIdentity.candidateShippingInputIdentity){throw 'RELEASE BLOCKED — staged shipping identity does not match the candidate commit.'}
+$verifiedOutputs=[string]$verification.outputDirectory
+$verifiedTar=Join-Path $verifiedOutputs "devfleet-v$((Get-Content -LiteralPath (Join-Path $buildSource 'VERSION') -Raw).Trim()).tar.gz"
+$verifiedPortable=Join-Path $verifiedOutputs "DevFleet-v$((Get-Content -LiteralPath (Join-Path $buildSource 'VERSION') -Raw).Trim())-Portable-Codebase-Verified-r1.zip"
+if(-not (Test-Path -LiteralPath $verifiedTar) -or -not (Test-Path -LiteralPath $verifiedPortable)){throw 'RELEASE BLOCKED — frozen verification did not produce authoritative TAR and portable artifacts.'}
+Copy-Item -LiteralPath $verifiedTar -Destination (Join-Path $outputs (Split-Path -Leaf $verifiedTar)) -Force
+Copy-Item -LiteralPath $verifiedPortable -Destination (Join-Path $outputs (Split-Path -Leaf $verifiedPortable)) -Force
+function Assert-StageShippingIdentity([string]$Phase) {
+  $currentJson = & $releasePython $shippingIdentityTool --source-root $buildSource --installer-root $buildInstaller | Select-Object -Last 1
+  if($LASTEXITCODE){throw "RELEASE BLOCKED — shipping identity recomputation failed at $Phase."}
+  $current = $currentJson | ConvertFrom-Json
+  if([string]$current.shippingInputIdentity -cne [string]$candidateIdentity.candidateShippingInputIdentity){throw "RELEASE BLOCKED — shipping identity changed at $Phase."}
+}
+$devfleetVersion=(Get-Content -LiteralPath (Join-Path $buildSource 'VERSION') -Raw).Trim()
+$installerVersion=(Get-Content -LiteralPath (Join-Path $buildInstaller 'INSTALLER_VERSION') -Raw).Trim()
+if($devfleetVersion -notmatch '^\d+\.\d+\.\d+$'){throw "Release source VERSION is not semantic: $devfleetVersion"}
+if($installerVersion -notmatch '^\d+\.\d+\.\d+$'){throw "Installer VERSION is not semantic: $installerVersion"}
+$assemblyVersion="$installerVersion.0"
+$advisoryReport = Join-Path $outputs 'dependency-advisory-gate.json'
+& $releasePython (Join-Path $buildSource 'tools\check_dependency_advisories.py') --lock (Join-Path $buildSource 'app\requirements-hashed.txt') --allowlist (Join-Path $buildSource 'linux\dependency-advisory-allowlist.json') --output $advisoryReport
+if($LASTEXITCODE){throw 'Dependency security-freshness gate blocked the release build.'}
+$osvScanner=if($OsvScannerPath){$OsvScannerPath}elseif($env:DEVFLEET_OSV_SCANNER_PATH){$env:DEVFLEET_OSV_SCANNER_PATH}else{(Get-Command osv-scanner.exe -ErrorAction SilentlyContinue).Source}
+if(-not $osvScanner -or -not (Test-Path -LiteralPath $osvScanner -PathType Leaf)){throw 'RELEASE BLOCKED — first-party OSV-Scanner is unavailable; dependency reconciliation is fail-closed.'}
+$osvReconciliation = Join-Path $outputs 'independent-osv-reconciliation.json'
+& $releasePython (Join-Path $workspaceRoot 'tools\reconcile_osv_scanner.py') --scanner $osvScanner --lock (Join-Path $buildSource 'app\requirements-hashed.txt') --custom-report $advisoryReport --output $osvReconciliation
+if($LASTEXITCODE){throw 'Independent OSV-Scanner reconciliation blocked the release build.'}
+$tar=Join-Path $outputs "devfleet-v$devfleetVersion.tar.gz"
+$hash=(Get-FileHash -LiteralPath $tar -Algorithm SHA256).Hash.ToLowerInvariant()
+if((Get-Content -LiteralPath (Join-Path $buildInstaller 'DevFleet.Setup\PayloadManifest.cs') -Raw) -notmatch [regex]::Escape($hash)){throw 'PayloadManifest.cs is not synchronized with the frozen TAR SHA-256.'}
+if((Get-Content -LiteralPath (Join-Path $buildInstaller 'DevFleet.Setup\DevFleet.Setup.csproj') -Raw) -notmatch [regex]::Escape("devfleet-v$devfleetVersion.tar.gz")){throw 'Installer project payload metadata is not synchronized with the frozen version.'}
+if((Get-Content -LiteralPath (Join-Path $buildInstaller 'DevFleet.Setup\app.manifest') -Raw) -notmatch ('assemblyIdentity\s+version="'+[regex]::Escape($assemblyVersion)+'"')){throw 'Windows application manifest identity is not synchronized with the frozen installer version.'}
+$sourceZip = Join-Path $outputs "DevFleet-v$devfleetVersion-Installer-Source.zip"
+& $releasePowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $buildSource 'tools\Build-InstallerSourceZip.ps1') -SourceRoot $buildSource -InstallerRoot $buildInstaller -OutputPath $sourceZip
+if($LASTEXITCODE){throw 'Installer source archive build failed.'}
+& $releasePython (Join-Path $buildSource 'tools\release_fingerprint.py') --source-root $buildSource --installer-root $buildInstaller --output (Join-Path $outputs 'release-fingerprint.json') --artifact "tar=$tar" --artifact "portable=$(Join-Path $outputs "DevFleet-v$devfleetVersion-Portable-Codebase-Verified-r1.zip")" --artifact "installerSource=$sourceZip"
+if($LASTEXITCODE){throw 'Release fingerprint generation failed.'}
+& $DotNet restore (Join-Path $buildInstaller 'DevFleet.Setup\DevFleet.Setup.csproj')
+if($LASTEXITCODE){throw 'dotnet restore failed.'}
+& $DotNet build (Join-Path $buildInstaller 'DevFleet.Setup\DevFleet.Setup.csproj') -c Release --no-restore
+if($LASTEXITCODE){throw 'dotnet build failed.'}
+& $DotNet run --project (Join-Path $buildInstaller 'DevFleet.Setup.Tests\DevFleet.Setup.Tests.csproj') -c Release
+if($LASTEXITCODE){throw 'installer tests failed.'}
+$publish=Join-Path $outputs 'publish';New-Item -ItemType Directory -Path $publish -Force|Out-Null
+& $DotNet publish (Join-Path $buildInstaller 'DevFleet.Setup\DevFleet.Setup.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o $publish
+if($LASTEXITCODE){throw 'installer publish failed.'}
+$unsignedExe=Join-Path $outputs "DevFleet-Setup-v$devfleetVersion-win-x64.exe"
+Copy-Item -LiteralPath (Join-Path $publish 'DevFleet.Setup.exe') -Destination $unsignedExe -Force
+$selfTest=Join-Path $outputs 'unsigned-self-test.txt'
+$env:DEVFLEET_SELF_TEST_OUTPUT=$selfTest
+$selfTestProcess=Start-Process -FilePath $unsignedExe -ArgumentList '--self-test' -Wait -PassThru
+Remove-Item Env:DEVFLEET_SELF_TEST_OUTPUT -ErrorAction SilentlyContinue
+if($selfTestProcess.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $selfTest) -or (Get-Content -LiteralPath $selfTest -Raw) -notmatch '(?m)^PASS(?:\r?$)'){throw 'Unsigned installer self-test failed.'}
+Assert-StageShippingIdentity 'pre-sign'
+$portable = Join-Path $outputs "DevFleet-v$devfleetVersion-Portable-Codebase-Verified-r1.zip"
+$fingerprintArgs = @(
+  ("--artifact=exe=$unsignedExe"),
+  ("--artifact=tar=$tar"),
+  ("--artifact=portable=$portable"),
+  ("--artifact=installerSource=$sourceZip")
+)
+& $releasePython (Join-Path $buildSource 'tools\release_fingerprint.py') --source-root $buildSource --installer-root $buildInstaller --output (Join-Path $outputs 'release-fingerprint.json') @fingerprintArgs
+if($LASTEXITCODE){throw 'Final release fingerprint generation failed.'}
+$artifactRows = @(
+  [ordered]@{name='exe';path="outputs/DevFleet-Setup-v$devfleetVersion-win-x64.exe";bytes=(Get-Item $unsignedExe).Length;sha256=(Get-FileHash $unsignedExe -Algorithm SHA256).Hash.ToLowerInvariant()},
+  [ordered]@{name='tar';path="outputs/devfleet-v$devfleetVersion.tar.gz";bytes=(Get-Item $tar).Length;sha256=(Get-FileHash $tar -Algorithm SHA256).Hash.ToLowerInvariant()},
+  [ordered]@{name='portable';path="outputs/DevFleet-v$devfleetVersion-Portable-Codebase-Verified-r1.zip";bytes=(Get-Item $portable).Length;sha256=(Get-FileHash $portable -Algorithm SHA256).Hash.ToLowerInvariant()},
+  [ordered]@{name='installerSource';path="outputs/DevFleet-v$devfleetVersion-Installer-Source.zip";bytes=(Get-Item $sourceZip).Length;sha256=(Get-FileHash $sourceZip -Algorithm SHA256).Hash.ToLowerInvariant()}
+)
+$fingerprintObject=Get-Content (Join-Path $outputs 'release-fingerprint.json') -Raw | ConvertFrom-Json
+if([int]$fingerprintObject.schemaVersion -ne 2){throw 'Current candidate release fingerprint must use schema v2.'}
+$candidateGitBranch=(& git -C $workspaceRoot branch --show-current 2>$null).Trim()
+if($candidateGitCommit -notmatch '^[0-9a-fA-F]{40}$' -or -not $candidateGitBranch){throw 'Release candidate identity could not be bound to a local Git commit and branch.'}
+$signingState='PRE-SIGN UNSIGNED — Authenticode signing and verification occur later in this invocation'
+$currentTooling = [ordered]@{schemaVersion=2;releaseFingerprintSchemaVersion=2;releaseFingerprintId=$fingerprintObject.releaseFingerprintId;toolingFingerprintId=$fingerprintObject.toolingFingerprint.toolingFingerprintId;toolingInputs=$fingerprintObject.toolingFingerprint.toolingInputs;artifacts=$artifactRows;generatedAt=(Get-Date).ToUniversalTime().ToString('o')}
+$currentToolingPath = Join-Path $outputs 'tooling-fingerprint-current.json'
+$currentToolingTemporary = "$currentToolingPath.$([guid]::NewGuid().ToString('N')).tmp"
+try {
+  [IO.File]::WriteAllText($currentToolingTemporary, (($currentTooling | ConvertTo-Json -Depth 12) + [Environment]::NewLine), (New-Object Text.UTF8Encoding($false)))
+  Move-Item -LiteralPath $currentToolingTemporary -Destination $currentToolingPath -Force
+} finally {
+  Remove-Item -LiteralPath $currentToolingTemporary -Force -ErrorAction SilentlyContinue
+}
+$finalManifest = [ordered]@{schemaVersion=2;releaseFingerprintSchemaVersion=2;releaseVersion=$devfleetVersion;installerVersion=$installerVersion;gitCommit=$candidateGitCommit;branch=$candidateGitBranch;candidateGitCommit=$candidateGitCommit;shippingInputIdentity=$candidateIdentity.candidateShippingInputIdentity;candidateShippingInputIdentity=$candidateIdentity.candidateShippingInputIdentity;releaseFingerprintId=$fingerprintObject.releaseFingerprintId;toolingFingerprintId=$fingerprintObject.toolingFingerprint.toolingFingerprintId;artifacts=$artifactRows;sourceChangedSinceCandidate=$false;rebuildRequired=$false;sourceIdentityMatchesCandidate=$true;artifactTupleMatchesCandidate=$true;candidateBuildCurrent=$true;candidateIsCurrent=$true;validationEvidenceCurrent=$false;fullReleasePassed=$false;physicalSurrogateCertificationCurrent=$false;internalPromotionAllowed=$false;publicPromotionAllowed=$false;releaseStatus='BLOCKED';signingState=$signingState;signing=$signingState}
+$finalManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputs 'final-artifact-hashes.json') -Encoding utf8
+$state=[ordered]@{
+  release_version=$devfleetVersion;installer_version=$installerVersion;workspace=$workspaceRoot;branch=$candidateGitBranch;git_commit=$candidateGitCommit;candidate_git_commit=$candidateGitCommit;shipping_input_identity=$candidateIdentity.candidateShippingInputIdentity;candidate_shipping_input_identity=$candidateIdentity.candidateShippingInputIdentity;current_phase='candidate-built-awaiting-clean-fullrelease';last_completed_phase='candidate-build-and-self-test';status='BLOCKED';authorized_correction=$authorizedCorrection;source_changed_since_candidate=$false;rebuild_required=$false;source_identity_matches_candidate=$true;artifact_tuple_matches_candidate=$true;candidate_build_current=$true;candidate_is_current=$true;validation_evidence_current=$false;full_release_passed=$false;physical_surrogate_certification_current=$false;internal_promotion_allowed=$false;public_promotion_allowed=$false;release_status='BLOCKED';signing_state=$signingState;release_fingerprint_schema_version=2;releaseFingerprintId=$fingerprintObject.releaseFingerprintId;toolingFingerprintId=$fingerprintObject.toolingFingerprint.toolingFingerprintId;production_safety=[ordered]@{production_unchanged=$true;mulattotechsurface_touched=$false;scope='disposable DevFleet-E2E resources only'};candidate=[ordered]@{exe=$artifactRows[0];tar=$artifactRows[1];portable=$artifactRows[2];installer_source=$artifactRows[3]};self_test=(Get-Content (Join-Path $outputs 'unsigned-self-test.txt') -Raw);gates=[ordered]@{dependency_matrix='UNVERIFIED — exact candidate FullRelease required';wpf='UNVERIFIED — exact candidate FullRelease required';linux='UNVERIFIED — exact candidate Linux validation required';primary='UNVERIFIED — exact candidate FullRelease required';repair='UNVERIFIED — exact candidate FullRelease required';clean_reinstall='UNVERIFIED — exact candidate FullRelease required';uninstall='UNVERIFIED — exact candidate FullRelease required';factory_reset='UNVERIFIED — exact candidate FullRelease required';reboot_resume='UNVERIFIED — exact candidate FullRelease required';maintenance='UNVERIFIED — 0/5 promoted for current candidate';stopped_project='UNVERIFIED — exact candidate FullRelease required';tailscale_install_deferred='UNVERIFIED — exact candidate FullRelease required';tailscale_full_auth='UNVERIFIED — exact candidate FullRelease required';automation_harness='IMPLEMENTED — non-shipping tooling; complete FullRelease not yet certified'};blockers=@('Final clean-room FullRelease against this exact candidate is required.','Physical MulattoTechSurface Laptop/Surrogate validation is required before v1.2.13 can be final.')
+}
+$state | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $workspaceRoot 'finalization-state.json') -Encoding utf8
+@("DevFleet $devfleetVersion / Installer $installerVersion","Status: candidate current; awaiting exact-candidate clean FullRelease","Git commit: $candidateGitCommit","Release fingerprint: $($fingerprintObject.releaseFingerprintId)","Tooling fingerprint: $($fingerprintObject.toolingFingerprint.toolingFingerprintId)",'Source changed since candidate: FALSE','Rebuild required: FALSE','Candidate is current: TRUE','All expensive acceptance gates remain unpromoted until exact-candidate evidence exists.') | Set-Content -LiteralPath (Join-Path $workspaceRoot 'finalization-state.txt') -Encoding utf8
+$preSignExe=[ordered]@{path="outputs/DevFleet-Setup-v$devfleetVersion-win-x64.exe";bytes=(Get-Item $unsignedExe).Length;sha256=(Get-FileHash $unsignedExe -Algorithm SHA256).Hash.ToLowerInvariant();authenticodeStatus=[string](Get-AuthenticodeSignature -LiteralPath $unsignedExe).Status}
+if(-not $UnsignedDeveloperBuild){
+  if($preSignExe.authenticodeStatus -ne 'NotSigned'){throw 'RELEASE BLOCKED — final build output was already signed before the selected signing profile ran.'}
+  $tool=if($SignToolPath){$SignToolPath}elseif($env:DEVFLEET_SIGNTOOL_PATH){$env:DEVFLEET_SIGNTOOL_PATH}else{(Get-Command signtool.exe -ErrorAction SilentlyContinue).Source}
+  $dlib=if($SigningDlibPath){$SigningDlibPath}else{$env:DEVFLEET_SIGNING_DLIB_PATH}
+  $metadata=if($SigningMetadataPath){$SigningMetadataPath}else{$env:DEVFLEET_SIGNING_METADATA_PATH}
+  $privateIdentity=$null;$timestampState='NOT TIMESTAMPED';$signtoolVerification='UNAVAILABLE — SignTool not installed'
+  if($SigningProfile -eq 'PrivateSelfSigned'){
+    $privateIdentity=$privateIdentityPreflight
+    $thumbprint=[string]$privateIdentity.thumbprint
+    if($CertificateThumbprint -and $CertificateThumbprint -cne $thumbprint){throw 'Configured certificate thumbprint does not match the persisted DevFleet private signing identity.'}
+    if($tool){
+      if(-not(Test-Path -LiteralPath $tool)){throw 'RELEASE BLOCKED — SIGNTOOL PATH IS INVALID.'}
+      & $tool sign /v /sha1 $thumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 $unsignedExe
+      $timestampExit=$LASTEXITCODE
+      if($timestampExit){
+        $afterTimestampAttempt=Get-AuthenticodeSignature -LiteralPath $unsignedExe
+        if($afterTimestampAttempt.Status -eq 'NotSigned'){
+          & $tool sign /v /sha1 $thumbprint /fd SHA256 $unsignedExe
+          if($LASTEXITCODE){throw "Private Authenticode signing without a timestamp failed with exit code $LASTEXITCODE."}
+        }elseif($afterTimestampAttempt.Status -ne 'Valid' -or $afterTimestampAttempt.SignerCertificate.Thumbprint -cne $thumbprint){
+          throw "Private Authenticode timestamp attempt failed with exit code $timestampExit and left an unusable signature; the artifact was not double-signed."
         }
-        catch (UnauthorizedAccessException)
-        {
-            Console.WriteLine("SKIP physical WindowsApps package-root branch: current test token cannot enumerate the protected directory.");
-        }
+        $timestampState='NOT TIMESTAMPED — RFC3161 timestamp unavailable; private SignTool signing completed without a timestamp'
+      }else{$timestampState='RFC3161 TIMESTAMPED'}
+    }else{
+      $certificate=Get-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint"
+      $setResult=Set-AuthenticodeSignature -LiteralPath $unsignedExe -Certificate $certificate -HashAlgorithm SHA256
+      if($setResult.Status -ne 'Valid'){throw "Private Authenticode fallback signing failed: $($setResult.Status)"}
+      $timestampState='NOT TIMESTAMPED — SignTool unavailable; Set-AuthenticodeSignature fallback used'
     }
-    if (package is not null)
-    {
-        var packageWinget = Path.Combine(package, "winget.exe");
-        Assert(OwnedPathSafety.IsExactWindowsAppxPackageCandidate(packageWinget, package, approvedWindowsApps, "Microsoft.DesktopAppInstaller", "8wekyb3d8bbwe"), "Valid physical WinGet package candidate was rejected.");
-        Assert(!OwnedPathSafety.IsExactWindowsAppxPackageCandidate(Path.Combine(approvedWindowsApps, "winget.exe"), approvedWindowsApps, approvedWindowsApps, "Microsoft.DesktopAppInstaller", "8wekyb3d8bbwe"), "WindowsApps root executable must not be accepted.");
-        Assert(!OwnedPathSafety.IsExactWindowsAppxPackageCandidate(Path.Combine(package, "..", "winget.exe"), package, approvedWindowsApps, "Microsoft.DesktopAppInstaller", "8wekyb3d8bbwe"), "Non-canonical parent traversal must not be accepted.");
-        Assert(!OwnedPathSafety.IsExactWindowsAppxPackageCandidate(packageWinget, package, approvedWindowsApps, "Wrong.Name", "8wekyb3d8bbwe"), "Wrong AppX name must not be accepted.");
-        Assert(!OwnedPathSafety.IsExactWindowsAppxPackageCandidate(packageWinget, package, approvedWindowsApps, "Microsoft.DesktopAppInstaller", "wrongpublisher"), "Wrong AppX publisher must not be accepted.");
-        Assert(!OwnedPathSafety.IsExactWindowsAppxPackageCandidate(packageWinget, package.Replace("_x64__", "_arm64__", StringComparison.OrdinalIgnoreCase), approvedWindowsApps, "Microsoft.DesktopAppInstaller", "8wekyb3d8bbwe"), "Non-x64 AppX package root must not be accepted.");
-        Assert(!OwnedPathSafety.IsExactWindowsAppxPackageCandidate(Path.Combine(package, "nested", "winget.exe"), package, approvedWindowsApps, "Microsoft.DesktopAppInstaller", "8wekyb3d8bbwe"), "Nested winget executable must not be accepted.");
-        Console.WriteLine("PASS exact physical WindowsApps package-root negative fixtures");
-    }
-    }
-    finally { Environment.SetEnvironmentVariable("PATH", priorPath); }
+  }else{
+    $thumbprint=if($CertificateThumbprint){$CertificateThumbprint}else{$env:DEVFLEET_SIGNING_CERTIFICATE_THUMBPRINT}
+    if($tool -and $dlib -and $metadata){
+      if(-not (Test-Path -LiteralPath $tool) -or -not (Test-Path -LiteralPath $dlib) -or -not (Test-Path -LiteralPath $metadata)){throw 'RELEASE BLOCKED — AUTHENTICODE SIGNING INPUT PATH IS INVALID.'}
+      & $tool sign /v /debug /fd SHA256 /tr $TimestampUrl /td SHA256 /dlib $dlib /dmdf $metadata $unsignedExe
+    }elseif($tool -and $thumbprint){
+      if(-not (Test-Path -LiteralPath $tool)){throw 'RELEASE BLOCKED — SIGNTOOL PATH IS INVALID.'}
+      & $tool sign /v /sha1 $thumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 $unsignedExe
+    }else{throw 'RELEASE BLOCKED — AUTHENTICODE PUBLISHER IDENTITY REQUIRED'}
+    if($LASTEXITCODE){throw "Authenticode signing failed with exit code $LASTEXITCODE."}
+    $timestampState='RFC3161 TIMESTAMPED'
+  }
+  $verifyText=Join-Path $outputs 'authenticode-verification.txt'
+  if($tool){
+    & $tool verify /pa /v $unsignedExe 2>&1 | Set-Content -LiteralPath $verifyText
+    if($LASTEXITCODE){throw 'SignTool /pa verification failed.'}
+    $signtoolVerification='PASS'
+  }else{
+    'UNAVAILABLE — SignTool is not installed; Get-AuthenticodeSignature verification is authoritative for this private build.' | Set-Content -LiteralPath $verifyText
+  }
+  $signature=Get-AuthenticodeSignature -LiteralPath $unsignedExe
+  if($signature.Status -ne 'Valid'){throw "Get-AuthenticodeSignature did not return Valid: $($signature.Status)"}
+  if($SigningProfile -eq 'PrivateSelfSigned'){
+    if($signature.SignerCertificate.Thumbprint -cne [string]$privateIdentity.thumbprint){throw 'Private Authenticode signer thumbprint does not match the expected DevFleet identity.'}
+    if('1.3.6.1.5.5.7.3.3' -notin @($signature.SignerCertificate.EnhancedKeyUsageList|ForEach-Object{[string]$_.ObjectId})){throw 'Private Authenticode signer lacks the Code Signing EKU.'}
+  }
+  $tamperedCopy=Join-Path $outputs ".authenticode-tamper-$([guid]::NewGuid().ToString('N')).exe"
+  try{
+    Copy-Item -LiteralPath $unsignedExe -Destination $tamperedCopy
+    $stream=[IO.File]::Open($tamperedCopy,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    try{$stream.Position=4096;$originalByte=$stream.ReadByte();$stream.Position=4096;$stream.WriteByte(($originalByte -bxor 1))}finally{$stream.Dispose()}
+    $tamperedStatus=[string](Get-AuthenticodeSignature -LiteralPath $tamperedCopy).Status
+    if($tamperedStatus -eq 'Valid'){throw 'Tampered Authenticode probe unexpectedly remained valid.'}
+  }finally{Remove-Item -LiteralPath $tamperedCopy -Force -ErrorAction SilentlyContinue}
+  $signedTest=Join-Path $outputs 'signed-self-test.txt';$env:DEVFLEET_SELF_TEST_OUTPUT=$signedTest
+  $signedProcess=Start-Process -FilePath $unsignedExe -ArgumentList '--self-test' -Wait -PassThru
+  Remove-Item Env:DEVFLEET_SELF_TEST_OUTPUT -ErrorAction SilentlyContinue
+  if($signedProcess.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $signedTest) -or (Get-Content -LiteralPath $signedTest -Raw) -notmatch '(?m)^PASS(?:\r?$)'){throw 'Signed installer self-test failed.'}
+  Assert-StageShippingIdentity 'post-sign'
 
-    // Multiple distinct canonical AppX roots are an ambiguity, not a reason
-    // to choose the first result.  These disposable physical roots exercise
-    // the same validate-then-distinct selection contract used by WinGet.
-    var selectionFixture = Path.Combine(Path.GetTempPath(), "devfleet-appx-selection-" + Guid.NewGuid().ToString("N"));
-    var selectionWindowsApps = Path.Combine(selectionFixture, "WindowsApps");
-    var selectionRoots = new[] {
-        Path.Combine(selectionWindowsApps, "Microsoft.DesktopAppInstaller_1.0.0.0_x64__8wekyb3d8bbwe"),
-        Path.Combine(selectionWindowsApps, "Microsoft.DesktopAppInstaller_1.0.0.1_x64__8wekyb3d8bbwe")
-    };
-    Directory.CreateDirectory(selectionWindowsApps);
+  $artifactRows[0]=[ordered]@{name='exe';path="outputs/DevFleet-Setup-v$devfleetVersion-win-x64.exe";bytes=(Get-Item $unsignedExe).Length;sha256=(Get-FileHash $unsignedExe -Algorithm SHA256).Hash.ToLowerInvariant()}
+  & $releasePython (Join-Path $buildSource 'tools\release_fingerprint.py') --source-root $buildSource --installer-root $buildInstaller --output (Join-Path $outputs 'release-fingerprint.json') --artifact "exe=$unsignedExe" --artifact "tar=$tar" --artifact "portable=$portable" --artifact "installerSource=$sourceZip"
+  if($LASTEXITCODE){throw 'Signed final release fingerprint generation failed.'}
+  $fingerprintObject=Get-Content (Join-Path $outputs 'release-fingerprint.json') -Raw|ConvertFrom-Json
+  $signingState=if($SigningProfile -eq 'PrivateSelfSigned'){'PRIVATE SELF-SIGNED AUTHENTICODE — VALID ON EXPLICITLY TRUSTED PERSONAL/TEST SYSTEMS'}else{'AUTHENTICODE SIGNED — VALID PUBLIC SIGNING PATH'}
+  $currentTooling.releaseFingerprintId=$fingerprintObject.releaseFingerprintId;$currentTooling.toolingFingerprintId=$fingerprintObject.toolingFingerprint.toolingFingerprintId;$currentTooling.artifacts=$artifactRows
+  [IO.File]::WriteAllText($currentToolingPath,(($currentTooling|ConvertTo-Json -Depth 12)+[Environment]::NewLine),(New-Object Text.UTF8Encoding($false)))
+  $finalManifest.releaseFingerprintId=$fingerprintObject.releaseFingerprintId;$finalManifest.toolingFingerprintId=$fingerprintObject.toolingFingerprint.toolingFingerprintId;$finalManifest.artifacts=$artifactRows;$finalManifest.signingState=$signingState;$finalManifest.signing=$signingState;$finalManifest.preSignExe=$preSignExe;$finalManifest.publicPromotionAllowed=$false
+  if($SigningProfile -eq 'PrivateSelfSigned'){$finalManifest.privateSigningProfile='PRIVATE_SELF_SIGNED';$finalManifest.privateSigningCertificateThumbprint=[string]$privateIdentity.thumbprint;$finalManifest.publicPublisherTrust=$false;$finalManifest.timestampState=$timestampState}
+  $finalManifest|ConvertTo-Json -Depth 10|Set-Content -LiteralPath (Join-Path $outputs 'final-artifact-hashes.json') -Encoding utf8
+  $state.releaseFingerprintId=$fingerprintObject.releaseFingerprintId;$state.toolingFingerprintId=$fingerprintObject.toolingFingerprint.toolingFingerprintId;$state.signing_state=$signingState;$state.candidate.exe=$artifactRows[0];$state.pre_sign_exe=$preSignExe
+  if($SigningProfile -eq 'PrivateSelfSigned'){$state.private_signing_profile='PRIVATE_SELF_SIGNED';$state.private_signing_certificate_thumbprint=[string]$privateIdentity.thumbprint;$state.public_publisher_trust=$false;$state.timestamp_state=$timestampState}
+  $state|ConvertTo-Json -Depth 12|Set-Content -LiteralPath (Join-Path $workspaceRoot 'finalization-state.json') -Encoding utf8
+  $publicCertificateRecord=$null
+  if($SigningProfile -eq 'PrivateSelfSigned'){
+    $publicCertificateOutput=Join-Path $outputs 'DevFleet-Private-Personal-Code-Signing.cer'
+    Copy-Item -LiteralPath ([string]$privateIdentity.publicCertificatePath) -Destination $publicCertificateOutput -Force
+    $publicCertificateRecord=[ordered]@{path='outputs/DevFleet-Private-Personal-Code-Signing.cer';bytes=(Get-Item $publicCertificateOutput).Length;sha256=(Get-FileHash $publicCertificateOutput -Algorithm SHA256).Hash.ToLowerInvariant()}
+  }
+  [ordered]@{provider=if($SigningProfile -eq 'PrivateSelfSigned' -and $tool){'Windows certificate store / SignTool'}elseif($SigningProfile -eq 'PrivateSelfSigned'){'Windows certificate store / Set-AuthenticodeSignature fallback'}elseif($dlib){'Azure Artifact Signing'}else{'Windows certificate store'};signingProfile=$SigningProfile;timestampState=$timestampState;signatureStatus=$signature.Status;signerSubject=$signature.SignerCertificate.Subject;signerThumbprint=$signature.SignerCertificate.Thumbprint;codeSigningEkuVerified=$true;signtoolVerification=$signtoolVerification;tamperedCopyStatus=$tamperedStatus;preSignExe=$preSignExe;finalSignedExe=$artifactRows[0];publicCertificate=$publicCertificateRecord;publicPublisherTrust=($SigningProfile -ne 'PrivateSelfSigned');publicPromotionAllowed=$false} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputs 'signing-provider.json')
+  @("DevFleet $devfleetVersion / Installer $installerVersion","Status: signed candidate current; awaiting exact-candidate clean FullRelease","Git commit: $candidateGitCommit","Release fingerprint: $($fingerprintObject.releaseFingerprintId)","Tooling fingerprint: $($fingerprintObject.toolingFingerprint.toolingFingerprintId)","Signing state: $signingState",'Source changed since candidate: FALSE','Rebuild required: FALSE','Candidate is current: TRUE','Public promotion allowed: FALSE')|Set-Content -LiteralPath (Join-Path $workspaceRoot 'finalization-state.txt') -Encoding utf8
+}else{Write-Warning 'Unsigned developer build explicitly requested; this artifact is not release eligible.'}
+Write-Host "Release complete: $outputs"
+
+```
+
+
+## FILE: installer-source/CLEAN-REINSTALL.md
+
+SHA256: 2d564d5f20f75e8314e0dba9690fc8231484a0357e8ea3ec3809d302dda98522 | Bytes: 334 | Git mode: 100644
+
+```
+# Clean Reinstall
+
+Clean Reinstall creates a redacted recovery ZIP, preserves projects, VMs, backups, identities, and data by default, removes installer-owned control-plane integration, installs the verified current payload through the production orchestrator, and reconciles preserved state. It never silently becomes Factory Reset.
+
+```
+
+
+## FILE: installer-source/CLEAN-ROOM-INSTALL.md
+
+SHA256: 51442b27ee7597662af6ac6898437565945da71078dcb4b256ee199f939cab3c | Bytes: 617 | Git mode: 100644
+
+```
+# Clean-room installation
+
+Supported release profile: Windows 11 Pro x64, fully patched, Internet-connected,
+administrator/UAC available, and hardware virtualization available. A clean test host
+must have no DevFleet, PowerShell 7, Git, Multipass, or DevFleet VMs. MULATTOTECHBOX is
+only a build/reference host and is never a clean-room target.
+
+Run the current `DevFleet-Setup-v<DevFleet VERSION>-win-x64.exe`; record preflight, dependency resolution,
+UAC, reboot/resume, role, Multipass, guest bootstrap, SSH, dashboard, and maintenance
+evidence. Do not treat mocked providers or source inspection as E2E evidence.
+
+```
+
+
+## FILE: installer-source/CODE-SIGNING.md
+
+SHA256: ac28c26aace63647228cb0d0900fe8906a653d686950be63f6455a4044e0cf94 | Bytes: 1359 | Git mode: 100644
+
+```
+# Authenticode signing
+
+Release signing uses Microsoft Azure Artifact Signing with SignTool, SHA-256, and the
+RFC 3161-compatible `http://timestamp.acs.microsoft.com` timestamp service, or a
+legitimate certificate-store identity with protected private key. The normal
+`Build-Release.ps1` fails closed when no identity is configured. Only
+`-UnsignedDeveloperBuild` permits an unsigned inner-loop build; it is not release
+eligible. Verify with `signtool verify /pa /v` and `Get-AuthenticodeSignature` and run
+the signed self-test before calculating the distributed hash.
+
+Private/personal releases may explicitly use `-SigningProfile PrivateSelfSigned`.
+That profile creates or reuses one exact-subject, RSA-3072, SHA-256 Code Signing
+certificate in `CurrentUser/My`, requires a non-exportable private key, persists only
+public metadata under `%LOCALAPPDATA%\DevFleet\Signing\PrivateSelfSigned`, and trusts
+only the exported public certificate in the signing user's Root and Trusted Publishers
+stores. Windows may require the interactive owner-consent prompt for the Root import;
+the release gate blocks until that exact thumbprint is present. It never creates a PFX
+and never enables public promotion. This profile means
+cryptographically signed and valid only on explicitly trusted personal/test systems;
+it does not mean publicly trusted publisher identity.
+
+```
+
+
+## FILE: installer-source/DEPENDENCY-RESOLUTION.md
+
+SHA256: 751d08beb7dc8bc6e9416791b8f488718959cbc6bd3b6e1c50818bba3b8e26b2 | Bytes: 580 | Git mode: 100644
+
+```
+# Dependency resolution
+
+`dependencies.json` is the single catalog consumed by WPF and PowerShell. Detection
+uses PATH, App Paths, registry, and known vendor locations, then probes version and
+compatibility. Only Compatible and Compatible-Newer states are preserved automatically;
+Outdated is updated, Broken is repaired/reinstalled, and Unsupported-Major is blocked.
+
+Every downloaded executable is restricted to an official vendor source and checked for
+expected file type and Authenticode signer before execution. Post-install discovery and
+version verification are mandatory.
+
+```
+
+
+## FILE: installer-source/DevFleet.Setup.Tests/DevFleet.Setup.Tests.csproj
+
+SHA256: 7d50c80ae886b551e3deeb53df04bcf0800402cfb5d87c3c56efb7fcac6febf7 | Bytes: 586 | Git mode: 100644
+
+```
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DevFleet.Setup\DevFleet.Setup.csproj" GlobalPropertiesToRemove="SelfContained;RuntimeIdentifier;PublishSingleFile" />
+  </ItemGroup>
+
+</Project>
+
+```
+
+
+## FILE: installer-source/DevFleet.Setup.Tests/Program.cs
+
+SHA256: f681ebed4f6fab1cd8a13584846834f15ad16739d4a753b193b34861d91cc841 | Bytes: 46971 | Git mode: 100644
+
+```
+using DevFleet.Setup;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Text.Json;
+
+// Test mode is an explicit fixture capability, never inferred from a debugger,
+// process name, or user-controlled environment variable in the Release binary.
+TestEnvironment.EnableForTests();
+
+static void Assert(bool condition, string message)
+{
+    if (!condition) throw new InvalidOperationException(message);
+}
+
+static void AssertInheritedPipeDescendant(int expectedExitCode)
+{
+    var pidPath = Path.Combine(Path.GetTempPath(), "devfleet-inherited-pipe-" + Guid.NewGuid().ToString("N") + ".pid");
+    var descendantPid = 0;
     try
     {
-        foreach (var root in selectionRoots)
-        {
-            Directory.CreateDirectory(root);
-            File.Copy(trustedExecutable!, Path.Combine(root, "winget.exe"));
-        }
-        var appxRecords = selectionRoots.Select(root => new {
-            Name = "Microsoft.DesktopAppInstaller",
-            PublisherId = "8wekyb3d8bbwe",
-            InstallLocation = root,
-            Executable = Path.Combine(root, "winget.exe")
-        }).ToArray();
-        var exactMatches = appxRecords
-            .Where(record => OwnedPathSafety.IsExactWindowsAppxPackageCandidate(record.Executable, record.InstallLocation, selectionWindowsApps, record.Name, record.PublisherId))
-            .Select(record => Path.GetFullPath(record.InstallLocation).TrimEnd(Path.DirectorySeparatorChar))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        Assert(appxRecords.All(record => OwnedPathSafety.IsExactWindowsAppxPackageCandidate(record.Executable, record.InstallLocation, selectionWindowsApps, record.Name, record.PublisherId)), "Multiple-root fixture did not individually satisfy exact AppX validation.");
-        Assert(exactMatches.Length == 2, $"Multiple-root fixture did not retain two distinct canonical matches: {exactMatches.Length}.");
-        var selected = exactMatches.Length == 1 ? exactMatches[0] : null;
-        Assert(selected is null, "Multiple distinct exact AppX roots must fail closed rather than select a trusted WinGet candidate.");
-        Console.WriteLine("PASS multiple-distinct physical AppX package-root selection fail-closed fixture");
-    }
-    finally { try { Directory.Delete(selectionFixture, recursive: true); } catch { } }
-
-    // O: a real temporary broad-user-writable directory remains rejected.  The
-    // ACL is applied only to this disposable fixture, never Program Files or
-    // Windows, and the product resolver must not trust the resulting path.
-    var broadFixture = Path.Combine(Path.GetTempPath(), "devfleet-acl-broad-" + Guid.NewGuid().ToString("N"));
-    Directory.CreateDirectory(broadFixture);
-    try
-    {
-        var security = new DirectoryInfo(broadFixture).GetAccessControl();
-        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        security.AddAccessRule(new FileSystemAccessRule(WindowsIdentity.GetCurrent().User ?? throw new InvalidOperationException("Test caller has no Windows SID."), FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
-        security.AddAccessRule(new FileSystemAccessRule("BUILTIN\\Users", FileSystemRights.WriteData, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
-        new DirectoryInfo(broadFixture).SetAccessControl(security);
-        var observed = new DirectoryInfo(broadFixture).GetAccessControl().GetAccessRules(true, true, typeof(NTAccount)).OfType<FileSystemAccessRule>();
-        Assert(observed.Any(rule => OwnedPathSafety.IsBroadUntrustedPrincipal(rule.IdentityReference.Value) && OwnedPathSafety.HasPrimitiveMutationRights(rule.FileSystemRights)), "ACL regression O did not observe a genuine broad-user mutation ACE.");
-        var broadExecutable = Path.Combine(broadFixture, "broad.exe");
-        File.Copy(trustedExecutable!, broadExecutable);
-        var broadDetection = new DependencyService(new RecordingProcessRunner()).Detect(new DependencyDefinition {
-            Id = "acl-broad-writable", DisplayName = "ACL broad writable fixture", KnownVendorInstallLocations = [broadExecutable],
-            MinimumSupportedVersion = "1.0.0", VersionProbe = new VersionProbe { Regex = "(\\d+\\.\\d+)" },
-            InstallerAuthenticityPolicy = new InstallerAuthenticityPolicy { InstalledExecutableTrust = "signed-installer-locked-path" }
-        });
-        Assert(!broadDetection.Found && !broadDetection.Compatible, "ACL regression O trusted a genuinely broad-user-writable path.");
-        Console.WriteLine("PASS ACL broad-user-writable path rejection O");
-    }
-    finally { try { Directory.Delete(broadFixture, recursive: true); } catch { } }
-}
-
-var blocked = PlanService.Build(InstallerMode.FactoryReset, true, true, false, true, false, "", "");
-Assert(!blocked.IsAllowed, "Factory Reset must block without phrases and an individual project selection.");
-Assert(blocked.Items.Any(i => i.Action.Contains("fresh safety backup", StringComparison.OrdinalIgnoreCase)), "Fresh safety backup plan item missing.");
-
-var stateRoot = Path.Combine(Path.GetTempPath(), "DevFleet-Setup-SelfTest-" + Guid.NewGuid().ToString("N"));
-TestEnvironment.EnableForSelfTest(stateRoot);
-Environment.SetEnvironmentVariable("DEVFLEET_SETUP_STATE_ROOT", stateRoot);
-Environment.SetEnvironmentVariable("DEVFLEET_SETUP_INSTALL_ROOT", Path.Combine(stateRoot, "install"));
-var durableJsonPath = Path.Combine(stateRoot, "durable-state.json");
-StateStore.WriteJsonAtomically(durableJsonPath, new { marker = "durable-checkpoint", generation = 1 });
-var durableJsonBytes = File.ReadAllBytes(durableJsonPath);
-using (var durableJson = JsonDocument.Parse(durableJsonBytes))
-    Assert(durableJson.RootElement.GetProperty("marker").GetString() == "durable-checkpoint" && durableJson.RootElement.GetProperty("generation").GetInt32() == 1, "Durably flushed atomic JSON did not survive exact readback.");
-Assert(durableJsonBytes.Length > 0 && durableJsonBytes.Any(value => value != 0), "Durably flushed atomic JSON was empty or zero-filled.");
-Assert(!Directory.EnumerateFiles(stateRoot, "durable-state.json.tmp-*", SearchOption.TopDirectoryOnly).Any(), "Atomic JSON left a temporary file after commit.");
-Console.WriteLine("PASS durable atomic JSON flush and readback");
-var stagedResumePath = PayloadService.StageVerifiedPayload("resume-stage");
-var stagedResumePathAgain = PayloadService.StageVerifiedPayload("resume-stage");
-Assert(stagedResumePath == stagedResumePathAgain && File.Exists(stagedResumePath), "Reboot resume must reuse the exact verified staged payload.");
-File.WriteAllBytes(stagedResumePath, [0x44, 0x65, 0x76, 0x46, 0x6C, 0x65, 0x65, 0x74]);
-var stagedMismatchBlocked = false;
-try { PayloadService.StageVerifiedPayload("resume-stage"); } catch (InvalidDataException) { stagedMismatchBlocked = true; }
-Assert(stagedMismatchBlocked, "A mismatching staged payload must be rejected rather than overwritten or trusted.");
-File.Delete(stagedResumePath);
-StateStore.WriteLedger(new InstallLedger { OwnedResources = [new OwnedResource("project-vm", "demo", "DevFleetLedger", Path.Combine(stateRoot, "demo"), "project-demo")] });
-var allowed = PlanService.Build(InstallerMode.FactoryReset, true, true, false, true, true, "DELETE DEVFLEET", "DELETE DEVFLEET PROJECT DATA");
-Assert(!allowed.IsAllowed, "Factory Reset must require an individual project selection.");
-
-var preserveGuard = PlanService.Build(InstallerMode.CleanReinstall, false, true, false, false, false, "", "");
-Assert(!preserveGuard.IsAllowed, "Clean Reinstall must not silently become project-data deletion.");
-
-Console.WriteLine("PASS destructive safety plan tests");
-
-var priorMarkerPlan = new InstallerPlan { Mode = InstallerMode.FreshInstall, TransactionId = new string('a', 32), AcknowledgeRootfulDocker = true };
-RebootCheckpointService.PrepareScriptTransaction(priorMarkerPlan, "Primary / Desktop");
-var staleStateMarker = Path.Combine(stateRoot, "stage-host-agent.complete");
-var staleInstallerMarker = Path.Combine(stateRoot, "Installer", "stage-prereqs-Desktop.complete");
-Directory.CreateDirectory(Path.GetDirectoryName(staleInstallerMarker)!);
-var staleMarker = JsonSerializer.Serialize(new { transactionId = priorMarkerPlan.TransactionId, payloadSha256 = PayloadManifest.PayloadSha256, action = "FreshInstall", role = "Desktop", stage = "stage-host-agent", completedUtc = DateTime.UtcNow.ToString("O") });
-File.WriteAllText(staleStateMarker, staleMarker);
-File.WriteAllText(staleInstallerMarker, staleMarker);
-var nextMarkerPlan = new InstallerPlan { Mode = InstallerMode.FreshInstall, TransactionId = new string('b', 32), AcknowledgeRootfulDocker = true };
-RebootCheckpointService.PrepareScriptTransaction(nextMarkerPlan, "Primary / Desktop");
-Assert(!File.Exists(staleStateMarker) && !File.Exists(staleInstallerMarker), "A new transaction must clear only stale top-level DevFleet stage markers from both canonical stage roots.");
-File.WriteAllText(staleStateMarker, staleMarker.Replace(priorMarkerPlan.TransactionId, nextMarkerPlan.TransactionId, StringComparison.Ordinal));
-RebootCheckpointService.PrepareScriptTransaction(nextMarkerPlan, "Primary / Desktop");
-Assert(File.Exists(staleStateMarker), "Preparing the same transaction for reboot resume must preserve its stage markers.");
-File.Delete(staleStateMarker);
-Console.WriteLine("PASS stale stage-marker transition and same-transaction resume preservation");
-
-var rebootPlan = new InstallerPlan { Mode = InstallerMode.FreshInstall, AcknowledgeRootfulDocker = true };
-RebootCheckpointService.PrepareScriptTransaction(rebootPlan, "Primary / Desktop");
-using (var activeTransaction = JsonDocument.Parse(File.ReadAllText(Path.Combine(stateRoot, "active-transaction.json"))))
-    Assert(activeTransaction.RootElement.GetProperty("acknowledgeRootfulDocker").GetBoolean(), "Active transaction did not retain the reviewed rootful Docker acknowledgement.");
-RebootCheckpointService.Write(rebootPlan, "Primary / Desktop", null);
-var checkpointBytes = File.ReadAllBytes(RebootCheckpointService.Path);
-using (var firstCheckpoint = JsonDocument.Parse(checkpointBytes))
-{
-    Assert(firstCheckpoint.RootElement.GetProperty("checkpointGeneration").GetInt32() == 1, "First reboot checkpoint must start at generation one.");
-    Assert(firstCheckpoint.RootElement.GetProperty("resumeStage").GetString() == "bootstrap-entrypoint", "First reboot resume stage is incorrect.");
-    Assert(firstCheckpoint.RootElement.GetProperty("acknowledgeRootfulDocker").GetBoolean(), "Reviewed rootful Docker acknowledgement was not persisted for reboot resume.");
-}
-File.WriteAllText(Path.Combine(stateRoot, "stage-prereqs-Desktop.complete"), JsonSerializer.Serialize(new { transactionId = rebootPlan.TransactionId, payloadSha256 = PayloadManifest.PayloadSha256, action = "FreshInstall", role = "Desktop", stage = "stage-prereqs-Desktop", completedUtc = DateTime.UtcNow.ToString("O") }));
-RebootCheckpointService.Write(rebootPlan, "Primary / Desktop", null);
-var secondCheckpointBytes = File.ReadAllBytes(RebootCheckpointService.Path);
-using (var secondCheckpoint = JsonDocument.Parse(secondCheckpointBytes))
-{
-    Assert(secondCheckpoint.RootElement.GetProperty("checkpointGeneration").GetInt32() == 2, "Second reboot checkpoint did not advance its generation.");
-    Assert(secondCheckpoint.RootElement.GetProperty("completedStages").EnumerateArray().Any(x => x.GetString() == "stage-prereqs-Desktop"), "Completed prerequisite stage was not persisted.");
-    Assert(secondCheckpoint.RootElement.GetProperty("resumeStage").GetString() == "host-agent", "Second reboot resume stage did not advance.");
-}
-var resumedPlan = new InstallerPlan { Mode = InstallerMode.FreshInstall };
-var acknowledgementMismatchBlocked = false;
-try { RebootCheckpointService.ValidateIfPresent(new InstallerPlan { Mode = InstallerMode.FreshInstall, TransactionId = rebootPlan.TransactionId }, "Primary / Desktop"); } catch (InvalidDataException) { acknowledgementMismatchBlocked = true; }
-Assert(acknowledgementMismatchBlocked, "Resume validation accepted a plan that omitted the durable reviewed rootful Docker acknowledgement.");
-Assert(RebootCheckpointService.BindPlanIfPresent(resumedPlan, "Primary / Desktop"), "Reboot checkpoint was not discovered for plan binding.");
-Assert(resumedPlan.TransactionId == rebootPlan.TransactionId && resumedPlan.AcknowledgeRootfulDocker && RebootCheckpointService.ValidateIfPresent(resumedPlan, "Primary / Desktop"), "Resume did not bind the exact transaction, reviewed acknowledgement, and generation.");
-RebootCheckpointService.Consume(resumedPlan, "Primary / Desktop");
-Assert(!File.Exists(RebootCheckpointService.Path), "Consumed reboot checkpoint remains present.");
-Directory.CreateDirectory(Path.GetDirectoryName(RebootCheckpointService.Path)!);
-File.WriteAllBytes(RebootCheckpointService.Path, checkpointBytes);
-var replayBlocked = false;
-try { RebootCheckpointService.BindPlanIfPresent(new InstallerPlan { Mode = InstallerMode.FreshInstall }, "Primary / Desktop"); } catch (InvalidDataException) { replayBlocked = true; }
-Assert(replayBlocked, "A copied consumed reboot checkpoint must be rejected as replay.");
-File.Delete(RebootCheckpointService.Path);
-Console.WriteLine("PASS durable reboot transaction, generation, consumption, and replay tests");
-
-var integrationGeneration = Guid.NewGuid().ToString("D");
-var integrationLedgerPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "DevFleetHostAgent", "integration-ownership.json");
-var validIntegrationLedger = new InstallLedger
-{
-    InstallationGeneration = integrationGeneration,
-    WindowsIntegrationOwnershipPath = integrationLedgerPath,
-    WindowsIntegrations =
-    [
-        new OwnedWindowsIntegration("ScheduledTask", "DevFleet Host Agent", integrationGeneration, "M-TechLabs DevFleet Host Agent", Executable: @"C:\Program Files\PowerShell\7\pwsh.exe", Arguments: "-File agent.ps1", Principal: "SYSTEM", LogonType: "ServiceAccount", RunLevel: "Highest", Description: $"DevFleet generation={integrationGeneration}"),
-        new OwnedWindowsIntegration("FirewallRule", "DevFleetHostAgent-8790-Multipass", integrationGeneration, "M-TechLabs DevFleet Host Agent", Description: $"DevFleet generation={integrationGeneration}", DisplayName: "DevFleet Host Agent 8790 - Multipass", Group: "M-TechLabs DevFleet Host Agent", Direction: "Inbound", Action: "Allow", Protocol: "TCP", LocalPort: "8790", InterfaceAlias: "vEthernet (Default Switch)", RemoteAddress: "172.20.0.0/20", Profile: "Any")
-    ]
-};
-OwnedPathSafety.ValidateLedger(validIntegrationLedger);
-var wildcardIntegrationBlocked = false;
-try
-{
-    var invalid = new InstallLedger { InstallationGeneration = integrationGeneration, WindowsIntegrationOwnershipPath = integrationLedgerPath, WindowsIntegrations = [validIntegrationLedger.WindowsIntegrations[0] with { Name = "DevFleet*" }] };
-    OwnedPathSafety.ValidateLedger(invalid);
-}
-catch (InvalidDataException) { wildcardIntegrationBlocked = true; }
-Assert(wildcardIntegrationBlocked, "Wildcard Windows integration ownership must be rejected.");
-var partialIntegrationBlocked = false;
-try
-{
-    var invalid = new InstallLedger { InstallationGeneration = integrationGeneration, WindowsIntegrationOwnershipPath = integrationLedgerPath, WindowsIntegrations = [validIntegrationLedger.WindowsIntegrations[1] with { RemoteAddress = "" }] };
-    OwnedPathSafety.ValidateLedger(invalid);
-}
-catch (InvalidDataException) { partialIntegrationBlocked = true; }
-Assert(partialIntegrationBlocked, "Partial Windows integration ownership must be rejected.");
-Console.WriteLine("PASS Windows integration ownership ledger tests");
-
-var desktopStages = InstallerStageCatalog.ForRole("Primary / Desktop").Select(s => s.Name).ToArray();
-Assert(desktopStages.Contains("Primary compute") && !desktopStages.Contains("Vault"), "Desktop role stage map must provision Primary only.");
-var laptopStages = InstallerStageCatalog.ForRole("Companion Laptop / Failover + Vault").Select(s => s.Name).ToArray();
-Assert(laptopStages.Contains("Failover compute") && laptopStages.Contains("Vault"), "Laptop role stage map must provision Failover and Vault.");
-
-var installFixture = Path.Combine(stateRoot, "release");
-Directory.CreateDirectory(installFixture);
-File.WriteAllText(Path.Combine(installFixture, "Install-DevFleet.ps1"), "# fixture entry point");
-var desktopRunner = new RecordingProcessRunner();
-var desktopReport = new InstallService(desktopRunner).Run(installFixture, "Primary / Desktop", "FreshInstall");
-Assert(desktopRunner.Invocations.Count == 1, "Fresh Install must invoke the real entry point exactly once.");
-Assert(desktopRunner.Invocations[0].Arguments.Contains("-Role") && desktopRunner.Invocations[0].Arguments.Contains("Desktop"), "Desktop role was not forwarded to the real installer chain.");
-Assert(desktopRunner.Invocations[0].Arguments.Contains("-NonInteractive") && desktopRunner.Invocations[0].Arguments.Contains("-PackageRoot") && desktopRunner.Invocations[0].Arguments.Contains("Connected"), "Connected noninteractive contract was not forwarded.");
-Assert(desktopReport.Stages.Contains("Verification"), "Verification stage is mandatory.");
-
-var backupArchive = Path.Combine(stateRoot, "backup.tar");
-File.WriteAllText(backupArchive, "verified backup");
-var backupManifest = Path.Combine(stateRoot, "backup.json");
-var backupHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(backupArchive))).ToLowerInvariant();
-File.WriteAllText(backupManifest, System.Text.Json.JsonSerializer.Serialize(new { project_id = "project-demo", backup_id = "backup-demo", archive = backupArchive, sha256 = backupHash }));
-File.WriteAllText(Path.Combine(stateRoot, "projects.json"), System.Text.Json.JsonSerializer.Serialize(new[] { new { project_id = "project-demo", slug = "demo", runtime_id = "devfleet-project-demo", vm_name = "devfleet-project-demo", host_id = "test-node", managed_by = "devfleet", state = "stopped", backup_manifest = backupManifest } }));
-var projectManifest = new { project_id = "project-demo", backup_id = "backup-demo", archive = backupArchive, sha256 = backupHash, slug = "demo", runtime_id = "devfleet-project-demo", source_archive_sha256 = backupHash, host_archive_sha256 = backupHash };
-File.WriteAllText(backupManifest, System.Text.Json.JsonSerializer.Serialize(projectManifest));
-var verified = new BackupVerificationService().Verify(new DiscoveredProject("project-demo", "demo", "Multipass", "devfleet-project-demo", "HostAgent", backupManifest, true));
-Assert(verified.IsVerified, "Backup verification must hash the archive and validate identity/eligibility.");
-var selectedPlan = PlanService.Build(InstallerMode.FactoryReset, true, true, false, true, true, "DELETE DEVFLEET", "DELETE DEVFLEET PROJECT DATA", ["project-demo"]);
-Assert(selectedPlan.IsAllowed && selectedPlan.SelectedProjects.Count == 1, "Selected project plan must use the project-specific verified backup.");
-
-var vmProvider = new RecordingVmProvider([new VmRecord("Multipass", "devfleet-project-demo", "project-demo", true), new VmRecord("Multipass", "unrelated-vm", "other", false)]);
-new VmOwnershipService(vmProvider).DeleteOwnedExact("project-demo", "devfleet-project-demo", verified);
-Assert(vmProvider.DeletedRuntimeIds.SequenceEqual(["devfleet-project-demo"]), "Provider-aware deletion did not target the exact owned runtime.");
-Assert(vmProvider.Inventory.Single(x => x.RuntimeId == "devfleet-project-demo").BackupId == "", "Fixture inventory must remain immutable.");
-var wildcardBlocked = false;
-try { new VmOwnershipService(new RecordingVmProvider([new VmRecord("Multipass", "*", "project-demo", true)])).DeleteOwnedExact("project-demo", "*"); } catch (InvalidOperationException) { wildcardBlocked = true; }
-Assert(wildcardBlocked, "Wildcard provider deletion must be blocked.");
-var endpointBuilder = typeof(MultipassHostAgentProvider).GetMethod("BuildHostAgentBaseUri", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-var wildcardEndpoint = (Uri)endpointBuilder!.Invoke(null, ["http://+:8790/"])!;
-Assert(wildcardEndpoint.Host == "127.0.0.1" && wildcardEndpoint.Port == 8790, "Wildcard Host Agent listen prefix must normalize to the local endpoint for destruction requests.");
-
-Console.WriteLine("PASS installer stage, backup, provider, shortcut-contract tests");
-
-var auth = TailscaleAuthenticationService.ParseAuthenticationUri("To authenticate, visit: https://login.tailscale.com/a/abcDEF123");
-Assert(auth?.Host == "login.tailscale.com", "Official Tailscale authentication URL parser failed.");
-Assert(TailscaleAuthenticationService.ParseAuthenticationUri("https://evil.example/a/abc") is null, "Non-Tailscale authentication URL must be rejected.");
-var tailscaleRunner = new RecordingProcessRunner();
-tailscaleRunner.QueueResult(new ProcessResult(1, "", "To authenticate, visit: https://login.tailscale.com/a/abcDEF123"));
-var tailscaleBegin = TailscaleAuthenticationService.Begin(tailscaleRunner, "tailscale.exe");
-Assert(tailscaleRunner.Invocations.Single().Arguments.SequenceEqual(["up", "--timeout=30s"]), "Tailscale authentication must use a bounded CLI timeout.");
-Assert(tailscaleBegin.State == "Authentication required" && tailscaleBegin.AuthenticationUri?.Host == "login.tailscale.com", "Bounded Tailscale authentication must preserve the official URL result.");
-var incompleteTailscaleRunner = new RecordingProcessRunner();
-incompleteTailscaleRunner.QueueResult(new ProcessResult(1, "", "To authenticate, visit: https://login.tailscale.com/a/abcDEF123", OutputComplete: false));
-var incompleteTailscale = TailscaleAuthenticationService.Begin(incompleteTailscaleRunner, "tailscale.exe");
-Assert(incompleteTailscale.State == "Error" && incompleteTailscale.AuthenticationUri is null && incompleteTailscale.Detail.Contains("incomplete", StringComparison.OrdinalIgnoreCase), "Tailscale must reject a trusted URL parsed from incomplete output.");
-
-var deps = DependencyService.Catalog;
-Assert(deps.Any(d => d.Name == "PowerShell 7" && d.Required) && deps.Any(d => d.Name == "Multipass" && d.Required), "Core connected dependency catalog is incomplete.");
-Assert(deps.All(d => d.OfficialMetadata.Scheme == "https"), "Every dependency must use an HTTPS official metadata source.");
-var seven = deps.Single(d => d.Id == "sevenzip");
-var git = deps.Single(d => d.Id == "git");
-Assert(git.DirectOfficialVendorResolver.AllowedHosts.Contains("release-assets.githubusercontent.com"), "GitHub release assets must allow the official release-assets redirect host.");
-Assert(deps.Where(d => d.DirectOfficialVendorResolver.Type.Equals("github-release", StringComparison.OrdinalIgnoreCase)).All(d => d.DirectOfficialVendorResolver.AllowedHosts.Contains("release-assets.githubusercontent.com")), "Every GitHub release dependency must allow the official release-assets redirect host.");
-Assert(deps.Single(d => d.Id == "multipass").InstallerAuthenticityPolicy.AllowedSignerSubjectsExact.SequenceEqual(["CN=CANONICAL GROUP LIMITED, O=CANONICAL GROUP LIMITED, L=London, C=GB"]), "Multipass must use the exact currently published Canonical Group signer identity.");
-Assert(deps.Single(d => d.Id == "multipass").InstallerAuthenticityPolicy.InstalledExecutableTrust == "signed-installer-locked-path", "Multipass must bind unsigned installed binaries to a signed installer and locked machine path.");
-Assert(!seven.Required && seven.Classification == "OPTIONAL" && seven.Features.Contains("encrypted-transfer-bundle"), "7-Zip must be optional for core install and feature-scoped.");
-Assert(seven.InstallerAuthenticityPolicy.Strategy == "VendorReleaseSha256", "7-Zip must use the explicit vendor release digest strategy.");
-Assert(seven.DirectOfficialVendorResolver.ExpectedOwner == "ip7z" && seven.DirectOfficialVendorResolver.ExpectedRepository == "7zip", "7-Zip vendor identity must be narrowly bound to ip7z/7zip.");
-Assert(seven.DirectOfficialVendorResolver.AllowedHosts.Contains("api.github.com") && seven.DirectOfficialVendorResolver.AllowedHosts.Contains("github.com") && seven.DirectOfficialVendorResolver.AllowedHosts.Contains("release-assets.githubusercontent.com"), "7-Zip release hosts are incomplete.");
-Assert(deps.Where(d => d.Id != "sevenzip").Where(d => d.InstallerAuthenticityPolicy.Required).All(d => d.InstallerAuthenticityPolicy.Strategy == "Authenticode"), "Existing signed dependency policies must remain Authenticode-required.");
-var digestFixture = Path.Combine(stateRoot, "7z-fixture.bin");
-File.WriteAllBytes(digestFixture, [1, 2, 3, 4]);
-var digest = VendorReleaseAuthenticity.VerifySha256(digestFixture, "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a");
-Assert(digest.Length == 64, "Valid vendor digest was not accepted.");
-var digestBlocked = false;
-try { VendorReleaseAuthenticity.VerifySha256(digestFixture, "0000000000000000000000000000000000000000000000000000000000000000"); } catch (InvalidDataException) { digestBlocked = true; }
-Assert(digestBlocked, "Wrong vendor digest must fail closed.");
-var malformedBlocked = false;
-try { VendorReleaseAuthenticity.NormalizeDigest("not-a-sha256"); } catch (InvalidDataException) { malformedBlocked = true; }
-Assert(malformedBlocked, "Missing/malformed vendor digest must fail closed.");
-Assert(seven.DirectOfficialVendorResolver.OfficialPageUri == "https://www.7-zip.org/download.html", "7-Zip official page binding is missing.");
-Assert(seven.DirectOfficialVendorResolver.AssetRegex?.Contains("x64") == true, "7-Zip architecture restriction is missing.");
-Assert(seven.DirectOfficialVendorResolver.MetadataUri.Contains("api.github.com/repos/ip7z/7zip/releases", StringComparison.OrdinalIgnoreCase), "7-Zip release metadata must come from the official API.");
-Assert(seven.InstallerAuthenticityPolicy.Extensions.SequenceEqual([".exe"]), "7-Zip vendor digest policy must restrict the installer type.");
-Console.WriteLine("PASS authenticity strategy, vendor digest, release identity, host, architecture, and signed-policy preservation tests");
-
-var deferredRunner = new RecordingProcessRunner();
-new InstallService(deferredRunner).Run(installFixture, "Desktop", "FreshInstall", deferNetworkPairing: true, acknowledgeRootfulDocker: true);
-Assert(deferredRunner.Invocations.Single().Arguments.Contains("-DeferNetworkPairing"), "DeferNetworkPairing was not forwarded through the production install contract.");
-foreach (var mode in new[] { InstallerMode.FreshInstall, InstallerMode.Repair, InstallerMode.CleanReinstall, InstallerMode.LocalUpdate })
-{
-    var laptopDeferred = PlanService.Build(mode, true, true, false, false, false, "", "", deferNetworkPairing: true, role: "Laptop / Surrogate");
-    Assert(!laptopDeferred.IsAllowed && laptopDeferred.Blockers.Any(x => x.Contains("connected Tailscale pairing")), "A deferred Laptop plan must be blocked before mutation because Vault transport requires authentication.");
-    var laptopConnected = PlanService.Build(mode, true, true, false, false, false, "", "", deferNetworkPairing: false, role: "Laptop / Surrogate");
-    Assert(!laptopConnected.Blockers.Any(x => x.Contains("connected Tailscale pairing")), "Connected Laptop plan acquired an unrelated network-deferral blocker.");
-}
-Assert(deferredRunner.Invocations.Single().Arguments.Contains("-AcknowledgeRootfulDocker"), "Rootful Docker acknowledgement was not forwarded through the production install contract.");
-var elevatedArguments = InstallerLaunchContract.BuildElevatedResumeArguments("Primary / Desktop", InstallerMode.FreshInstall, deferNetworkPairing: true, acknowledgeRootfulDocker: true);
-var elevatedRequest = InstallerLaunchContract.Parse(elevatedArguments);
-Assert(elevatedRequest is { ElevatedResume: true, DeferNetworkPairing: true, AcknowledgeRootfulDocker: true, Action: InstallerMode.FreshInstall, Role: "Primary / Desktop" }, "UAC relaunch did not round-trip the exact reviewed action, role, network choice, and rootful Docker acknowledgement through the production parser contract.");
-var defaultElevatedRequest = InstallerLaunchContract.Parse(InstallerLaunchContract.BuildElevatedResumeArguments("Primary / Desktop", InstallerMode.Repair, deferNetworkPairing: false, acknowledgeRootfulDocker: false));
-Assert(!defaultElevatedRequest.DeferNetworkPairing && !defaultElevatedRequest.AcknowledgeRootfulDocker, "UAC relaunch fabricated optional reviewed choices that were not selected.");
-Console.WriteLine("PASS elevated relaunch reviewed-plan argument and parser contract");
-
-var incompleteSuccessRunner = new RecordingProcessRunner();
-incompleteSuccessRunner.QueueResult(new ProcessResult(0, "", "", OutputComplete: false));
-var incompleteSuccessReport = new InstallService(incompleteSuccessRunner).Run(installFixture, "Desktop", "FreshInstall");
-Assert(incompleteSuccessReport.ExitCode == 0 && incompleteSuccessReport.Detail.Contains("incomplete", StringComparison.OrdinalIgnoreCase), "Installer exit 0 must remain authoritative while incomplete diagnostics are explicit.");
-var incompleteRebootRunner = new RecordingProcessRunner();
-incompleteRebootRunner.QueueResult(new ProcessResult(3010, "", "", OutputComplete: false));
-var incompleteRebootReport = new InstallService(incompleteRebootRunner).Run(installFixture, "Desktop", "FreshInstall");
-Assert(incompleteRebootReport.ExitCode == 3010 && incompleteRebootReport.Detail.Contains("incomplete", StringComparison.OrdinalIgnoreCase), "Installer exit 3010 must remain authoritative while incomplete diagnostics are explicit.");
-
-var defaultInstallService = new InstallService();
-var installRunnerField = typeof(InstallService).GetField("_runner", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-var defaultInstallRunner = installRunnerField?.GetValue(defaultInstallService) as ProcessRunner;
-Assert(InstallService.ConnectedInstallTimeoutSeconds == DeadlinePolicy.DesktopTransactionSeconds, "Connected installation compatibility timeout must match the composed Desktop transaction policy.");
-Assert(defaultInstallRunner?.DefaultTimeoutSeconds == DeadlinePolicy.DesktopTransactionSeconds && !defaultInstallRunner.AllowEnvironmentOverride, "Default connected installation must use the composed role-aware transaction budget without the process-wide environment override.");
-Assert(DeadlinePolicy.LaptopTransactionSeconds > DeadlinePolicy.DesktopTransactionSeconds, "Laptop transaction must dominate its additional sequential compute, vault, and transport stages.");
-Assert(DeadlinePolicy.ComputeStageSeconds >= DeadlinePolicy.MultipassReadinessSeconds + DeadlinePolicy.GuestBootstrapSeconds, "Compute stage must contain both readiness and complete guest bootstrap allowances.");
-Assert(DeadlinePolicy.VaultStageSeconds > DeadlinePolicy.VaultBootstrapSeconds + DeadlinePolicy.SshAndMarkerSeconds, "Vault stage must contain its snapshot, transport, bounded Vault bootstrap, and SSH/marker allowances.");
-Assert(DeadlinePolicy.DesktopTransactionSeconds > DeadlinePolicy.ComputeStageSeconds, "Desktop transaction must dominate its compute stage and all surrounding stages.");
-Assert(DeadlinePolicy.LaptopTransactionSeconds > DeadlinePolicy.VaultStageSeconds + DeadlinePolicy.ComputeStageSeconds, "Laptop transaction must dominate both sequential provisioning stages.");
-Assert(DeadlinePolicy.PrerequisitesSeconds == DeadlinePolicy.PrerequisiteDependencyCount * (DeadlinePolicy.DependencyProbeSeconds + DeadlinePolicy.DependencyHealthSeconds + DeadlinePolicy.DependencyInstallSeconds + DeadlinePolicy.DependencyVerificationSeconds) + DeadlinePolicy.WindowsCapabilitySeconds + DeadlinePolicy.WindowsFeatureSeconds + (4 * DeadlinePolicy.MultipassConfigurationSeconds) + (3 * DeadlinePolicy.VsCodeExtensionSeconds), "Prerequisite stage must be derived from every finite sequential dependency/configuration operation.");
-Assert(new ProcessRunner().DefaultTimeoutSeconds == 900, "Ordinary process probes must retain their 900-second default bound.");
-
-var stress = new ProcessRunner().Run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$s='x'*200000;[Console]::Out.Write($s);[Console]::Error.Write($s)"]);
-Assert(stress.ExitCode == 0 && stress.OutputComplete && stress.StandardOutput.Length == 200000 && stress.StandardError.Length == 200000, "ProcessRunner stdout/stderr stress failed.");
-var ordinaryFailure = new ProcessRunner().Run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "[Console]::Out.Write('known-output');[Console]::Error.Write('known-error');exit 7"]);
-Assert(ordinaryFailure.ExitCode == 7 && ordinaryFailure.OutputComplete && ordinaryFailure.StandardOutput == "known-output" && ordinaryFailure.StandardError == "known-error", "ProcessRunner ordinary nonzero complete-output contract failed.");
-AssertInheritedPipeDescendant(23);
-AssertInheritedPipeDescendant(3010);
-var previousProcessTimeout = Environment.GetEnvironmentVariable("DEVFLEET_SETUP_PROCESS_TIMEOUT_SECONDS");
-try
-{
-    Environment.SetEnvironmentVariable("DEVFLEET_SETUP_PROCESS_TIMEOUT_SECONDS", "1");
-    var timeoutTimer = System.Diagnostics.Stopwatch.StartNew();
-    var directTimeout = new ProcessRunner(InstallService.ConnectedInstallTimeoutSeconds).Run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"]);
-    timeoutTimer.Stop();
-    Assert(directTimeout.ExitCode == -2 && timeoutTimer.Elapsed < TimeSpan.FromSeconds(10), "ProcessRunner direct-process timeout contract failed.");
-}
-finally { Environment.SetEnvironmentVariable("DEVFLEET_SETUP_PROCESS_TIMEOUT_SECONDS", previousProcessTimeout); }
-Console.WriteLine("PASS connected dependency, Tailscale, deferred pairing, and ProcessRunner tests");
-
-```
-
-
-## FILE: installer-source/DevFleet.Setup/App.xaml
-
-SHA256: 8bd96b935412a757a21e891815e4a153889803006b3d310d2291f4a7a54f2a66 | Bytes: 1712 | Git mode: 100644
-
-```
-<Application x:Class="DevFleet.Setup.App"
-             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:DevFleet.Setup"
-             Startup="Application_Startup">
-    <Application.Resources>
-        <SolidColorBrush x:Key="WindowBrush" Color="#0D1424" />
-        <SolidColorBrush x:Key="PanelBrush" Color="#151F35" />
-        <SolidColorBrush x:Key="PanelBorderBrush" Color="#2C3C5E" />
-        <SolidColorBrush x:Key="TextBrush" Color="#F2F6FF" />
-        <SolidColorBrush x:Key="MutedBrush" Color="#AAB9D5" />
-        <SolidColorBrush x:Key="AccentBrush" Color="#6D9BFF" />
-        <SolidColorBrush x:Key="DangerBrush" Color="#D75B6C" />
-        <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-        </Style>
-        <Style TargetType="Button">
-            <Setter Property="Padding" Value="14,9" />
-            <Setter Property="Margin" Value="4,0" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="Background" Value="#2B4F9B" />
-            <Setter Property="BorderBrush" Value="#527BD2" />
-            <Setter Property="BorderThickness" Value="1" />
-        </Style>
-        <Style TargetType="ComboBox">
-            <Setter Property="Padding" Value="8,6" />
-            <Setter Property="Margin" Value="0,5,0,12" />
-        </Style>
-        <Style TargetType="CheckBox">
-            <Setter Property="Margin" Value="0,7" />
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-        </Style>
-    </Application.Resources>
-</Application>
-
-```
-
-
-## FILE: installer-source/DevFleet.Setup/App.xaml.cs
-
-SHA256: 2edf0f5fed9ccff111be6e4449c3fe584bbf09e497e4bcae9e21b49ab5df07d5 | Bytes: 4569 | Git mode: 100644
-
-```
-using System.IO;
-using System.Diagnostics;
-using System.Windows;
-
-namespace DevFleet.Setup;
-
-public partial class App : Application
-{
-    private void Application_Startup(object sender, StartupEventArgs e)
-    {
-        if (e.Args.Any(a => a.Equals("--self-test", StringComparison.OrdinalIgnoreCase)))
-        {
-            var scratch = Path.Combine(Path.GetTempPath(), "DevFleet-Setup-SelfTest-" + Guid.NewGuid().ToString("N"));
-            try
-            {
-                TestEnvironment.EnableForSelfTest(scratch);
-                AppPaths.ConfigureSelfTestRoots(Path.Combine(scratch, "install"), Path.Combine(scratch, "state"));
-                var staged = PayloadService.StageVerifiedPayload("self-test");
-                var extracted = PayloadService.ExtractVerifiedPayload(staged, "self-test");
-                var blocked = PlanService.Build(InstallerMode.FactoryReset, true, true, false, true, false, "", "");
-                var bootstrap = Path.Combine(extracted, "Bootstrap-Install.ps1");
-                var install = Path.Combine(extracted, "Install-DevFleet.ps1");
-                var bootstrapText = File.ReadAllText(bootstrap); var installText = File.ReadAllText(install);
-                var extractedVersion = File.ReadAllText(Path.Combine(extracted, "VERSION")).Trim();
-                var resourceCount = typeof(PayloadService).Assembly.GetManifestResourceNames().Count(n => n.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase));
-                if (PayloadManifest.DevFleetVersion != extractedVersion || string.IsNullOrWhiteSpace(PayloadManifest.InstallerVersion)) throw new InvalidDataException("Release manifest version mismatch.");
-                if (resourceCount != 1) throw new InvalidDataException($"Exactly one TAR payload is required; found {resourceCount}.");
-                foreach (var parameter in new[] { "Role", "BootstrapBundlePath", "PackageRoot", "InstallationMode", "NonInteractive", "SkipWindowsUpdates", "DeferNetworkPairing", "AcknowledgeRootfulDocker" })
-                    if (!bootstrapText.Contains("$" + parameter, StringComparison.Ordinal) || !installText.Contains("$" + parameter, StringComparison.Ordinal)) throw new InvalidDataException($"Bootstrap parameter contract missing: {parameter}");
-                var report = $"PASS{Environment.NewLine}installer_version={PayloadManifest.InstallerVersion}{Environment.NewLine}devfleet_version={PayloadManifest.DevFleetVersion}{Environment.NewLine}payload={PayloadManifest.PayloadSha256}{Environment.NewLine}payload_extraction=PASS{Environment.NewLine}bootstrap_entrypoint=PASS{Environment.NewLine}bootstrap_parameter_contract=PASS{Environment.NewLine}embedded_tar_count={resourceCount}{Environment.NewLine}factory_reset_backup_gate={(blocked.Blockers.Any(b => b.Contains("backup", StringComparison.OrdinalIgnoreCase) || b.Contains("project", StringComparison.OrdinalIgnoreCase)) ? "PASS" : "FAIL")}{Environment.NewLine}plan_safety=PASS{Environment.NewLine}";
-                var output = Environment.GetEnvironmentVariable("DEVFLEET_SELF_TE

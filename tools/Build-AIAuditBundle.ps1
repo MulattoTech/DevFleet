@@ -656,18 +656,59 @@ try {
         $baselineReceiptPath=Join-Path $Workspace (Join-Path 'evidence\baselines\receipts' $baselineReceiptFile)
         if((Get-Hash $baselineReceiptPath) -cne [string]$baselinePointer.receiptSha256){throw 'Accepted baseline receipt hash does not match its pointer.'}
         if(-not(Add-CompactFile $baselineReceiptPath (Join-Path $evidenceStage "baselines\receipts\$baselineReceiptFile"))){throw 'Accepted baseline receipt is missing.'}
-        if([int]$baselinePointer.generation -eq 2){
-            $previousHash=[string]$baselinePointer.previousPointerSha256
+        if([int]$baselinePointer.generation -in @(3,4)){
+            $baselineReceipt=Read-Json $baselineReceiptPath
+            foreach($sourceHash in @([string]$baselineReceipt.successorLedgerSha256,[string]$baselineReceipt.nativeInventorySha256)){
+                if($sourceHash -cnotmatch '^[0-9a-f]{64}$'){throw 'Rebound baseline source hash is invalid.'}
+                $sourcePath=Join-Path $Workspace "evidence\baselines\sources\$sourceHash.json"
+                if((Get-Hash $sourcePath) -cne $sourceHash){throw 'Rebound baseline source hash differs.'}
+                $stagedSource=Join-Path $evidenceStage "baselines\sources\$sourceHash.json"
+                if(-not(Add-CompactFile $sourcePath $stagedSource)){throw 'Rebound baseline source is missing.'}
+                if((Get-Hash $stagedSource) -cne $sourceHash){throw 'Rebound staged baseline source hash differs.'}
+            }
+            if([int]$baselinePointer.generation -eq 4){
+                $artifactBinding=$null
+                $ledgerSource=Join-Path $Workspace ("evidence\baselines\sources\{0}.json" -f [string]$baselineReceipt.successorLedgerSha256)
+                if(Test-Path -LiteralPath $ledgerSource -PathType Leaf){
+                    $ledgerSourceJson=Read-Json $ledgerSource
+                    $artifactBinding=$ledgerSourceJson.artifactReceipt
+                }
+                $artifactHash=[string]$artifactBinding.sha256
+                $artifactSource=[string]$artifactBinding.path
+                if($artifactHash -notmatch '^[0-9a-f]{64}$' -or [string]$baselineReceipt.artifactReceiptSha256 -cne $artifactHash){throw 'Repair-3 signed-output receipt hash is missing, malformed, or not bound by the baseline receipt.'}
+                if(-not(Test-Path -LiteralPath $artifactSource -PathType Leaf)){
+                    $artifactSource=Join-Path $Workspace ("evidence\baselines\sources\{0}.json" -f $artifactHash)
+                }
+                if(-not(Test-Path -LiteralPath $artifactSource -PathType Leaf) -or (Get-Hash $artifactSource) -cne $artifactHash){throw 'Repair-3 signed-output receipt is missing or hash-mismatched.'}
+                $artifactDestination=Join-Path $evidenceStage ("baselines\sources\{0}.json" -f $artifactHash)
+                if(-not(Add-CompactFile $artifactSource $artifactDestination) -or (Get-Hash $artifactDestination) -cne $artifactHash){throw 'Repair-3 signed-output receipt staging failed hash verification.'}
+            }
+        }
+        $cursor=$baselinePointer
+        if([int]$cursor.generation -lt 1 -or [int]$cursor.generation -gt 4){throw 'Unsupported accepted baseline generation.'}
+        while([int]$cursor.generation -gt 1){
+            $previousHash=[string]$cursor.previousPointerSha256
             if($previousHash -cnotmatch '^[0-9a-f]{64}$'){throw 'Rebound baseline predecessor hash is invalid.'}
             $historyPath=Join-Path $Workspace "evidence\baselines\history\$previousHash.json"
             if((Get-Hash $historyPath) -cne $previousHash){throw 'Rebound baseline predecessor pointer hash differs.'}
             $previousPointer=Read-Json $historyPath
             $previousReceiptFile=[string]$previousPointer.receiptFile
-            if([int]$previousPointer.generation -ne 1 -or $previousReceiptFile -cnotmatch '^[0-9a-f]{32}\.json$'){throw 'Rebound baseline predecessor pointer is invalid.'}
+            if([int]$previousPointer.generation -ne ([int]$cursor.generation-1) -or $previousReceiptFile -cnotmatch '^[0-9a-f]{32}\.json$'){throw 'Rebound baseline predecessor pointer is invalid.'}
             $previousReceiptPath=Join-Path $Workspace (Join-Path 'evidence\baselines\receipts' $previousReceiptFile)
             if((Get-Hash $previousReceiptPath) -cne [string]$previousPointer.receiptSha256){throw 'Rebound baseline predecessor receipt hash differs.'}
+            if([int]$previousPointer.generation -eq 3){
+                $previousReceipt=Read-Json $previousReceiptPath
+                foreach($sourceHash in @([string]$previousReceipt.successorLedgerSha256,[string]$previousReceipt.nativeInventorySha256)){
+                    if($sourceHash -cnotmatch '^[0-9a-f]{64}$'){throw 'Predecessor baseline source hash is invalid.'}
+                    $sourcePath=Join-Path $Workspace "evidence\baselines\sources\$sourceHash.json"
+                    if((Get-Hash $sourcePath) -cne $sourceHash){throw 'Predecessor baseline source hash differs.'}
+                    $stagedSource=Join-Path $evidenceStage "baselines\sources\$sourceHash.json"
+                    if(-not(Add-CompactFile $sourcePath $stagedSource)){throw 'Predecessor baseline source is missing.'}
+                }
+            }
             if(-not(Add-CompactFile $historyPath (Join-Path $evidenceStage "baselines\history\$previousHash.json"))){throw 'Rebound baseline predecessor pointer is missing.'}
             if(-not(Add-CompactFile $previousReceiptPath (Join-Path $evidenceStage "baselines\receipts\$previousReceiptFile"))){throw 'Rebound baseline predecessor receipt is missing.'}
+            $cursor=$previousPointer
         }
         if(-not(Add-CompactFile $baselinePointerPath (Join-Path $evidenceStage 'baselines\CURRENT.json'))){throw 'Accepted baseline pointer is missing.'}
     }

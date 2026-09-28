@@ -17,15 +17,63 @@ import tempfile
 
 POLICY_ID = 'DF-FRESH-CERTIFICATION-20260926'
 ONE_DIAGNOSTIC_ID = POLICY_ID + '-R2-D1'
+REPAIR_ID = POLICY_ID + '-R2-REPAIR-1'
+REPAIR2_ID = POLICY_ID + '-R2-REPAIR-2'
+REPAIR3_ID = POLICY_ID + '-R2-REPAIR-3'
+REPAIR4_ID = POLICY_ID + '-R2-REPAIR-4'
+REPAIR3_CANDIDATE_COMMIT = 'be0f1473838b4c2255d22efd99b25a58fd588a78'
+REPAIR3_SHIPPING_SHA256 = '4d7d2dcfd486adb622e413ed9abe894df6d105457e91aa0f96779d776a5e4b44'
+REPAIR3_SIGNED_EXE_SHA256 = '1ee8059ea9ae253ab358b9aec5241aae1019676cb54544b5f352080cdf132908'
+REPAIR3_FAILED_LEDGER_SHA256 = 'dffe7810cc2f1833ed73a9514a8a49e4d65eed67eac0bf936bf81a1c8d6521ff'
+REPAIR3_RECEIPT_SHA256 = 'b071752cc2042b3405c05856780f74bbecdc11d0c647c8b602404c73829034b6'
 LIMITS = {'standard-token': 3, 'laptop-proof': 3, 'desktop-proof': 3,
           'fullrelease': 3, 'diagnostic': 6, 'maintenance': 3, 'build-sign': 3}
 ONE_DIAGNOSTIC_LIMITS = {operation: (1 if operation == 'diagnostic' else 0)
                          for operation in LIMITS}
+REPAIR_LIMITS = {operation: (1 if operation in ('standard-token', 'diagnostic',
+                                               'laptop-proof', 'desktop-proof',
+                                               'fullrelease') else 0)
+                 for operation in LIMITS}
+REPAIR_SEQUENCE = (('standard-token', 'PASS_NATIVE_STANDARD_TOKEN'),
+                   ('diagnostic', 'PASS_READY_FOR_PROOF_RESERVATION'),
+                   ('laptop-proof', 'NATIVE_LAPTOP_PROOF_PASS'),
+                   ('desktop-proof', 'NATIVE_DESKTOP_PROOF_PASS'),
+                   ('fullrelease', 'NATIVE_FULLRELEASE_PASS'))
+REPAIR2_LIMITS = {operation: (1 if operation in ('build-sign', 'standard-token',
+                                                'diagnostic', 'laptop-proof',
+                                                'desktop-proof', 'fullrelease') else 0)
+                  for operation in LIMITS}
+REPAIR2_SEQUENCE = (('build-sign', 'PASS_NATIVE_BUILD_SIGN'),) + REPAIR_SEQUENCE
+REPAIR3_LIMITS = {operation: (1 if operation in ('standard-token', 'diagnostic',
+                                                'laptop-proof', 'desktop-proof',
+                                                'fullrelease') else 0)
+                  for operation in LIMITS}
+REPAIR3_SEQUENCE = REPAIR_SEQUENCE
+REPAIR4_LIMITS = dict(REPAIR3_LIMITS)
+REPAIR4_SEQUENCE = REPAIR_SEQUENCE
+
+
+def sequence_for(policy_id):
+    if policy_id == REPAIR2_ID:
+        return REPAIR2_SEQUENCE
+    if policy_id == REPAIR3_ID:
+        return REPAIR3_SEQUENCE
+    if policy_id == REPAIR4_ID:
+        return REPAIR4_SEQUENCE
+    return REPAIR_SEQUENCE
 
 
 def limits_for(policy_id):
     if policy_id == ONE_DIAGNOSTIC_ID:
         return ONE_DIAGNOSTIC_LIMITS
+    if policy_id == REPAIR_ID:
+        return REPAIR_LIMITS
+    if policy_id == REPAIR2_ID:
+        return REPAIR2_LIMITS
+    if policy_id == REPAIR3_ID:
+        return REPAIR3_LIMITS
+    if policy_id == REPAIR4_ID:
+        return REPAIR4_LIMITS
     if policy_id in (POLICY_ID, POLICY_ID + '-R2'):
         return LIMITS
     raise ValueError('Unsupported explicitly authorized campaign')
@@ -90,9 +138,122 @@ def atomic_write(path, value):
     finally:
         if os.path.exists(temporary): os.unlink(temporary)
 
-def initialize(ledger, authorization, predecessors, policy_id=POLICY_ID):
+def _load_repair3_receipt(path):
+    if not path:
+        raise ValueError('Repair3 immutable artifact receipt is required')
+    path = safe_path(path)
+    if not path.is_file():
+        raise ValueError('Repair3 immutable artifact receipt is required')
+    receipt = strict_json(path)
+    if digest(path) != REPAIR3_RECEIPT_SHA256:
+        raise ValueError('Repair3 artifact receipt source identity differs')
+    required = {'schemaVersion', 'contract', 'status', 'certificationCredit',
+                'repositoryHead', 'failedAttemptLedgerSha256',
+                'shippingInputIdentity', 'artifacts', 'signatureStatus',
+                'publicPromotionAllowed', 'publicPublisherTrust'}
+    if not isinstance(receipt, dict) or not required.issubset(receipt):
+        raise ValueError('Repair3 artifact receipt is malformed')
+    if receipt['schemaVersion'] != 1 or receipt['contract'] != 'devfleet-signed-build-output-inspection-v1':
+        raise ValueError('Repair3 artifact receipt schema is unsupported')
+    if receipt['status'] != 'PASS_VERIFIED_SIGNED_OUTPUT_WITH_FAILED_ADMISSION' or receipt['certificationCredit'] is not False:
+        raise ValueError('Repair3 artifact receipt is not non-certifying verified output')
+    if receipt['repositoryHead'] != REPAIR3_CANDIDATE_COMMIT:
+        raise ValueError('Repair3 artifact receipt candidate binding differs')
+    if receipt['failedAttemptLedgerSha256'] != REPAIR3_FAILED_LEDGER_SHA256:
+        raise ValueError('Repair3 artifact receipt failed ledger binding differs')
+    if receipt['shippingInputIdentity'] != REPAIR3_SHIPPING_SHA256:
+        raise ValueError('Repair3 artifact receipt shipping binding differs')
+    if receipt['signatureStatus'] != 'Valid' or receipt['publicPromotionAllowed'] is not False or receipt['publicPublisherTrust'] is not False:
+        raise ValueError('Repair3 artifact receipt signature/trust boundary differs')
+    artifacts = receipt['artifacts']
+    if not isinstance(artifacts, list) or len(artifacts) != 4:
+        raise ValueError('Repair3 artifact receipt must bind four artifacts')
+    names = set()
+    for artifact in artifacts:
+        if (not isinstance(artifact, dict)
+                or not {'name', 'path', 'sha256'}.issubset(artifact)
+                or not isinstance(artifact['name'], str) or not artifact['name']
+                or not isinstance(artifact['path'], str) or not artifact['path']
+                or not re.fullmatch(r'[a-f0-9]{64}', str(artifact['sha256']))):
+            raise ValueError('Repair3 artifact receipt contains malformed artifact')
+        if artifact['name'] in names:
+            raise ValueError('Repair3 artifact receipt contains duplicate artifact')
+        names.add(artifact['name'])
+    if names != {'exe', 'tar', 'portable', 'installerSource'}:
+        raise ValueError('Repair3 artifact receipt does not bind the exact four artifacts')
+    exe = next(artifact for artifact in artifacts if artifact['name'] == 'exe')
+    if exe['sha256'] != REPAIR3_SIGNED_EXE_SHA256:
+        raise ValueError('Repair3 artifact receipt signed executable binding differs')
+    return path
+
+
+def initialize(ledger, authorization, predecessors, policy_id=POLICY_ID, artifact_receipt=None):
     limits = limits_for(policy_id)
-    if policy_id == ONE_DIAGNOSTIC_ID:
+    if policy_id == REPAIR4_ID:
+        if len(predecessors) != 2 or safe_path(predecessors[0]) == safe_path(predecessors[1]):
+            raise ValueError('Fourth repair successor requires distinct terminal snapshot and live repair3 predecessor')
+        if safe_path(authorization) in (safe_path(predecessors[0]), safe_path(predecessors[1]), safe_path(ledger)):
+            raise ValueError('Fourth repair authorization must be a distinct source')
+        if digest(predecessors[0]) != digest(predecessors[1]):
+            raise ValueError('Fourth repair predecessor snapshot differs from live repair3 ledger')
+        parents = [load(p) for p in predecessors]
+        if any(p['policyId'] != REPAIR3_ID or p['activeRunId'] is not None
+               or len(p['attempts']) != len(REPAIR3_SEQUENCE)
+               or p['attempts'][-1].get('state') != 'TERMINAL'
+               or p['attempts'][-1].get('operation') != 'fullrelease'
+               or p['attempts'][-1].get('exitCode') != 2
+               or p['attempts'][-1].get('classification') != 'NATIVE_FULLRELEASE_BLOCKED'
+               for p in parents):
+            raise ValueError('Fourth repair successor requires terminal blocked repair3 FullRelease predecessor')
+        if parents[0]['authorization']['sha256'] == digest(authorization):
+            raise ValueError('Fourth repair successor requires separate explicit authorization')
+    elif policy_id == REPAIR3_ID:
+        if len(predecessors) != 2 or safe_path(predecessors[0]) == safe_path(predecessors[1]):
+            raise ValueError('Third repair successor requires distinct terminal snapshot and live repair2 predecessor')
+        if digest(predecessors[0]) != digest(predecessors[1]):
+            raise ValueError('Third repair predecessor snapshot differs from live repair2 ledger')
+        parents = [load(p) for p in predecessors]
+        if any(p['policyId'] != REPAIR2_ID or p['activeRunId'] is not None
+               or len(p['attempts']) != 1
+               or p['attempts'][-1].get('state') != 'TERMINAL'
+               or p['attempts'][-1].get('operation') != 'build-sign'
+               or p['attempts'][-1].get('exitCode') != 2
+               or p['attempts'][-1].get('classification') != 'BUILD_SIGN_BLOCKED'
+               for p in parents):
+            raise ValueError('Third repair successor requires terminal failed repair2 build-sign predecessor')
+        if parents[0]['authorization']['sha256'] == digest(authorization):
+            raise ValueError('Third repair successor requires separate explicit authorization')
+        artifact_receipt = _load_repair3_receipt(artifact_receipt)
+        receipt_data = strict_json(artifact_receipt)
+        if digest(predecessors[0]) != receipt_data['failedAttemptLedgerSha256']:
+            raise ValueError('Third repair predecessor does not match verified failed ledger')
+    elif policy_id == REPAIR2_ID:
+        if len(predecessors) != 2 or safe_path(predecessors[0]) == safe_path(predecessors[1]):
+            raise ValueError('Second repair successor requires distinct terminal snapshot and live repair predecessor')
+        if digest(predecessors[0]) != digest(predecessors[1]):
+            raise ValueError('Second repair predecessor snapshot differs from live repair ledger')
+        parents = [load(p) for p in predecessors]
+        if any(p['policyId'] != REPAIR_ID or p['activeRunId'] is not None
+               or len(p['attempts']) != len(REPAIR_SEQUENCE)
+               or p['attempts'][-1].get('state') != 'TERMINAL'
+               or p['attempts'][-1].get('operation') != 'fullrelease'
+               or p['attempts'][-1].get('exitCode') != 2
+               or p['attempts'][-1].get('classification') != 'NATIVE_FULLRELEASE_BLOCKED'
+               for p in parents):
+            raise ValueError('Second repair successor requires terminal failed FullRelease predecessor')
+        if parents[0]['authorization']['sha256'] == digest(authorization):
+            raise ValueError('Second repair successor requires separate explicit authorization')
+    elif policy_id == REPAIR_ID:
+        if len(predecessors) != 2 or safe_path(predecessors[0]) == safe_path(predecessors[1]):
+            raise ValueError('Repair successor requires distinct terminal snapshot and live R2 predecessor')
+        if digest(predecessors[0]) != digest(predecessors[1]):
+            raise ValueError('Repair predecessor snapshot differs from live R2')
+        parents = [load(p) for p in predecessors]
+        if any(p['policyId'] != POLICY_ID + '-R2' or p['activeRunId'] is not None for p in parents):
+            raise ValueError('Repair successor requires inactive R2 predecessor')
+        if parents[0]['authorization']['sha256'] == digest(authorization):
+            raise ValueError('Repair successor requires separate explicit authorization')
+    elif policy_id == ONE_DIAGNOSTIC_ID:
         parents = [load(p) for p in predecessors]
         if len(parents) != 1 or parents[0]['policyId'] != POLICY_ID + '-R2' or parents[0]['activeRunId'] is not None:
             raise ValueError('One-diagnostic successor requires one terminal R2 predecessor')
@@ -115,12 +276,15 @@ def initialize(ledger, authorization, predecessors, policy_id=POLICY_ID):
                 'authorization':{'path':str(authorization),'sha256':digest(authorization)},
                 'predecessors':[{'path':str(safe_path(p)),'sha256':digest(p)} for p in predecessors],
                 'limits':dict(limits),'attempts':[],'activeRunId':None,'certificationCredit':False}
+        if policy_id == REPAIR3_ID:
+            data['artifactReceipt'] = {'path': str(artifact_receipt),
+                                       'sha256': digest(artifact_receipt)}
         atomic_write(ledger,data)
     return status(ledger)
 
 def load(ledger):
     data = strict_json(ledger)
-    if not isinstance(data,dict) or type(data.get('schemaVersion')) is not int or data['schemaVersion'] != 1 or data.get('policyId') not in (POLICY_ID, POLICY_ID+'-R2', ONE_DIAGNOSTIC_ID):
+    if not isinstance(data,dict) or type(data.get('schemaVersion')) is not int or data['schemaVersion'] != 1 or data.get('policyId') not in (POLICY_ID, POLICY_ID+'-R2', ONE_DIAGNOSTIC_ID, REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID):
         raise ValueError('Unsupported campaign schema/identity')
     if data.get('certificationCredit') is not False:
         raise ValueError('Attempt accounting cannot grant certification credit')
@@ -131,6 +295,112 @@ def load(ledger):
     auth = data.get('authorization',{})
     if digest(safe_path(auth['path'])) != auth.get('sha256'):
         raise ValueError('Authorization source changed')
+    if data['policyId'] == REPAIR3_ID:
+        receipt = data.get('artifactReceipt')
+        if not isinstance(receipt, dict) or set(receipt) != {'path', 'sha256'}:
+            raise ValueError('Repair3 artifact receipt binding is missing')
+        receipt_path = _load_repair3_receipt(receipt['path'])
+        if digest(receipt_path) != receipt.get('sha256'):
+            raise ValueError('Repair3 artifact receipt changed')
+        if receipt_path == safe_path(ledger):
+            raise ValueError('Repair3 artifact receipt cannot be the ledger')
+    if data['policyId'] == REPAIR_ID:
+        predecessors = data.get('predecessors')
+        if not isinstance(predecessors, list) or len(predecessors) != 2:
+            raise ValueError('Repair predecessors are missing')
+        paths = [safe_path(p['path']) for p in predecessors]
+        if paths[0] in (paths[1], safe_path(ledger)) or paths[1] == safe_path(ledger):
+            raise ValueError('Repair predecessors are not distinct from successor')
+        if any(digest(path) != row.get('sha256') for path, row in zip(paths, predecessors)):
+            raise ValueError('Repair predecessor changed')
+        if digest(paths[0]) != digest(paths[1]):
+            raise ValueError('Repair snapshot and live R2 diverged')
+        parents = [load(path) for path in paths]
+        if any(parent['policyId'] != POLICY_ID + '-R2' or parent['activeRunId'] is not None
+               for parent in parents):
+            raise ValueError('Repair predecessor is not inactive R2')
+        r2_predecessors = parents[0].get('predecessors')
+        if not isinstance(r2_predecessors, list) or len(r2_predecessors) != 1:
+            raise ValueError('R2 predecessor lineage is missing')
+        base_path = safe_path(r2_predecessors[0]['path'])
+        if base_path in (*paths, safe_path(ledger)) or digest(base_path) != r2_predecessors[0].get('sha256'):
+            raise ValueError('R2 predecessor lineage changed')
+        base = load(base_path)
+        if base['policyId'] != POLICY_ID or base['activeRunId'] is not None:
+            raise ValueError('R2 predecessor is not inactive base campaign')
+        if parents[0]['authorization']['sha256'] == auth['sha256']:
+            raise ValueError('Repair successor authorization repeats R2 source')
+    if data['policyId'] == REPAIR2_ID:
+        predecessors = data.get('predecessors')
+        if not isinstance(predecessors, list) or len(predecessors) != 2:
+            raise ValueError('Second repair predecessors are missing')
+        paths = [safe_path(p['path']) for p in predecessors]
+        if paths[0] in (paths[1], safe_path(ledger)) or paths[1] == safe_path(ledger):
+            raise ValueError('Second repair predecessors are not distinct from successor')
+        if any(digest(path) != row.get('sha256') for path, row in zip(paths, predecessors)):
+            raise ValueError('Second repair predecessor changed')
+        if digest(paths[0]) != digest(paths[1]):
+            raise ValueError('Second repair snapshot and live predecessor diverged')
+        parents = [load(path) for path in paths]
+        if any(parent['policyId'] != REPAIR_ID or parent['activeRunId'] is not None
+               or len(parent['attempts']) != len(REPAIR_SEQUENCE)
+               or parent['attempts'][-1].get('state') != 'TERMINAL'
+               or parent['attempts'][-1].get('operation') != 'fullrelease'
+               or parent['attempts'][-1].get('exitCode') != 2
+               or parent['attempts'][-1].get('classification') != 'NATIVE_FULLRELEASE_BLOCKED'
+               for parent in parents):
+            raise ValueError('Second repair predecessor is not the terminal blocked first repair')
+        if parents[0]['authorization']['sha256'] == auth['sha256']:
+            raise ValueError('Second repair authorization repeats first repair source')
+    if data['policyId'] == REPAIR3_ID:
+        predecessors = data.get('predecessors')
+        if not isinstance(predecessors, list) or len(predecessors) != 2:
+            raise ValueError('Third repair predecessors are missing')
+        paths = [safe_path(p['path']) for p in predecessors]
+        if paths[0] in (paths[1], safe_path(ledger)) or paths[1] == safe_path(ledger):
+            raise ValueError('Third repair predecessors are not distinct from successor')
+        if any(digest(path) != row.get('sha256') for path, row in zip(paths, predecessors)):
+            raise ValueError('Third repair predecessor changed')
+        if digest(paths[0]) != digest(paths[1]):
+            raise ValueError('Third repair snapshot and live predecessor diverged')
+        parents = [load(path) for path in paths]
+        if any(parent['policyId'] != REPAIR2_ID or parent['activeRunId'] is not None
+               or len(parent['attempts']) != 1
+               or parent['attempts'][-1].get('state') != 'TERMINAL'
+               or parent['attempts'][-1].get('operation') != 'build-sign'
+               or parent['attempts'][-1].get('exitCode') != 2
+               or parent['attempts'][-1].get('classification') != 'BUILD_SIGN_BLOCKED'
+               for parent in parents):
+            raise ValueError('Third repair predecessor is not the terminal blocked repair2 build-sign')
+        receipt_data = strict_json(receipt['path'])
+        if digest(paths[0]) != receipt_data['failedAttemptLedgerSha256']:
+            raise ValueError('Third repair predecessor does not match verified failed ledger')
+        if parents[0]['authorization']['sha256'] == auth['sha256']:
+            raise ValueError('Third repair authorization repeats repair2 source')
+    if data['policyId'] == REPAIR4_ID:
+        predecessors = data.get('predecessors')
+        if not isinstance(predecessors, list) or len(predecessors) != 2:
+            raise ValueError('Fourth repair predecessors are missing')
+        paths = [safe_path(p['path']) for p in predecessors]
+        if paths[0] in (paths[1], safe_path(ledger)) or paths[1] == safe_path(ledger):
+            raise ValueError('Fourth repair predecessors are not distinct from successor')
+        if safe_path(auth['path']) in (*paths, safe_path(ledger)):
+            raise ValueError('Fourth repair authorization is not a distinct source')
+        if any(digest(path) != row.get('sha256') for path, row in zip(paths, predecessors)):
+            raise ValueError('Fourth repair predecessor changed')
+        if digest(paths[0]) != digest(paths[1]):
+            raise ValueError('Fourth repair snapshot and live predecessor diverged')
+        parents = [load(path) for path in paths]
+        if any(parent['policyId'] != REPAIR3_ID or parent['activeRunId'] is not None
+               or len(parent['attempts']) != len(REPAIR3_SEQUENCE)
+               or parent['attempts'][-1].get('state') != 'TERMINAL'
+               or parent['attempts'][-1].get('operation') != 'fullrelease'
+               or parent['attempts'][-1].get('exitCode') != 2
+               or parent['attempts'][-1].get('classification') != 'NATIVE_FULLRELEASE_BLOCKED'
+               for parent in parents):
+            raise ValueError('Fourth repair predecessor is not the terminal blocked repair3 FullRelease')
+        if parents[0]['authorization']['sha256'] == auth['sha256']:
+            raise ValueError('Fourth repair authorization repeats repair3 source')
     if data['policyId'] == ONE_DIAGNOSTIC_ID:
         predecessors = data.get('predecessors')
         if not isinstance(predecessors, list) or len(predecessors) != 1:
@@ -169,6 +439,17 @@ def load(ledger):
         raise ValueError('Ambiguous active attempt')
     if any(sum(a['operation']==op for a in attempts)>limit for op,limit in expected_limits.items()):
         raise ValueError('Campaign allowance exceeded')
+    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID):
+        sequence = sequence_for(data['policyId'])
+        if len(attempts) > len(sequence):
+            raise ValueError('Repair successor has too many phases')
+        for index, attempt in enumerate(attempts):
+            if attempt['operation'] != sequence[index][0]:
+                raise ValueError('Repair successor phase order changed')
+            if index < len(attempts) - 1 and (attempt.get('state') != 'TERMINAL'
+                    or attempt.get('exitCode') != 0
+                    or attempt.get('classification') != sequence[index][1]):
+                raise ValueError('Repair successor advanced past an unpassed prerequisite')
     return data
 
 def status(ledger):
@@ -195,6 +476,17 @@ def prepare(data, request):
     if data['activeRunId'] is not None: raise ValueError('Active attempt must be reconciled; crash is not a free replay')
     if any(a['runId']==request['runId'] for a in data['attempts']): raise ValueError('RunId has already been charged')
     if sum(a['operation']==request['operation'] for a in data['attempts'])>=limits[request['operation']]: raise ValueError('Operation allowance exhausted')
+    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID):
+        sequence = sequence_for(data['policyId'])
+        prior = data['attempts']
+        if (len(prior) >= len(sequence)
+                or request['operation'] != sequence[len(prior)][0]
+                or any(a['operation'] != expected_operation
+                       or a.get('state') != 'TERMINAL'
+                       or a.get('exitCode') != 0
+                       or a.get('classification') != expected_result
+                       for a, (expected_operation, expected_result) in zip(prior, sequence))):
+            raise ValueError('Repair successor phase order or prerequisite result is invalid')
     result=json.loads(json.dumps(request,allow_nan=False))
     result.update(state='RESERVED_CHARGED',reservedUtc=utc(),certificationCredit=False)
     return result
@@ -223,10 +515,11 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command',choices=['initialize','status','reserve','finish'])
     parser.add_argument('--ledger',required=True); parser.add_argument('--authorization'); parser.add_argument('--predecessor',action='append',default=[])
-    parser.add_argument('--policy-id',choices=[POLICY_ID,POLICY_ID+'-R2',ONE_DIAGNOSTIC_ID],default=POLICY_ID)
+    parser.add_argument('--policy-id',choices=[POLICY_ID,POLICY_ID+'-R2',ONE_DIAGNOSTIC_ID,REPAIR_ID,REPAIR2_ID,REPAIR3_ID,REPAIR4_ID],default=POLICY_ID)
+    parser.add_argument('--artifact-receipt')
     parser.add_argument('--request'); parser.add_argument('--dry-run',action='store_true')
     args=parser.parse_args()
-    if args.command=='initialize': result=initialize(args.ledger,args.authorization,args.predecessor,args.policy_id)
+    if args.command=='initialize': result=initialize(args.ledger,args.authorization,args.predecessor,args.policy_id,args.artifact_receipt)
     elif args.command=='status': result=status(args.ledger)
     elif args.command=='reserve': result=reserve(args.ledger,strict_json(args.request),args.dry_run)
     else:

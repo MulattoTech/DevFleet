@@ -147,9 +147,16 @@ def project_transfer_lock(slug: str):
         yield
 
 
-def _source_state_fingerprint(project: Path, *, include_generated: bool = False) -> str:
-    """Hash source paths and bytes, excluding only DevFleet's mutable metadata."""
+def _source_state_fingerprint(
+    project: Path,
+    *,
+    include_generated: bool = False,
+    exclude_ownership_lease: bool = False,
+    return_full_lease_variant: bool = False,
+) -> str | tuple[str, str]:
+    """Hash source bytes, optionally capturing both lease variants in one walk."""
     digest = hashlib.sha256()
+    full_digest = hashlib.sha256() if return_full_lease_variant else None
     for current, dirs, names in os.walk(project, topdown=True, followlinks=False):
         if not include_generated:
             dirs[:] = [d for d in dirs if d not in IGNORED_FINGERPRINT_DIRS]
@@ -159,17 +166,24 @@ def _source_state_fingerprint(project: Path, *, include_generated: bool = False)
             rel = path.relative_to(project).as_posix()
             if rel == ".devfleet/project.json":
                 continue
+            excluded_lease = exclude_ownership_lease and rel == ".devfleet/ownership-lease.json"
+            if excluded_lease and full_digest is None:
+                continue
             if path.is_symlink() or not path.is_file():
                 raise ValueError(
                     f"Workspace changed to an unsupported entry during destructive preparation: {rel}"
                 )
-            digest.update(rel.encode())
-            digest.update(b"\0")
+            targets = ([digest] if not excluded_lease else []) + ([full_digest] if full_digest else [])
+            for target in targets:
+                target.update(rel.encode())
+                target.update(b"\0")
             with path.open("rb") as handle:
                 for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(chunk)
-            digest.update(b"\0")
-    return digest.hexdigest()
+                    for target in targets:
+                        target.update(chunk)
+            for target in targets:
+                target.update(b"\0")
+    return (digest.hexdigest(), full_digest.hexdigest()) if full_digest else digest.hexdigest()
 
 
 def _safety_backup_fields(
@@ -4035,7 +4049,12 @@ def safety_backup_project(slug: str, _lock_held: bool = False) -> dict[str, Any]
             }
         )
         _write_project_metadata(project, meta)
-        before = _source_state_fingerprint(project, include_generated=True)
+        # backup_project records its verified backup in ownership-lease.json.
+        # Exclude that one self-update only from the during-backup comparison;
+        # the final binding still includes the complete post-backup lease.
+        before = _source_state_fingerprint(
+            project, include_generated=True, exclude_ownership_lease=True
+        )
         # Consistency is transaction-local and explicit.  The signature check
         # keeps older focused test doubles compatible without reintroducing
         # mutable module state.
@@ -4047,7 +4066,12 @@ def safety_backup_project(slug: str, _lock_held: bool = False) -> dict[str, Any]
             result = json.loads(backup_project(slug))
         result.setdefault("consistency_level", "quiesced")
         meta = load_authoritative_project_identity_for_mutation(project)
-        after = _source_state_fingerprint(project, include_generated=True)
+        after, bound_fingerprint = _source_state_fingerprint(
+            project,
+            include_generated=True,
+            exclude_ownership_lease=True,
+            return_full_lease_variant=True,
+        )
         if before != after:
             raise RuntimeError(
                 "Destructive deletion blocked: workspace changed during the safety backup; no deletion was performed."
@@ -4082,7 +4106,7 @@ def safety_backup_project(slug: str, _lock_held: bool = False) -> dict[str, Any]
             "runtime_id": str(meta.get("runtime_id") or ""),
             "backup_id": backup_id,
             "backup_sha256": backup_sha.lower(),
-            "source_state_fingerprint": after,
+            "source_state_fingerprint": bound_fingerprint,
             "fingerprint_policy": {
                 "schema_version": FINGERPRINT_POLICY_VERSION,
                 "algorithm": FINGERPRINT_ALGORITHM,

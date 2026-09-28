@@ -1,702 +1,707 @@
 # DevFleet source part 106
 
 Full-source UTF-8 byte interval [4882500, 4929000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: bc34910005215268fc5fdd545f19591c8492331febc0b76ec961f19411a4b4bf
+Payload SHA-256: 9bb4a5a26a7dec964f87fb434ee1c2d22146d692641f19ee2912c6056c632cd2
 
 <!-- BEGIN SOURCE SLICE -->
-$nodeFile=Join-Path (Get-DevFleetStateRoot) 'tmp\primary-node.json';$primaryNode|ConvertTo-Json|Set-Content $nodeFile -Encoding utf8
-Invoke-External $mp @('transfer',$nodeFile,"${name}:/tmp/primary-node.json")
-Invoke-External $mp @('exec',$name,'--','sudo','/usr/local/sbin/devfleet-join-deployment','/tmp/primary-node.json')
-$hostIdentityPath=Join-Path (Get-DevFleetStateRoot) 'node-identity.json'
-$hostIdentity=Get-Content -LiteralPath $hostIdentityPath -Raw|ConvertFrom-Json
-if($hostIdentity.node_role -ne 'surrogate' -or -not $hostIdentity.node_id){throw 'Local surrogate identity is incomplete.'}
-$hostIdentity.deployment_id=[string]$primaryNode.deployment_id;$hostIdentity.coordinator_node_id=[string]$primaryNode.node_id;$hostIdentity.registration_state='joined'
-$vaultIdentity=Get-OrCreateVaultIdentity
-$vaultIdentity.deployment_id=[string]$primaryNode.deployment_id
-$vaultIdentityPath=Join-Path (Get-DevFleetStateRoot) 'vault-node-identity.json'
-$vaultIdentity|ConvertTo-Json|Set-Content -LiteralPath $vaultIdentityPath -Encoding utf8
-$vaultName=[string]$config.Vault.InstanceName
-if(Test-MultipassInstance $vaultName){
- $vaultPublic=(Invoke-External $mp @('exec',$vaultName,'--','sudo','cat','/etc/devfleet-vault-public.json') -Capture)|ConvertFrom-Json
- $localSecrets=Get-OrCreateSecrets
- if([string]$vaultPublic.cluster -ne [string]$config.ClusterName -or [string]$vaultPublic.user -ne [string]$localSecrets.VaultRestUser){throw 'Vault legacy adoption identity does not match the exact local cluster/credential binding.'}
- $vaultIdentityTransfer=Join-Path (Get-DevFleetStateRoot) 'tmp\vault-node-identity.json';$vaultIdentity|ConvertTo-Json|Set-Content -LiteralPath $vaultIdentityTransfer -Encoding utf8
- Invoke-External $mp @('transfer',$vaultIdentityTransfer,"${vaultName}:/tmp/devfleet-vault-identity.json")
- Invoke-External $mp @('exec',$vaultName,'--','sudo','install','-o','root','-g','root','-m','0600','/tmp/devfleet-vault-identity.json','/etc/devfleet-vault-identity.json')
- Invoke-External $mp @('exec',$vaultName,'--','sudo','rm','-f','--','/tmp/devfleet-vault-identity.json')
-}
-$hostIdentity|ConvertTo-Json|Set-Content -LiteralPath $hostIdentityPath -Encoding utf8
-Protect-DevFleetStateAcl
-Add-LocalSshKeyToInstance -InstanceName $name -PublicKeyPath (Join-Path $dest 'desktop-client.pub')
-Write-Host 'Failover node paired with primary. Cluster setup is complete.' -ForegroundColor Green
-} finally {
- Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue
- if($tmp){Remove-Item $tmp -Force -ErrorAction SilentlyContinue}
-}
+.chmod(archived_mode)
 
-try { & (Join-Path (Get-PackageRootFromState) 'client\Configure-SSH.ps1') -SkipConnectivityTest } catch { Write-Warning $_ }
 
-try { & (Join-Path (Get-PackageRootFromState) 'client\Configure-VSCode.ps1') -ExtensionSets core } catch { Write-Warning $_ }
-if (Get-Command docker.exe -ErrorAction SilentlyContinue) { try { & (Join-Path (Get-PackageRootFromState) 'client\Configure-DockerContext.ps1') } catch { Write-Warning $_ } }
+def _extract_regular_tar_member(archive: tarfile.TarFile, info: tarfile.TarInfo, dest: Path, name: str) -> None:
+    assert info.isfile(), f"unsupported TAR entry type: {name}"
+    target = _safe_target(dest, name)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    source = archive.extractfile(info)
+    assert source is not None, f"TAR member could not be read: {name}"
+    with source, target.open("xb") as output:
+        shutil.copyfileobj(source, output)
+    if os.name != "nt":
+        target.chmod(info.mode & 0o777)
+
+
+def verify_archive(path: Path) -> None:
+    """Validate and clean-extract a zip/tar release archive without running it."""
+    assert path.is_file(), f"archive not found: {path}"
+    with tempfile.TemporaryDirectory() as td:
+        dest = Path(td); names: set[str] = set(); modes: dict[str, int] = {}
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as archive:
+                for info in archive.infolist():
+                    name = _safe_member(info.filename)
+                    if name.endswith("/"): continue
+                    assert name not in names, f"duplicate archive member: {name}"; names.add(name)
+                    modes[name] = (info.external_attr >> 16) & 0o777
+                    _extract_regular_zip_member(archive, info, dest, name)
+        else:
+            with tarfile.open(path, "r:*") as archive:
+                for info in archive.getmembers():
+                    name = _safe_member(info.name)
+                    if info.isdir(): continue
+                    assert name not in names, f"duplicate archive member: {name}"; names.add(name); modes[name] = info.mode & 0o777
+                    assert info.isfile(), f"unsupported TAR entry type: {name}"
+                    _extract_regular_tar_member(archive, info, dest, name)
+        assert set(REQUIRED).issubset(names), f"archive missing required files: {sorted(set(REQUIRED)-names)[:10]}"
+        hooks = [name for name in names if name in executable_template_hooks(dest)]
+        assert hooks, "archive contains no trusted template hooks"
+        for name in hooks:
+            assert modes.get(name, 0) == 0o755, f"template hook does not have 0755 mode in archive: {name}"
+            # Windows extraction APIs do not expose POSIX execute bits. The
+            # archive mode is still checked above; on POSIX, also verify the
+            # mode survived the actual clean extraction.
+            if os.name != "nt":
+                assert (dest / name).stat().st_mode & 0o111, f"trusted template hook lost executable mode after extraction: {name}"
+        assert CHECKSUM_MANIFEST in names, "archive missing checksum manifest"
+
+
+def archive_structural_checks(root: Path = ROOT) -> None:
+    """Round-trip a clean tar archive to exercise release structure and modes."""
+    with tempfile.TemporaryDirectory() as td:
+        archive = Path(td) / "package.tar.gz"
+        hooks = executable_template_hooks(root)
+        with tarfile.open(archive, "w:gz") as out:
+            for rel in sorted(package_files(root)):
+                source = root / rel; info = out.gettarinfo(str(source), arcname=rel)
+                if rel in hooks: info.mode = 0o755
+                with source.open("rb") as stream: out.addfile(info, stream)
+        verify_archive(archive)
+
+
+def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser(); parser.add_argument("--archive", type=Path)
+    args = parser.parse_args()
+    assert re.fullmatch(r"\d+\.\d+\.\d+", PACKAGE_VERSION), PACKAGE_VERSION
+    require_files(); parse_data(); compile_python_jinja(); bash_syntax(); linux_executable_hooks(); powershell_lexical(); template_smoke(); codexpro_guard_tests(); fastapi_smoke(); no_empty(); baseline_preserved(); verify_checksums(); archive_structural_checks()
+    if args.archive: verify_archive(args.archive)
+    print(f"DevFleet v{PACKAGE_VERSION} offline package verification passed.")
+
+
+if __name__ == "__main__":
+    main()
 
 ```
 
 
-## FILE: source/windows/Configure-DevFleet-HostControl.ps1
+## FILE: source/tools/write_posix_zip.py
 
-SHA256: 0c386e55d8d961d12708551ea4e30b0b2c224c1d25fd48f6a1c84f16bafa6432 | Bytes: 3931 | Git mode: 100644
+SHA256: 10088dbe4b07289b6f3df8811a75a2c58a2ad65b0b44f728f448c7cbc2129cda | Bytes: 1706 | Git mode: 100644
+
+```
+"""Write a deterministic ZIP whose entries advertise Unix file modes."""
+from __future__ import annotations
+
+import argparse
+import json
+import stat
+import zipfile
+from pathlib import Path
+
+
+def _mode_map(path: Path) -> dict[str, int]:
+    values = json.loads(path.read_text(encoding="utf-8-sig"))
+    return {str(item["path"]): int(item["posixMode"]) for item in values}
+
+
+def write_zip(stage: Path, output: Path, modes_path: Path) -> None:
+    modes = _mode_map(modes_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if output.exists():
+        output.unlink()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        paths = sorted(stage.rglob("*"), key=lambda item: item.relative_to(stage).as_posix())
+        for path in paths:
+            name = path.relative_to(stage).as_posix()
+            if path.is_dir():
+                continue
+            if not path.is_file():
+                continue
+            mode = modes.get(name, 0o644)
+            info = zipfile.ZipInfo(name)
+            info.create_system = 3
+            info.external_attr = (stat.S_IFREG | (mode & 0o7777)) << 16
+            with path.open("rb") as handle:
+                archive.writestr(info, handle.read(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--stage", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--modes", type=Path, required=True)
+    args = parser.parse_args()
+    write_zip(args.stage, args.output, args.modes)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+```
+
+
+## FILE: source/windows/00-Preflight.ps1
+
+SHA256: e9a3edb41802e9a01d76641f133430d683c84d37cf43604a492ebf106827c731 | Bytes: 4118 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([Parameter(Mandatory)][ValidateSet('Laptop','Desktop')][string]$Role,[ValidateSet('Offline','Connected')][string]$InstallationMode='Offline')
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+Assert-PowerShell7; Assert-Administrator
+$config=Get-DevFleetConfig
+
+Write-Host "`nPreflight for $Role on $env:COMPUTERNAME ($InstallationMode)" -ForegroundColor Cyan
+$os=Get-CimInstance Win32_OperatingSystem
+$cpu=Get-CimInstance Win32_Processor | Select-Object -First 1
+$sys=Get-CimInstance Win32_ComputerSystem
+$drive=Get-PSDrive -Name ($env:SystemDrive.TrimEnd(':'))
+$virtFirmware=$cpu.VirtualizationFirmwareEnabled
+$slat=$cpu.SecondLevelAddressTranslationExtensions
+$nestedHyperVOperational=$false
+if (-not $slat) {
+  try { Get-VMHost -ErrorAction Stop | Out-Null; $nestedHyperVOperational=$true } catch { }
+}
+
+[pscustomobject]@{
+  Windows=$os.Caption
+  Version=$os.Version
+  CPU=$cpu.Name
+  LogicalProcessors=$sys.NumberOfLogicalProcessors
+  RAMGB=[math]::Round($sys.TotalPhysicalMemory/1GB,1)
+  SystemDriveFreeGB=[math]::Round($drive.Free/1GB,1)
+  VirtualizationFirmwareEnabled=$virtFirmware
+  SLAT=$slat
+  OperationalHyperVHost=$nestedHyperVOperational
+} | Format-List
+
+if (-not $virtFirmware) { throw 'Hardware virtualization is disabled in UEFI/BIOS.' }
+if (-not $slat -and -not $nestedHyperVOperational) { throw 'Second Level Address Translation is required.' }
+# Conservatively adapt defaults to this machine instead of overcommitting RAM/CPU.
+$ramGB=[math]::Floor($sys.TotalPhysicalMemory/1GB);$logical=[int]$sys.NumberOfLogicalProcessors;$changed=$false
+if($Role -eq 'Desktop'){
+  $mem=[math]::Max(8,[math]::Min(32,[math]::Floor($ramGB*0.60)));$cpus=[math]::Max(2,[math]::Min(12,$logical-2))
+  if($config.Primary.Memory -ne "${mem}G"){$config.Primary.Memory="${mem}G";$changed=$true}
+  if([int]$config.Primary.Cpus -ne $cpus){$config.Primary.Cpus=$cpus;$changed=$true}
+}else{
+  $profile=$config.RoleProfiles.LaptopSurrogate
+  if(-not $profile -or -not $profile.Recommended -or -not $profile.MinimumTested){throw 'Laptop/Surrogate resource policy is missing from the canonical configuration.'}
+  $failMem=[int]([string]$profile.Recommended.FailoverMemory -replace '[^0-9.]','')
+  $vaultMem=[int]([string]$profile.Recommended.VaultMemory -replace '[^0-9.]','')
+  $minimumFailMem=[int]([string]$profile.MinimumTested.FailoverMemory -replace '[^0-9.]','')
+  $minimumVaultMem=[int]([string]$profile.MinimumTested.VaultMemory -replace '[^0-9.]','')
+  if($failMem -lt $minimumFailMem -or $vaultMem -lt $minimumVaultMem){throw 'Canonical Laptop/Surrogate resource policy is below the tested minimum.'}
+  $failCpu=[math]::Max(2,[math]::Min(4,$logical-2));$vaultCpu=[math]::Max(1,[math]::Min(2,[math]::Floor($logical/4)))
+  if($config.Failover.Memory -ne "${failMem}G"){$config.Failover.Memory="${failMem}G";$changed=$true}
+  if($config.Vault.Memory -ne "${vaultMem}G"){$config.Vault.Memory="${vaultMem}G";$changed=$true}
+  if([int]$config.Failover.Cpus -ne $failCpu){$config.Failover.Cpus=$failCpu;$changed=$true}
+  if([int]$config.Vault.Cpus -ne $vaultCpu){$config.Vault.Cpus=$vaultCpu;$changed=$true}
+}
+if($changed){Save-DevFleetConfig $config;Write-Host 'VM CPU/RAM defaults were adjusted conservatively for this computer.' -ForegroundColor Yellow}
+$requiredFree = if ($Role -eq 'Desktop') { 120 } else { 100 }
+if (($drive.Free/1GB) -lt $requiredFree) { throw "At least $requiredFree GB free is required with current defaults. Reduce VM disk sizes in the config or free space." }
+
+$edition=(Get-ComputerInfo -Property WindowsProductName).WindowsProductName
+$hyperVCapable=$edition -match 'Pro|Enterprise|Education'
+if (-not $hyperVCapable) { Write-Warning 'Hyper-V is not included in this Windows edition. Multipass will require VirtualBox.' }
+
+$conflicts=Get-Process -Name 'MuMuPlayer','NemuHeadless','VBoxHeadless','vmware' -ErrorAction SilentlyContinue
+if ($conflicts) { Write-Warning 'A virtualization/emulator process is running. Close it before installing or changing a hypervisor.' }
+Write-Host 'Preflight passed.' -ForegroundColor Green
+
+```
+
+
+## FILE: source/windows/01-Install-Prerequisites.ps1
+
+SHA256: bc4d60449c0633509984438a3a41a8d5077222e66ca57e79f20f621fe076f81b | Bytes: 12943 | Git mode: 100644
 
 ```
 [CmdletBinding()]
 param(
-    [string]$VmName = 'devfleet-primary',
-    [string]$HostAddress = 'mulattotechbox',
-    [int]$Port = 8790,
-    [switch]$PreviewOnly,
-    [switch]$AllowPermanentDelete
+  [Parameter(Mandatory)][ValidateSet('Laptop','Desktop')][string]$Role,
+  [Parameter(Mandatory)][string]$OfflinePackageRoot,
+  [ValidateSet('Offline','Connected')][string]$InstallationMode='Offline',
+  [switch]$SkipWindowsUpdates
 )
-
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-if ($VmName -notmatch '^devfleet-primary$') { throw 'Only the existing primary dashboard VM may be configured by this utility.' }
-$multipass = Get-MultipassExe
-$installRoot = 'C:\ProgramData\DevFleetHostAgent'
-$tokenPath = Join-Path $installRoot 'token.txt'
-$url = "http://${HostAddress}:$Port"
+Assert-PowerShell7; Assert-Administrator
 
-if (-not (Test-Path -LiteralPath $tokenPath)) { throw 'Host-agent token is missing; install the host agent first.' }
-$token = (Get-Content -LiteralPath $tokenPath -Raw).Trim()
-if ($token.Length -lt 40) { throw 'Host-agent token is unexpectedly short.' }
-$overlay = [ordered]@{
-    host_control_enabled = $true
-    host_control_url = $url
-    host_control_token = $token
-    expected_host_name = $env:COMPUTERNAME
-    host_agent_timeout_seconds = 30
-    host_resource_policy = [ordered]@{
-        policy_version = '1.0.0'
-        physical_floor_min_gb = 8
-        physical_floor_percent = 0.10
-        commit_headroom_floor_min_gb = 16
-        commit_headroom_percent = 0.20
-        commit_usage_limit_percent = 80
-        reserved_logical_processors = 2
-        minimum_free_disk_gb = 50
-        maximum_vm_count = 4
-        maximum_parallel_provisioning = 1
-        max_project_cpus = 6
-        max_project_memory_gb = 12
-        max_project_disk_gb = 120
+function Test-InstalledCommand([string]$Name) { return [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
+$manifest=Get-CanonicalDependencyManifest -PackageRoot $OfflinePackageRoot
+function Get-OfflinePayload([string]$PackageId) {
+  $manifestPath=Join-Path $OfflinePackageRoot 'OFFLINE-DEPENDENCIES.json'
+  if(-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)){ throw 'Release-bound offline dependency manifest is missing.' }
+  $offline=Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+  if($offline.schemaVersion -ne 2 -or [string]$offline.devfleetVersion -ne '1.2.13' -or -not $offline.releaseBinding){ throw 'Offline dependency manifest is not bound to this DevFleet release.' }
+  $entries=@($offline.payloads)
+  $duplicateDependency=$entries | Group-Object dependencyId | Where-Object Count -ne 1
+  $duplicateFile=$entries | Group-Object filename | Where-Object Count -ne 1
+  if($duplicateDependency -or $duplicateFile){ throw 'Offline dependency manifest contains duplicate payload identities.' }
+  # PowerShell unwraps a one-item pipeline result. Keep the exact-match
+  # collection an array before reading Count so a valid singleton payload
+  # cannot fail with a missing-property error.
+  $entry=@($entries | Where-Object { [string]$_.dependencyId -eq $PackageId })
+  if($entry.Count -ne 1){ throw "No exact release-bound offline payload exists for $PackageId. Connected mode is required for this target." }
+  if([IO.Path]::IsPathRooted([string]$entry[0].filename) -or ([string]$entry[0].filename).Contains('..')){ throw 'Offline payload filename escapes the release package root.' }
+  $payloadPath=Join-Path $OfflinePackageRoot ([string]$entry[0].filename)
+  if(-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)){ throw "Exact offline payload is missing: $($entry[0].filename)." }
+  $item=Get-Item -LiteralPath $payloadPath -Force
+  if([int64]$item.Length -ne [int64]$entry[0].sizeBytes){ throw "Offline payload size mismatch for $($item.Name)." }
+  $actual=(Get-FileHash -LiteralPath $payloadPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  if($actual -ne ([string]$entry[0].sha256).ToLowerInvariant()){ throw "Offline prerequisite hash mismatch for $($item.Name)." }
+  $allFiles=@(Get-ChildItem -LiteralPath $OfflinePackageRoot -File -Recurse | Where-Object Name -ne 'OFFLINE-DEPENDENCIES.json')
+  $allowed=@($entries | ForEach-Object { [IO.Path]::GetFullPath((Join-Path $OfflinePackageRoot ([string]$_.filename))) })
+  if(@($allFiles | Where-Object { $allowed -notcontains $_.FullName }).Count -gt 0){ throw 'Unlisted offline payload files are rejected.' }
+  return $payloadPath
+}
+function Install-OfflinePayload([string]$PackageId,[string[]]$Arguments) {
+  $payload=Get-OfflinePayload $PackageId
+  $dependency=@($manifest.dependencies)|Where-Object id -eq $PackageId|Select-Object -First 1
+  if(-not $dependency){throw "Dependency id is not present in canonical manifest: $PackageId"}
+  $strategy=Get-AuthenticityStrategy $dependency.installerAuthenticityPolicy
+  if($strategy -ne 'VendorReleaseSha256'){Test-OfficialSigner -Path $payload -Policy $dependency.installerAuthenticityPolicy}
+  $ext=[IO.Path]::GetExtension($payload).ToLowerInvariant()
+  if($ext -eq '.msi') { $msiexec=Join-Path $env:WINDIR 'System32\msiexec.exe';if(-not (Test-TrustedExecutableCandidate $msiexec)){throw 'Trusted Windows Installer executable was not found.'};Invoke-External -FilePath $msiexec -ArgumentList (@('/i',$payload,'/qn','/norestart')) -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'dependencyInstall') -AllowedExitCodes @(0,3010) | Out-Null }
+  elseif($ext -eq '.exe') { Invoke-External -FilePath $payload -ArgumentList $Arguments -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'dependencyInstall') -AllowedExitCodes @(0,3010) | Out-Null }
+  else { throw "Unsupported offline installer type for ${PackageId}: $ext" }
+}
+function Ensure-Dependency([string]$Id,[switch]$FeatureRequested) {
+  $dependency=@($manifest.dependencies)|Where-Object id -eq $Id|Select-Object -First 1
+  if(-not $dependency){throw "Dependency id is not present in canonical manifest: $Id"}
+  $detected=if($Id -ceq 'multipass'){
+    Wait-DevFleetDependencyStatus -Dependency $dependency -MaximumAttempts (Get-DevFleetDependencyProbeAttemptLimit -Dependency $dependency)
+  }else{
+    Get-DependencyStatus -Dependency $dependency
+  }
+  Write-Host "$($dependency.displayName): detected=$($detected.Version) path=$($detected.Path) status=$($detected.Status)" -ForegroundColor Cyan
+   if($detected.Status -eq 'Compatible'){Write-Host "Preserving compatible prerequisite: $($dependency.displayName)";return}
+  if(-not $dependency.required -and [string]$dependency.classification -in @('OPTIONAL','RECOMMENDED') -and -not $FeatureRequested){Write-Warning "$($dependency.displayName) is $($dependency.classification.ToLowerInvariant()) for core installation; leaving its feature unavailable rather than forcing acquisition.";return}
+  if($detected.Status -eq 'Unsupported-Major'){throw "$($dependency.displayName) major version $($detected.Version) is outside the supported policy."}
+  if($InstallationMode -eq 'Offline'){
+    if($dependency.required){Install-OfflinePayload $dependency.wingetPackageId @()}
+    else{Write-Warning "Optional prerequisite is absent or incompatible and no local payload was selected: $($dependency.displayName)"}
+  }else{
+    $health=Get-WingetHealth
+    if($health.Status -eq 'Healthy' -and $dependency.wingetPackageId){
+      try { Install-WingetPackage -Id $dependency.wingetPackageId -Upgrade:($detected.Status -eq 'Outdated') }
+      catch {
+        if($_.Exception.Message -notmatch '(?i)External command timed out' -or -not $dependency.directOfficialVendorResolver){throw}
+        Write-Warning "WinGet stalled for $($dependency.displayName); switching to the authenticated official vendor resolver."
+        Install-OfficialDependency -Dependency $dependency
+      }
     }
-}
-if ($AllowPermanentDelete) { $overlay.allow_permanent_delete = $true }
-if ($PreviewOnly) {
-    [ordered]@{ok=$true;preview_only=$true;vm_name=$VmName;host_control_url=$url;expected_host_name=$env:COMPUTERNAME;gpu_passthrough=$false;allow_permanent_delete=[bool]$AllowPermanentDelete} | ConvertTo-Json -Compress
-    exit 0
+    else{Write-Warning "WinGet $($health.Status); using direct official fallback for $($dependency.displayName).";Install-OfficialDependency -Dependency $dependency}
+  }
+  $after=if($Id -ceq 'multipass'){
+    Wait-DevFleetDependencyStatus -Dependency $dependency -MaximumAttempts (Get-DevFleetDependencyProbeAttemptLimit -Dependency $dependency)
+  }else{
+    Get-DependencyStatus -Dependency $dependency
+  }
+  if($after.Status -notin @('Compatible')){throw "$($dependency.displayName) did not reach a compatible post-install state: $($after.Status) ($($after.Detail))"}
+  Write-Host "Verified post-install: $($dependency.displayName) $($after.Version) at $($after.Path)" -ForegroundColor Green
 }
 
-$payloadPath = Join-Path $env:TEMP "devfleet-host-control-$([guid]::NewGuid().ToString('N')).json"
-try {
-    [IO.File]::WriteAllText($payloadPath,($overlay | ConvertTo-Json -Depth 8),(New-Object Text.UTF8Encoding($false)))
-    & $multipass transfer $payloadPath "${VmName}:/tmp/devfleet-host-control.json" | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Unable to transfer the host-control overlay to the primary VM.' }
-    $remote = @'
-set -Eeuo pipefail
-sudo -n python3 - /tmp/devfleet-host-control.json <<'PY'
-import grp, json, os, tempfile
-config_path = '/etc/devfleet/config.json'
-overlay_path = '/tmp/devfleet-host-control.json'
-with open(config_path, encoding='utf-8') as fh:
-    config = json.load(fh)
-with open(overlay_path, encoding='utf-8') as fh:
-    config.update(json.load(fh))
-fd, temp_path = tempfile.mkstemp(prefix='.config-', dir='/etc/devfleet')
-try:
-    with os.fdopen(fd, 'w', encoding='utf-8') as fh:
-        json.dump(config, fh, separators=(',', ':'))
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.chown(temp_path, 0, grp.getgrnam('devrunner').gr_gid)
-    os.chmod(temp_path, 0o640)
-    os.replace(temp_path, config_path)
-except Exception:
-    try: os.unlink(temp_path)
-    except FileNotFoundError: pass
-    raise
-PY
-sudo -n rm -f /tmp/devfleet-host-control.json
-'@
-    & $multipass exec $VmName -- bash -lc $remote | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'The primary VM rejected the atomic host-control configuration update.' }
-    & $multipass exec $VmName -- sudo -n systemctl restart devfleet.service | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'The primary DevFleet service did not restart after host-control configuration.' }
-    $health = (& $multipass exec $VmName -- curl -fsS --connect-timeout 5 http://127.0.0.1:8787/healthz | Out-String).Trim()
-    [ordered]@{ok=$true;configured_vm=$VmName;host_control_url=$url;dashboard_health=$health;gpu_passthrough=$false} | ConvertTo-Json -Compress
-} finally {
-    if (Test-Path -LiteralPath $payloadPath) { [IO.File]::Delete($payloadPath) }
+function Install-VsCodeExtension([string]$CodeCli,[string]$Extension) {
+  $cmd=Join-Path $env:WINDIR 'System32\cmd.exe'
+  if(-not (Test-TrustedExecutableCandidate $cmd)){throw 'Trusted command interpreter was not found for the optional VS Code integration.'}
+  $quotedCode='"'+$CodeCli.Replace('"','""')+'"'
+  $quotedExtension='"'+$Extension.Replace('"','""')+'"'
+  Invoke-External -FilePath $cmd -ArgumentList @('/d','/s','/c',"$quotedCode --install-extension $quotedExtension --force") -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'vscodeExtension') | Out-Null
 }
+
+function Invoke-MultipassConfigurationProbe([string]$Multipass,[string[]]$Arguments,[string]$FailureMessage) {
+  $context=Get-DevFleetDeadlineContext
+  $operationDeadline=[DateTime]::UtcNow.AddSeconds((Get-DevFleetOperationMaximumSeconds 'multipassConfiguration'))
+  if($context -and ([datetime]$context.StageDeadlineUtc -lt $operationDeadline)){$operationDeadline=[datetime]$context.StageDeadlineUtc}
+  # The configured operation deadline is the finite retry bound. A fixed
+  # attempt count can expire during a transient Multipass daemon/backend
+  # readiness window after a Hyper-V checkpoint restore even though the
+  # inherited 600-second operation budget is still available.
+  while([DateTime]::UtcNow -lt $operationDeadline){
+    $remaining=[int][math]::Floor(($operationDeadline-[DateTime]::UtcNow).TotalSeconds)
+    if($remaining -le 0){break}
+    try {
+      return (Invoke-External $Multipass $Arguments -Capture -TimeoutSeconds ([math]::Min(60,$remaining)) -DeadlineUtc $operationDeadline)
+    } catch {
+      $sleepSeconds=[math]::Min(1,[math]::Max(0,$remaining-1))
+      if($sleepSeconds -gt 0){Start-Sleep -Seconds $sleepSeconds}
+    }
+  }
+  throw $FailureMessage
+}
+
+Write-Host "`nInstalling/updating Windows prerequisites ($InstallationMode) ..." -ForegroundColor Cyan
+Ensure-Dependency 'git'
+Ensure-Dependency 'multipass'
+Ensure-Dependency 'tailscale'
+Ensure-Dependency 'github-cli'
+Ensure-Dependency 'sevenzip'
+Ensure-Dependency 'vscode'
+
+$ssh=Get-WindowsCapability -Online | Where-Object Name -Like 'OpenSSH.Client*' | Select-Object -First 1
+if(-not $ssh){ throw 'Windows OpenSSH Client capability was not found.' }
+if($ssh.State -ne 'Installed'){
+  if($InstallationMode -eq 'Offline'){ throw 'OpenSSH Client is not installed and Windows capability acquisition is not supported by this Full Offline profile.' }
+  Add-WindowsCapability -Online -Name $ssh.Name | Out-Null
+}
+
+$edition=(Get-ComputerInfo -Property WindowsProductName).WindowsProductName
+if($edition -match 'Pro|Enterprise|Education'){
+  $feature=Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All
+  if($feature.State -ne 'Enabled'){
+    Write-Warning 'Enabling Hyper-V. A reboot will be required before VM provisioning.'
+    Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All -All -NoRestart | Out-Null
+  }
+}else{
+  Ensure-Dependency 'virtualbox' -FeatureRequested
+}
+
+if(-not (Test-PendingReboot)){
+  $mp=Get-MultipassExe
+  $desiredDriver=if($edition -match 'Pro|Enterprise|Education'){'hyperv'}else{'virtualbox'}
+  # Verify the restored daemon state before writing it. Re-applying an already
+  # selected driver can restart Multipass while a nested instance is starting,
+  # leaving the control-plane socket unavailable to the following probe.
+  $selectedDriver=([string](Invoke-MultipassConfigurationProbe $mp @('get','local.driver') 'Multipass did not become ready before driver verification.')).Trim()
+  if($selectedDriver -ne $desiredDriver){
+    Invoke-External $mp @('set',"local.driver=$desiredDriver") -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'multipassConfiguration')
+    $selectedDriver=([string](Invoke-MultipassConfigurationProbe $mp @('get','local.driver') 'Multipass did not become ready after the driver setting was applied.')).Trim()
+  }
+  if($selectedDriver -ne $desiredDriver){throw "Multipass did not select the required driver: $selectedDriver (expected $desiredDriver)"}
+  $selectedPrivilegedMounts=([string](Invoke-MultipassConfigurationProbe $mp @('get','local.privileged-mounts') 'Multipass did not become ready before privileged-mount verification.')).Trim()
+  if($selectedPrivilegedMounts -ne 'false'){
+    Invoke-External $mp @('set','local.privileged-mounts=false') -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'multipassConfiguration')
+    Invoke-MultipassConfigurationProbe $mp @('get','local.privileged-mounts') 'Multipass did not become ready after privileged mounts were disabled.'
+  }
+}else{ Write-Warning 'Hypervisor configuration will finish automatically when this installer is re-run after reboot.' }
+
+$code=Get-VsCodeCli
+if($code){
+  $vsixRoot=Join-Path $OfflinePackageRoot 'vsix'
+  foreach($ext in @('ms-vscode-remote.remote-ssh','ms-vscode-remote.remote-containers','ms-vscode.remote-explorer')){
+    if($InstallationMode -eq 'Offline'){
+      $vsix=Get-ChildItem -LiteralPath $vsixRoot -Filter "*$ext*.vsix" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+      if($vsix){ Install-VsCodeExtension $code $vsix.FullName } else { Write-Warning "Optional VS Code extension payload is absent: $ext" }
+    }else{ Install-VsCodeExtension $code $ext }
+  }
+}else{ Write-Warning 'VS Code integration is optional and its CLI is not available.' }
+
+if(-not $SkipWindowsUpdates){ Write-Host 'Windows Update is not forced automatically. Install pending Windows security updates, then reboot if Windows requests it.' -ForegroundColor Yellow }
+# A prerequisite stage is not durably complete while servicing still requires a
+# reboot.  Leaving the marker absent makes the resumed transaction rerun only
+# this idempotent prerequisite stage and then advance normally.
+if(-not (Test-PendingReboot)){ Write-StageMarker "prereqs-$Role" } else { Write-Warning 'Prerequisite stage remains pending until Windows servicing settles; no completion marker was written.' }
 
 ```
 
 
-## FILE: source/windows/Configure-GitHub.ps1
+## FILE: source/windows/02-Provision-ComputeNode.ps1
 
-SHA256: 39ad88bc44596bfcb497d0b69f92130d859e338b878b6ad27d8fa1376f62e9d4 | Bytes: 675 | Git mode: 100644
+SHA256: e06b31924cb383c9d6383c70376b89b49213248f1f09e61aef5dc15d8afff7d1 | Bytes: 9264 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param(
+ [Parameter(Mandatory)][ValidateSet('Primary','Failover')][string]$NodeRole,
+ [switch]$ForceReprovision,
+ [string]$TransactionId,
+ [string]$TransactionPayloadSha256,
+ [string]$TransactionAction,
+ [string]$TransactionRole,
+ [string]$TransactionPreparedUtc
+)
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+Assert-PowerShell7; Assert-Administrator
+$deadlineContext=Get-DevFleetDeadlineContext
+if(-not $deadlineContext){$fallbackDeadline=[DateTime]::UtcNow.AddSeconds((Get-DevFleetStageBudgetSeconds 'compute'));Set-DevFleetDeadlineContext -TransactionDeadlineUtc $fallbackDeadline -StageName 'compute' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'compute') | Out-Null}
+$config=Get-DevFleetConfig
+$node=if($NodeRole -eq 'Primary'){$config.Primary}else{$config.Failover}
+$name=$node.InstanceName
+$package=Get-PackageRootFromState
+$packageVersion=(Get-Content -LiteralPath (Join-Path $package 'VERSION') -Raw).Trim()
+$bootstrapSeconds=Get-DevFleetOperationMaximumSeconds 'guestBootstrap'
+$expectedRole=if($NodeRole -eq 'Primary'){'Desktop'}else{'Laptop'}
+$activeTransaction=Wait-ActiveDevFleetTransaction -ExpectedRole $expectedRole
+if(-not $activeTransaction -and $TransactionId -and $TransactionPayloadSha256 -and $TransactionAction -and $TransactionRole -and $TransactionPreparedUtc){
+ $propagated=[pscustomobject]@{transactionId=$TransactionId;payloadSha256=$TransactionPayloadSha256;action=$TransactionAction;role=$TransactionRole;preparedUtc=$TransactionPreparedUtc}
+ if(Test-DevFleetTransactionBinding -Transaction $propagated -ExpectedRole $expectedRole){$activeTransaction=$propagated}
+}
+if(-not $activeTransaction) { throw 'Active DevFleet transaction is missing, malformed, or not bound to this compute role.' }
+$bootstrapNodeRole=if($NodeRole -eq 'Failover'){'surrogate'}else{'primary'}
+$bootstrapBoundary=New-DevFleetBootstrapBoundary -Kind compute -InstanceName $name -TransactionId ([string]$activeTransaction.transactionId) -PayloadSha256 ([string]$activeTransaction.payloadSha256) -BootstrapMaxSeconds $bootstrapSeconds -PackageVersion $packageVersion -NodeRole $bootstrapNodeRole
+$mp=Get-MultipassExe
+Write-StageMarker -Name $bootstrapBoundary.multipassResolvedStageName -Transaction $activeTransaction
+Assert-MultipassIsolation -InstanceNames @($name)
+Write-StageMarker -Name $bootstrapBoundary.isolationVerifiedStageName -Transaction $activeTransaction
+$secrets=Get-OrCreateSecrets
+$nodeIdentity=Get-OrCreateNodeIdentity -Role $(if($NodeRole -eq 'Primary'){'Desktop'}else{'Laptop'})
+
+$instancePresent=Test-MultipassInstance $name
+Write-StageMarker -Name $(if($instancePresent){$bootstrapBoundary.instancePresentStageName}else{$bootstrapBoundary.instanceAbsentStageName}) -Transaction $activeTransaction
+if($instancePresent){
+ if($ForceReprovision){ throw "Refusing automatic destruction of existing $name. Remove it manually only after verifying backups." }
+ Write-Host "$name already exists; updating the DevFleet payload in place." -ForegroundColor Yellow
+  Invoke-External $mp @('start',$name) -IgnoreExitCode
+  Write-StageMarker -Name $bootstrapBoundary.instanceStartedStageName -Transaction $activeTransaction
+  Wait-MultipassReady $name 1200
+}else{
+ $cloud=Join-Path (Get-DevFleetStateRoot) "tmp\cloud-$name.yaml"
+ $template=Get-Content (Join-Path $package 'cloud-init\compute.yaml') -Raw
+ $template=$template.Replace('__NODE_NAME__',(ConvertTo-YamlSingleQuotedScalar $name)).Replace('__NODE_ROLE__',(ConvertTo-YamlSingleQuotedScalar $NodeRole.ToLower())).Replace('__GIT_NAME_SHELL__',(ConvertTo-ShellSingleQuotedScalar $config.Git.UserName)).Replace('__GIT_EMAIL_SHELL__',(ConvertTo-ShellSingleQuotedScalar $config.Git.Email))
+ Set-Content $cloud $template -Encoding utf8
+  # PowerShell `if` is a statement, not an expression; resolve the owning
+  # stage deadline before passing it to the fresh-launch recovery helper.
+  $launchDeadline=[datetime]::MinValue
+  if($deadlineContext){$launchDeadline=([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime()}
+  try {
+   Invoke-MultipassLaunchWithReadinessRecovery -InstanceName $name -LaunchArguments @('launch',[string]$node.UbuntuImage,'--name',$name,'--cpus',[string]$node.Cpus,'--memory',[string]$node.Memory,'--disk',[string]$node.Disk,'--cloud-init',$cloud) -ReadinessTimeoutSeconds 1200 -DeadlineUtc $launchDeadline -OnInstanceEstablished { param($launch) Write-StageMarker -Name $bootstrapBoundary.instanceLaunchedStageName -Transaction $activeTransaction }
+  } catch {
+   # Windows servicing can become reboot-pending while Multipass is inside its
+   # bounded launch/recovery envelope. Preserve the original launch error for
+   # the post-reboot attempt, but first return the native 3010 contract so the
+   # installer advances the durable checkpoint instead of treating the stale
+   # Hyper-V state as a terminal compute failure.
+   if(Test-PendingReboot){Write-Warning 'Windows reported a new reboot requirement during compute launch. Re-run this same transaction after reboot; completed stages will be detected.';exit 3010}
+   throw
+  }
+  if(Test-PendingReboot){Write-Warning 'Windows reported a new reboot requirement after compute launch. Re-run this same transaction after reboot; completed stages will be detected.';exit 3010}
+}
+Write-StageMarker -Name $bootstrapBoundary.instanceReadyStageName -Transaction $activeTransaction
+
+$tmp=Join-Path (Get-DevFleetStateRoot) "tmp\payload-$name"
+Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory $tmp -Force | Out-Null
+foreach($d in @('linux','app','templates')){ Copy-Item (Join-Path $package $d) $tmp -Recurse }
+Copy-Item (Join-Path $package 'VERSION') (Join-Path $tmp 'VERSION')
+$nodeSecrets=[ordered]@{
+ NodeName=$name; NodeRole=$bootstrapNodeRole; FriendlyName=[string]$node.FriendlyName; PortalPort=$config.Network.PortalPort; DeploymentId=[string]$nodeIdentity.deployment_id; NodeId=[string]$nodeIdentity.node_id; CoordinatorNodeId=[string]$nodeIdentity.coordinator_node_id; ProtocolVersion=[int]$nodeIdentity.protocol_version
+ AdminUser=$secrets.PortalAdminUser; AdminPassword=$secrets.PortalAdminPassword; ApiToken=$secrets.NodeApiToken
+ GitName=$config.Git.UserName; GitEmail=$config.Git.Email; OllamaBaseUrl=($(if($config.Ollama.PreferredBaseUrl){$config.Ollama.PreferredBaseUrl}else{$config.Ollama.BaseUrl})); OllamaModel=$config.Ollama.Model; OllamaProfile=$config.Ollama.Profile
+ DevelopmentProfile=$config.Development.Profile; DockerMode=($(if($NodeRole -eq 'Primary'){$config.Docker.PrimaryMode}else{$config.Docker.FailoverMode}))
+ EnableSharedCaches=[bool]$config.Development.EnableSharedBuildCaches; EnableAnalyzerCache=[bool]$config.Development.EnableAnalyzerCache; AutoStartCodexPro=[bool]$config.Development.AutoStartCodexPro; AllowTailnetPorts=[bool]$config.Development.AllowTailnetPortPublishing; BackupBeforeRebuild=[bool]$config.Development.BackupBeforeRebuild; BackupBeforeQuarantine=[bool]$config.Development.BackupBeforeQuarantine
+ BackupIntervalMinutes=[int]$config.Backup.IntervalMinutes
+ PackageVersion=$packageVersion
+}
+$zip=Join-Path (Get-DevFleetStateRoot) "tmp\payload-$name.zip"
+Remove-Item $zip -Force -ErrorAction SilentlyContinue
+Compress-Archive -Path (Join-Path $tmp '*') -DestinationPath $zip
+$payloadDeadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetOperationMaximumSeconds 'payloadTransfer'))
+$payloadContext=Get-DevFleetDeadlineContext
+if($payloadContext -and ([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime() -lt $payloadDeadline){$payloadDeadline=([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime()}
+try {
+ Invoke-External $mp @('transfer',$zip,"${name}:/tmp/devfleet-payload.zip") -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
+ Write-StageMarker -Name $bootstrapBoundary.payloadTransferredStageName -Transaction $activeTransaction
+ Invoke-External $mp @('exec',$name,'--','bash','-lc',$bootstrapBoundary.extractionCommand) -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
+ Write-StageMarker -Name $bootstrapBoundary.payloadExtractedStageName -Transaction $activeTransaction
+ $bootstrapDeadline=[datetime]::UtcNow.AddSeconds($bootstrapBoundary.bootstrapMaxSeconds)
+ $bootstrapContext=Get-DevFleetDeadlineContext
+ if($bootstrapContext -and ([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime() -lt $bootstrapDeadline){$bootstrapDeadline=([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime()}
+ Invoke-MultipassWithStandardInput -FilePath $mp -InstanceName $name -CommandArgumentList @('bash','-lc',$bootstrapBoundary.bootstrapCommand) -TimeoutSeconds $bootstrapBoundary.bootstrapMaxSeconds -DeadlineUtc $bootstrapDeadline -StandardInputText ($nodeSecrets | ConvertTo-Json -Compress)
+} finally {
+ Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+ Remove-Item $zip -Force -ErrorAction SilentlyContinue
+ $nodeSecrets=$null
+}
+Add-LocalSshKeyToInstance -InstanceName $name
+Write-StageMarker -Name $bootstrapBoundary.completionStageName -Transaction $activeTransaction
+Write-Host "$name provisioned. Portal credentials are stored under C:\ProgramData\DevFleet\secrets." -ForegroundColor Green
+
+```
+
+
+## FILE: source/windows/03-Provision-Vault.ps1
+
+SHA256: 620c99ab23861ad44f74b5d79ceda9e79eba20feb89ff6694e0e548e2a5308c6 | Bytes: 7647 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param(
+ [switch]$ForceReprovision,
+ [string]$TransactionId,
+ [string]$TransactionPayloadSha256,
+ [string]$TransactionAction,
+ [string]$TransactionRole,
+ [string]$TransactionPreparedUtc
+)
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+Assert-PowerShell7;Assert-Administrator
+$deadlineContext=Get-DevFleetDeadlineContext
+if(-not $deadlineContext){$fallbackDeadline=[DateTime]::UtcNow.AddSeconds((Get-DevFleetStageBudgetSeconds 'vault'));Set-DevFleetDeadlineContext -TransactionDeadlineUtc $fallbackDeadline -StageName 'vault' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'vault') | Out-Null}
+$config=Get-DevFleetConfig;$v=$config.Vault;$name=$v.InstanceName;$package=Get-PackageRootFromState
+$activeTransaction=Wait-ActiveDevFleetTransaction -ExpectedRole 'Laptop'
+if(-not $activeTransaction -and $TransactionId -and $TransactionPayloadSha256 -and $TransactionAction -and $TransactionRole -and $TransactionPreparedUtc){
+ $propagated=[pscustomobject]@{transactionId=$TransactionId;payloadSha256=$TransactionPayloadSha256;action=$TransactionAction;role=$TransactionRole;preparedUtc=$TransactionPreparedUtc}
+ if(Test-DevFleetTransactionBinding -Transaction $propagated -ExpectedRole 'Laptop'){$activeTransaction=$propagated}
+}
+if(-not $activeTransaction){throw 'Active DevFleet transaction is missing, malformed, or not bound to the Vault role.'}
+$bootstrapSeconds=Get-DevFleetOperationMaximumSeconds 'vaultBootstrap'
+$bootstrapBoundary=New-DevFleetBootstrapBoundary -Kind vault -InstanceName $name -TransactionId ([string]$activeTransaction.transactionId) -PayloadSha256 ([string]$activeTransaction.payloadSha256) -BootstrapMaxSeconds $bootstrapSeconds -PackageVersion 'vault' -NodeRole 'vault'
+$mp=Get-MultipassExe
+Write-StageMarker -Name $bootstrapBoundary.multipassResolvedStageName -Transaction $activeTransaction
+Assert-MultipassIsolation -InstanceNames @($name)
+Write-StageMarker -Name $bootstrapBoundary.isolationVerifiedStageName -Transaction $activeTransaction
+$secrets=Get-OrCreateSecrets;$vaultIdentity=Get-OrCreateVaultIdentity
+$instancePresent=Test-MultipassInstance $name
+Write-StageMarker -Name $(if($instancePresent){$bootstrapBoundary.instancePresentStageName}else{$bootstrapBoundary.instanceAbsentStageName}) -Transaction $activeTransaction
+if($instancePresent){
+ if($ForceReprovision){throw 'Refusing automatic destruction of an existing backup vault.'}
+  New-DevFleetSnapshotSafe -InstanceName $name -SnapshotName "pre-refresh-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"|Out-Null
+  Invoke-External $mp @('start',$name) -IgnoreExitCode
+  Write-StageMarker -Name $bootstrapBoundary.instanceStartedStageName -Transaction $activeTransaction
+ Wait-MultipassReady $name 1200
+ Write-Host "$name already exists; refreshing safe configuration." -ForegroundColor Yellow
+}else{
+ $cloud=Join-Path (Get-DevFleetStateRoot) "tmp\cloud-$name.yaml"
+ $dependencyPolicy=Get-Content -LiteralPath (Join-Path $package 'linux/dependency-policy.json') -Raw|ConvertFrom-Json
+ $tailscaleFingerprint=[string]$dependencyPolicy.tailscale.signingKeySha256Fingerprint
+ if($tailscaleFingerprint-notmatch'^[A-F0-9]{40}$'){throw 'Canonical Tailscale signing-key fingerprint is invalid.'}
+ (Get-Content (Join-Path $package 'cloud-init\vault.yaml') -Raw).Replace('__NODE_NAME__',(ConvertTo-YamlSingleQuotedScalar $name)).Replace('__TAILSCALE_SIGNING_FINGERPRINT__',$tailscaleFingerprint)|Set-Content $cloud -Encoding utf8
+  # PowerShell `if` is a statement, not an expression; resolve the owning
+  # stage deadline before passing it to the fresh-launch recovery helper.
+  $launchDeadline=[datetime]::MinValue
+  if($deadlineContext){$launchDeadline=([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime()}
+  Invoke-MultipassLaunchWithReadinessRecovery -InstanceName $name -LaunchArguments @('launch',[string]$v.UbuntuImage,'--name',$name,'--cpus',[string]$v.Cpus,'--memory',[string]$v.Memory,'--disk',[string]$v.Disk,'--cloud-init',$cloud) -ReadinessTimeoutSeconds 1200 -DeadlineUtc $launchDeadline -OnInstanceEstablished { param($launch) Write-StageMarker -Name $bootstrapBoundary.instanceLaunchedStageName -Transaction $activeTransaction }
+}
+Write-StageMarker -Name $bootstrapBoundary.instanceReadyStageName -Transaction $activeTransaction
+if($instancePresent){
+ $client=Invoke-External $mp @('exec',$name,'--','sh','-c','if command -v tailscale >/dev/null 2>&1; then printf PRESENT; else printf ABSENT; fi') -Capture -TimeoutSeconds 20
+ if($client-cne'PRESENT'){throw 'The existing Vault is missing its Tailscale client. Restore the client from the verified signed repository before running Repair; the existing Vault and backups have been preserved.'}
+}
+# Vault bootstrap and client configuration require an authenticated tailnet.
+# Fresh cloud-init installs the verified client; pair before transferring secrets
+# or starting bootstrap stages that depend on tailscale0 and its private IP.
+& (Join-Path $PSScriptRoot '04-Connect-Tailscale.ps1') -InstanceName $name
+$tmp=Join-Path (Get-DevFleetStateRoot) 'tmp\vault-payload';Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue;New-Item -ItemType Directory $tmp -Force|Out-Null
+Copy-Item (Join-Path $package 'linux') $tmp -Recurse
+$vaultSecrets=[ordered]@{VaultPort=$config.Network.VaultPort;RestUser=$secrets.VaultRestUser;RestPassword=$secrets.VaultRestPassword;ResticPassword=$secrets.ResticPassword;ClusterName=$config.ClusterName;DeploymentId=$vaultIdentity.deployment_id;NodeId=$vaultIdentity.node_id;NodeName=$vaultIdentity.node_name}|ConvertTo-Json -Compress
+$zip=Join-Path (Get-DevFleetStateRoot) 'tmp\vault-payload.zip';Remove-Item $zip -Force -ErrorAction SilentlyContinue;Compress-Archive -Path (Join-Path $tmp '*') -DestinationPath $zip
+$payloadDeadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetOperationMaximumSeconds 'payloadTransfer'))
+$payloadContext=Get-DevFleetDeadlineContext
+if($payloadContext -and ([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime() -lt $payloadDeadline){$payloadDeadline=([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime()}
+try {
+ Invoke-External $mp @('transfer',$zip,"${name}:/tmp/devfleet-vault-payload.zip") -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
+ Write-StageMarker -Name $bootstrapBoundary.payloadTransferredStageName -Transaction $activeTransaction
+ Invoke-External $mp @('exec',$name,'--','bash','-lc',$bootstrapBoundary.extractionCommand) -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
+ Write-StageMarker -Name $bootstrapBoundary.payloadExtractedStageName -Transaction $activeTransaction
+ $bootstrapDeadline=[datetime]::UtcNow.AddSeconds($bootstrapBoundary.bootstrapMaxSeconds)
+ $bootstrapContext=Get-DevFleetDeadlineContext
+ if($bootstrapContext -and ([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime() -lt $bootstrapDeadline){$bootstrapDeadline=([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime()}
+ Invoke-MultipassWithStandardInput -FilePath $mp -InstanceName $name -CommandArgumentList @('bash','-lc',$bootstrapBoundary.bootstrapCommand) -TimeoutSeconds $bootstrapBoundary.bootstrapMaxSeconds -DeadlineUtc $bootstrapDeadline -StandardInputText $vaultSecrets
+} finally {
+ Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+ Remove-Item $zip -Force -ErrorAction SilentlyContinue
+ $vaultSecrets=$null
+}
+Write-StageMarker -Name $bootstrapBoundary.completionStageName -Transaction $activeTransaction;Write-Host "$name provisioned. Do not delete or purge this instance." -ForegroundColor Green
+
+```
+
+
+## FILE: source/windows/04-Connect-Tailscale.ps1
+
+SHA256: a8c18e358eeeeb4c00058fc893f165c2d47f90015e06abde8265bd7ae98b077b | Bytes: 1873 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$')][string]$InstanceName)
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Tailscale.psm1') -Force
+$mp=Get-MultipassExe
+$deadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetStageBudgetSeconds 'tailscale'))
+$activeTransaction = $null
+try { $activeTransaction = Get-ActiveDevFleetTransaction } catch { }
+$transactionId = if ($activeTransaction) { [string]$activeTransaction.transactionId } else { '' }
+$payloadSha256 = if ($activeTransaction) { [string]$activeTransaction.payloadSha256 } else { '' }
+$evidenceName = if ($transactionId -match '^[0-9a-fA-F]{32}$') { "setup-tailscale-pairing-$transactionId.log" } else { "setup-tailscale-pairing-pid-$PID.log" }
+$evidencePath = Join-Path (Join-Path $env:ProgramData 'M-TechLabs\DevFleet\Logs') $evidenceName
+$profile=Get-DevFleetTailscaleEnrollmentProfile
+$expectedPeer=if([string]$profile.hostName){[string]$profile.hostName}else{"$env:COMPUTERNAME-devfleet-host"}
+try {
+    $result=Invoke-DevFleetTailscaleOAuthPairing -FilePath $mp -InstanceName $InstanceName -Hostname $InstanceName -ExpectedPeer $expectedPeer -DeadlineUtc $deadline -EvidencePath $evidencePath -RunId ([string]$env:DEVFLEET_RUN_ID) -TransactionId $transactionId -PayloadSha256 $payloadSha256 -StageName 'tailscale' -TargetRole 'Guest' -PendingRebootProvider { Test-PendingReboot }
+} catch {
+    if ([string]$_.Exception.Message -match '^DEVFLEET_REBOOT_REQUIRED:') {
+        Write-Warning "Windows servicing requires a reboot during guest Tailscale stage for $InstanceName; returning 3010 before Vault completion is published."
+        exit 3010
+    }
+    throw
+}
+Write-Host "$InstanceName authenticated Tailscale IP: $($result.ipv4)" -ForegroundColor Green
+
+```
+
+
+## FILE: source/windows/04a-Connect-WindowsTailscale.ps1
+
+SHA256: 361255d8773a9de440bac3007db55635a7940e49409d77f9245651df44c3585b | Bytes: 1720 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param()
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Tailscale.psm1') -Force
+Assert-Administrator
+$service=Get-Service -Name Tailscale -ErrorAction SilentlyContinue
+$ts=Get-TailscaleExe
+$deadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetStageBudgetSeconds 'windowsTailscale'))
+$activeTransaction = $null
+try { $activeTransaction = Get-ActiveDevFleetTransaction } catch { }
+$transactionId = if ($activeTransaction) { [string]$activeTransaction.transactionId } else { '' }
+$payloadSha256 = if ($activeTransaction) { [string]$activeTransaction.payloadSha256 } else { '' }
+$evidenceName = if ($transactionId -match '^[0-9a-fA-F]{32}$') { "setup-tailscale-pairing-$transactionId.log" } else { "setup-tailscale-pairing-pid-$PID.log" }
+$evidencePath = Join-Path (Join-Path $env:ProgramData 'M-TechLabs\DevFleet\Logs') $evidenceName
+$hostname = ("{0}-devfleet-host" -f $env:COMPUTERNAME.ToLower())
+try {
+    $result=Invoke-DevFleetTailscaleOAuthPairing -FilePath $ts -Hostname $hostname -DeadlineUtc $deadline -EvidencePath $evidencePath -RunId ([string]$env:DEVFLEET_RUN_ID) -TransactionId $transactionId -PayloadSha256 $payloadSha256 -StageName 'windows-tailscale' -TargetRole 'Host' -PendingRebootProvider { Test-PendingReboot }
+} catch {
+    if ([string]$_.Exception.Message -match '^DEVFLEET_REBOOT_REQUIRED:') {
+        Write-Warning 'Windows servicing requires a reboot during the Tailscale stage; returning 3010 before the stage marker is written.'
+        exit 3010
+    }
+    throw
+}
+Write-Host "Windows host $env:COMPUTERNAME authenticated Tailscale IP: $($result.ipv4)" -ForegroundColor Green
+
+```
+
+
+## FILE: source/windows/05-Configure-LocalVaultClient.ps1
+
+SHA256: 9687c9be4a3bf40a2e1481cd402c7d4118aaa0c4533e9037244b7bb3a25e0c62 | Bytes: 1235 | Git mode: 100644
 
 ```
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$InstanceName)
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-$config=Get-DevFleetConfig;$mp=Get-MultipassExe
-Invoke-External $mp @('exec',$InstanceName,'--','sudo','-u','devrunner','git','config','--global','user.name',[string]$config.Git.UserName)
-Invoke-External $mp @('exec',$InstanceName,'--','sudo','-u','devrunner','git','config','--global','user.email',[string]$config.Git.Email)
-Write-Host 'Complete the GitHub browser/device authentication below.' -ForegroundColor Yellow
-& $mp exec $InstanceName -- sudo -iu devrunner gh auth login --web --git-protocol ssh
+$config=Get-DevFleetConfig;$secrets=Get-OrCreateSecrets;$mp=Get-MultipassExe
+$vaultIp=Get-InstanceIPv4 $config.Vault.InstanceName -PreferTailscale
+$pairingMode=if($vaultIp -match '^100\.'){'tailscale'}else{throw 'Authenticated Vault transport requires a Tailscale address; plaintext LAN fallback is disabled.'}
+$obj=[ordered]@{Repository="rest:http://${vaultIp}:$($config.Network.VaultPort)/$($secrets.VaultRestUser)/$($config.ClusterName)";RestUser=$secrets.VaultRestUser;RestPassword=$secrets.VaultRestPassword;ResticPassword=$secrets.ResticPassword;VaultIp=$vaultIp;VaultPort=$config.Network.VaultPort;PairingMode=$pairingMode}
+$tmp=Join-Path (Get-DevFleetStateRoot) 'secrets\vault-client.json';$obj|ConvertTo-Json|Set-Content $tmp -Encoding utf8
+Protect-DevFleetStateAcl
+Invoke-External $mp @('transfer',$tmp,"${InstanceName}:/tmp/vault-client.json")
+Invoke-External $mp @('exec',$InstanceName,'--','sudo','/usr/local/sbin/devfleet-configure-backup','/tmp/vault-client.json')
+Write-Host "Append-only backups configured for $InstanceName." -ForegroundColor Green
 
 ```
 
 
-## FILE: source/windows/Configure-Ollama.ps1
+## FILE: source/windows/06-Import-Laptop-Bootstrap.ps1
 
-SHA256: fffd6eb381da44ab8239be426bccf4260b196b4d48cdb9606289df62d2b322bd | Bytes: 2506 | Git mode: 100644
+SHA256: e38b19b780ca0a6ef94aba9a71a225d4a6cc28d5c3fe6c80333f7fa0d00c8452 | Bytes: 2442 | Git mode: 100644
 
 ```
 [CmdletBinding()]
-param(
-    [ValidateSet('stable-interactive','large-context','parallel-agents')][string]$Profile='stable-interactive',
-    [string]$LanFallback='http://192.168.1.243:11434/v1'
-)
+param([Parameter(Mandatory)][ValidateScript({Test-Path $_})][string]$BundlePath)
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-Assert-PowerShell7
-Assert-Administrator
-$root=Get-PackageRootFromState
-$profiles=Get-Content (Join-Path $root 'config\ollama-profiles.json') -Raw|ConvertFrom-Json -AsHashtable
-$selected=$profiles[$Profile]
-if(-not $selected){throw 'Profile not found.'}
-$tailscaleIp=$null
-$magicDns=$null
+$config=Get-DevFleetConfig;$mp=Get-MultipassExe;$dest=Join-Path (Get-DevFleetStateRoot) 'tmp\import-laptop';$peerFile=$null;Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue
+Expand-EncryptedBundle -BundlePath $BundlePath -Destination $dest
 try {
-    $ts=Get-TailscaleExe
-    $tailscaleIp=(Invoke-External $ts @('ip','-4') -Capture).Trim().Split("`n")[0]
-    $status=Invoke-External $ts @('status','--json') -Capture|ConvertFrom-Json
-    $magicDns=([string]$status.Self.DNSName).TrimEnd('.')
-} catch { Write-Warning "Tailscale identity could not be resolved: $_" }
-$hostValue=if($tailscaleIp){$tailscaleIp}else{'127.0.0.1'}
-if($hostValue -in @('0.0.0.0','::')){throw 'Wildcard Ollama binding is refused.'}
-[Environment]::SetEnvironmentVariable('OLLAMA_HOST',"$hostValue`:11434",'User')
-foreach($kv in $selected.Environment.GetEnumerator()){
-    [Environment]::SetEnvironmentVariable([string]$kv.Key,[string]$kv.Value,'User')
-}
-$ruleName='DevFleet Ollama Tailnet Only'
-Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue|Remove-NetFirewallRule
-if($tailscaleIp){
-    New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow -Protocol TCP -LocalAddress $tailscaleIp -LocalPort 11434 -RemoteAddress '100.64.0.0/10' -Profile Any|Out-Null
-}
-$state=Get-DevFleetStateRoot
-$cfg=Get-DevFleetConfig
-$cfg.Ollama.Profile=$Profile
-$cfg.Ollama.PreferredBaseUrl=if($magicDns){"http://$magicDns`:11434/v1"}elseif($tailscaleIp){"http://$tailscaleIp`:11434/v1"}else{$LanFallback}
-Save-DevFleetConfig $cfg
-[ordered]@{
-    Profile=$Profile
-    BindHost=$hostValue
-    MagicDns=$magicDns
-    PreferredBaseUrl=$cfg.Ollama.PreferredBaseUrl
-    LanFallback=$LanFallback
-    Environment=$selected.Environment
-    FirewallScope=if($tailscaleIp){'Tailscale local IP; remote 100.64.0.0/10'}else{'No inbound DevFleet rule created'}
-    Configured=(Get-Date).ToString('o')
-}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $state 'ollama-effective.json') -Encoding utf8
-Write-Host 'Restart Ollama completely, then run Test-Ollama.ps1. Re-run compute-node provisioning to propagate a changed endpoint into an already installed VM.' -ForegroundColor Green
-
-```
-
-
-## FILE: source/windows/DevFleet-HostAgent.ps1
-
-SHA256: bf68455620a50dab6d3d470f54b264899d4712f553632c5180d7dc420e130bf2 | Bytes: 96997 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([string]$ConfigPath = 'C:\ProgramData\DevFleetHostAgent\config.json',[switch]$ValidateOnly,[switch]$LibraryOnly)
-
-$ErrorActionPreference = 'Stop'
-
-# Fixed structured operations exposed by this agent: 'ensure', 'start', 'stop',
-# 'restart', 'inspect', 'health', 'backup', 'quarantine', 'restore', 'destroy',
-# plus host 'capacity'. There is no arbitrary command execution endpoint.
-$script:Config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-$script:Root = Split-Path -Parent $ConfigPath
-$script:Token = (Get-Content -LiteralPath $script:Config.TokenPath -Raw).Trim()
-function Resolve-TrustedHostExecutable {
-    param([Parameter(Mandatory)][string[]]$Candidates)
-    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:WINDIR) | Where-Object { $_ } | ForEach-Object { [IO.Path]::GetFullPath($_).TrimEnd('\') + '\' }
-    foreach ($candidate in $Candidates) {
-        try {
-            $full = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($candidate))
-            if ((Test-Path -LiteralPath $full -PathType Leaf) -and -not ((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -and @($roots | Where-Object { $full.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) { return $full }
-        } catch { continue }
-    }
-    throw 'No trusted machine executable matched the host-agent configuration.'
-}
-# Multipass resolves its Windows client certificate below LOCALAPPDATA.  The
-# installer places the authenticated client in the SYSTEM profile because this
-# agent runs as SYSTEM; keep the lookup explicit and host-portable.
-if ($script:Config.MultipassClientCertificateRoot) {
-    $env:LOCALAPPDATA = Split-Path -Parent ([string]$script:Config.MultipassClientCertificateRoot)
-}
-$script:Multipass = Resolve-TrustedHostExecutable @($script:Config.MultipassPath, (Join-Path $env:ProgramFiles 'Multipass\bin\multipass.exe'), (Join-Path ${env:ProgramFiles(x86)} 'Multipass\bin\multipass.exe'))
-$script:RegistryPath = Join-Path $script:Root 'projects.json'
-$script:LogPath = Join-Path $script:Root 'agent.jsonl'
-$script:BackupRoot = Join-Path $script:Root 'backups'
-$script:BackupVerificationCache = @{}
-$script:ReconciliationRequired = $false
-$script:AgentVersion = '2.5.0'
-$script:VsCodeHelperPath = Join-Path $script:Root 'DevFleet-VSCode.ps1'
-if (Test-Path -LiteralPath $script:VsCodeHelperPath -PathType Leaf) { . $script:VsCodeHelperPath }
-
-if ($ValidateOnly) {
-    if ([string]$script:Config.HostName -ne [string]$env:COMPUTERNAME) { throw "Host config identity mismatch: $($script:Config.HostName) vs $env:COMPUTERNAME" }
-    if ((Get-Content -LiteralPath $script:Config.TokenPath -Raw).Trim().Length -lt 40) { throw 'Host-agent token is unexpectedly short.' }
-    $policy = $script:Config.ResourcePolicy
-    foreach ($name in 'PolicyVersion','PhysicalFloorMinGb','PhysicalFloorPercent','CommitHeadroomFloorMinGb','CommitHeadroomPercent','CommitUsageLimitPercent','ReservedLogicalProcessors','ReservedHostDiskGb','MaximumVmCount','MaximumParallelProvisioning','MaxProjectCpus','MaxProjectMemoryGb','MaxProjectDiskGb') {
-        if ($null -eq $policy.$name) { throw "Resource policy is missing $name." }
-    }
-    [ordered]@{ok=$true;mode='validate-only';host_name=$script:Config.HostName;host_id=$script:Config.HostId;agent_version=$script:AgentVersion;provider='multipass';gpu_enabled=$false} | ConvertTo-Json -Compress
-    exit 0
-}
-
-function Write-AgentLog {
-    param([string]$Action,[string]$ProjectId = '',[string]$RuntimeId = '',[string]$State = 'info',[string]$Message = '')
-    $entry = [ordered]@{
-        timestamp = (Get-Date).ToUniversalTime().ToString('o')
-        operation_id = [guid]::NewGuid().ToString()
-        project_id = $ProjectId
-        runtime_id = $RuntimeId
-        host_id = [string]$script:Config.HostId
-        provider = 'multipass'
-        action = $Action
-        result = $State
-        message = $Message
-    }
-    ($entry | ConvertTo-Json -Compress) | Add-Content -LiteralPath $script:LogPath -Encoding UTF8
-}
-
-function Read-Registry {
-    if (-not (Test-Path -LiteralPath $script:RegistryPath)) { return @{schema_version = 2; host_id = [string]$script:Config.HostId; projects = @{}} }
-    try {
-        $data = Get-Content -LiteralPath $script:RegistryPath -Raw | ConvertFrom-Json -AsHashtable
-        if (-not $data.projects) { $data.projects = @{} }
-        return $data
-    } catch { throw 'Host agent registry is not valid JSON.' }
-}
-
-function Write-Registry {
-    param([hashtable]$Data)
-    $tmp = "$script:RegistryPath.$([guid]::NewGuid().ToString('N')).tmp"
-    $json = $Data | ConvertTo-Json -Depth 20
-    [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false)))
-    Move-Item -LiteralPath $tmp -Destination $script:RegistryPath -Force
-}
-
-function Invoke-Multipass {
-    param([Parameter(Mandatory)][string[]]$ArgumentList,[int]$TimeoutSeconds = 120)
-    $psi = [Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = [string]$script:Multipass
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    foreach ($arg in $ArgumentList) { [void]$psi.ArgumentList.Add([string]$arg) }
-    $process = [Diagnostics.Process]::new();$process.StartInfo = $psi
-    try {
-        if (-not $process.Start()) { throw 'Unable to start the configured Multipass executable.' }
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync();$stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit([Math]::Max(1,$TimeoutSeconds) * 1000)) {
-            try { $process.Kill($true) } catch {}
-            try {[void]([Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdoutTask,$stderrTask)).Wait([TimeSpan]::FromSeconds(5)))} catch {}
-            $commandLabel=($ArgumentList|Select-Object -First 5)-join ' '
-            throw "Multipass command timed out after $TimeoutSeconds seconds: $commandLabel"
-        }
-        $exitCode=$process.ExitCode
-        $outputComplete=$false
-        try {$outputComplete=[Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdoutTask,$stderrTask)).Wait([TimeSpan]::FromSeconds(5))} catch {$outputComplete=$false}
-        $stdout=if($stdoutTask.Status -eq [Threading.Tasks.TaskStatus]::RanToCompletion){$stdoutTask.GetAwaiter().GetResult()}else{''}
-        $stderr=if($stderrTask.Status -eq [Threading.Tasks.TaskStatus]::RanToCompletion){$stderrTask.GetAwaiter().GetResult()}else{''}
-        if (-not $outputComplete) { $commandLabel=($ArgumentList|Select-Object -First 5)-join ' ';throw "Multipass exited with code $exitCode, but redirected output was incomplete after the bounded post-exit drain: $commandLabel" }
-        if ($exitCode -ne 0) { $detail = ($stderr + $stdout).Trim(); throw "Multipass failed ($exitCode): $detail" }
-        return [pscustomobject]@{ExitCode=$exitCode;Text=(($stdout + "`n" + $stderr).Trim());OutputComplete=$true}
-    } finally { $process.Dispose() }
-}
-
-function Assert-Slug { param([Parameter(Mandatory)][string]$Slug); if ($Slug -notmatch '^[a-z0-9][a-z0-9._-]{1,62}$') { throw 'Invalid project slug.' }; return $Slug.ToLowerInvariant() }
-function Assert-ProjectId { param([Parameter(Mandatory)][string]$ProjectId); if ($ProjectId -notmatch '^[0-9a-fA-F-]{36}$') { throw 'Invalid project identifier.' }; return $ProjectId }
-function Assert-BackupId { param([Parameter(Mandatory)][string]$BackupId);if($BackupId -notmatch '^[a-z0-9][a-z0-9._-]{1,159}$'){throw 'Invalid backup identifier.'};return $BackupId.ToLowerInvariant() }
-function Get-Policy { return $script:Config.ResourcePolicy }
-
-function New-VerifiedRemoteWorkspaceArchive {
-    param(
-        [Parameter(Mandatory)][string]$VmName,
-        [Parameter(Mandatory)][string]$Archive,
-        [Parameter(Mandatory)][string]$Slug,
-        [bool]$IncludeGenerated = $false
-    )
-    $Slug=Assert-Slug $Slug
-    if($Archive -notmatch '^/tmp/devfleet-(backup|export|import)-[a-z0-9._-]+\.tar\.gz$'){throw 'Remote workspace archive path is invalid.'}
-    $workspace="/home/devrunner/workspaces/$Slug"
-    $archiveScript=@'
-import hashlib
-import json
-import sys
-import tarfile
-from pathlib import Path, PurePosixPath
-
-archive, workspace, slug, include_generated = sys.argv[1:]
-include_generated = include_generated.lower() == "true"
-root = Path(workspace)
-if not root.is_dir():
-    raise SystemExit("workspace is missing")
-excluded = {"node_modules", ".next", "build", "dist", ".venv", "venv", ".pytest_cache", "__pycache__", ".test-runtime"}
-members = []
-
-def archive_filter(info):
-    name = info.name.replace("\\", "/")
-    pure = PurePosixPath(name)
-    if pure.is_absolute() or ".." in pure.parts or not (name == slug or name.startswith(slug + "/")):
-        raise SystemExit("unsafe workspace archive path")
-    if not include_generated and any(part in excluded for part in pure.parts[1:]):
-        return None
-    if info.issym() or info.islnk() or info.isfifo() or info.isdev():
-        raise SystemExit("workspace archive contains a link or special file")
-    members.append(name)
-    return info
-
-with tarfile.open(archive, "w:gz") as bundle:
-    bundle.add(root, arcname=slug, recursive=True, filter=archive_filter)
-if not members:
-    raise SystemExit("workspace archive is empty")
-digest = hashlib.sha256()
-with Path(archive).open("rb") as stream:
-    for block in iter(lambda: stream.read(1024 * 1024), b""):
-        digest.update(block)
-digest = digest.hexdigest()
-print(json.dumps({"archive_sha256": digest, "member_count": len(members)}))
-'@
-    $result=Invoke-Multipass @('exec',$VmName,'--','sudo','python3','-c',$archiveScript,$Archive,$workspace,$Slug,([string]$IncludeGenerated)) 1200
-    try{$inspection=$result.Text|ConvertFrom-Json -AsHashtable}catch{throw 'Project VM did not return valid workspace archive verification JSON.'}
-    if([string]$inspection.archive_sha256 -notmatch '^[0-9a-f]{64}$' -or [int]$inspection.member_count -lt 1){throw 'Project VM returned incomplete workspace archive verification.'}
-    return $inspection
-}
-
-function Get-HostCapacity {
-    $computer = Get-CimInstance Win32_ComputerSystem;$os = Get-CimInstance Win32_OperatingSystem
-    $processor = Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum
-    $drive = $env:SystemDrive.TrimEnd(':') + ':';$disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$drive'"
-    $registry = Read-Registry;$committedCpu = 0.0;$committedMemory = 0.0;$committedDisk = 0.0;$vmCount = 0
-    foreach ($item in $registry.projects.Values) {
-        if ($item.state -notin @('destroyed')) { $committedCpu += [double]$item.cpus;$committedMemory += [double]$item.memory_gb;$committedDisk += [double]$item.disk_gb;$vmCount++ }
-    }
-    $policy = Get-Policy
-    $totalGb = [math]::Round($computer.TotalPhysicalMemory / 1GB, 2)
-    $memory = Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory
-    $availableGb = [math]::Round([double]$memory.AvailableBytes / 1GB, 2)
-    $commitGb = 0.0; $commitLimitGb = 0.0
-    try {
-        $commitGb = [math]::Round((Get-Counter '\Memory\Committed Bytes' -MaxSamples 1 -ErrorAction Stop).CounterSamples.CookedValue / 1GB, 2)
-        $commitLimitGb = [math]::Round((Get-Counter '\Memory\Commit Limit' -MaxSamples 1 -ErrorAction Stop).CounterSamples.CookedValue / 1GB, 2)
-    } catch {}
-    $diskFreeGb = [math]::Round($disk.FreeSpace / 1GB, 2)
-    $reservedCpu = [double]$policy.ReservedLogicalProcessors
-    $reservedDisk = [double]$policy.ReservedHostDiskGb
-    $physicalFloor = [math]::Max([double]$policy.PhysicalFloorMinGb, $totalGb * [double]$policy.PhysicalFloorPercent)
-    $commitFloor = [math]::Max([double]$policy.CommitHeadroomFloorMinGb, $commitLimitGb * [double]$policy.CommitHeadroomPercent)
-    $commitPercent = if ($commitLimitGb -gt 0) { [math]::Round($commitGb / $commitLimitGb * 100, 2) } else { 100 }
-    $resourceExhaustion = @()
-    try { $resourceExhaustion = @(Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows-Resource-Exhaustion-Detector';StartTime=(Get-Date).AddMinutes(-10)} -ErrorAction SilentlyContinue) } catch {}
-    $commitHeadroom = [math]::Max(0, $commitLimitGb - $commitGb)
-    $physicalHealthy = $availableGb -ge $physicalFloor
-    $commitHealthy = $commitHeadroom -ge $commitFloor -and $commitPercent -lt [double]$policy.CommitUsageLimitPercent
-    $adaptiveHealthy = $physicalHealthy -and $commitHealthy -and @($resourceExhaustion).Count -eq 0
-    $cpuPercent = 0.0
-    try { $cpuPercent = [math]::Round((Get-Counter '\Processor(_Total)\% Processor Time' -MaxSamples 1 -ErrorAction Stop).CounterSamples.CookedValue, 1) } catch {}
-    return [ordered]@{
-        host_id = [string]$script:Config.HostId;host_name = [string]$script:Config.HostName;agent_version = $script:AgentVersion;provider = 'multipass';provider_version = [string]$script:Config.MultipassVersion
-        resource_policy_version = [string]$policy.PolicyVersion;logical_cpus = [int]$processor.Sum;total_memory_gb = $totalGb;available_memory_gb = $availableGb;free_memory_gb = $availableGb;cpu_percent = $cpuPercent;disk_free_gb = $diskFreeGb
-        physical_floor_gb = [math]::Round($physicalFloor, 2);commit_headroom_floor_gb = [math]::Round($commitFloor, 2);commit_gb = $commitGb;commit_limit_gb = $commitLimitGb;commit_headroom_gb = $commitHeadroom;commit_usage_percent = $commitPercent;resource_exhaustion = @($resourceExhaustion).Count -gt 0
-        reserved_host_cpus = $reservedCpu;reserved_host_disk_gb = $reservedDisk
-        committed_project_cpus = [math]::Round($committedCpu, 2);committed_project_memory_gb = [math]::Round($committedMemory, 2);committed_project_disk_gb = [math]::Round($committedDisk, 2);managed_vm_count = $vmCount
-        allocatable_cpus = [math]::Max(0,[math]::Round([int]$processor.Sum - $reservedCpu - $committedCpu, 2))
-        allocatable_memory_gb = [math]::Max(0,[math]::Round([math]::Min($availableGb - $physicalFloor, $commitHeadroom - $commitFloor), 2))
-        allocatable_disk_gb = [math]::Max(0,[math]::Round($diskFreeGb - $reservedDisk - $committedDisk, 2))
-        health = if (-not $adaptiveHealthy -or $diskFreeGb -lt $reservedDisk -or $cpuPercent -ge 95) { 'degraded' } else { 'healthy' }
-    }
-}
-
-function Assert-HostCapacity {
-    $capacity = Get-HostCapacity;$policy = Get-Policy
-    if ($capacity.health -ne 'healthy') { throw 'Host capacity is temporarily below the configured safe threshold. No VM was created.' }
-    if ([int]$capacity.managed_vm_count -ge [int]$policy.MaximumVmCount) { throw 'The maximum managed VM count has been reached.' }
-    return $capacity
-}
-
-function Assert-ResourceRequest {
-    param([double]$Cpus,[double]$MemoryGb,[double]$DiskGb)
-    $policy = Get-Policy
-    if ($Cpus -lt 1 -or $Cpus -gt [double]$policy.MaxProjectCpus) { throw 'Requested project CPU allocation exceeds host-agent policy.' }
-    if ($MemoryGb -lt 2 -or $MemoryGb -gt [double]$policy.MaxProjectMemoryGb) { throw 'Requested project memory allocation exceeds host-agent policy.' }
-    if ($DiskGb -lt 20 -or $DiskGb -gt [double]$policy.MaxProjectDiskGb) { throw 'Requested project disk allocation exceeds host-agent policy.' }
-    $capacity = Assert-HostCapacity
-    if ($Cpus -gt $capacity.allocatable_cpus -or $MemoryGb -gt $capacity.allocatable_memory_gb -or $DiskGb -gt $capacity.allocatable_disk_gb) { throw ('Insufficient host capacity. Available: {0} CPU, {1} GB RAM, {2} GB disk.' -f $capacity.allocatable_cpus,$capacity.allocatable_memory_gb,$capacity.allocatable_disk_gb) }
-}
-
-function Get-ProjectVmName {
-    param([Parameter(Mandatory)][string]$Slug)
-    $Slug = Assert-Slug $Slug;$base = "devfleet-project-$Slug"
-    if ($base.Length -le 60) { return $base }
-    $sha = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($Slug));$hash = (($sha | ForEach-Object { $_.ToString('x2') }) -join '').Substring(0,12)
-    return "devfleet-project-$($Slug.Substring(0,35))-$hash"
-}
-
-function Get-MultipassVms { $result = Invoke-Multipass @('list','--format','json') 30;try { return @((($result.Text | ConvertFrom-Json).list)) } catch { throw 'Multipass did not return valid VM inventory JSON.' } }
-function Get-ProjectRecord { param([Parameter(Mandatory)][string]$Slug);$registry=Read-Registry;$key=(Assert-Slug $Slug).ToLowerInvariant();if(-not $registry.projects.ContainsKey($key)){throw 'Project VM is not registered with the DevFleet host agent.'};return $registry.projects[$key] }
-function Get-ProjectSlugByRuntime { param([Parameter(Mandatory)][string]$RuntimeId);$registry=Read-Registry;foreach($entry in $registry.projects.GetEnumerator()){if([string]$entry.Value.runtime_id -eq $RuntimeId){return [string]$entry.Key}};throw 'Runtime identity is not registered with the DevFleet host agent.' }
-function Assert-OwnedProjectVm { param([Parameter(Mandatory)][string]$Slug,[string]$RuntimeId='', [switch]$AllowStoppedTransition)
-    $record=Get-ProjectRecord $Slug;$expected=Get-ProjectVmName $Slug
-    if($record.vm_name -ne $expected -or $record.managed_by -ne 'devfleet' -or $record.host_id -ne $script:Config.HostId){throw 'Project VM ownership registry mismatch.'}
-    if($RuntimeId -and $record.runtime_id -ne $RuntimeId){throw 'Runtime identity does not match the ownership registry.'}
-    $inventory=@(Get-MultipassVms|Where-Object{$_.name -eq $record.vm_name});if($inventory.Count -ne 1){throw 'Registered project VM is missing or duplicated.'}
-    $info=Get-ProjectVmInfo $record.vm_name
-    if([string]$info.state -ne 'RUNNING'){
-        if($AllowStoppedTransition){return $record}
-        throw 'Live project VM ownership cannot be verified while the guest is stopped; refusing the operation.'
-    }
-    $runtimeText=(Invoke-Multipass @('exec',$record.vm_name,'--','sudo','cat','/etc/devfleet/project-runtime.json') 30).Text
-    try{$runtime=$runtimeText|ConvertFrom-Json -AsHashtable}catch{throw 'Live project VM ownership document is missing or malformed.'}
-    foreach($key in @('managed_by','project_id','slug','runtime_id','host_id','provisioning_attempt_id')){
-        if([string]$runtime[$key] -ne [string]$record[$key]){throw "Live project VM ownership mismatch for $key; refusing the operation."}
-    }
-    return $record
-}
-
-function New-CloudInit {
-    param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)][string]$ProjectId,[string]$GitUrl='', [Parameter(Mandatory)][string]$ProvisioningAttemptId)
-    $Slug=Assert-Slug $Slug;$ProjectId=Assert-ProjectId $ProjectId
-    if($GitUrl -and $GitUrl -notmatch '^(https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?|git@github\.com:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?)$'){throw 'Only GitHub repository URLs are accepted for VM bootstrap.'}
-    $publicKeyPath=[string]$script:Config.SshPublicKeyPath
-    if([string]::IsNullOrWhiteSpace($publicKeyPath) -or -not(Test-Path -LiteralPath $publicKeyPath -PathType Leaf)){throw 'Configured DevFleet SSH public key is not available for project VM provisioning.'}
-    $key=(Get-Content -LiteralPath $publicKeyPath -Raw).Trim()
-    if([string]::IsNullOrWhiteSpace($key) -or $key -match "['\r\n]"){throw 'Configured DevFleet SSH public key is invalid.'}
-    $keyProperty="    ssh_authorized_keys:`n      - '$key'"
-    $workspace="/home/devrunner/workspaces/$Slug";$cloneLine="mkdir -p '$workspace'";if($GitUrl){$cloneLine="git clone --depth 1 '$GitUrl' '$workspace'"}
-    $cloud=@"
-#cloud-config
-package_update: true
-packages:
-  - openssh-server
-  - git
-  - curl
-  - ca-certificates
-  - docker.io
-  - docker-compose-v2
-users:
-  - default
-  - name: devrunner
-    groups: [users]
-    shell: /bin/bash
-$keyProperty
-write_files:
-  - path: /etc/devfleet/project-runtime.json
-    permissions: !!str 0644
-    content: |
-      {"managed_by":"devfleet","project_id":"$ProjectId","slug":"$Slug","runtime_id":"$(Get-ProjectVmName $Slug)","host_id":"$($script:Config.HostId)","provisioning_attempt_id":"$ProvisioningAttemptId","bootstrap_version":"1","gpu_enabled":false}
-  - path: /usr/local/sbin/devfleet-project-health
-    permissions: !!str 0755
-    content: |
-      #!/usr/bin/env bash
-      set -eu
-      test -f /etc/devfleet/project-runtime.json
-      test -d /home/devrunner/workspaces/$Slug
-      docker --version >/dev/null
-      docker compose version >/dev/null
-runcmd:
-  - [ bash, -lc, "$cloneLine" ]
-  - [ bash, -lc, "mkdir -p /home/devrunner/workspaces/$Slug && chown -R devrunner:devrunner /home/devrunner/workspaces/$Slug" ]
-  - [ systemctl, enable, --now, ssh ]
-  - [ systemctl, enable, --now, docker ]
-"@
-    return $cloud
-}
-
-function Get-ProjectVmInfo { param([Parameter(Mandatory)][string]$VmName);$result=Invoke-Multipass @('info',$VmName,'--format','json') 30;try{$data=$result.Text|ConvertFrom-Json;if($data.info.$VmName){return $data.info.$VmName};return $data}catch{throw 'Multipass did not return valid project VM information.'} }
-function Get-PrimaryProjectVmIpv4 {
-    param([Parameter(Mandatory)]$Info)
-    if([string]$Info.state -ne 'RUNNING'){throw 'Project VM is not running; its address is unavailable.'}
-    $candidates=@($Info.ipv4|Where-Object{$_ -match '^\d{1,3}(?:\.\d{1,3}){3}$' -and $_ -notmatch '^(127\.|169\.254\.|172\.(17|18|19)\.)'})
-    if($candidates.Count -eq 0){throw 'Running project VM did not report a guest-reachable primary IPv4 address.'}
-    return [string]$candidates[0]
-}
-function Wait-ProjectVmReady { param([Parameter(Mandatory)][string]$VmName)
-    $deadline=(Get-Date).AddSeconds([int]$script:Config.BootTimeoutSeconds)
-    $attempt=0
-    while((Get-Date)-lt $deadline){
-        $attempt++;$remaining=[math]::Max(0,($deadline-(Get-Date)).TotalSeconds);$info=$null
-        try {
-            $info=Invoke-Multipass @('info',$VmName,'--format','json') 30
-            if($info.Text -match 'RUNNING'){
-                try{$health=Invoke-Multipass @('exec',$VmName,'--','sudo','/usr/local/sbin/devfleet-project-health') 30;if($health.ExitCode -eq 0){return $true};Write-AgentLog 'readiness' '' $VmName 'waiting' "Project VM health probe returned exit $($health.ExitCode); $([math]::Round($remaining,1)) seconds remain."}catch{Write-AgentLog 'readiness' '' $VmName 'waiting' "Project VM health probe failed on attempt $attempt; $([math]::Round($remaining,1)) seconds remain."}
-            } else {Write-AgentLog 'readiness' '' $VmName 'waiting' "Project VM is not RUNNING on attempt $attempt; $([math]::Round($remaining,1)) seconds remain."}
-        } catch {Write-AgentLog 'readiness' '' $VmName 'waiting' "Project VM readiness inventory failed on attempt $attempt; $([math]::Round($remaining,1)) seconds remain."}
-        $remaining=[math]::Max(0,($deadline-(Get-Date)).TotalSeconds);if($remaining -le 0){break};Start-Sleep -Seconds ([int][math]::Min(5,[math]::Max(1,$remaining)))
-    }
-    throw "Project VM did not become ready within $($script:Config.BootTimeoutSeconds) seconds."
-}
-
-function Import-ProjectWorkspace {
-    param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)][string]$RuntimeId,[Parameter(Mandatory)][string]$SourceVm,[Parameter(Mandatory)][string]$ProjectId)
-    $Slug=Assert-Slug $Slug;$ProjectId=Assert-ProjectId $ProjectId;$record=Assert-OwnedProjectVm $Slug $RuntimeId
-    if([string]$record.project_id -ne $ProjectId){throw 'Project identifier does not match the target VM ownership registry.'}
-    if($SourceVm -notmatch '^devfleet-[a-z0-9][a-z0-9._-]{1,62}$'){throw 'Workspace imports are limited to a DevFleet source VM.'}
-    if($SourceVm -eq $record.vm_name){throw 'The source VM and target project VM must be different.'}
-    $lock=New-ProvisioningLock
-    $sourceArchive='';$localArchive='';$importRoot="/home/devrunner/workspaces/.devfleet-import-$([guid]::NewGuid().ToString('N'))"
-    try {
-        $sourceInventory=@(Get-MultipassVms|Where-Object{$_.name -eq $SourceVm});if($sourceInventory.Count -ne 1){throw 'The DevFleet source VM is missing or duplicated.'}
-        if([string]$sourceInventory[0].state -ne 'RUNNING'){throw 'The DevFleet source VM must already be running; the import will not start or stop it.'}
-        $targetInfo=Get-ProjectVmInfo $record.vm_name;if([string]$targetInfo.state -ne 'RUNNING'){throw 'The target project VM is not running.'}
-        $sourcePath="/home/devrunner/workspaces/$Slug";$archiveName="devfleet-import-$Slug-$([guid]::NewGuid().ToString('N')).tar.gz";$sourceArchive="/tmp/$archiveName";$imports=Join-Path $script:Root 'imports';New-Item -ItemType Directory -Force -Path $imports|Out-Null;$localArchive=Join-Path $imports $archiveName
-        Invoke-Multipass @('exec',$SourceVm,'--','sudo','test','-d',$sourcePath) 30|Out-Null
-        Invoke-Multipass @('exec',$SourceVm,'--','sudo','tar','-czf',$sourceArchive,'-C','/home/devrunner/workspaces',$Slug) 600|Out-Null
-        $archiveValidator=@'
-import hashlib
-import json
-import sys
-import tarfile
-from pathlib import PurePosixPath
-
-archive, slug = sys.argv[1:]
-names = []
-with tarfile.open(archive, "r:gz") as bundle:
-    for member in bundle.getmembers():
-        name = member.name.replace("\\", "/")
-        pure = PurePosixPath(name)
-        if pure.is_absolute() or ".." in pure.parts or "\x00" in name or not (name == slug or name.startswith(slug + "/")):
-            raise SystemExit("unsafe archive path")
-        if member.issym() or member.islnk() or member.isdev() or not (member.isdir() or member.isfile()):
-            raise SystemExit("unsupported archive member type")
-        if member.mode & 0o7000:
-            raise SystemExit("unsafe archive mode")
-        names.append(name)
-    if slug not in names or slug + "/.devfleet/project.json" not in names:
-        raise SystemExit("archive root or project metadata is missing")
-digest = hashlib.sha256()
-with open(archive, "rb") as stream:
-    for block in iter(lambda: stream.read(1024 * 1024), b""):
-        digest.update(block)
-print(json.dumps({"archive_sha256": digest.hexdigest(), "member_count": len(names)}))
-'@
-        $sourceValidationText=(Invoke-Multipass @('exec',$SourceVm,'--','sudo','python3','-c',$archiveValidator,$sourceArchive,$Slug) 180).Text
-        try{$sourceValidation=$sourceValidationText|ConvertFrom-Json -AsHashtable}catch{throw 'Source VM archive validator did not return structured JSON.'}
-        if([string]$sourceValidation.archive_sha256 -notmatch '^[0-9a-f]{64}$' -or [int]$sourceValidation.member_count -lt 2){throw 'Source VM archive failed structured validation.'}
-        Invoke-Multipass @('transfer',"${SourceVm}:$sourceArchive",$localArchive) 600|Out-Null
-        if(-not(Test-Path -LiteralPath $localArchive)){throw 'The host did not receive the workspace archive.'}
-        $digest=(Get-FileHash -LiteralPath $localArchive -Algorithm SHA256).Hash.ToLowerInvariant()
-        if($digest -ne [string]$sourceValidation.archive_sha256){throw 'Host archive hash does not match the immutable source validation hash.'}
-        Invoke-Multipass @('transfer',$localArchive,"$($record.vm_name):$sourceArchive") 600|Out-Null
-        $targetDigest=((Invoke-Multipass @('exec',$record.vm_name,'--','sha256sum',$sourceArchive) 60).Text -split '\s+')[0].ToLowerInvariant()
-        if($targetDigest -ne $digest){throw 'Workspace archive integrity verification failed on the target VM.'}
-        $targetValidationText=(Invoke-Multipass @('exec',$record.vm_name,'--','sudo','python3','-c',$archiveValidator,$sourceArchive,$Slug) 180).Text
-        try{$targetValidation=$targetValidationText|ConvertFrom-Json -AsHashtable}catch{throw 'Target VM archive validator did not return structured JSON.'}
-        if([string]$targetValidation.archive_sha256 -ne $digest){throw 'Target VM archive validation hash differs from the transferred archive.'}
-        Invoke-Multipass @('exec',$record.vm_name,'--','sudo','mkdir','-p',$importRoot) 30|Out-Null
-        Invoke-Multipass @('exec',$record.vm_name,'--','sudo','tar','-xzf',$sourceArchive,'-C',$importRoot,'--no-same-owner','--no-same-permissions') 600|Out-Null
-        Invoke-Multipass @('exec',$record.vm_name,'--','sudo','test','-d',"$importRoot/$Slug") 30|Out-Null
-        $targetPath="/home/devrunner/workspaces/$Slug";$existing=(Invoke-Multipass @('exec',$record.vm_name,'--','sudo','find',$targetPath,'-mindepth','1','-maxdepth','1','-print') 30).Text.Trim();if($existing){throw 'Target workspace is not empty; import refused to avoid overwriting data.'}
-        Invoke-Multipass @('exec',$record.vm_name,'--','sudo','rmdir',$targetPath) 30|Out-Null
-        Invoke-Multipass @('exec',$record.vm_name,'--','sudo','mv',"$importRoot/$Slug",$targetPath) 30|Out-Null
-        Invoke-Multipass @('exec',$record.vm_name,'--','sudo','rmdir',$importRoot) 30|Out-Null
-        Invoke-Multipass @('exec',$record.vm_name,'--','sudo','chown','-R','devrunner:devrunner',$targetPath) 120|Out-Null
-        Invoke-Multipass @('exec',$record.vm_name,'--','sudo','test','-f',"$targetPath/.devfleet/project.json") 30|Out-Null
-        $record.import_state='verified';$record.import_archive_sha256=$digest;$record.import_source_vm=$SourceVm;$record.imported_at=(Get-Date).ToUniversalTime().ToString('o');$record.updated_at=$record.imported_at;Update-ProjectRecord $Slug $record|Out-Null
-        Write-AgentLog 'import' $record.project_id $record.runtime_id 'ready' "Existing workspace imported from $SourceVm with verified archive $digest."
-        return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$record.runtime_id;vm_name=$record.vm_name;source_vm=$SourceVm;archive_sha256=$digest;target_archive_sha256=$targetDigest;workspace_preserved=$true;state='ready';message='Existing workspace imported into the dedicated VM.'}
-    } finally {
-        Remove-Item -LiteralPath $localArchive -Force -ErrorAction SilentlyContinue
-        if($sourceArchive){try { Invoke-Multipass @('exec',$SourceVm,'--','sudo','rm','-f',$sourceArchive) 30|Out-Null } catch {}}
-        if($sourceArchive){try { Invoke-Multipass @('exec',$record.vm_name,'--','sudo','rm','-f',$sourceArchive) 30|Out-Null } catch {}}
-        try { Invoke-Multipass @('exec',$record.vm_name,'--','sudo','rm','-rf',$importRoot) 30|Out-Null } catch {}
-        try {$lock.ReleaseMutex()}catch{};$lock.Dispose()
-    }
-}
-
-function New-RegistryLock {
-    $mutex=[Threading.Mutex]::new($false,'Global\DevFleetHostAgent-Registry')
-    try { $acquired=$mutex.WaitOne(30000) }
-    catch [Threading.AbandonedMutexException] { Write-AgentLog 'registry-lock' '' '' 'recovery-required' 'An abandoned registry mutex was recovered; exact live ownership reconciliation is required.'; $script:ReconciliationRequired=$true; $acquired=$true }
-    if(-not $acquired){$mutex.Dispose();throw 'Host agent registry is busy; retry the operation.'}
-    if($script:ReconciliationRequired){
-        $registry=Read-Registry
-        foreach($entry in $registry.projects.GetEnumerator()){
-            if([string]$entry.Value.state -eq 'destroyed'){continue}
-            $null=Assert-OwnedProjectVm ([string]$entry.Key) ([string]$entry.Value.runtime_id)
-        }
-        $script:ReconciliationRequired=$false
-        Write-AgentLog 'registry-reconciliation' '' '' 'reconciled' 'Abandoned registry lock state was re-read and every active project VM passed exact live ownership verification.'
-    }
-    return $mutex
-}
-function Invoke-RegistryTransaction {
-    param([Parameter(Mandatory)][scriptblock]$Mutation)
-    $lock=New-RegistryLock
-    try { $registry=Read-Registry; $result=& $Mutation $registry; Write-Registry $registry; return $result }
-    finally { try{$lock.ReleaseMutex()}catch{};$lock.Dispose() }
-}
-function Update-ProjectRecord { param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)]$Record);$key=(Assert-Slug $Slug).ToLowerInvariant();Invoke-RegistryTransaction { param($registry);$registry.projects[$key]=$Record;return $Record } }
-function Remove-ProvisionalProjectRecord {
-    param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)][string]$ProjectId,[Parameter(Mandatory)][string]$ProvisioningAttemptId)
-    $key=(Assert-Slug $Slug).ToLowerInvariant()
-    Invoke-RegistryTransaction { param($registry);if($registry.projects.ContainsKey($key)){ $record=$registry.projects[$key]; if([string]$record.project_id -eq $ProjectId -and [string]$record.provisioning_attempt_id -eq $ProvisioningAttemptId){$registry.projects.Remove($key);return $true} };return $false }
-}
-function New-ProvisioningLock {
-    $mutex=[Threading.Mutex]::new($false,'Global\DevFleetHostAgent-Provisioning')
-    try { $acquired=$mutex.WaitOne(1000) }
-    catch [Threading.AbandonedMutexException] {
-        Write-AgentLog 'provisioning-lock' '' '' 'recovery-required' 'An abandoned provisioning mutex was recovered; state reconciliation is required before continuing.'
-        $script:ReconciliationRequired=$true
-        $acquired=$true
-    }
-    if(-not $acquired){ $mutex.Dispose();throw 'Another project VM provisioning operation is already active.' }
-    if($script:ReconciliationRequired){
-        $registry=Read-Registry
-        foreach($entry in $registry.projects.GetEnumerator()){
-            if([string]$entry.Value.state -eq 'destroyed'){continue}
-            $null=Assert-OwnedProjectVm ([string]$entry.Key) ([string]$entry.Value.runtime_id)
-        }
-        $script:ReconciliationRequired=$false
-        Write-AgentLog 'provisioning-reconciliation' '' '' 'reconciled' 'Abandoned provisioning lock state was re-read and every active project VM passed exact live ownership verification.'
-    }
-    return $mutex
-}
-function Remove-PartiallyCreatedProjectVm {
-    param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)]$Record,[Parameter(Mandatory)]$Attempt)
-    try {
-        if(-not [bool]$Attempt.launch_succeeded){Write-AgentLog 'create-cleanup' ([string]$Record.project_id) ([string]$Record.runtime_id) 'skipped' 'Provisioning launch did not succeed; cleanup is forbidden because a same-named runtime may be foreign.';return}
-        $vmName=Get-ProjectVmName $Slug
-        $inventory=@(Get-MultipassVms|Where-Object{$_.name -eq $vmName})
-        if($inventory.Count -ne 1){return}
-        $runtimeText=(Invoke-Multipass @('exec',$vmName,'--','sudo','cat','/etc/devfleet/project-runtime.json') 30).Text
-        try{$runtimeMeta=$runtimeText|ConvertFrom-Json -AsHashtable}catch{Write-AgentLog 'create-cleanup' ([string]$Record.project_id) ([string]$Record.runtime_id) 'skipped' 'Runtime identity proof was unavailable; cleanup was forbidden.';return}
-        if([string]$runtimeMeta.managed_by -ne 'devfleet' -or [string]$runtimeMeta.project_id -ne [string]$Record.project_id -or [string]$runtimeMeta.slug -ne $Slug -or [string]$runtimeMeta.runtime_id -ne [string]$Record.runtime_id -or [string]$runtimeMeta.host_id -ne [string]$script:Config.HostId -or [string]$runtimeMeta.provisioning_attempt_id -ne [string]$Attempt.provisioning_attempt_id){Write-AgentLog 'create-cleanup' ([string]$Record.project_id) ([string]$Record.runtime_id) 'skipped' 'Exact provisioning attempt/runtime ownership proof failed; cleanup was forbidden.';return}
-        $info=Get-ProjectVmInfo $vmName
-        if([string]$info.state -eq 'RUNNING'){Invoke-Multipass @('stop',$vmName) 120|Out-Null}
-        Invoke-Multipass @('delete',$vmName,'--purge') 600|Out-Null
-        if(@(Get-MultipassVms|Where-Object{$_.name -eq $vmName}).Count -ne 0){throw 'Multipass still reports the partially-created project VM after cleanup.'}
-        Write-AgentLog 'create-cleanup' $Record.project_id $Record.runtime_id 'cleaned' 'Removed a project VM left behind by a failed first-time provisioning attempt.'
-    } catch {
-        Write-AgentLog 'create-cleanup' ([string]$Record.project_id) ([string]$Record.runtime_id) 'cleanup-failed' $_.Exception.Message
-    }
-}
-
-function Ensure-ProjectVm {
-    param([Parameter(Mand
+$vault=Get-C

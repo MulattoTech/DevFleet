@@ -1,884 +1,900 @@
 # DevFleet source part 122
 
 Full-source UTF-8 byte interval [5626500, 5673000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 89bebc267e07db2845c4f794e6829625f690dd14c9e3ce91b5b61b6fed2f80b7
+Payload SHA-256: 6db29b6ed84081af7ab21e2f42f407c20a10e25c4a4b72661bfd57381c259584
 
 <!-- BEGIN SOURCE SLICE -->
-ntory in inventories:
-        require(inventory.get('status') == 'PASS'
-                and isinstance(inventory.get('names'), list)
-                and all(isinstance(n, str) and n.strip() and n != L2_NAME
-                        for n in inventory['names'])
-                and isinstance(inventory.get('verification'), str)
-                and inventory['verification'].strip(),
-                'Nested L2 backend inventory is incomplete or present')
-
-    require(live.get('scope') == 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
-            and live.get('vm') == {'name': VM_NAME, 'id': VM_ID, 'state': 'Off'},
-            'Final native exact L1 Off identity is absent')
-    live_time = instant(live.get('observedUtc'))
-    require(auth_time <= instant(attempts[0].get('terminalUtc')) <= live_time,
-            'Authenticated observation is outside its terminal diagnostic lineage')
-    require(auth_time <= live_time <= datetime.now(timezone.utc)
-            and (live_time - auth_time).total_seconds() <= 3600
-            and live_time < expires and datetime.now(timezone.utc) < expires
-            and (datetime.now(timezone.utc) - live_time).total_seconds() <= 3600,
-            'Native checkpoint inventory is not fresh after authenticated guest evidence')
-    snapshots = live.get('snapshots')
-    require(isinstance(snapshots, list) and len(snapshots) >= 2
-            and all(isinstance(s, dict) for s in snapshots),
-            'Native snapshot inventory is incomplete')
-    old_rows = [s for s in snapshots if s.get('id') == OLD_ID or s.get('name') == OLD_NAME]
-    new_rows = [s for s in snapshots if s.get('id') == new_id or s.get('name') == NEW_NAME]
-    require(len(old_rows) == 1 and old_rows[0].get('name') == OLD_NAME
-            and old_rows[0].get('id') == OLD_ID and old_rows[0].get('vmId') == VM_ID,
-            'Predecessor checkpoint is missing or ambiguous')
-    require(len(new_rows) == 1 and new_rows[0].get('name') == NEW_NAME
-            and new_rows[0].get('id') == new_id and new_rows[0].get('vmId') == VM_ID
-            and new_rows[0].get('parentSnapshotId') == OLD_ID,
-            'Replacement checkpoint is missing, ambiguous or name-only')
-    return current_tuple, expires
-
-
-def adopt(root, proposal_path, approval_path, auth_path, live_path, tuple_path, ledger_path,
-          *, fault=None):
-    """Atomically adopt one validated replacement; never touch checkpoints or old history."""
-    state = _state(root)
-    with lock(state / '.adoption.lock'):
-        pointer = state / 'CURRENT.json'
-        receipts = state / 'receipts'
-        require(not pointer.exists(), 'An accepted replacement already exists; replay rejected')
-        require(not receipts.exists() or not list(receipts.iterdir()),
-                'Interrupted/orphan receipt exists; old baseline remains selected')
-        proposal, approval = read_json(proposal_path), read_json(approval_path)
-        auth, live, current_tuple = read_json(auth_path), read_json(live_path), read_json(tuple_path)
-        ledger = read_json(ledger_path)
-        predecessor_evidence = proposal.get('predecessorEvidence') or {}
-        predecessor_path = Path(predecessor_evidence.get('path', ''))
-        expected_source_root = Path(root).resolve(strict=True) / 'audit/agent-memory/attempts/DF-FRESH-CERTIFICATION-20260926-R2'
-        require(predecessor_path.is_absolute() and predecessor_path.suffix.lower() == '.json'
-                and predecessor_path.resolve(strict=True).is_relative_to(expected_source_root)
-                and predecessor_evidence.get('sha256') == digest(predecessor_path),
-                'Preserved predecessor evidence is absent, outside R2, or hash mismatched')
-        predecessor_record = read_json(predecessor_path)
-        require((predecessor_record.get('lab') or {}).get('l1Id') == VM_ID
-                and (predecessor_record.get('lab') or {}).get('cleanId') == OLD_ID
-                and (predecessor_record.get('liveGuestAuth') or {}).get('cleanRestored') is True
-                and (predecessor_record.get('liveGuestAuth') or {}).get('finalL1State') == 'Off',
-                'Predecessor source does not preserve the exact restored CLEAN identity')
-        candidate, expires = _validate(proposal, approval, auth, live, current_tuple,
-                                       ledger, auth_path)
-        receipts.mkdir(parents=True, exist_ok=True)
-        receipt_id = uuid.uuid4().hex
-        receipt_file = receipt_id + '.json'
-        receipt = {
-            'schemaVersion': 1, 'contract': 'devfleet-baseline-adoption-receipt-v1',
-            'receiptId': receipt_id, 'status': 'ADOPTED',
-            'adoptedUtc': datetime.now(timezone.utc).isoformat(),
-            'certificationCredit': False, 'secretValuesRecorded': False,
-            'predecessor': proposal['predecessor'], 'replacement': proposal['replacement'],
-            'candidate': candidate, 'runId': proposal['runId'],
-            'passwordLastSetUtc': auth['guest']['passwordLastSetUtc'],
-            'passwordExpiresUtc': auth['guest']['passwordExpiresUtc'],
-            'protectedStoreUpdatedUtc': auth['credential']['protectedStoreUpdatedUtc'],
-            'authenticatedGuest': {'computerName': auth['guest']['computerName'],
-                                   'principal': auth['guest']['principal'],
-                                   'accountEnabled': True,
-                                   'sourceObservedUtc': auth['observedUtc']},
-            'nestedL2': auth['nestedL2'],
-            'finalL1': live['vm'],
-            'liveCheckpointInventory': live['snapshots'],
-            'adoptionAuthority': {'decision': approval['decision'],
-                                  'approvedBy': approval['approvedBy'],
-                                  'sourceSha256': digest(approval_path)},
-            'sources': {'proposalSha256': digest(proposal_path),
-                        'predecessorEvidenceSha256': digest(predecessor_path),
-                        'approvalSha256': digest(approval_path),
-                        'authenticatedGuestSha256': digest(auth_path),
-                        'nativeInventorySha256': digest(live_path),
-                        'currentTupleSha256': digest(tuple_path),
-                        'r2LedgerSha256': digest(ledger_path)},
-        }
-        receipt_path = receipts / receipt_file
-        _write_exclusive(receipt_path, _json_bytes(receipt))
-        receipt_hash = digest(receipt_path)
-        if fault == 'after_receipt':
-            raise RuntimeError('Injected interruption after immutable receipt')
-        pointer_value = {'schemaVersion': 1, 'contract': 'devfleet-accepted-baseline-v1',
-                         'generation': 1, 'status': 'ACCEPTED',
-                         'receiptFile': receipt_file, 'receiptSha256': receipt_hash,
-                         'checkpoint': proposal['replacement']}
-        _atomic_replace(pointer, _json_bytes(pointer_value))
-        return {'receiptFile': receipt_file, 'receiptSha256': receipt_hash,
-                'certificationCredit': False, 'passwordExpiresUtc': expires.isoformat()}
-
-
-def main():
-    import argparse
-    parser = argparse.ArgumentParser(description=__doc__)
-    sub = parser.add_subparsers(dest='command', required=True)
-    inspect = sub.add_parser('inspect')
-    inspect.add_argument('--root', required=True)
-    inspect.add_argument('--tuple')
-    adoption = sub.add_parser('adopt')
-    for flag in ('root', 'proposal', 'approval', 'auth', 'live', 'tuple', 'ledger'):
-        adoption.add_argument('--' + flag, required=True)
-    binding = sub.add_parser('rebind')
-    for flag in ('root', 'tuple', 'approval', 'ledger', 'live'):
-        binding.add_argument('--' + flag, required=True)
-    args = parser.parse_args()
-    if args.command == 'inspect':
-        value = accepted_baseline(args.root, read_json(args.tuple) if args.tuple else None)
-    elif args.command == 'adopt':
-        value = adopt(args.root, args.proposal, args.approval, args.auth, args.live, args.tuple,
-                      args.ledger)
-    else:
-        value = rebind(args.root, args.tuple, args.approval, args.ledger, args.live)
-    print(json.dumps(value, indent=2))
-
-
-if __name__ == '__main__': main()
+son",
+      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/synthetic-reboot-probe.json",
+      "sha256": "a8066ca72880b4783876facb391302d771a6cd5e5a51882d6e72036f493081ba",
+      "bytes": 1968,
+      "kind": "corrective-proof3-causal-original-no-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/astra-result-analysis.json",
+      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/astra-result-analysis.json",
+      "sha256": "dc369f352d0c9fa1d3179f3ae9506690963c9d1ee9b2d11d0907111aeb824460",
+      "bytes": 13154,
+      "kind": "analysis-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-health-native-first.log",
+      "destination": "astra-m6-local-20260907/proof3-health-native-first.log",
+      "sha256": "ba3f07e422109374469c057f2599f4fc663cc2afbf1f82424fb20a68ed34752f",
+      "bytes": 569,
+      "kind": "local-health-regression-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-health-native-qualified.json",
+      "destination": "astra-m6-local-20260907/proof3-health-native-qualified.json",
+      "sha256": "0eabe57f31de63e5f655b75b295c350e172e51383e402ae9f9f4a9b48bd9b2ba",
+      "bytes": 5187,
+      "kind": "local-health-regression-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-health-native-qualified.log",
+      "destination": "astra-m6-local-20260907/proof3-health-native-qualified.log",
+      "sha256": "4914aeb0bfe50bc9844c563a20085c55022a1fa407a4013a08b6c32081cde085",
+      "bytes": 146,
+      "kind": "local-health-regression-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-health-native-deadline-qualified.json",
+      "destination": "astra-m6-local-20260907/proof3-health-native-deadline-qualified.json",
+      "sha256": "9f8824f6de7704b439677b1c11f25b3650113e749b190207f8497502635c9086",
+      "bytes": 5565,
+      "kind": "local-health-regression-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-health-native-deadline-qualified.log",
+      "destination": "astra-m6-local-20260907/proof3-health-native-deadline-qualified.log",
+      "sha256": "31430c924c0f0e649d67159e5a6b8e9582e722ff4df581972501f6657712ac14",
+      "bytes": 146,
+      "kind": "local-health-regression-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-observer-regression.log",
+      "destination": "astra-m6-local-20260907/proof3-observer-regression.log",
+      "sha256": "814d49eeff9f9b2ec3f24dd8e0fc0e03a282db94549c36bcb4692cd06e5ff397",
+      "bytes": 3026,
+      "kind": "local-health-regression-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-harness-regression.log",
+      "destination": "astra-m6-local-20260907/proof3-harness-regression.log",
+      "sha256": "a420f5daa620ff2aac1d5208be30e455322a894c9f3af8cc3343e7056af82d64",
+      "bytes": 1000,
+      "kind": "local-health-regression-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-failure-capture-regression.log",
+      "destination": "astra-m6-local-20260907/proof3-failure-capture-regression.log",
+      "sha256": "c39e2afca73764e4c5f5b621e3b7cec20b67a25827f48051d2dc1a9f1df3b9f6",
+      "bytes": 2692,
+      "kind": "local-health-regression-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-health-qualification.json",
+      "destination": "astra-m6-local-20260907/proof3-health-qualification.json",
+      "sha256": "9a887b2de10841b7ffa724bc10f9f8ee5d18ded4fe33e59d552eaa5be37b7333",
+      "bytes": 3831,
+      "kind": "local-causal-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-vault-first.log",
+      "destination": "astra-m6-local-20260907/proof3-vault-first.log",
+      "sha256": "11ed8f3859b94c04f6d1552ecbb5f9238bb82cc1f0139cf0e263ab7c53a6123f",
+      "bytes": 100,
+      "kind": "local-qualified-correction-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-vault-python-qualified.log",
+      "destination": "astra-m6-local-20260907/proof3-vault-python-qualified.log",
+      "sha256": "f260d4ac4c91b2eb0f24f7eb88845fa1affc06883ca2d90983145d28f83e8e23",
+      "bytes": 101,
+      "kind": "local-qualified-correction-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-vault-review-qualified.log",
+      "destination": "astra-m6-local-20260907/proof3-vault-review-qualified.log",
+      "sha256": "49272102c43795b457b32a679f7fc027841f0c9e9667247b47e43b12cb630d7c",
+      "bytes": 101,
+      "kind": "local-qualified-correction-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-vault-yaml-qualified.log",
+      "destination": "astra-m6-local-20260907/proof3-vault-yaml-qualified.log",
+      "sha256": "ac57a5fb1175c79c870dc19221de70cc8b9d72c3d3dcd444dc89697966769cae",
+      "bytes": 76,
+      "kind": "local-qualified-correction-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-pairing-first.log",
+      "destination": "astra-m6-local-20260907/proof3-pairing-first.log",
+      "sha256": "7b8d35d42520ae012da84260ac8c54eacee39fa4e816e80a244981919a0eefd0",
+      "bytes": 2254,
+      "kind": "local-qualified-correction-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-pairing-qualified.log",
+      "destination": "astra-m6-local-20260907/proof3-pairing-qualified.log",
+      "sha256": "7b8d35d42520ae012da84260ac8c54eacee39fa4e816e80a244981919a0eefd0",
+      "bytes": 2254,
+      "kind": "local-qualified-correction-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-wpf-plan-first.log",
+      "destination": "astra-m6-local-20260907/proof3-wpf-plan-first.log",
+      "sha256": "26346aef8505cb6506a20992a55277ff167339ff9bdfe167f848b868bda281d3",
+      "bytes": 922,
+      "kind": "local-qualified-correction-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-wpf-plan-localupdate-qualified.log",
+      "destination": "astra-m6-local-20260907/proof3-wpf-plan-localupdate-qualified.log",
+      "sha256": "26346aef8505cb6506a20992a55277ff167339ff9bdfe167f848b868bda281d3",
+      "bytes": 922,
+      "kind": "local-qualified-correction-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-wpf-role-boundary-qualified.log",
+      "destination": "astra-m6-local-20260907/proof3-wpf-role-boundary-qualified.log",
+      "sha256": "a4ae38447f3b773936048da9cbe748dc63cb977d7b4cdcaf6aaab3575161190c",
+      "bytes": 78,
+      "kind": "local-qualified-correction-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-bootstrap-terminal-regression.log",
+      "destination": "astra-m6-local-20260907/proof3-bootstrap-terminal-regression.log",
+      "sha256": "4505bff5060f34f4d5911d8f5fcdfb2184c8e961cff0d45fc47a90edc26c8f1a",
+      "bytes": 62,
+      "kind": "local-qualified-correction-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-observer-final.log",
+      "destination": "astra-m6-local-20260907/proof3-observer-final.log",
+      "sha256": "814d49eeff9f9b2ec3f24dd8e0fc0e03a282db94549c36bcb4692cd06e5ff397",
+      "bytes": 3026,
+      "kind": "local-qualified-correction-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-harness-final.log",
+      "destination": "astra-m6-local-20260907/proof3-harness-final.log",
+      "sha256": "a420f5daa620ff2aac1d5208be30e455322a894c9f3af8cc3343e7056af82d64",
+      "bytes": 1000,
+      "kind": "local-qualified-correction-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-release-integrity-qualified.log",
+      "destination": "astra-m6-local-20260907/proof3-release-integrity-qualified.log",
+      "sha256": "05f60387e5348038a7801b108b88a931f6a186da4986154281dbc958029d35b3",
+      "bytes": 61,
+      "kind": "local-qualified-correction-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-native-prepare-qualified.log",
+      "destination": "astra-m6-local-20260907/proof3-native-prepare-qualified.log",
+      "sha256": "055d6d2a7336a57ae3cbf66fd900f815bbff0b23231cb36e3a2bdad8b986326f",
+      "bytes": 452,
+      "kind": "local-qualified-correction-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-diff-final.log",
+      "destination": "astra-m6-local-20260907/proof3-diff-final.log",
+      "sha256": "d9a9470d1af1f38aa5cffe32503a2614d5de72e937f16111b28a13afd1a6606e",
+      "bytes": 2118,
+      "kind": "local-qualified-correction-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-candidate-preservation.json",
+      "destination": "astra-m6-local-20260907/proof3-candidate-preservation.json",
+      "sha256": "4c70a5a66a2d66a5e017037ac13ce28c89245653895826ee0f9a8e8c0e5a3d2c",
+      "bytes": 362,
+      "kind": "bounded-readiness-context-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/tailscale-up-local-help.txt",
+      "destination": "astra-m6-local-20260907/tailscale-up-local-help.txt",
+      "sha256": "0d9609f4524c45ee8750d3967a032f87c80543016f0877f6a903e160190d6e87",
+      "bytes": 4054,
+      "kind": "bounded-readiness-context-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-shipping-identity-pre-freeze.json",
+      "destination": "astra-m6-local-20260907/proof3-shipping-identity-pre-freeze.json",
+      "sha256": "42f29372e9bd73f2966a9224504fc0be702fd6c9a200e13b5f8c90da370f1c7d",
+      "bytes": 413810,
+      "kind": "bounded-readiness-context-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-corrections-qualification.json",
+      "destination": "astra-m6-local-20260907/proof3-corrections-qualification.json",
+      "sha256": "9e9264b77522d128f94171cfba8e9ae261b70fe0f3c18144249ca1db386cf91b",
+      "bytes": 11649,
+      "kind": "local-causal-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/astra-result-analysis.json",
+      "destination": "proof4/astra-result-analysis.json",
+      "sha256": "ad59f0db5b533e6bc1c322715d9e06ae9c2650c9edf95db12ccbce97665bbd3b",
+      "bytes": 15906,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/cleanup-state.json",
+      "destination": "proof4/cleanup-state.json",
+      "sha256": "0ab41d9aca2631930dc36ed583708046fd2e63bea212d4dfb66606ae86e86d42",
+      "bytes": 1480,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/initial-FreshInstall-wpf-evidence.json",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/initial-FreshInstall-wpf-evidence.json",
+      "sha256": "557a531d4f558cb0dbfa7503caff3544cca2d5eabb8405da12fc106fcbdde9b4",
+      "bytes": 8861,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/product-lifecycle-generation-1.json",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/product-lifecycle-generation-1.json",
+      "sha256": "219ea97938282f75694a882db6a103afc42ea88929faaa177e76dca4fddeb751",
+      "bytes": 336415,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/product-lifecycle-observer-generation-0.json",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/product-lifecycle-observer-generation-0.json",
+      "sha256": "80c538224584f64798f94bda01c236f3012a56ff495ce8d09fa9bd0cc166e2ea",
+      "bytes": 307913,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/product-lifecycle-progress-current.json",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/product-lifecycle-progress-current.json",
+      "sha256": "bd20d47e1fb51601c70e69b5487196ff00140494718f5e17be80520233c6f37f",
+      "bytes": 110873,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/product-lifecycle-progress.jsonl",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/product-lifecycle-progress.jsonl",
+      "sha256": "c4fc310180883565083d63e04d02cdee8e5b8cb9f920a4d4b2a6366f5060a164",
+      "bytes": 3044631,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/resume-generation-1-wpf-evidence.json",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/resume-generation-1-wpf-evidence.json",
+      "sha256": "2e5a5f19fdf554cec0a7168b7fe5bcbddd53330d9ffd4ce83fb964dce5a75fb3",
+      "bytes": 7674,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-5df494a6b43546f5a89c7b0778a59b54-checkpoint.json",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-5df494a6b43546f5a89c7b0778a59b54-checkpoint.json",
+      "sha256": "022a4aa8b75550eae85eba8b7b6e11e3093b39745a7a55d4361e760abef757a6",
+      "bytes": 727,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-5df494a6b43546f5a89c7b0778a59b54-driver-bound.json",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-5df494a6b43546f5a89c7b0778a59b54-driver-bound.json",
+      "sha256": "52ffdeec8e81ba2f3f54a856219e206057964ae927815e48832df1ea51105f98",
+      "bytes": 802,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-5df494a6b43546f5a89c7b0778a59b54-launch-request.json",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-5df494a6b43546f5a89c7b0778a59b54-launch-request.json",
+      "sha256": "0b97072782b654173aba1a7aefd74b6e578e0bdc6960eae0305e15033775fc96",
+      "bytes": 8712,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-5df494a6b43546f5a89c7b0778a59b54-terminal.json",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-5df494a6b43546f5a89c7b0778a59b54-terminal.json",
+      "sha256": "08f2058f7ea691a2ec1290f46b9cc07c8b3eef2cf4d2c1fb91380d1b6cde423a",
+      "bytes": 9086,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-5df494a6b43546f5a89c7b0778a59b54-worker-terminal.json",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-5df494a6b43546f5a89c7b0778a59b54-worker-terminal.json",
+      "sha256": "1c57e1e80039883f68162ba27c80c36af720286e63a461debd32dc20634ffe97",
+      "bytes": 5679,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-78161542e27443b3a078ff408aac5345-checkpoint.json",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-78161542e27443b3a078ff408aac5345-checkpoint.json",
+      "sha256": "ab04a177081e166ef43db51caae5da86000bf7325ee7118f2905c90bd071c355",
+      "bytes": 889,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-78161542e27443b3a078ff408aac5345-driver-bound.json",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-78161542e27443b3a078ff408aac5345-driver-bound.json",
+      "sha256": "b8c66c6df8c00ab0e3202a78f51745bed780fb6d4b87b61b9f0ad9a0bf2437d6",
+      "bytes": 832,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-78161542e27443b3a078ff408aac5345-launch-request.json",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-78161542e27443b3a078ff408aac5345-launch-request.json",
+      "sha256": "42c12944935b9eac82c9ed01e87d12a9f5e846f784993a748e9c8211444531aa",
+      "bytes": 8922,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-78161542e27443b3a078ff408aac5345-terminal.json",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-78161542e27443b3a078ff408aac5345-terminal.json",
+      "sha256": "946b6a0788121865fb394eab7cedb62c64db0de90f8ed80e7534476297eb4a02",
+      "bytes": 6853,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-78161542e27443b3a078ff408aac5345-worker-terminal.json",
+      "destination": "proof4/lifecycle-REBOOT-RESUME-aaf82a6ed78041c5853e2af3c5418443/wpf-78161542e27443b3a078ff408aac5345-worker-terminal.json",
+      "sha256": "ffb331951c091f80fc0019b1d99c51a4d12ff5c5c4956f8253fa875346e95279",
+      "bytes": 3339,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/operator-stop-request.json",
+      "destination": "proof4/operator-stop-request.json",
+      "sha256": "c02804505ba60198149707dc805a8ff23f7d1680c013bcd342e250e9b493468d",
+      "bytes": 1180,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/pre-operator-stop-progress.json",
+      "destination": "proof4/pre-operator-stop-progress.json",
+      "sha256": "bd20d47e1fb51601c70e69b5487196ff00140494718f5e17be80520233c6f37f",
+      "bytes": 110873,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/proof-error.json",
+      "destination": "proof4/proof-error.json",
+      "sha256": "91fe259c6c33225db91a72062da0526ddf05ab1709ab486ac5f7d4eb68633d60",
+      "bytes": 357,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/proof-start.json",
+      "destination": "proof4/proof-start.json",
+      "sha256": "9224d0727144f6c7badb8d170868550dc0674ad552f2a53f6da618c1e912c592",
+      "bytes": 10160,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/read-only-health-runtime.json",
+      "destination": "proof4/read-only-health-runtime.json",
+      "sha256": "39348eb312c215947722ed342f065fb716ea49f78d6054b62b100776c593e5bc",
+      "bytes": 1298,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r4-20260907t112155z/synthetic-reboot-probe.json",
+      "destination": "proof4/synthetic-reboot-probe.json",
+      "sha256": "1e133513772e8e24e52acd409cd4f15ca2de2468013a2547c55a4c0d9b8e7c26",
+      "bytes": 1968,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-correction-native-build-start.json",
+      "destination": "astra-m6-local-20260907/proof3-correction-native-build-start.json",
+      "sha256": "e4b2f622df000b44060b3e58e755a5a8e44071a6e1ad6da456365c4ec5dd59e0",
+      "bytes": 520,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-correction-native-build-result.json",
+      "destination": "astra-m6-local-20260907/proof3-correction-native-build-result.json",
+      "sha256": "756ebce6417e5c3528e92ae8209ccd04c053eab4f9e0b553167467a5b9bc7905",
+      "bytes": 775,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-correction-native-build-stdout.log",
+      "destination": "astra-m6-local-20260907/proof3-correction-native-build-stdout.log",
+      "sha256": "49cd373547b822e3833ab5fc864d81dc5e51f62a59e9e470561bdd53eb7328b5",
+      "bytes": 2499,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-correction-native-build-stderr.log",
+      "destination": "astra-m6-local-20260907/proof3-correction-native-build-stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/read-proof4-health-runtime.ps1",
+      "destination": "astra-m6-local-20260907/read-proof4-health-runtime.ps1",
+      "sha256": "971d90b33c3fd19f8bb367d53f28a98f288686ef649df5d2d93d01ae46e61149",
+      "bytes": 3791,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/record-proof4-terminal.py",
+      "destination": "astra-m6-local-20260907/record-proof4-terminal.py",
+      "sha256": "f3744eabf82c929da014f49567c5105349a98878ca4752d3b9230f9206d73a22",
+      "bytes": 4810,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-hidden-before.log",
+      "destination": "astra-m6-local-20260907/proof4-hidden-before.log",
+      "sha256": "f4888539578b6eca2262de13e58fdb12735d08e367097327f414577eadde333c",
+      "bytes": 540,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-hidden-after.json",
+      "destination": "astra-m6-local-20260907/proof4-hidden-after.json",
+      "sha256": "9f8824f6de7704b439677b1c11f25b3650113e749b190207f8497502635c9086",
+      "bytes": 5565,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-hidden-after.log",
+      "destination": "astra-m6-local-20260907/proof4-hidden-after.log",
+      "sha256": "31430c924c0f0e649d67159e5a6b8e9582e722ff4df581972501f6657712ac14",
+      "bytes": 146,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-hidden-error-qualified.json",
+      "destination": "astra-m6-local-20260907/proof4-hidden-error-qualified.json",
+      "sha256": "a28082ecd0310477da299ec579c288709ec488963e755c729affcf86c3109f5f",
+      "bytes": 6009,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-hidden-error-qualified.log",
+      "destination": "astra-m6-local-20260907/proof4-hidden-error-qualified.log",
+      "sha256": "f9536c7880d0caa029dcd154aa68ebfb3ae96feb6b6d0d51dfb5c6f248d045ab",
+      "bytes": 146,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-health-final.json",
+      "destination": "astra-m6-local-20260907/proof4-health-final.json",
+      "sha256": "a28082ecd0310477da299ec579c288709ec488963e755c729affcf86c3109f5f",
+      "bytes": 6009,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-health-final.log",
+      "destination": "astra-m6-local-20260907/proof4-health-final.log",
+      "sha256": "f9536c7880d0caa029dcd154aa68ebfb3ae96feb6b6d0d51dfb5c6f248d045ab",
+      "bytes": 146,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-maintenance-first.json",
+      "destination": "astra-m6-local-20260907/proof4-maintenance-first.json",
+      "sha256": "903d1c33a55cac827e512c7f49342521a3f556ca2b3d24fd5c3b3be81a65c70c",
+      "bytes": 2532,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-maintenance-first.log",
+      "destination": "astra-m6-local-20260907/proof4-maintenance-first.log",
+      "sha256": "b8d6d8bcc59d83b405670a34b00108fddcfdf95dd55f0375bd5eb3ec89a3f37f",
+      "bytes": 136,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-maintenance-final.json",
+      "destination": "astra-m6-local-20260907/proof4-maintenance-final.json",
+      "sha256": "e953a68834d898fc9bec6b1c357d67266d128c860fe07e2087e6b9c81e59a320",
+      "bytes": 2682,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-maintenance-final.log",
+      "destination": "astra-m6-local-20260907/proof4-maintenance-final.log",
+      "sha256": "7853408eaee060b283d2d8231cca71051b0cd638257534930197c41876bff9e8",
+      "bytes": 136,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-fallback-qualified.json",
+      "destination": "astra-m6-local-20260907/proof4-fallback-qualified.json",
+      "sha256": "3b88a8c3cb8fee7aefd6ce5cfb5a361966a8eeb4ea8d6f2035d96816162edd89",
+      "bytes": 731,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-fallback-qualified.log",
+      "destination": "astra-m6-local-20260907/proof4-fallback-qualified.log",
+      "sha256": "7921597163373bb9c5c83ddb0d2c0a911bfcbeee2622699e20a42100d5cce78a",
+      "bytes": 1197,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-fallback-ps51.json",
+      "destination": "astra-m6-local-20260907/proof4-fallback-ps51.json",
+      "sha256": "571636c2f860a92c8a79181eafd16e7ce4a690b1c847c67b1c2fb709224632d9",
+      "bytes": 1323,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-fallback-ps51.log",
+      "destination": "astra-m6-local-20260907/proof4-fallback-ps51.log",
+      "sha256": "63cb82b29bedd078c2269e3a89150d33e90e1ed013bba1453388d35280b20823",
+      "bytes": 48,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-observer-final.log",
+      "destination": "astra-m6-local-20260907/proof4-observer-final.log",
+      "sha256": "0402345cc61c9c97a741366cf4e5e00f8b58969b34a149e47ef3c24119242362",
+      "bytes": 2936,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-harness-frozen.log",
+      "destination": "astra-m6-local-20260907/proof4-harness-frozen.log",
+      "sha256": "1952d06f06c049bb4a62690ec1a4b24c0f57b01942758567c352ba251e836272",
+      "bytes": 973,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-integrity-final.log",
+      "destination": "astra-m6-local-20260907/proof4-integrity-final.log",
+      "sha256": "05f60387e5348038a7801b108b88a931f6a186da4986154281dbc958029d35b3",
+      "bytes": 61,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/qualify-proof4-corrections.py",
+      "destination": "astra-m6-local-20260907/qualify-proof4-corrections.py",
+      "sha256": "bf2e5bff4917ad0ec3754187592d5df6d9f4aa664a5e0769d6704b3fd2322f34",
+      "bytes": 6026,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof4-corrections-qualification.json",
+      "destination": "astra-m6-local-20260907/proof4-corrections-qualification.json",
+      "sha256": "ec1d0408a925190ac66d8437ee2f1a2a0f4a23091a3ad1210a06b699835e78c1",
+      "bytes": 3419,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/before-proof4-closeout-YOLO-RESUME-HANDOFF.json",
+      "destination": "astra-m6-local-20260907/before-proof4-closeout-YOLO-RESUME-HANDOFF.json",
+      "sha256": "8dd1340a6e43a2d829ae89efc4d2e6f7286511b55f5aefc31fa98baf98d77499",
+      "bytes": 5973,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/before-proof4-closeout-YOLO-RESUME-HANDOFF.md",
+      "destination": "astra-m6-local-20260907/before-proof4-closeout-YOLO-RESUME-HANDOFF.md",
+      "sha256": "7e7294d6cce8a378203baffdad0b85504f578ed5061d303629234b040bb9cc0a",
+      "bytes": 2959,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/before-proof4-closeout-SOL-HELPER-ALLOCATION-LEDGER.json",
+      "destination": "astra-m6-local-20260907/before-proof4-closeout-SOL-HELPER-ALLOCATION-LEDGER.json",
+      "sha256": "135b4a557d385fd779e4e729e2965f4f8248d6a357a8e93a1494a339bb04c7b5",
+      "bytes": 6135,
+      "kind": "causal-failure-or-local-qualification-no-proof-credit"
+    }
+  ]
+}
 
 ```
 
 
-## FILE: tools/compute_shipping_input_identity.py
+## FILE: tools/audit-test-manifest.json
 
-SHA256: 124fb632ac98b18e48f3b163a1568b627381c1614e93f98effce4d13d254732b | Bytes: 9809 | Git mode: 100644
+SHA256: d4541110787db1c96ce03696393a5eb202d8c85ac6a076b2c855bf31ef594f5f | Bytes: 1306 | Git mode: 100644
 
 ```
-"""Compute live and candidate shipping-input rows from the release fingerprint contract.
+{
+  "schemaVersion": 1,
+  "entrypoint": "release-tooling/run_portable_audit_tests.py",
+  "pathAuthority": "release-tooling/audit_bundle_paths.py",
+  "portableTests": [
+    "source/tests/test_dependency_advisories.py",
+    "source/tests/test_release_fingerprint.py",
+    "source/tests/test_posix_zip_writer.py",
+    "source/tests/test_audit_coherence.py"
+  ],
+  "categories": {
+    "requiresHistoricalEvidence": ["**/test_failed_attempt_freeze.py"],
+    "requiresReleaseBinary": ["source/tests/test_installer_self_cleanup.py", "source/tests/test_verify_package_watchdog.py"],
+    "requiresPowerShell": ["source/tests/test_hardening8_windows_integrations.py", "source/tests/test_migration_integration.py"],
+    "windowsOnly": ["source/tests/test_host_agent_integration.py", "source/tests/test_v122_lifecycle_archive.py"],
+    "portable": ["source/tests/test_*.py"]
+  },
+  "excludedArtifacts": [
+    "historical failed-attempt evidence",
+    "compiled release binaries",
+    "nested release archives",
+    "original repository virtual-environment paths",
+    "VM images and credentials"
+  ],
+  "policy": {
+    "pythonInterpreter": "sys.executable",
+    "workingDirectory": "extracted bundle root",
+    "unknownClassification": "FAIL",
+    "excludedArtifactHandling": "SKIP with machine-readable reason"
+  }
+}
 
-This is release tooling: it imports the candidate-bound ``release_fingerprint``
-implementation instead of maintaining a second inclusion/mode/hash policy.
+```
+
+
+## FILE: tools/audit_bundle_paths.py
+
+SHA256: c1c886fba4c84706dd0e624e08e71d398af92298e48398f1851f84179a0b77d8 | Bytes: 1179 | Git mode: 100644
+
+```
+"""Canonical repository versus extracted-audit-bundle path resolution."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class BundleLayout:
+    bundle_root: Path
+    source_root: Path
+    installer_source_root: Path
+    release_tooling_root: Path
+    release_e2e_root: Path
+
+
+def resolve_bundle_layout(anchor: Path) -> BundleLayout:
+    anchor = anchor.resolve()
+    for candidate in (anchor, *anchor.parents):
+        source_root = candidate / "source"
+        installer_source_root = candidate / "installer-source"
+        release_tooling_root = candidate / "release-tooling"
+        if not release_tooling_root.is_dir():
+            release_tooling_root = candidate / "tools"
+        release_e2e_root = candidate / "automation" / "release-e2e"
+        if source_root.is_dir() and installer_source_root.is_dir() and release_tooling_root.is_dir() and release_e2e_root.is_dir():
+            return BundleLayout(candidate, source_root, installer_source_root, release_tooling_root, release_e2e_root)
+    raise AssertionError(f"Could not identify a repository or canonical audit bundle root from {anchor}")
+
+```
+
+
+## FILE: tools/baseline_lineage.py
+
+SHA256: 52613d825b166702fa1ea1e2a61df01e5233a9ba7be36ca128a7d2adb5bbd5a7 | Bytes: 60663 | Git mode: 100644
+
+```
+"""Exact-L1 baseline adoption contract and atomic, non-promoting receipt.
+
+The operator must provide independently collected native Hyper-V and admitted
+authenticated-guest evidence plus a separate explicit account-owner approval.
+This module cannot create a checkpoint, change a credential, or award proof.
 """
 from __future__ import annotations
 
-import argparse
-import hashlib
-import io
-import json
-import subprocess
-import sys
-import tarfile
-import tempfile
-from pathlib import Path
-
-
-RELEASE_ARTIFACT_NAMES = frozenset({"exe", "tar", "portable", "installerSource"})
-
-
-def _fingerprint(source: Path, installer: Path, artifacts: dict[str, Path] | None = None) -> dict[str, object]:
-    tools = source / "tools"
-    previous_modules = {name: sys.modules.get(name) for name in ("release_fingerprint", "hook_modes")}
-    for name in previous_modules:
-        sys.modules.pop(name, None)
-    sys.path.insert(0, str(tools))
-    try:
-        from release_fingerprint import build_fingerprint  # type: ignore
-
-        return build_fingerprint(source, installer, artifacts)
-    finally:
-        sys.path.pop(0)
-        for name in previous_modules:
-            sys.modules.pop(name, None)
-        for name, module in previous_modules.items():
-            if module is not None:
-                sys.modules[name] = module
-
-
-def _git_commit_exists(workspace: Path, commit: str) -> None:
-    if not commit or len(commit) != 40 or any(ch not in "0123456789abcdefABCDEF" for ch in commit):
-        raise ValueError("candidate commit must be an explicit 40-character Git object ID")
-    try:
-        subprocess.run(["git", "-C", str(workspace), "cat-file", "-e", f"{commit}^{{commit}}"], check=True, capture_output=True, text=True)
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise ValueError(f"candidate commit does not resolve to a commit: {commit}") from exc
-
-
-def _materialize_candidate(workspace: Path, commit: str, artifacts: dict[str, Path] | None = None) -> tuple[dict[str, object], Path]:
-    """Materialize candidate shipping trees without changing the checkout."""
-    _git_commit_exists(workspace, commit)
-    try:
-        archive = subprocess.check_output(["git", "-C", str(workspace), "-c", "core.autocrlf=false", "archive", "--format=tar", commit, "source", "installer-source"], stderr=subprocess.STDOUT)
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise ValueError(f"candidate shipping tree could not be materialized: {commit}") from exc
-    staging = Path(tempfile.mkdtemp(prefix="devfleet-candidate-"))
-    try:
-        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as stream:
-            stream.extractall(staging, filter="data")
-        source, installer = staging / "source", staging / "installer-source"
-        if not source.is_dir() or not installer.is_dir():
-            raise ValueError("candidate commit has ambiguous or incomplete shipping roots")
-        return _fingerprint(source, installer, artifacts), staging
-    except Exception:
-        import shutil
-        shutil.rmtree(staging, ignore_errors=True)
-        raise
-
-
-def _shipping_identity(fingerprint: dict[str, object]) -> str:
-    payload = {"schemaVersion": 1, "devfleetVersion": fingerprint["devfleetVersion"], "installerVersion": fingerprint["installerVersion"], "shippingModeContract": fingerprint["shippingModeContract"], "shippingInputs": fingerprint["shippingInputs"]}
-    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _materialization_comparison(
-    live_source: Path,
-    live_installer: Path,
-    candidate_source: Path,
-    candidate_installer: Path,
-    live: dict[str, object],
-    candidate: dict[str, object],
-) -> dict[str, object]:
-    """Classify checkout differences without weakening Git-object authority.
-
-    Only insertion of CR before an LF in a live Windows checkout is accepted
-    as a non-substantive materialization difference.  Missing files, mode
-    contract changes, versions, bare CR changes, or any other byte change are
-    substantive.
-    """
-
-    def rows(value: dict[str, object]) -> dict[str, dict[str, object]]:
-        return {
-            f"{row['root']}/{row['path']}": row
-            for row in value["shippingInputs"]  # type: ignore[index]
-        }
-
-    live_rows, candidate_rows = rows(live), rows(candidate)
-    changed = sorted(
-        path
-        for path in set(live_rows) | set(candidate_rows)
-        if live_rows.get(path) != candidate_rows.get(path)
-    )
-    crlf_only_paths: list[str] = []
-    crlf_only = bool(changed)
-    for relative in changed:
-        live_row, candidate_row = live_rows.get(relative), candidate_rows.get(relative)
-        if live_row is None or candidate_row is None or live_row.get("mode") != candidate_row.get("mode"):
-            crlf_only = False
-            continue
-        root_name, path = relative.split("/", 1)
-        live_root = live_source if root_name == "source" else live_installer
-        candidate_root = candidate_source if root_name == "source" else candidate_installer
-        live_bytes = (live_root / path).read_bytes()
-        candidate_bytes = (candidate_root / path).read_bytes()
-        if live_bytes != candidate_bytes and live_bytes.replace(b"\r\n", b"\n") == candidate_bytes:
-            crlf_only_paths.append(relative)
-        else:
-            crlf_only = False
-    if (
-        live["shippingModeContract"] != candidate["shippingModeContract"]
-        or live["devfleetVersion"] != candidate["devfleetVersion"]
-        or live["installerVersion"] != candidate["installerVersion"]
-    ):
-        crlf_only = False
-    if crlf_only and len(crlf_only_paths) != len(changed):
-        crlf_only = False
-    return {
-        "lineEndingComparison": "CRLF_ONLY" if crlf_only else ("BYTE_EXACT" if not changed else "SUBSTANTIVE"),
-        "materializedChangedPaths": changed,
-        "crlfOnlyPaths": crlf_only_paths if crlf_only else [],
-        "crlfOnlyMaterialization": crlf_only,
-    }
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--workspace", type=Path)
-    parser.add_argument("--candidate-commit")
-    parser.add_argument("--source-root", type=Path)
-    parser.add_argument("--installer-root", type=Path)
-    parser.add_argument("--artifact", action="append", default=[], metavar="NAME=PATH")
-    args = parser.parse_args()
-    artifacts: dict[str, Path] = {}
-    for value in args.artifact:
-        name, separator, raw_path = value.partition("=")
-        if not separator or not name or not raw_path:
-            parser.error(f"artifact must be NAME=PATH: {value}")
-        if name in artifacts:
-            parser.error(f"duplicate artifact name: {name}")
-        artifacts[name] = Path(raw_path).resolve()
-    if artifacts:
-        missing = sorted(RELEASE_ARTIFACT_NAMES - set(artifacts))
-        unexpected = sorted(set(artifacts) - RELEASE_ARTIFACT_NAMES)
-        if missing or unexpected:
-            parser.error(f"artifact tuple must be exactly {sorted(RELEASE_ARTIFACT_NAMES)}; missing={missing}; unexpected={unexpected}")
-        absent = sorted(name for name, path in artifacts.items() if not path.is_file())
-        if absent:
-            parser.error(f"artifact paths must be existing files: {absent}")
-    if args.source_root and args.installer_root:
-        fingerprint = _fingerprint(args.source_root.resolve(), args.installer_root.resolve(), artifacts)
-        print(json.dumps({"shippingInputIdentity": _shipping_identity(fingerprint), "releaseFingerprintId": fingerprint["releaseFingerprintId"], "artifacts": fingerprint["artifacts"], "toolingFingerprint": fingerprint["toolingFingerprint"]}, ensure_ascii=False, separators=(",", ":")))
-        return 0
-    if not args.workspace or not args.candidate_commit:
-        parser.error("--workspace and --candidate-commit are required unless --source-root and --installer-root are supplied")
-    workspace = args.workspace.resolve()
-    live = _fingerprint(workspace / "source", workspace / "installer-source", artifacts)
-    candidate, staging = _materialize_candidate(workspace, args.candidate_commit, artifacts)
-    try:
-        comparison = _materialization_comparison(
-            workspace / "source",
-            workspace / "installer-source",
-            staging / "source",
-            staging / "installer-source",
-            live,
-            candidate,
-        )
-        candidate_fingerprint = {
-            key: value for key, value in candidate.items() if key != "toolingFingerprint"
-        }
-        payload = {
-            "liveShippingInputs": live["shippingInputs"],
-            "candidateShippingInputs": candidate["shippingInputs"],
-            "liveShippingModeContract": live["shippingModeContract"],
-            "candidateShippingModeContract": candidate["shippingModeContract"],
-            "liveVersion": live["devfleetVersion"],
-            "candidateVersion": candidate["devfleetVersion"],
-            "liveInstallerVersion": live["installerVersion"],
-            "candidateInstallerVersion": candidate["installerVersion"],
-            "liveShippingInputIdentity": _shipping_identity(live),
-            "candidateShippingInputIdentity": _shipping_identity(candidate),
-            "liveReleaseFingerprintId": live["releaseFingerprintId"],
-            "candidateReleaseFingerprintId": candidate["releaseFingerprintId"],
-            "artifacts": candidate["artifacts"],
-            "candidateFingerprint": candidate_fingerprint,
-            "liveToolingFingerprint": live["toolingFingerprint"],
-            **comparison,
-        }
-    finally:
-        import shutil
-        shutil.rmtree(staging, ignore_errors=True)
-    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-```
-
-
-## FILE: tools/reconcile_osv_scanner.py
-
-SHA256: 6cb2abed1ebcf7784767c22714f398bd68935bb74ede1b4239c0b512794ab82b | Bytes: 5548 | Git mode: 100644
-
-```
-"""Reconcile the custom dependency gate with first-party OSV-Scanner output."""
-from __future__ import annotations
-
-import argparse
-import hashlib
-import json
-import subprocess
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
-
-
-def _sha(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def _scanner_packages(payload: dict[str, Any]) -> set[tuple[str, str]]:
-    packages: set[tuple[str, str]] = set()
-    for result in payload.get("results", []) or []:
-        for item in result.get("packages", []) or []:
-            package = item.get("package") or {}
-            name, version = package.get("name"), package.get("version")
-            if name and version:
-                packages.add((str(name).lower().replace("_", "-"), str(version)))
-    return packages
-
-
-def _scanner_advisories(payload: dict[str, Any]) -> list[dict[str, str]]:
-    found: list[dict[str, str]] = []
-    for result in payload.get("results", []) or []:
-        for item in result.get("packages", []) or []:
-            package = item.get("package") or {}
-            for vulnerability in item.get("vulnerabilities", []) or []:
-                if isinstance(vulnerability, dict):
-                    found.append({
-                        "id": str(vulnerability.get("id") or vulnerability.get("aliases", ["unknown"])[0]),
-                        "package": str(package.get("name") or ""),
-                        "version": str(package.get("version") or ""),
-                        "severity": str(vulnerability.get("severity") or "UNKNOWN"),
-                    })
-    return sorted(found, key=lambda item: (item["package"], item["version"], item["id"]))
-
-
-def _scanner_version(scanner: Path) -> str:
-    completed = subprocess.run([str(scanner), "--version"], capture_output=True, text=True, timeout=30, check=True)
-    for line in completed.stdout.splitlines():
-        if line.lower().startswith("osv-scanner version:"):
-            return line.split(":", 1)[1].strip()
-    raise RuntimeError("OSV-Scanner version output was not recognizable")
-
-
-def reconcile(scanner: Path, lock: Path, custom_report: Path, output: Path) -> dict[str, Any]:
-    custom = json.loads(custom_report.read_text(encoding="utf-8"))
-    raw_path = output.with_name(output.name + ".scanner-raw.json")
-    version = _scanner_version(scanner)
-    command = [str(scanner), "scan", "source", "--lockfile", str(lock), "--format", "json", "--all-packages", "--output-file", str(raw_path), "--verbosity", "error"]
-    try:
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=180)
-        try:
-            scanner_payload = json.loads(raw_path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"OSV-Scanner returned no valid JSON (exit {completed.returncode}): {completed.stderr[-1000:]}") from exc
-    finally:
-        raw_path.unlink(missing_ok=True)
-    custom_packages = {
-        (str(item["package"]).lower().replace("_", "-"), str(item["version"]))
-        for item in custom.get("packages", [])
-    }
-    scanner_packages = _scanner_packages(scanner_payload)
-    advisories = _scanner_advisories(scanner_payload)
-    errors: list[str] = []
-    if completed.returncode != 0:
-        errors.append(f"OSV-Scanner exit code {completed.returncode}: {completed.stderr[-1000:]}")
-    if custom.get("status") != "PASS":
-        errors.append(f"custom dependency gate status is {custom.get('status')!r}")
-    if custom_packages != scanner_packages:
-        errors.append(f"package inventory mismatch: custom_only={sorted(custom_packages - scanner_packages)} scanner_only={sorted(scanner_packages - custom_packages)}")
-    if advisories:
-        errors.append("independent OSV-Scanner found advisories")
-    report = {
-        "schema_version": 1,
-        "status": "PASS" if not errors else "BLOCKED",
-        "scanner": "OSV-Scanner",
-        "scanner_version": version,
-        "invocation": command,
-        "input_lock": str(lock),
-        "input_lock_sha256": _sha(lock),
-        "checked_at": datetime.now(timezone.utc).isoformat(),
-        "package_count": len(scanner_packages),
-        "custom_package_count": len(custom_packages),
-        "advisories": advisories,
-        "custom_blocking_advisories": custom.get("blocking_advisories", []),
-        "allowlisted_advisories": [item for item in custom.get("packages", []) if item.get("advisories")],
-        "errors": errors,
-    }
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    return report
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--scanner", type=Path, required=True)
-    parser.add_argument("--lock", type=Path, required=True)
-    parser.add_argument("--custom-report", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
-    try:
-        report = reconcile(args.scanner, args.lock, args.custom_report, args.output)
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, RuntimeError) as exc:
-        print(json.dumps({"status": "BLOCKED", "error": str(exc)}))
-        return 2
-    print(json.dumps({"status": report["status"], "packages": report["package_count"], "advisories": len(report["advisories"]), "errors": len(report["errors"])}))
-    return 0 if report["status"] == "PASS" else 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-```
-
-
-## FILE: tools/release-tooling-requirements.txt
-
-SHA256: 78a660089f62dde9ed045e27020e6fd7973a0addfd638e2235d8064dcd083f60 | Bytes: 340 | Git mode: 100644
-
-```
-# Release-only dependencies for source/tools/check_dependency_advisories.py.
-# These are intentionally not part of the DevFleet product runtime.
-packaging==26.3 \
-    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
-cvss==3.6 \
-    --hash=sha256:e342c6d9c7eb69d2eabbbc2768a03cabd57eb947c806e145de5b936219833ea
-
-```
-
-
-## FILE: tools/run_portable_audit_tests.py
-
-SHA256: e65e234f040d84909033ce93152a27ba0ee6948c58892cf6bcf9fe6ccb0e90d9 | Bytes: 5249 | Git mode: 100644
-
-```
-"""Run the bounded, self-contained test corpus from a clean audit extraction."""
-from __future__ import annotations
-
-import argparse
-import fnmatch
-import importlib.util
-import shutil
-import json
-import subprocess
-import sys
-from pathlib import Path
-
-SCRIPT_ROOT = Path(__file__).resolve().parent
-if str(SCRIPT_ROOT) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_ROOT))
-
-from audit_bundle_paths import resolve_bundle_layout
-
-
-def _classify(path: str, manifest: dict) -> str:
-    for category, patterns in manifest.get("categories", {}).items():
-        if any(fnmatch.fnmatch(path, pattern) for pattern in patterns):
-            return category
-    return "UNCLASSIFIED"
-
-
-def run(root: Path) -> dict:
-    root = root.resolve()
-    layout = resolve_bundle_layout(root)
-    if layout.bundle_root != root:
-        raise RuntimeError(f"runner root is not the extracted bundle root: {root}")
-    manifest_path = layout.release_tooling_root / "audit-test-manifest.json"
-    if not manifest_path.is_file():
-        raise RuntimeError(f"audit test manifest is missing: {manifest_path}")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
-    if manifest.get("entrypoint") != "release-tooling/run_portable_audit_tests.py":
-        raise RuntimeError("audit test manifest entrypoint is not canonical")
-    # The portable tests intentionally retain their repository-relative
-    # authority imports (ROOT / tools/...).  A clean audit extraction maps
-    # release tooling under release-tooling/, so stage only these two
-    # non-shipping authority helpers into the temporary extraction root.
-    compatibility_root = root / "tools"
-    compatibility_root.mkdir(parents=True, exist_ok=True)
-    for helper in ("compute_shipping_input_identity.py", "validate_release_bundle.py", "Build-AIAuditBundle.ps1"):
-        source_helper = layout.release_tooling_root / helper
-        if not source_helper.is_file():
-            raise RuntimeError(f"portable authority helper is missing from extraction: {helper}")
-        shutil.copy2(source_helper, compatibility_root / helper)
-    classifications: dict[str, dict] = {}
-    for path in sorted((root / "source/tests").glob("test_*.py")):
-        relative = path.relative_to(root).as_posix()
-        category = _classify(relative, manifest)
-        classifications[relative] = {"category": category, "status": "NOT_RUN", "reason": "not selected by bounded portable corpus"}
-    for path in manifest.get("portableTests", []):
-        if path not in classifications:
-            raise RuntimeError(f"manifest portable test is missing from extraction: {path}")
-        classifications[path] = {"category": "portable", "status": "PENDING", "reason": "selected portable test"}
-    unclassified = [path for path, record in classifications.items() if record["category"] == "UNCLASSIFIED"]
-    if unclassified:
-        raise RuntimeError(f"unclassified tests: {unclassified}")
-    for path, record in classifications.items():
-        if record["status"] == "NOT_RUN":
-            record["status"] = "SKIPPED"
-            record["reason"] = f"classified {record['category']}; required artifact/platform is not part of portable mode"
-    pytest_available = importlib.util.find_spec("pytest") is not None
-    if not pytest_available:
-        raise RuntimeError("portable test runner requires pytest in the invoking interpreter; no original .venv-test path is used")
-    selected = list(manifest["portableTests"])
-    completed = subprocess.run([sys.executable, "-m", "pytest", "-q", *selected], cwd=root, capture_output=True, text=True, timeout=300)
-    if completed.returncode:
-        raise RuntimeError(f"portable pytest collection/test failure (exit {completed.returncode}): {(completed.stdout + completed.stderr)[-4000:]}")
-    for path in selected:
-        classifications[path]["status"] = "PASS"
-        classifications[path]["reason"] = "portable test completed with the invoking interpreter"
-    return {
-        "schemaVersion": 1,
-        "status": "PASS",
-        "root": str(root),
-        "python": sys.executable,
-        "workingDirectory": str(root),
-        "portableTests": selected,
-        "tests": classifications,
-        "unexpectedCollectionFailures": [],
-        "explicitSkips": [record for record in classifications.values() if record["status"] == "SKIPPED"],
-        "nestedReleaseArchiveAssumption": False,
-        "canonicalReleaseToolingResolved": True,
-        "originalRepositoryFallback": False,
-        "pytestOutput": completed.stdout,
-    }
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--root", type=Path, default=Path.cwd())
-    parser.add_argument("--output", type=Path)
-    args = parser.parse_args()
-    try:
-        result = run(args.root)
-    except Exception as exc:  # noqa: BLE001 - structured CLI failure is required
-        result = {"schemaVersion": 1, "status": "FAIL", "error": str(exc), "unexpectedCollectionFailures": [str(exc)]}
-        print(json.dumps(result, indent=2))
-        return 2
-    if args.output:
-        args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(result, indent=2))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-```
-
-
-## FILE: tools/test_baseline_lineage.py
-
-SHA256: eca3e391c660e57a494a770c0c3b46d438fa631ba299c12d697b7b271b7fa8f6 | Bytes: 19983 | Git mode: 100644
-
-```
-"""VM-free transaction tests for exact DevFleet CLEAN baseline adoption."""
-import copy
-import importlib.util
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
-import shutil
+import re
+import subprocess
+import sys
 import tempfile
-import unittest
-
-from baseline_lineage import adopt, accepted_baseline, rebind
-from validate_release_bundle import load_accepted_baseline
+import uuid
 
 
-VM = '84b7d8b8-ee6c-4085-aa29-4b0adc316de2'
-OLD = '19865b76-4c3a-44f7-ba39-841e9d3c40c9'
-NEW = '11111111-2222-4333-8444-555555555555'
-TUPLE = {'repositoryHead': '1' * 40, 'candidateBuildCommit': '2' * 40,
-         'shippingInputIdentity': '3' * 64, 'releaseFingerprintId': '4' * 64,
-         'toolingFingerprintId': '5' * 64, 'candidateSha256': '6' * 64}
+VM_NAME = 'DevFleet-E2E-Win11-01'
+VM_ID = '84b7d8b8-ee6c-4085-aa29-4b0adc316de2'
+OLD_NAME = 'DevFleet-E2E-CLEAN'
+OLD_ID = '19865b76-4c3a-44f7-ba39-841e9d3c40c9'
+NEW_NAME = 'DevFleet-E2E-CLEAN-R2'
+L2_NAME = 'DevFleet-E2E-Linux-01'
+TUPLE_KEYS = ('repositoryHead', 'candidateBuildCommit', 'shippingInputIdentity',
+              'releaseFingerprintId', 'toolingFingerprintId', 'candidateSha256')
+HEX64 = re.compile(r'[0-9a-f]{64}\Z')
 
 
-class BaselineLineageTests(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
-        predecessor = self.root / 'audit/agent-memory/attempts/DF-FRESH-CERTIFICATION-20260926-R2/readiness-predecessor.json'
-        predecessor.parent.mkdir(parents=True, exist_ok=True)
-        predecessor.write_text(json.dumps({'lab': {'l1Id': VM, 'cleanId': OLD},
-                                           'liveGuestAuth': {'cleanRestored': True,
-                                                             'finalL1State': 'Off'}}), encoding='utf-8')
-        self.proposal = {'schemaVersion': 1, 'contract': 'devfleet-baseline-adoption-proposal-v1',
-                         'runId': 'r2-owned-baseline-1',
-                         'vm': {'name': 'DevFleet-E2E-Win11-01', 'id': VM},
-                         'predecessor': {'name': 'DevFleet-E2E-CLEAN', 'id': OLD},
-                         'replacement': {'name': 'DevFleet-E2E-CLEAN-R2', 'id': NEW,
-                                         'vmId': VM, 'parentSnapshotId': OLD},
-                         'predecessorEvidence': {'path': str(predecessor),
-                                                 'sha256': hashlib.sha256(predecessor.read_bytes()).hexdigest()},
-                         'candidate': copy.deepcopy(TUPLE)}
-        self.approval = {'schemaVersion': 1, 'contract': 'devfleet-baseline-adoption-approval-v1',
-                         'decision': 'APPROVE', 'approvedBy': 'ACCOUNT_OWNER',
-                         'vmId': VM, 'predecessorId': OLD, 'replacementId': NEW,
-                         'runId': 'r2-owned-baseline-1', 'candidate': copy.deepcopy(TUPLE)}
-        self.auth = {'scope': 'CURRENT_RUNNING_GUEST_READ_ONLY',
-                     'runId': 'r2-owned-baseline-1', 'connected': True,
-                     'status': 'AUTHENTICATED_CURRENT_GUEST_NOT_CLEAN_PROOF',
-                     'certificationCredit': False,
-                     'observedUtc': '2026-09-27T03:00:00Z',
-                     'guest': {'computerName': 'DEVFLEET-E2E-01',
-                               'principal': 'DEVFLEET-E2E-01\\E2EAdmin',
-                               'accountEnabled': True,
-                               'passwordLastSetUtc': '2026-09-27T02:40:00Z',
-                               'passwordExpiresUtc': '2026-10-27T02:40:00Z'},
-                     'credential': {'storeUser': 'E2EAdmin',
-                                    'protectedStoreUpdatedUtc': '2026-09-27T02:45:00Z',
-                                    'secretValuesRecorded': False},
-                     'nestedL2': {'status': 'ABSENT', 'present': False,
-                                  'expectedName': 'DevFleet-E2E-Linux-01',
-                                  'exactMatchCount': 0,
-                                  'observedUtc': '2026-09-27T02:59:00Z',
-                                  'backendInventories': [
-                                      {'provider': 'Hyper-V', 'status': 'PASS', 'names': [], 'verification': 'read-only'},
-                                      {'provider': 'VirtualBox', 'status': 'PASS', 'names': [], 'verification': 'read-only'}]}}
-        self.live = {'scope': 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY',
-                     'observedUtc': '2026-09-27T03:05:00Z',
-                     'vm': {'name': 'DevFleet-E2E-Win11-01', 'id': VM, 'state': 'Off'},
-                     'snapshots': [{'name': 'DevFleet-E2E-CLEAN', 'id': OLD, 'vmId': VM},
-                                   {'name': 'DevFleet-E2E-CLEAN-R2', 'id': NEW,
-                                    'vmId': VM, 'parentSnapshotId': OLD}]}
-        now = datetime.now(timezone.utc)
-        stamp = lambda value: value.isoformat()
-        self.auth['observedUtc'] = stamp(now - timedelta(minutes=5))
-        self.auth['guest']['passwordLastSetUtc'] = stamp(now - timedelta(minutes=20))
-        self.auth['guest']['passwordExpiresUtc'] = stamp(now + timedelta(days=30))
-        self.auth['credential']['protectedStoreUpdatedUtc'] = stamp(now - timedelta(minutes=10))
-        self.auth['nestedL2']['observedUtc'] = stamp(now - timedelta(minutes=6))
-        self.live['observedUtc'] = stamp(now - timedelta(minutes=1))
-        self.auth['startedUtc'] = stamp(now - timedelta(minutes=7))
-        self.auth['vm'] = {'name': 'DevFleet-E2E-Win11-01', 'id': VM}
-        self.auth['candidate'] = copy.deepcopy(TUPLE)
-        self.ledger = {'policyId': 'DF-FRESH-CERTIFICATION-20260926-R2',
-                       'activeRunId': None,
-                       'attempts': [{'runId': 'r2-owned-baseline-1', 'operation': 'diagnostic',
-                                     'state': 'TERMINAL', 'certificationCredit': False,
-                                     'tuple': copy.deepcopy(TUPLE), 'exitCode': 0,
-                                     'reservedUtc': stamp(now - timedelta(minutes=8)),
-                                     'deadlineUtc': stamp(now + timedelta(minutes=5)),
-                                     'evidence': [str(self.root / 'auth.json')],
-                                     'terminalUtc': stamp(now - timedelta(minutes=2))}]}
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
 
-    def write(self, name, value):
-        path = self.root / name
-        path.write_text(json.dumps(value), encoding='utf-8')
-        return path
 
-    def one_diagnostic_ledger(self):
-        source = Path(__file__).resolve().parents[1] / '.agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py'
-        target = self.root / '.agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py'
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, target)
-        spec = importlib.util.spec_from_file_location('fixture_fresh_attempts', target)
-        journal = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(journal)
-        base_auth = self.root / 'base-authorization.md'
-        r2_auth = self.root / 'r2-authorization.md'
-        d1_auth = self.root / 'd1-authorization.md'
-        for path, text in ((base_auth, 'base'), (r2_auth, 'R2'),
-                           (d1_auth, 'one extra diagnostic')):
-            path.write_text(text, encoding='utf-8')
-        base = self.root / 'base-ledger.json'
-        r2 = self.root / 'r2-ledger.json'
-        successor = self.root / 'successor-ledger.json'
-        journal.initialize(base, base_auth, [])
-        journal.initialize(r2, r2_auth, [base], journal.POLICY_ID + '-R2')
-        for number in range(6):
-            request = {'runId': f'diagnostic-{number}', 'operation': 'diagnostic',
-                       'owner': {'pid': 1234, 'startUtc': '2026-09-27T00:00:00Z'},
-                       'tuple': {'repositoryHead': '1' * 40},
-                       'entrypoint': 'readiness.ps1', 'entrypointSha256': '2' * 64,
-                       'arguments': [], 'changedCondition': 'bounded fixture',
-                       'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
-            journal.reserve(r2, request)
-            journal.finish(r2, request['runId'], request['owner'], 2, 'TEST_TERMINAL', [])
-        journal.initialize(successor, d1_auth, [r2], journal.ONE_DIAGNOSTIC_ID)
-        return successor
+def digest(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
-    def invoke(self, *, proposal=None, approval=None, auth=None, live=None,
-               candidate=None, ledger=None, fault=None):
-        return adopt(self.root,
-                     self.write('proposal.json', self.proposal if proposal is None else proposal),
-                     self.write('approval.json', self.approval if approval is None else approval),
-                     self.write('auth.json', self.auth if auth is None else auth),
-                     self.write('live.json', self.live if live is None else live),
-                     self.write('candidate.json', TUPLE if candidate is None else candidate),
-                     self.write('ledger.json', self.ledger if ledger is None else ledger),
-                     fault=fault)
 
-    def test_valid_transaction_preserves_predecessor_and_no_credit(self):
-        self.assertEqual(accepted_baseline(self.root)['id'], OLD)
-        receipt = self.invoke()
-        selected = accepted_baseline(self.root, TUPLE)
-        self.assertEqual(selected['id'], NEW)
-        self.assertEqual(selected['predecessorId'], OLD)
-        self.assertEqual(selected['receiptSha256'], receipt['receiptSha256'])
-        self.assertFalse(receipt['certificationCredit'])
-        receipt_path = self.root / 'evidence/baselines/receipts' / receipt['receiptFile']
-        self.assertTrue(receipt_path.is_file())
-        self.assertEqual(json.loads(receipt_path.read_text())['sources']['predecessorEvidenceSha256'],
-                         self.proposal['predecessorEvidence']['sha256'])
-        expected = {'repositoryHead': TUPLE['repositoryHead'],
-                    'candidateCommit': TUPLE['candidateBuildCommit'],
-                    'shippingInputIdentity': TUPLE['shippingInputIdentity'],
-                    'releaseFingerprintId': TUPLE['releaseFingerprintId'],
-                    'toolingFingerprintId': TUPLE['toolingFingerprintId']}
-        self.assertEqual(load_accepted_baseline(self.root, expected,
-                                                {'exe': TUPLE['candidateSha256']})['id'], NEW)
+def read_json(path):
+    path = Path(path)
+    require(path.is_file() and not path.is_symlink() and path.stat().st_size <= 4_000_000,
+            'Baseline input is absent, linked, or oversized')
+    def pairs(items):
+        data = {}
+        for key, value in items:
+            require(key not in data, 'Duplicate JSON key')
+            data[key] = value
+        return data
+    def invalid(_):
+        raise ValueError('Nonfinite JSON number')
+    value = json.loads(path.read_text(encoding='utf-8-sig'),
+                       object_pairs_hook=pairs, parse_constant=invalid)
+    require(isinstance(value, dict), 'Baseline input is not a JSON object')
+    return value
 
-    def test_exact_owner_approved_rebind_preserves_v1_chain(self):
-        first = self.invoke()
-        new_tuple = {**TUPLE, 'repositoryHead': '7' * 40,
-                     'toolingFingerprintId': '8' * 64}
-        binding_approval = {'schemaVersion': 1,
-                            'contract': 'devfleet-baseline-rebind-approval-v1',
-                            'decision': 'APPROVE', 'approvedBy': 'ACCOUNT_OWNER',
-                            'candidate': new_tuple,
-                            'replacement': self.proposal['replacement'],
-                            'previousReceiptSha256': first['receiptSha256']}
-        successor = self.one_diagnostic_ledger()
-        with self.assertRaises(ValueError):
-            rebind(self.root,
-                   self.write('bad-shipping-tuple.json', {**new_tuple, 'shippingInputIdentity': '9' * 64}),
-                   self.write('rebind-approval.json', binding_approval), successor,
-                   self.write('rebind-live.json', self.live))
-        with self.assertRaises(ValueError):
-            rebind(self.root, self.write('new-tuple.json', new_tuple),
-                   self.write('bad-rebind-approval.json', {**binding_approval, 'decision': 'PENDING'}),
-                   successor, self.root / 'rebind-live.json')
-        with self.assertRaises(ValueError):
-            rebind(self.root, self.root / 'new-tuple.json',
-                   self.root / 'rebind-approval.json',
-                   self.write('forged-successor.json', {'policyId': 'DF-FRESH-CERTIFICATION-20260926-R2-D1',
-                                                        'activeRunId': None, 'limits': {'diagnostic': 1},
-                                                        'attempts': []}),
-                   self.root / 'rebind-live.json')
-        rebound = rebind(self.root, self.write('new-tuple.json', new_tuple),
-                         self.write('rebind-approval.json', binding_approval),
-                         successor,
-                         self.write('rebind-live.json', self.live))
-        self.assertEqual(rebound['id'], NEW)
-        self.assertEqual(rebound['generation'], 2)
-        self.assertNotEqual(rebound['receiptSha256'], first['receiptSha256'])
-        self.assertEqual(accepted_baseline(self.root, new_tuple)['receiptSha256'],
-                         rebound['receiptSha256'])
-        expected = {'repositoryHead': new_tuple['repositoryHead'],
-                    'candidateCommit': new_tuple['candidateBuildCommit'],
-                    'shippingInputIdentity': new_tuple['shippingInputIdentity'],
-                    'releaseFingerprintId': new_tuple['releaseFingerprintId'],
-                    'toolingFingerprintId': new_tuple['toolingFingerprintId']}
-        self.assertEqual(load_accepted_baseline(self.root, expected,
-                                                {'exe': new_tuple['candidateSha256']})['receiptSha256'],
-                         rebound['receiptSha256'])
-        with self.assertRaises(ValueError):
-            rebind(self.root, self.root / 'new-tuple.json', self.root / 'rebind-approval.json',
-                   successor, self.root / 'rebind-live.json')
-        history = next((self.root / 'evidence/baselines/history').glob('*.json'))
-        history.write_bytes(history.read_bytes() + b' ')
-        with self.assertRaises(ValueError):
-            accepted_baseline(self.root, new_tuple)
-        with self.assertRaises(ValueError):
-            load_accepted_baseline(self.root, expected, {'exe': new_tuple['candidateSha256']})
 
-    def test_independent_release_validator_rejects_rehashed_malformed_receipt(self):
-        import hashlib
-        receipt_info = self.invoke()
-        path = self.root / 'evidence/baselines/receipts' / receipt_info['receiptFile']
-        pointer_path = self.root / 'evidence/baselines/CURRENT.json'
-        expected = {'repositoryHead': TUPLE['repositoryHead'],
-                    'candidateCommit': TUPLE['candidateBuildCommit'],
-                    'shippingInputIdentity': TUPLE['shippingInputIdentity'],
-                    'releaseFingerprintId': TUPLE['releaseFingerprintId'],
-                    'toolingFingerprintId': TUPLE['toolingFingerprintId']}
-        original = json.loads(path.read_text())
-        for kind in ('schema', 'guid', 'nested', 'secret'):
-            with self.subTest(kind=kind):
-                receipt = copy.deepcopy(original)
-                if kind == 'schema': receipt['schemaVersion'] = 9
-                if kind == 'guid': receipt['replacement']['id'] = 'not-a-guid'
-                if kind == 'nested': receipt['nestedL2']['backendInventories'][0]['names'] = ['DevFleet-E2E-Linux-01']
-                if kind == 'secret': receipt['secretValuesRecorded'] = True
-                path.write_text(json.dumps(receipt), encoding='utf-8')
-                pointer = json.loads(pointer_path.read_text())
-                pointer['receiptSha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
-                pointer['checkpoint'] = receipt['replacement']
-                pointer_path.write_text(json.dumps(pointer), encoding='utf-8')
-                with self.assertRaises(ValueError):
-                    load_accepted_baseline(self.root, expected, {'exe': TUPLE['candidateSha256']})
+def instant(value):
+    require(isinstance(value, str) and value, 'Missing UTC instant')
+    parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    require(parsed.tzinfo is not None and parsed.utcoffset().total_seconds() == 0,
+            'Baseline evidence instant is not UTC')
+    return parsed.astimezone(timezone.utc)
 
-    def test_wrong_missing_ambiguous_checkpoint_and_name_only_rejected(self):
-        for kind in ('wrong_vm', 'missing_new', 'duplicate_new', 'name_only', 'wrong_parent'):
-            with self.subTest(kind=kind):
-                proposal, live = copy.deepcopy(self.proposal), copy.deepcopy(self.live)
-                if kind == 'wrong_vm': live['vm']['id'] = '00000000-0000-0000-0000-000000000001'
-                if kind == 'missing_new': live['snapshots'].pop()
-                if kind == 'duplicate_new': live['snapshots'].append(copy.deepcopy(live['snapshots'][-1]))
-                if kind == 'name_only': live['snapshots'][-1]['id'] = OLD
-                if kind == 'wrong_parent': live['snapshots'][-1]['parentSnapshotId'] = NEW
-                with self.assertRaises(ValueError): self.invoke(proposal=proposal, live=live)
-                self.assertEqual(accepted_baseline(self.root)['id'], OLD)
 
-    def test_approval_inventory_expiry_and_tuple_rejected(self):
-        for kind in ('unapproved', 'approval_id', 'inventory_missing', 'inventory_present',
-                     'expired', 'unknown_expiry', 'tuple', 'guest_identity'):
-            with self.subTest(kind=kind):
-                approval, auth, candidate = copy.deepcopy(s
+def exact_tuple(value):
+    require(isinstance(value, dict) and set(value) == set(TUPLE_KEYS),
+            'Candidate tuple is missing or contains unexpected fields')
+    for key in TUPLE_KEYS:
+        size = 40 if key in ('repositoryHead', 'candidateBuildCommit') else 64
+        require(isinstance(value[key], str) and re.fullmatch(f'[0-9a-f]{{{size}}}', value[key]),
+                'Candidate tuple field is malformed: ' + key)
+    return {key: value[key] for key in TUPLE_KEYS}
+
+
+@contextmanager
+def lock(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, 'a+b') as stream:
+        stream.seek(0); stream.write(b'0'); stream.flush(); stream.seek(0)
+        if os.name == 'nt':
+            import msvcrt
+            try: msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as exc: raise ValueError('Baseline adoption already has an owner') from exc
+        else:
+            import fcntl
+            try: fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc: raise ValueError('Baseline adoption already has an owner') from exc
+        try:
+            yield
+        finally:
+            stream.seek(0)
+            if os.name == 'nt': msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else: fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def _json_bytes(value):
+    return (json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + '\n').encode('utf-8')
+
+
+def _write_exclusive(path, payload):
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'wb') as stream:
+        stream.write(payload)
+        stream.flush(); os.fsync(stream.fileno())
+
+
+def _atomic_replace(path, payload):
+    fd, tmp = tempfile.mkstemp(prefix=path.name + '.', suffix='.tmp', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(payload); stream.flush(); os.fsync(stream.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp): os.unlink(tmp)
+
+
+def _state(root):
+    root = Path(root).resolve(strict=True)
+    return root / 'evidence' / 'baselines'
+
+
+def accepted_baseline(root, current_tuple=None):
+    """Resolve only the original CLEAN or a hash-bound adopted receipt."""
+    state = _state(root)
+    pointer_path = state / 'CURRENT.json'
+    if not pointer_path.exists():
+        return {'name': OLD_NAME, 'id': OLD_ID, 'vmName': VM_NAME, 'vmId': VM_ID,
+                'predecessorId': None, 'receiptSha256': None, 'legacyOriginal': True}
+    pointer = read_json(pointer_path)
+    if pointer.get('generation') == 4:
+        return _accepted_rebound_v4(root, pointer, current_tuple)
+    if pointer.get('generation') == 3:
+        return _accepted_rebound_v3(root, pointer, current_tuple)
+    if pointer.get('generation') == 2:
+        return _accepted_rebound_baseline(root, pointer, current_tuple)
+    return _accepted_v1_baseline(root, pointer, current_tuple)
+
+
+def _accepted_v1_baseline(root, pointer, current_tuple=None):
+    state = _state(root)
+    require(pointer.get('schemaVersion') == 1 and pointer.get('contract') == 'devfleet-accepted-baseline-v1'
+            and pointer.get('generation') == 1 and pointer.get('status') == 'ACCEPTED',
+            'Accepted baseline pointer is malformed')
+    filename = pointer.get('receiptFile')
+    require(isinstance(filename, str) and re.fullmatch(r'[0-9a-f]{32}\.json', filename),
+            'Accepted baseline receipt path is invalid')
+    receipt_path = state / 'receipts' / filename
+    receipt = read_json(receipt_path)
+    require(pointer.get('receiptSha256') == digest(receipt_path),
+            'Accepted baseline receipt hash differs')
+    require(receipt.get('contract') == 'devfleet-baseline-adoption-receipt-v1'
+            and receipt.get('status') == 'ADOPTED' and receipt.get('certificationCredit') is False
+            and receipt.get('secretValuesRecorded') is False
+            and receipt.get('receiptId') + '.json' == filename,
+            'Accepted baseline receipt is malformed')
+    old, new = receipt.get('predecessor') or {}, receipt.get('replacement') or {}
+    require(old == {'name': OLD_NAME, 'id': OLD_ID}
+            and new.get('name') == NEW_NAME and new.get('vmId') == VM_ID
+            and new.get('parentSnapshotId') == OLD_ID and new.get('id') != OLD_ID,
+            'Accepted baseline lineage differs')
+    require(pointer.get('checkpoint') == new, 'Pointer and immutable receipt disagree')
+    try: new_id = str(uuid.UUID(new.get('id', '')))
+    except (ValueError, TypeError, AttributeError) as exc: raise ValueError('Accepted replacement GUID is invalid') from exc
+    require(new_id == new['id'], 'Accepted replacement GUID is not canonical')
+    authority = receipt.get('adoptionAuthority') or {}
+    guest = receipt.get('authenticatedGuest') or {}
+    nested = receipt.get('nestedL2') or {}
+    sources = receipt.get('sources') or {}
+    require(authority.get('decision') == 'APPROVE' and authority.get('approvedBy') == 'ACCOUNT_OWNER'
+            and guest.get('computerName') == 'DEVFLEET-E2E-01'
+            and guest.get('principal') == 'DEVFLEET-E2E-01\\E2EAdmin'
+            and guest.get('accountEnabled') is True
+            and nested.get('status') == 'ABSENT' and nested.get('present') is False
+            and nested.get('expectedName') == L2_NAME
+            and nested.get('exactMatchCount') == 0
+            and receipt.get('finalL1') == {'name': VM_NAME, 'id': VM_ID, 'state': 'Off'},
+            'Accepted baseline approval, authenticated identity, or terminal lab state differs')
+    inventories = nested.get('backendInventories')
+    require(isinstance(inventories, list) and len(inventories) == 2
+            and {row.get('provider') for row in inventories if isinstance(row, dict)} == {'Hyper-V', 'VirtualBox'}
+            and all(row.get('status') == 'PASS' and isinstance(row.get('names'), list)
+                    and L2_NAME not in row['names'] for row in inventories),
+            'Accepted baseline nested backend inventories are incomplete')
+    for source_key in ('proposalSha256', 'predecessorEvidenceSha256', 'approvalSha256',
+                       'authenticatedGuestSha256', 'nativeInventorySha256',
+                       'currentTupleSha256', 'r2LedgerSha256'):
+        require(isinstance(sources.get(source_key), str)
+                and HEX64.fullmatch(sources[source_key]),
+                'Accepted baseline source hash is missing: ' + source_key)
+    require(authority.get('sourceSha256') == sources['approvalSha256'],
+            'Accepted baseline approval source hash differs')
+    require(instant(receipt.get('passwordLastSetUtc')) <=
+            instant(receipt.get('protectedStoreUpdatedUtc')) <=
+            instant(guest.get('sourceObservedUtc')) <
+            instant(receipt.get('passwordExpiresUtc')),
+            'Accepted baseline credential freshness metadata differs')
+    if current_tuple is not None:
+        require(receipt.get('candidate') == exact_tuple(current_tuple),
+                'Accepted baseline is bound to another candidate/material tuple')
+    require(instant(receipt.get('passwordExpiresUtc')) > datetime.now(timezone.utc),
+            'Accepted baseline credential expiry is no longer current')
+    return {'name': new['name'], 'id': new['id'], 'vmName': VM_NAME, 'vmId': VM_ID,
+            'predecessorId': OLD_ID, 'receiptSha256': pointer['receiptSha256'],
+            'receiptFile': filename, 'legacyOriginal': False}
+
+
+def _accepted_rebound_baseline(root, pointer, current_tuple=None):
+    state = _state(root)
+    require(pointer.get('schemaVersion') == 2
+            and pointer.get('contract') == 'devfleet-accepted-baseline-v2'
+            and pointer.get('status') == 'ACCEPTED',
+            'Rebound baseline pointer contract is invalid')
+    filename = pointer.get('receiptFile')
+    old_hash = pointer.get('previousPointerSha256')
+    require(isinstance(filename, str) and re.fullmatch(r'[0-9a-f]{32}\.json', filename)
+            and isinstance(old_hash, str) and HEX64.fullmatch(old_hash),
+            'Rebound baseline chain filename or hash is invalid')
+    history_path = state / 'history' / (old_hash + '.json')
+    require(digest(history_path) == old_hash, 'Previous baseline pointer hash differs')
+    previous = read_json(history_path)
+    receipt_path = state / 'receipts' / filename
+    require(digest(receipt_path) == pointer.get('receiptSha256'),
+            'Rebound baseline receipt hash diffe

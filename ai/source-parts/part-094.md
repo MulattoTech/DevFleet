@@ -1,1136 +1,1165 @@
 # DevFleet source part 094
 
 Full-source UTF-8 byte interval [4324500, 4371000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 52554499823c7941e7cfbe20a90a5ff3b08e15849a9060c39b1de54f4426b96b
+Payload SHA-256: dd564799056fd00750712129f395ab3bba4b384a2e5c24bca342d208239bce4e
 
 <!-- BEGIN SOURCE SLICE -->
-INGS, docker_mode="rootless", docker_host="unix:///run/user/1000/docker.sock", docker_owner_uid=1000)
-    monkeypatch.setattr(core, "SETTINGS", settings)
-    monkeypatch.setattr(core.os, "lstat", lambda _path: SimpleNamespace(st_mode=stat.S_IFSOCK, st_uid=1000))
-    captured = {}
-
-    def fake_subprocess(_cmd, **kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
-
-    monkeypatch.setattr(core.subprocess, "run", fake_subprocess)
-    monkeypatch.setenv("DOCKER_HOST", "unix:///run/user/1000/docker.sock")
-    core.run(["docker", "info"], check=False)
-    assert captured["env"]["DOCKER_HOST"] == "unix:///run/user/1000/docker.sock"
+ source
+    assert "python3 - \"$SECRETS_ENV_TMP\"" in source
+    assert "target.replace('/etc/devfleet/secrets.env')" in source
+    assert "DEVFLEET_ADMIN_PASSWORD=$ADMIN_PASSWORD" not in source
 
 
-@pytest.mark.parametrize("host", ["unix:///run/user/4242/docker.sock", "tcp://127.0.0.1:2375", "", "unix:///run/user/1000/not-docker.sock"])
-def test_rootless_endpoint_rejects_wrong_identity_or_shape(monkeypatch, host: str) -> None:
-    settings = replace(SETTINGS, docker_mode="rootless", docker_host=host, docker_owner_uid=1000)
-    monkeypatch.setattr(core, "SETTINGS", settings)
-    monkeypatch.setattr(core.os, "lstat", lambda _path: SimpleNamespace(st_mode=stat.S_IFSOCK, st_uid=1000))
-    with pytest.raises(RuntimeError):
-        core._validate_rootless_docker_host(host)
+def test_compute_bootstrap_uses_structured_json_generation():
+    source = (ROOT / "linux" / "bootstrap-compute.sh").read_text(encoding="utf-8")
+    assert "jq -n" in source
+    assert "--arg" in source
+    assert "--argjson" in source
+    assert 's|__PORT__|$PORT|g' in source
+    assert 's|__WORKSPACES__|$WORKSPACES|g' in source
+    assert 's|__QUARANTINE__|$QUARANTINE|g' in source
 
 
-def test_rootless_deployment_contract_is_explicit() -> None:
-    unit = Path("source/app/systemd/devfleet.service").read_text(encoding="utf-8")
-    core_text = Path("source/app/devfleet/core.py").read_text(encoding="utf-8")
-    assert "SupplementaryGroups=devrunner" in unit
-    assert "Environment=DOCKER_HOST=unix:///run/user/__DEVRUNNER_UID__/docker.sock" in unit
-    assert "os.getuid" not in core_text
-    assert "_validate_rootless_docker_host" in core_text
+def test_bootstrap_entrypoints_bind_identity_and_install_cleanup_before_stdin_capture():
+    for name in ("bootstrap-compute.sh", "bootstrap-vault.sh"):
+        source = (ROOT / "linux" / name).read_text(encoding="utf-8")
+        argument_parser = source[: source.index("done", source.index("while (($#))"))]
+        assert "cat >" not in argument_parser
+        assert "--package-version" in argument_parser
+        assert "--node-role" in argument_parser
+        capture = source.index("devfleet_capture_json_stdin")
+        assert source.index("BOOTSTRAP_DEADLINE_EPOCH") < capture
+        assert source.index("trap '") < capture
+        assert source.index("begin_component secretsInput") < capture
+        assert "SECRETS_INPUT_MAX_SECONDS=60" in source
 
 
-def test_rootless_docker_acl_is_reapplied_after_each_service_start() -> None:
-    bootstrap = Path("source/linux/bootstrap-compute.sh").read_text(encoding="utf-8")
-    drop_in = "/home/devrunner/.config/systemd/user/docker.service.d/devfleet-control-acl.conf"
-    daemon_reload = (
-        "sudo -u devrunner env HOME=/home/devrunner XDG_RUNTIME_DIR=/run/user/$uid "
-        "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus systemctl --user daemon-reload"
-    )
-    enable_docker = (
-        "sudo -u devrunner env HOME=/home/devrunner XDG_RUNTIME_DIR=/run/user/$uid "
-        "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus systemctl --user enable --now docker"
-    )
-
-    assert drop_in in bootstrap
-    assert "ExecStartPost=/usr/bin/setfacl -m u:devfleet-control:rx %t" in bootstrap
-    assert "ExecStartPost=/usr/bin/setfacl -m u:devfleet-control:rw %t/docker.sock" in bootstrap
-    assert daemon_reload in bootstrap
-    assert bootstrap.index(daemon_reload) < bootstrap.index(enable_docker)
-
-
-def test_credential_comparison_count_is_constant(monkeypatch) -> None:
-    monkeypatch.setattr(auth, "SETTINGS", replace(SETTINGS, admin_user="alice", admin_password="secret"))
-    original = auth.hmac.compare_digest
-    counts: list[int] = []
-    calls = []
-
-    def counted(left, right):
-        calls.append((left, right))
-        return original(left, right)
-
-    monkeypatch.setattr(auth.hmac, "compare_digest", counted)
-    for user, password in [("wrong", "wrong"), ("alice", "wrong"), ("wrong", "secret"), ("alice", "secret"), ("", "")]:
-        calls.clear()
-        auth.valid_credentials(user, password, source="red-blue-test")
-        counts.append(len(calls))
-    assert counts == [2, 2, 2, 2, 2]
+def test_bootstrap_input_helper_is_deadline_bounded_and_never_logs_input():
+    source = (ROOT / "linux" / "bootstrap-input.sh").read_text(encoding="utf-8")
+    assert 'timeout --foreground --kill-after=5s "${remaining}s" cat >"$secret_path"' in source
+    assert "rm -f -- \"$secret_path\"" in source
+    assert "jq -e 'type == \"object\"'" in source
+    assert "cat \"$secret_path\"" not in source
 
 ```
 
 
-## FILE: source/tests/test_hardening7_boundaries.py
+## FILE: source/tests/test_client_generation.py
 
-SHA256: c76ba7108747796dc74b7ff6c4d026d5be2672dd2b4e99d14fc6f0f49bcbd8bb | Bytes: 8255 | Git mode: 100644
+SHA256: 493a64b3ce136bc267434b59f1afd5a134efec124cba7b736950b61bc56002f0 | Bytes: 547 | Git mode: 100644
 
 ```
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
-import json
-import re
-
-import yaml
-
-
-ROOT = Path(__file__).parents[1]
-
-
-def read(relative: str) -> str:
-    return (ROOT / relative).read_text(encoding="utf-8")
-
-
-def test_linux_bootstrap_has_stdin_only_secret_transport_and_separated_identities():
-    bootstrap = read("linux/bootstrap-compute.sh")
-    input_helper = read("linux/bootstrap-input.sh")
-    service = read("app/systemd/devfleet.service")
-    backup = read("app/systemd/devfleet-backup.service")
-    assert "--secrets-stdin)" in bootstrap
-    assert "devfleet_capture_json_stdin" in bootstrap
-    assert "timeout --foreground --kill-after=5s" in input_helper
-    assert "Refusing legacy plaintext node-secrets.json input" in bootstrap
-    assert 'SECRETS_SOURCE="${PAYLOAD}/node-secrets.json"' not in bootstrap
-    assert "User=devfleet-control" in service
-    assert "Group=devfleet-control" in service
-    assert "User=devfleet-backup" in backup
-    assert "Group=devfleet-backup" in backup
-    assert "chown root:devfleet-control /etc/devfleet/secrets.env" in bootstrap
-    assert "chmod 0640 /etc/devfleet/secrets.env" in bootstrap
-    assert "NOPASSWD:ALL" not in bootstrap
-    assert "sudoers.d/devfleet-devrunner" in bootstrap
-
-
-def test_windows_provisioning_never_writes_node_secret_file_or_passes_secret_argv():
-    provision = read("windows/02-Provision-ComputeNode.ps1")
-    common = read("windows/DevFleet.Common.psm1")
-    assert "node-secrets.json" not in provision
-    assert "New-DevFleetBootstrapBoundary" in provision
-    assert "--secrets-stdin" in common
-    assert ".extractionCommand" in provision
-    assert ".bootstrapCommand" in provision
-    assert "-StandardInputText" in provision
-    assert "RedirectStandardInput" in common
-    assert "-p$password" not in common
-    assert "DFENV001" in common
-    assert "AesGcm" in common
-
-
-def test_live_vm_identity_is_guest_bound_and_stopped_operations_fail_closed():
-    agent = read("windows/DevFleet-HostAgent.ps1")
-    assert "project-runtime.json" in agent
-    for field in ("managed_by", "project_id", "slug", "runtime_id", "host_id", "provisioning_attempt_id"):
-        assert f"runtimeMeta.{field}" in agent
-    assert "AllowStoppedTransition" in agent
-    assert "Operation -eq 'start'" in agent
-    assert "groups: [docker, sudo]" not in read("cloud-init/compute.yaml")
-    assert "NOPASSWD:ALL" not in agent
-
-
-def test_cleanup_is_postcondition_and_transaction_bound():
-    lifecycle = read("../installer-source/DevFleet.Setup/Services/InstallerLifecycle.cs")
-    services = read("../installer-source/DevFleet.Setup/Services/InstallerServices.cs")
-    assert "InstallationGeneration" in lifecycle
-    assert "PayloadFingerprint" in lifecycle
-    assert "Owned registry entry remains after cleanup" in lifecycle
-    assert "Owned shortcut remains after cleanup" in lifecycle
-    assert "Owned file remains after cleanup" in services
-    assert "Owned scheduled task remains after cleanup" in lifecycle
-    assert "cleanup-history" in lifecycle
-
-
-def test_uac_does_not_stage_before_elevation_and_vscode_is_trusted():
-    main = read("../installer-source/DevFleet.Setup/MainWindow.xaml.cs")
-    app = read("../installer-source/DevFleet.Setup/App.xaml.cs")
-    lifecycle = read("../installer-source/DevFleet.Setup/Services/InstallerLifecycle.cs")
-    assert "elevation-check" not in main
-    assert "TrustedExecutableResolver.VsCodePath()" in app
-    assert "UseShellExecute = false" in app
-    assert "ArgumentList.Add" in app
-    assert "Microsoft VS Code" in lifecycle
-
-
-def test_safety_policy_restore_journal_compose_reanalysis_and_frontend_terminal_states():
-    projects = read("app/devfleet/projects.py")
-    restore = read("app/devfleet/workspace_archives.py")
-    operations = read("app/devfleet/operations.py")
-    frontend = read("app/static/app.js")
-    assert "FINGERPRINT_POLICY_VERSION" in projects
-    assert "fingerprint_policy" in projects
-    assert "_assert_current_compose_safety" in projects
-    assert "force=True" in projects
-    for phase in ("PREPARED", "OLD_MOVED_TO_ROLLBACK", "NEW_PROMOTED", "POSTCHECK_PASSED", "COMMITTED"):
-        assert phase in restore
-    assert "BoundedSemaphore" in operations
-    assert "queued_deadline_at" in operations
-    for state in ("completed", "failed", "cancelled", "interrupted"):
-        assert state in frontend
-
-
-def test_yaml_generation_uses_rejecting_scalar_encoders():
-    common = read("windows/DevFleet.Common.psm1")
-    provision = read("windows/02-Provision-ComputeNode.ps1")
-    vault = read("windows/03-Provision-Vault.ps1")
-    assert "ConvertTo-YamlSingleQuotedScalar" in common
-    assert "ConvertTo-ShellSingleQuotedScalar" in common
-    assert "ConvertTo-YamlSingleQuotedScalar" in provision
-    assert "ConvertTo-ShellSingleQuotedScalar" in provision
-    assert "ConvertTo-YamlSingleQuotedScalar" in vault
-
-
-def test_fresh_multipass_launch_has_one_bounded_exact_readiness_recovery():
-    common = read("windows/DevFleet.Common.psm1")
-    compute = read("windows/02-Provision-ComputeNode.ps1")
-    vault = read("windows/03-Provision-Vault.ps1")
-    assert "function Invoke-MultipassLaunchWithReadinessRecovery" in common
-    assert "--timeout" in common
-    assert "Fresh Multipass launch recovery refused existing instance" in common
-    assert "multipass-stop-start" in common
-    assert "Wait-MultipassReady -Name $InstanceName" in common
-    for provisioner in (compute, vault):
-        assert "Invoke-MultipassLaunchWithReadinessRecovery" in provisioner
-        assert "-OnInstanceEstablished" in provisioner
-        assert "-DeadlineUtc" in provisioner
-        assert "$launchDeadline=[datetime]::MinValue" in provisioner
-        assert "-DeadlineUtc $launchDeadline" in provisioner
-        assert not re.search(r"-DeadlineUtc\s+\(if\s*\(", provisioner)
-
-
-def test_fresh_multipass_launch_retries_inventory_with_the_existing_deadline():
-    common = read("windows/DevFleet.Common.psm1")
-    assert "function Invoke-MultipassInventoryWithBoundedRetry" in common
-    assert "Invoke-MultipassInventoryWithBoundedRetry -InventoryScript $inventory" in common
-    assert "DeadlineUtc" in common
-    assert "inventory retry exhausted" in common
-    assert "$after = @(&$inventory 60" not in common
-
-
-def test_cloud_init_write_file_permissions_are_explicit_schema_strings():
-    expected_0644_counts = {"cloud-init/compute.yaml": 3, "cloud-init/vault.yaml": 2}
-    expected_total_counts = {"cloud-init/compute.yaml": 3, "cloud-init/vault.yaml": 3}
-    for relative, expected_0644_count in expected_0644_counts.items():
-        source = read(relative)
-        assert source.count("permissions: !!str 0644") == expected_0644_count
-        assert not re.search(r"(?m)^\s+permissions:\s+(?!!!str\b)\S+", source)
-
-        document = yaml.safe_load(source)
-        permissions = [entry["permissions"] for entry in document["write_files"]]
-        assert len(permissions) == expected_total_counts[relative]
-        assert all(isinstance(mode, str) and re.fullmatch(r"0[0-7]{3}", mode) for mode in permissions)
-
-
-def test_project_metadata_transaction_preserves_concurrent_fields(tmp_path):
-    from devfleet.projects import project_metadata_transaction
-
-    project = tmp_path / "transaction-project"
-    (project / ".devfleet").mkdir(parents=True)
-    metadata = {
-        "schema_version": 3,
-        "managed_by": "devfleet",
-        "slug": project.name,
-        "identity": project.name,
-        "project_id": "12345678-1234-1234-1234-123456789012",
-        "runtime_provider": "docker-compose",
-        "runtime_id": "",
-        "host_id": "test-node",
-        "health_status": "unknown",
-        "lifecycle_status": "ready",
-    }
-    (project / ".devfleet/project.json").write_text(json.dumps(metadata), encoding="utf-8")
-
-    def write_field(name, value):
-        with project_metadata_transaction(project) as current:
-            current[name] = value
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        list(pool.map(lambda item: write_field(*item), (("field_a", "a"), ("field_b", "b"))))
-    result = json.loads((project / ".devfleet/project.json").read_text(encoding="utf-8"))
-    assert result["field_a"] == "a"
-    assert result["field_b"] == "b"
+ROOT=Path(__file__).resolve().parents[1]
+def test_ssh_safety():
+ t=(ROOT/'client/ssh-config.example').read_text();assert 'Host CodexDevVM' in t and 'ForwardAgent no' in t and 'IdentitiesOnly yes' in t
+def test_docker_context_uses_ssh_not_tcp():
+ t=(ROOT/'client/Configure-DockerContext.ps1').read_text();assert 'ssh://devrunner@' in t and '2375' not in t
+def test_vscode_exclusions():
+ t=(ROOT/'client/vscode-settings.jsonc').read_text();assert 'node_modules' in t and '.ai-bridge/local-agent' in t and 'safetensors' in t
 
 ```
 
 
-## FILE: source/tests/test_hardening8_api_serialization.py
+## FILE: source/tests/test_codexpro_hook.py
 
-SHA256: 6af8731cc3e3d84adf2d355de336e1adf60780f5072dee5ac7b998124532ec29 | Bytes: 7410 | Git mode: 100644
+SHA256: 3c6790200f5f72039ea577a5398e1824a827686d394a6ef55882e05e789ad118 | Bytes: 1824 | Git mode: 100644
 
 ```
-import json
-import threading
-import time
-from dataclasses import replace
+import shutil
+import subprocess
+import uuid
+import os
+from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
-from devfleet import main, operations
+ROOT = Path(__file__).resolve().parents[1]
 
 
-def _project(tmp_path, slug="demo"):
+@pytest.fixture
+def project_root():
+    if os.name == 'nt':
+        pytest.skip('CodexPro shell-hook tests require a POSIX execution environment')
+    base = Path(os.environ.get("DEVFLEET_TEST_WORKSPACES", "/workspaces"))
+    base.mkdir(parents=True, exist_ok=True)
+    project = base / f"devfleet-hook-test-{uuid.uuid4().hex[:12]}"
+    project.mkdir(parents=True)
+    try:
+        yield project
+    finally:
+        shutil.rmtree(project, ignore_errors=True)
+
+
+def materialize(project: Path):
+    hook = project / ".devfleet/codexpro-bootstrap.sh"
+    hook.parent.mkdir()
+    hook.write_text((ROOT / "templates/generic/.devfleet/codexpro-bootstrap.sh").read_text())
+    hook.chmod(0o755)
+    return hook
+
+
+def hook_env(project: Path):
+    env = dict(os.environ)
+    env.update(PATH="/usr/bin:/bin", DEVFLEET_WORKSPACES_ROOT=str(project.parent), DEVFLEET_CODEXPRO_HEALTH_URL="http://127.0.0.1:18787/healthz")
+    return env
+    return hook
+
+
+def test_unavailable_state_is_actionable(project_root):
+    hook = materialize(project_root)
+    result = subprocess.run(
+        [str(hook)],
+        cwd=project_root,
+        text=True,
+        capture_output=True,
+        env=hook_env(project_root),
+    )
+    assert result.returncode == 0
+    assert "unavailable" in (project_root / ".devfleet/runtime/codexpro-status.json").read_text()
+
+
+def test_hook_idempotent_unavailable(project_root):
+    hook = materialize(project_root)
+    subprocess.run([str(hook)], cwd=project_root, env=hook_env(project_root), check=True)
+    subprocess.run([str(hook)], cwd=project_root, env=hook_env(project_root), check=True)
+    assert (project_root / ".devfleet/runtime/codexpro-bootstrap.log").exists()
+
+```
+
+
+## FILE: source/tests/test_configuration.py
+
+SHA256: 8fe09b0249911ea8b01eca683e82f01fe488eaa0b01084e404c1962705fde75c | Bytes: 1342 | Git mode: 100644
+
+```
+from devfleet.configuration import migrate_cluster_config,validate_cluster_config
+def schema1(rootless=True):return {'SchemaVersion':1,'ClusterName':'custom','Primary':{'InstanceName':'p','Cpus':99},'Failover':{'InstanceName':'f'},'Vault':{'InstanceName':'v'},'Ollama':{'BaseUrl':'http://old/v1','Model':'m'},'Network':{'PortalPort':9999},'Backup':{},'Safety':{'RequireRootlessDocker':rootless,'AllowDockerTcp':False}}
+def test_migration_preserves_values_and_names():
+ out,changes=migrate_cluster_config(schema1());validate_cluster_config(out);assert out['Primary']['InstanceName']=='p' and out['Primary']['Cpus']==99;assert out['Development']['Profile']=='strict';assert out['Docker']['PrimaryMode']=='rootless';assert out['Primary']['FriendlyName']=='CodexDevVM';assert changes
+def test_clean_install_balanced():assert migrate_cluster_config(schema1(),clean_install=True)[0]['Development']['Profile']=='balanced'
+def test_custom_safety_preserved_without_store_switch():
+ out,_=migrate_cluster_config(schema1(False));assert out['Safety']['RequireRootlessDocker'] is False;assert out['Docker']['PrimaryMode']=='rootless'
+def test_docker_tcp_rejected():
+ out,_=migrate_cluster_config(schema1());out['Safety']['AllowDockerTcp']=True
+ try:validate_cluster_config(out)
+ except ValueError:pass
+ else:raise AssertionError('must reject Docker TCP')
+
+```
+
+
+## FILE: source/tests/test_csharp_host_agent_response_auth.py
+
+SHA256: d5a00280ded660b836947e6921aa804fcfca33b524853a57a3473848fac185fb | Bytes: 1039 | Git mode: 100644
+
+```
+from pathlib import Path
+
+
+ROOT = Path(__file__).parents[2]
+
+
+def test_csharp_maintenance_client_authenticates_success_and_error_responses_before_trust():
+    source = (ROOT / "installer-source/DevFleet.Setup/Services/InstallerLifecycle.cs").read_text(encoding="utf-8")
+    assert source.count("VerifyResponseAuthentication(request, response, bodyBytes") >= 2
+    assert source.index("VerifyResponseAuthentication(request, response, bodyBytes") < source.index("if (!response.IsSuccessStatusCode)")
+    assert "CryptographicOperations.FixedTimeEquals" in source
+    assert "response.StatusCode" in source
+    assert "expectedHost" in source
+    assert "request.RequestUri!.AbsolutePath" in source
+    assert "X-DevFleet-Host-Response-Signature" in source
+
+
+def test_host_agent_resets_auth_context_between_listener_requests():
+    source = (ROOT / "source/windows/DevFleet-HostAgent.ps1").read_text(encoding="utf-8")
+    assert "$context=$null;$auth=$null;$responseAuth=$null" in source
+    assert "Send-AuthenticatedJsonResponse" in source
+
+```
+
+
+## FILE: source/tests/test_dashboard_v11.py
+
+SHA256: ddf6ab6efb8d2ada422be5e1cb2fc897fe02d619baceec195d823e3d0045dbc0 | Bytes: 2659 | Git mode: 100644
+
+```
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[1]
+
+def test_long_operations_auto_refresh_and_show_log_timestamps():
+ text=(ROOT/'app/templates/index.html').read_text(encoding='utf-8')
+ assert 'http-equiv="refresh"' not in text
+ assert 'operation-banner' in text
+ assert 'operation.updated_at' in text and 'operation.log' in text
+
+def test_sensitive_actions_have_explicit_acknowledgements():
+ text=(ROOT/'app/templates/index.html').read_text(encoding='utf-8')
+ for name in ('confirm_slug','confirm_phrase','DANGER ZONE','Move to another node'):
+  assert name in text
+
+def test_dashboard_exposes_requested_quick_commands_and_cache_status():
+ text=(ROOT/'app/templates/index.html').read_text(encoding='utf-8')
+ assert 'workspace_target(p)' in text and 'data-provider' in text
+ assert 'Advanced details' in text and 'Last backup' in text
+
+def test_v1_dashboard_repair_and_peer_control_are_preserved():
+ main=(ROOT/'app/devfleet/main.py').read_text()
+ html=(ROOT/'app/templates/index.html').read_text(encoding='utf-8')
+ assert any(marker in main for marker in ("@app.post('/repair')", '@app.post("/repair")')) and any(marker in main for marker in ("@app.post('/peer/projects/{slug}/{action}')", '@app.post("/peer/projects/{slug}/{action}")'))
+ assert 'Run non-destructive repair' in html and 'Move to another node' in html
+
+def test_cluster_monitor_has_all_refresh_choices_and_manual_refresh():
+ text=(ROOT/'app/templates/index.html').read_text(encoding='utf-8')
+ js=(ROOT/'app/static/app.js').read_text()
+ for value in ('value="0"','value="5"','value="10"','value="15"','value="30"'):
+  assert value in text
+ assert 'id="refresh-cluster"' in text and "setInterval(refreshCluster" in js
+ assert "fetch('/cluster/status'" in js
+
+def test_portainer_style_container_controls_are_present_and_confirm_removal():
+ main=(ROOT/'app/devfleet/main.py').read_text()
+ html=(ROOT/'app/templates/index.html').read_text(encoding='utf-8')
+ js=(ROOT/'app/static/app.js').read_text()
+ containers=(ROOT/'app/devfleet/containers.py').read_text()
+ assert any(marker in main for marker in ("@app.get('/api/containers'", '@app.get("/api/containers"')) and any(marker in main for marker in ("@app.post('/containers/{container_ref}/{action}')", '@app.post("/containers/{container_ref}/{action}")'))
+ assert 'container-inspect' in js and 'container-action' in js and 'container-table' in html
+ assert 'confirm_remove' in main and '"docker", "stats"' in containers
+
+def test_cluster_status_covers_failover_and_vault():
+ status=(ROOT/'app/devfleet/status.py').read_text()
+ assert 'def cluster_status' in status and "devfleet-failover" in status and "devfleet-vault" in status
+
+```
+
+
+## FILE: source/tests/test_dependency_advisories.py
+
+SHA256: 4cdaf6f35cb09709b2df65afa97dbf56fccb76f517065254ad6d2b99c4eada2b | Bytes: 4652 | Git mode: 100644
+
+```
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from tools import check_dependency_advisories as gate
+
+
+def _lock(tmp_path: Path, text: str) -> Path:
+    path = tmp_path / "requirements.txt"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_exact_pin_and_canonical_name(tmp_path: Path):
+    assert gate.lock_packages(_lock(tmp_path, "Fast_API[security]==1.2.3\n")) == [("fast-api", "1.2.3")]
+
+
+def test_pip_compile_continuation_and_trailing_whitespace(tmp_path: Path):
+    lock = _lock(
+        tmp_path,
+        """demo==1.2.3 \\
+    --hash=sha256:abc \\
+    # via test
+next==2.0.0""" + "   \n" + """
+""",
+    )
+    assert gate.lock_packages(lock) == [("demo", "1.2.3"), ("next", "2.0.0")]
+
+
+def test_marker_continuation_and_extras(tmp_path: Path):
+    lock = _lock(
+        tmp_path,
+        """demo[extra]==1.2.3 \\
+    ; python_version < "3.13"
+platform==2.0; sys_platform == "win32"
+""",
+    )
+    assert gate.lock_requirements(lock) == [
+        ("demo", "1.2.3", 'python_version < "3.13"'),
+        ("platform", "2.0", 'sys_platform == "win32"'),
+    ]
+
+
+def test_inline_annotation_is_not_part_of_version(tmp_path: Path):
+    assert gate.lock_packages(_lock(tmp_path, "demo==1.2.3 # generated annotation\n")) == [("demo", "1.2.3")]
+
+
+def test_non_exact_pin_fails_closed(tmp_path: Path):
+    with pytest.raises(ValueError, match="exact"):
+        gate.lock_packages(_lock(tmp_path, "demo>=1.2\n"))
+
+
+def test_cvss_v2_v3_and_v4_scores():
+    assert gate._score({"severity": [{"type": "CVSS_V2", "score": "AV:N/AC:L/Au:N/C:P/I:P/A:P"}]}) == pytest.approx(7.5)
+    assert gate._score({"severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}]}) == pytest.approx(9.8)
+    assert gate._score({"severity": [{"type": "CVSS_V4", "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"}]}) == pytest.approx(9.3)
+
+
+def test_high_critical_and_unknown_severity_block():
+    high = {"id": "HIGH", "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"}]}
+    critical = {"id": "CRIT", "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}]}
+    malformed = {"id": "BAD", "severity": [{"type": "CVSS_V3", "score": "CVSS:9.9/not-a-vector"}]}
+    assert gate._severity(high) == "HIGH"
+    assert gate._severity(critical) == "CRITICAL"
+    assert gate._severity(malformed) == "UNKNOWN"
+
+
+def test_declared_affected_severity_is_considered():
+    vulnerability = {"affected": [{"ecosystem_specific": {"severity": "HIGH"}}]}
+    assert gate._severity(vulnerability) == "HIGH"
+
+
+def test_run_sends_exact_query_and_allowlist(monkeypatch, tmp_path: Path):
+    lock = _lock(
+        tmp_path,
+        """Demo_Package[extra]==1.2.3 ; sys_platform == "win32" \\
+    --hash=sha256:abc
+""",
+    )
+    allowlist = tmp_path / "allow.json"
+    allowlist.write_text(json.dumps({"exceptions": [{"advisory_id": "OSV-1", "package": "demo-package", "affected_version": "1.2.3"}]}), encoding="utf-8")
+    requests: list[tuple[str, str]] = []
+
+    def fake_query(package: str, version: str) -> dict:
+        requests.append((package, version))
+        return {"vulns": [{"id": "OSV-1", "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}]}]}
+
+    monkeypatch.setattr(gate, "query", fake_query)
+    report = gate.run(lock, allowlist)
+    assert requests == [("demo-package", "1.2.3")]
+    assert report["packages"][0]["query"]["version"] == "1.2.3"
+    assert report["status"] == "PASS"
+
+
+def test_zero_advisories_pass_and_network_failure_blocks(monkeypatch, tmp_path: Path):
+    lock = _lock(tmp_path, "demo==1.2.3\n")
+    allowlist = tmp_path / "allow.json"
+    allowlist.write_text('{"exceptions": []}', encoding="utf-8")
+    monkeypatch.setattr(gate, "query", lambda *_: {"vulns": []})
+    assert gate.run(lock, allowlist)["status"] == "PASS"
+    monkeypatch.setattr(gate, "query", lambda *_: (_ for _ in ()).throw(OSError("offline")))
+    report = gate.run(lock, allowlist)
+    assert report["status"] == "BLOCKED"
+    assert report["errors"]
+
+
+def test_relevant_unknown_advisory_blocks(monkeypatch, tmp_path: Path):
+    lock = _lock(tmp_path, "demo==1.2.3\n")
+    allowlist = tmp_path / "allow.json"
+    allowlist.write_text('{"exceptions": []}', encoding="utf-8")
+    monkeypatch.setattr(gate, "query", lambda *_: {"vulns": [{"id": "OSV-BAD", "severity": [{"type": "CVSS_V3", "score": "not-supported"}]}]})
+    report = gate.run(lock, allowlist)
+    assert report["status"] == "BLOCKED"
+    assert report["blocking_advisories"][0]["severity"] == "UNKNOWN"
+
+```
+
+
+## FILE: source/tests/test_destructive_ownership.py
+
+SHA256: 79fa7f5ef8d85982f8650ed0d58b6716fd0e5327199a7c42f3f002b2e2d2e79d | Bytes: 2513 | Git mode: 100644
+
+```
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from devfleet import projects
+
+
+def _workspace(tmp_path: Path, slug: str = "owned-project", metadata: dict | None = None) -> Path:
     project = tmp_path / slug
-    project.mkdir()
+    (project / ".devfleet").mkdir(parents=True)
+    if metadata is not None:
+        (project / ".devfleet" / "project.json").write_text(json.dumps(metadata), encoding="utf-8")
     return project
 
 
-def _route_state(monkeypatch, tmp_path):
-    project = _project(tmp_path)
-    monkeypatch.setattr(main, "SETTINGS", replace(main.SETTINGS, workspaces=tmp_path))
-    metadata = {
+def _valid(slug: str = "owned-project") -> dict:
+    return {
         "schema_version": 3,
         "managed_by": "devfleet",
         "project_id": "12345678-1234-1234-1234-123456789abc",
-        "slug": "demo",
-        "runtime_id": "df_demo",
-        "host_id": "test-node",
+        "slug": slug,
         "runtime_provider": "docker-compose",
+        "host_id": "test-node",
     }
-    (project / ".devfleet").mkdir()
-    (project / ".devfleet/project.json").write_text(
-        json.dumps(metadata), encoding="utf-8"
-    )
-    monkeypatch.setattr(main, "load_meta", lambda _project: metadata)
-    monkeypatch.setattr(main, "project_capabilities", lambda *_args: {"can_run_runtime_action": True, "status_reason": ""})
-    return metadata
-
-
-def test_api_mutator_is_accepted_by_durable_serializer_and_never_runs_inline(monkeypatch, tmp_path):
-    metadata = _route_state(monkeypatch, tmp_path)
-    submissions = []
-    monkeypatch.setattr(main, "stop_project", lambda *_: pytest.fail("API mutator ran inline"))
-    monkeypatch.setattr(main, "submit_operation", lambda *args, **kwargs: submissions.append((args, kwargs)) or "stop-op-1")
-
-    response = TestClient(main.app).post(
-        "/api/projects/demo/stop",
-        headers={"X-DevFleet-Token": "test-token", "X-Idempotency-Key": "client-request-1"},
-        json={},
-    )
-
-    assert response.status_code == 202
-    assert response.json() == {
-        "ok": True,
-        "accepted": True,
-        "operation_id": "stop-op-1",
-        "operation_url": "/api/operations/stop-op-1",
-    }
-    args, kwargs = submissions[0]
-    assert args[:2] == ("stop", "demo")
-    assert kwargs["project_id"] == metadata["project_id"]
-    assert kwargs["runtime_id"] == metadata["runtime_id"]
-    assert kwargs["idempotency_key"].endswith(":client-request-1")
-
-
-def test_read_only_api_actions_remain_synchronous(monkeypatch, tmp_path):
-    _route_state(monkeypatch, tmp_path)
-    monkeypatch.setattr(main, "inspect_runtime", lambda slug: {"slug": slug, "read_only": True})
-    monkeypatch.setattr(main, "submit_operation", lambda *_args, **_kwargs: pytest.fail("read-only action was queued"))
-
-    response = TestClient(main.app).post(
-        "/api/projects/demo/inspect",
-        headers={"X-DevFleet-Token": "test-token"},
-        json={},
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {"ok": True, "output": {"slug": "demo", "read_only": True}}
-
-
-def test_api_project_creation_uses_the_same_durable_admission(monkeypatch):
-    submissions = []
-    monkeypatch.setattr(main, "create_project", lambda **_kwargs: pytest.fail("API create ran inline"))
-    monkeypatch.setattr(main, "submit_operation", lambda *args, **kwargs: submissions.append((args, kwargs)) or "create-op-1")
-
-    response = TestClient(main.app).post(
-        "/api/projects/create",
-        headers={"X-DevFleet-Token": "test-token"},
-        json={"slug": "new-app", "idempotency_key": "create-request-1"},
-    )
-
-    assert response.status_code == 202
-    assert response.json()["operation_id"] == "create-op-1"
-    assert submissions[0][0][:2] == ("create", "new-app")
-    assert submissions[0][1]["idempotency_key"] == "project-create:new-app:create-request-1"
-
-
-def test_action_classification_is_explicit_and_closed():
-    assert main.PROJECT_READ_ONLY_ACTIONS == {"inspect", "runtime-health", "logs"}
-    assert {
-        "start", "stop", "restart", "rebuild", "backup", "bootstrap", "health", "test",
-        "codexpro", "quarantine", "destroy", "restore-vault", "restore-backup",
-        "analyze-force", "reconcile-failed-migration",
-    } == main.PROJECT_MUTATING_ACTIONS
-    assert main.PROJECT_ACTIONS == main.PROJECT_READ_ONLY_ACTIONS | main.PROJECT_MUTATING_ACTIONS
-
-
-def _wait_terminal(operation_id, timeout=3):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        record = operations.get_operation(operation_id)
-        if record["state"] in {"completed", "failed", "cancelled", "interrupted"}:
-            return record
-        time.sleep(0.01)
-    raise AssertionError(f"operation {operation_id} did not become terminal")
 
 
 @pytest.mark.parametrize(
-    ("first_kind", "second_kind"),
-    [("api-start", "api-stop"), ("api-destroy", "ui-start"), ("api-backup", "ui-start"), ("api-rebuild", "api-stop")],
+    "metadata",
+    [
+        None,
+        {"schema_version": 3, "managed_by": "devfleet", "slug": "owned-project"},
+        {"schema_version": 3, "managed_by": "devfleet", "slug": "wrong", "project_id": "12345678-1234-1234-1234-123456789abc", "runtime_provider": "docker-compose", "host_id": "test-node"},
+        {"schema_version": 3, "managed_by": "someone-else", "slug": "owned-project", "project_id": "12345678-1234-1234-1234-123456789abc", "runtime_provider": "docker-compose", "host_id": "test-node"},
+        {"schema_version": 3, "managed_by": "devfleet", "slug": "owned-project", "project_id": "12345678-1234-1234-1234-123456789abc", "runtime_provider": "docker-compose"},
+    ],
 )
-def test_same_project_mutators_have_maximum_concurrency_one(monkeypatch, tmp_path, first_kind, second_kind):
-    monkeypatch.setattr(operations, "SETTINGS", replace(operations.SETTINGS, runtime_root=tmp_path))
-    started = threading.Event()
-    release = threading.Event()
-    active = 0
-    maximum = 0
-    guard = threading.Lock()
-
-    def first(_ctx):
-        nonlocal active, maximum
-        with guard:
-            active += 1
-            maximum = max(maximum, active)
-        started.set()
-        release.wait(2)
-        with guard:
-            active -= 1
-        return "first"
-
-    def second(_ctx):
-        nonlocal active, maximum
-        with guard:
-            active += 1
-            maximum = max(maximum, active)
-            active -= 1
-        return "second"
-
-    first_id = operations.submit_operation(first_kind, "demo", first)
-    assert started.wait(1)
-    second_id = operations.submit_operation(second_kind, "demo", second)
-    release.set()
-    assert _wait_terminal(first_id)["state"] == "completed"
-    assert _wait_terminal(second_id)["state"] in {"completed", "failed"}
-    assert maximum == 1
+def test_ambiguous_project_identity_is_denied_for_mutation(tmp_path: Path, metadata):
+    project = _workspace(tmp_path, metadata=metadata)
+    with pytest.raises(ValueError, match="Mutation denied"):
+        projects.load_authoritative_project_identity_for_mutation(project)
 
 
-def test_cancelled_queued_operation_never_executes(monkeypatch, tmp_path):
-    monkeypatch.setattr(operations, "SETTINGS", replace(operations.SETTINGS, runtime_root=tmp_path))
-    queued = []
-
-    class DeferredExecutor:
-        def submit(self, callback):
-            queued.append(callback)
-
-    monkeypatch.setattr(operations, "_EXECUTOR", DeferredExecutor())
-    ran = []
-    operation_id = operations.submit_operation("api-start", "demo", lambda _ctx: ran.append(True))
-    operations.update_operation(operation_id, state="cancelled", completed_at=operations.now_iso())
-
-    queued[0]()
-
-    assert ran == []
-    assert operations.get_operation(operation_id)["state"] == "cancelled"
+def test_malformed_metadata_is_denied_without_catalog_synthesis(tmp_path: Path):
+    project = _workspace(tmp_path, metadata=None)
+    metadata_file = project / ".devfleet" / "project.json"
+    metadata_file.write_text("{not-json", encoding="utf-8")
+    catalog = projects.load_project_for_catalog(project)
+    assert catalog["slug"] == project.name
+    with pytest.raises(ValueError, match="malformed"):
+        projects.load_authoritative_project_identity_for_mutation(project)
 
 
-def test_operation_admission_backpressure_fails_closed(monkeypatch, tmp_path):
-    monkeypatch.setattr(operations, "SETTINGS", replace(operations.SETTINGS, runtime_root=tmp_path))
-    monkeypatch.setattr(operations, "_ADMISSION", threading.BoundedSemaphore(1))
-    queued = []
-
-    class DeferredExecutor:
-        def submit(self, callback):
-            queued.append(callback)
-
-    monkeypatch.setattr(operations, "_EXECUTOR", DeferredExecutor())
-    first = operations.submit_operation("api-start", "first", lambda _ctx: "held")
-    second = operations.submit_operation("api-start", "second", lambda _ctx: pytest.fail("backpressured work ran"))
-
-    assert operations.get_operation(first)["state"] == "queued"
-    blocked = operations.get_operation(second)
-    assert blocked["state"] == "failed"
-    assert blocked["error"] == "operation_capacity"
-    operations.update_operation(first, state="cancelled", completed_at=operations.now_iso())
-    queued[0]()
+def test_valid_legacy_migration_record_is_authoritative(tmp_path: Path):
+    project = _workspace(tmp_path, metadata=_valid())
+    identity = projects.load_authoritative_project_identity_for_mutation(project)
+    assert identity["managed_by"] == "devfleet"
+    assert identity["project_id"]
 
 ```
 
 
-## FILE: source/tests/test_hardening8_container_ownership.py
+## FILE: source/tests/test_destructive_safety_transaction.py
 
-SHA256: a69ff2930191b209eff2bc8d772d2bcc824fa314f8fb54b464b4b7de975a9af2 | Bytes: 8949 | Git mode: 100644
+SHA256: c64fb764b78450c811014b85c76fcfda076ef98cf3e22003b5767c7131109bd8 | Bytes: 3145 | Git mode: 100644
 
 ```
 import json
-import contextlib
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from devfleet import projects
+from devfleet.workspace_archives import create_workspace_archive
+
+
+def _settings(tmp_path: Path):
+    return SimpleNamespace(
+        workspaces=tmp_path / "workspaces",
+        runtime_root=tmp_path / "runtime",
+        backup_before_rebuild=False,
+        backup_before_quarantine=True,
+        node_name="test-node",
+        development_profile="strict",
+        allow_permanent_delete=True,
+    )
+
+
+def _project(tmp_path: Path, slug: str = "active-writer") -> Path:
+    project = tmp_path / "workspaces" / slug
+    (project / ".devfleet").mkdir(parents=True)
+    (project / ".devfleet" / "project.json").write_text(
+        json.dumps({"schema_version": 3, "managed_by": "devfleet", "project_id": "12345678-1234-1234-1234-123456789012", "slug": slug, "runtime_provider": "docker-compose", "host_id": "test-node"}),
+        encoding="utf-8",
+    )
+    (project / "README.md").write_text("stable\n", encoding="utf-8")
+    return project
+
+
+def test_safety_backup_binds_fresh_backup_and_source_fingerprint(tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    settings = _settings(tmp_path)
+    settings.workspaces.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(projects, "SETTINGS", settings)
+    monkeypatch.setattr(projects, "stop_project", lambda _slug: "stopped")
+    monkeypatch.setattr(projects, "running", lambda _project: False)
+    archive = tmp_path / "runtime" / "workspace-backups" / "fresh" / "active-writer.tar.gz"
+    result = create_workspace_archive(project, "active-writer", archive)
+    monkeypatch.setattr(
+        projects,
+        "backup_project",
+        lambda _slug: json.dumps({
+            "backup_status": "verified",
+            "backup_id": "fresh-transaction",
+            "backup_path": str(archive),
+            "backup_sha256": result["archive_sha256"],
+        }),
+    )
+
+    outcome = projects.safety_backup_project("active-writer")
+    binding = outcome["binding"]
+    assert binding["project_id"] == "12345678-1234-1234-1234-123456789012"
+    assert binding["backup_id"] == "fresh-transaction"
+    assert binding["backup_sha256"] == result["archive_sha256"]
+    assert binding["transaction_id"].startswith("destroy-")
+
+
+def test_writer_after_quiescence_fails_closed(tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    settings = _settings(tmp_path)
+    settings.workspaces.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(projects, "SETTINGS", settings)
+
+    monkeypatch.setattr(projects, "stop_project", lambda _slug: "stopped")
+    monkeypatch.setattr(projects, "running", lambda _project: False)
+
+    def backup_with_active_writer(_slug):
+        (project / "README.md").write_text("written during backup\n", encoding="utf-8")
+        return json.dumps({"backup_status": "verified", "backup_id": "old", "backup_sha256": "a" * 64})
+
+    monkeypatch.setattr(projects, "backup_project", backup_with_active_writer)
+    with pytest.raises(RuntimeError, match="changed during the safety backup"):
+        projects.safety_backup_project("active-writer")
+
+```
+
+
+## FILE: source/tests/test_docker_modes.py
+
+SHA256: 5340bdf18fc9026bfca919acc59f908d4065dcfc756d1f5fe156d3b5cad85759 | Bytes: 1569 | Git mode: 100644
+
+```
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[1]
+
+def test_both_docker_stores_are_detected_and_reported():
+ text=(ROOT/'linux/devfleet-docker-mode-report').read_text()
+ assert 'Rootless store:' in text and 'Rootful store:' in text
+ assert 'Stores are separate' in text
+
+def test_switch_requires_rootful_ack_and_never_prunes():
+ text=(ROOT/'linux/devfleet-switch-docker-mode').read_text()
+ assert '--acknowledge-rootful' in text
+ assert 'docker system prune' not in text
+ assert 'Stores were not migrated or deleted' in text
+
+def test_clean_installer_requires_rootful_acknowledgement():
+ text=(ROOT/'Install-DevFleet.ps1').read_text()
+ assert 'ENABLE ROOTFUL CODEXDEVVM' in text
+
+def test_windows_mode_wrapper_snapshots_and_updates_authoritative_config():
+ text=(ROOT/'windows/Set-DevFleetDockerMode.ps1').read_text()
+ assert 'New-DevFleetSnapshotSafe' in text and 'Save-DevFleetConfig' in text
+ assert '-AcknowledgeRootful' in text
+ assert "@('delete'" not in text.lower() and 'multipass delete' not in text.lower()
+
+def test_update_and_repair_follow_selected_docker_mode():
+ for rel in ('linux/devfleet-safe-update','linux/devfleet-repair','linux/devfleet-user-repair'):
+  text=(ROOT/rel).read_text()
+  lower=text.lower()
+  assert "docker_mode" in lower and 'rootless' in lower and 'rootful' in lower
+
+def test_windows_maintenance_uses_stopped_state_snapshot_helper():
+ for rel in ('windows/Update-DevFleet.ps1','windows/Repair-DevFleet.ps1','windows/03-Provision-Vault.ps1'):
+  text=(ROOT/rel).read_text()
+  assert 'New-DevFleetSnapshotSafe' in text
+
+```
+
+
+## FILE: source/tests/test_existing_runtime_assignment.py
+
+SHA256: 3a7ca4b6a92618c2f753dad9d0e86b72253b9550bd61379fbd2301c1edd986bd | Bytes: 7902 | Git mode: 100644
+
+```
+import json
+from pathlib import Path
+
+import pytest
+
+import devfleet.projects as projects
+from devfleet.core import SETTINGS
+
+
+def make_existing(slug: str, *, metadata: dict | None = None) -> tuple[Path, dict]:
+    project = SETTINGS.workspaces / slug
+    (project / ".devfleet").mkdir(parents=True, exist_ok=True)
+    (project / "compose.yaml").write_text("services:\n  app:\n    image: ubuntu:24.04\n", encoding="utf-8")
+    (project / "README.md").write_text("workspace-preserved\n", encoding="utf-8")
+    record = metadata or {"schema_version": 3, "managed_by": "devfleet", "slug": slug, "display_name": "Legacy project", "project_id": "12345678-1234-1234-1234-123456789abc", "runtime_provider": "docker-compose", "host_id": "test-node"}
+    (project / ".devfleet" / "project.json").write_text(json.dumps(record), encoding="utf-8")
+    (project / ".devfleet" / "template.json").write_text(json.dumps({
+        "start_command": "docker compose up -d --build",
+        "stop_command": "docker compose down --remove-orphans",
+        "restart_command": "docker compose restart",
+        "rebuild_command": "docker compose build && docker compose up -d",
+        "logs_command": "docker compose logs",
+    }), encoding="utf-8")
+    return project, record
+
+
+def mark_healthy(slug: str) -> str:
+    project = SETTINGS.workspaces / slug
+    meta = projects.load_meta(project)
+    meta.update({'health_status': 'healthy', 'health_scope': 'application-check'})
+    projects.atomic_json(projects.metadata_path(project), meta)
+    return 'healthy'
+
+
+def test_legacy_project_is_detected_and_explicitly_assigned_to_container(monkeypatch: pytest.MonkeyPatch):
+    slug = "legacy-container-adopt"
+    project, _ = make_existing(slug)
+    monkeypatch.setattr(projects, "running", lambda _project: False)
+    monkeypatch.setattr(projects, "backup_project", lambda _slug: json.dumps({"backup_status": "verified", "backup_id": "test-backup", "backup_sha256": "a" * 64}))
+    monkeypatch.setattr(projects, "start_project", lambda _slug: "started")
+    monkeypatch.setattr(projects, "runtime_health", lambda _slug: {"ok": True, "healthy": True})
+    monkeypatch.setattr(projects, "health_project", mark_healthy)
+
+    result = projects.assign_project_runtime(slug, "container", "standard")
+
+    saved = json.loads((project / ".devfleet" / "project.json").read_text())
+    assert result["workspace_preserved"] is True
+    assert saved["runtime_isolation"] == "container"
+    assert saved["runtime_provider"] == "docker-compose"
+    assert saved["resource_profile"] == "standard"
+    assert (project / ".devfleet" / "runtime-resources.yaml").is_file()
+    assert (project / "README.md").read_text() == "workspace-preserved\n"
+
+
+def test_existing_project_vm_assignment_imports_workspace_and_persists_metadata(monkeypatch: pytest.MonkeyPatch):
+    slug = "legacy-vm-adopt"
+    project, _ = make_existing(slug)
+    monkeypatch.setattr(projects, "running", lambda _project: False)
+    monkeypatch.setattr(projects, "backup_project", lambda _slug: json.dumps({"backup_status": "verified", "backup_id": "test-backup", "backup_sha256": "a" * 64}))
+    monkeypatch.setattr(projects, "get_host_capacity", lambda: {"capacity": {"allocatable_cpus": 8, "allocatable_memory_gb": 24, "allocatable_disk_gb": 300}})
+    monkeypatch.setattr(projects.VmRuntimeOperations, "ensure", staticmethod(lambda _slug, _meta: {"runtime_id": "devfleet-project-legacy-vm-adopt", "address": "10.0.0.10", "state": "ready"}))
+    monkeypatch.setattr(projects.VmRuntimeOperations, "stop", staticmethod(lambda _slug, _meta: {"state": "stopped"}))
+    imported = {}
+
+    def fake_import(import_slug, runtime_id, *, source_vm, project_id):
+        imported.update(slug=import_slug, runtime_id=runtime_id, source_vm=source_vm, project_id=project_id)
+        return {"archive_sha256": "a" * 64, "target_archive_sha256": "a" * 64, "workspace_preserved": True}
+
+    monkeypatch.setattr(projects, "import_project_workspace", fake_import)
+    monkeypatch.setattr(projects, "sync_project_vm_ssh_alias", lambda *_args, **_kwargs: {"validated": True})
+    monkeypatch.setattr(projects, "start_project", lambda _slug: "started")
+    monkeypatch.setattr(projects, "stop_project", lambda _slug: "stopped")
+    monkeypatch.setattr(projects, "runtime_health", lambda _slug: {"ok": True, "healthy": True})
+    monkeypatch.setattr(projects, "health_project", mark_healthy)
+
+    result = projects.assign_project_runtime(slug, "vm", "small")
+
+    saved = json.loads((project / ".devfleet" / "project.json").read_text())
+    assert result["workspace_preserved"] is True
+    assert saved["runtime_isolation"] == "vm"
+    assert saved["runtime_provider"] == "multipass-host-agent"
+    assert saved["runtime_id"] == "devfleet-project-legacy-vm-adopt"
+    assert imported["source_vm"] == SETTINGS.node_name
+    assert imported["project_id"] == saved["project_id"]
+    assert (project / "README.md").read_text() == "workspace-preserved\n"
+
+
+def test_vm_assignment_rolls_back_metadata_and_override_when_import_fails(monkeypatch: pytest.MonkeyPatch):
+    slug = "legacy-vm-rollback"
+    project, original = make_existing(slug)
+    override = project / ".devfleet" / "runtime-resources.yaml"
+    override.write_text("services:\n  app:\n    cpus: 1\n", encoding="utf-8")
+    original_bytes = (project / ".devfleet" / "project.json").read_bytes()
+    original_override = override.read_text()
+    monkeypatch.setattr(projects, "running", lambda _project: False)
+    monkeypatch.setattr(projects, "backup_project", lambda _slug: json.dumps({"backup_status": "verified", "backup_id": "test-backup", "backup_sha256": "a" * 64}))
+    monkeypatch.setattr(projects, "get_host_capacity", lambda: {"capacity": {"allocatable_cpus": 8, "allocatable_memory_gb": 24, "allocatable_disk_gb": 300}})
+    monkeypatch.setattr(projects.VmRuntimeOperations, "ensure", staticmethod(lambda _slug, _meta: {"runtime_id": "devfleet-project-legacy-vm-rollback", "address": "10.0.0.11", "state": "ready"}))
+    monkeypatch.setattr(projects, "import_project_workspace", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("import failed")))
+    destroyed = []
+    monkeypatch.setattr(projects, "destroy_project_vm", lambda *args, **kwargs: destroyed.append(kwargs["runtime_id"]))
+
+    with pytest.raises(RuntimeError, match="import failed"):
+        projects.assign_project_runtime(slug, "vm", "small")
+
+    assert (project / ".devfleet" / "project.json").read_bytes() == original_bytes
+    assert override.read_text() == original_override
+    assert destroyed == ["devfleet-project-legacy-vm-rollback"]
+
+
+def test_vm_assignment_rejects_insufficient_capacity_before_mutation(monkeypatch: pytest.MonkeyPatch):
+    slug = "legacy-capacity-reject"
+    project, _ = make_existing(slug)
+    original = (project / ".devfleet" / "project.json").read_bytes()
+    monkeypatch.setattr(projects, "running", lambda _project: False)
+    monkeypatch.setattr(projects, "get_host_capacity", lambda: {"capacity": {"allocatable_cpus": 1, "allocatable_memory_gb": 1, "allocatable_disk_gb": 10}})
+
+    with pytest.raises(ValueError, match="capacity"):
+        projects.assign_project_runtime(slug, "vm", "standard")
+
+    assert (project / ".devfleet" / "project.json").read_bytes() == original
+
+
+def test_malformed_metadata_is_not_silently_deleted(monkeypatch: pytest.MonkeyPatch):
+    slug = "legacy-malformed-metadata"
+    project = SETTINGS.workspaces / slug
+    (project / ".devfleet").mkdir(parents=True, exist_ok=True)
+    (project / "compose.yaml").write_text("services:\n  app:\n    image: ubuntu:24.04\n", encoding="utf-8")
+    metadata_file = project / ".devfleet" / "project.json"
+    metadata_file.write_text("{not-json", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="malformed"):
+        projects.assign_project_runtime(slug, "container", "small")
+
+    assert metadata_file.read_text() == "{not-json"
+
+```
+
+
+## FILE: source/tests/test_failover.py
+
+SHA256: b69044da502f5c37cc4cd12d91091606a314ba90f0ff1157002439abb7ca5e6c | Bytes: 11565 | Git mode: 100644
+
+```
+from __future__ import annotations
+
+from collections import deque
+
+import pytest
+
+from devfleet import failover
+from devfleet.failover import guided_transfer
+
+
+class C:
+    def __init__(self):
+        self.events = []
+
+    def update(self, progress, message):
+        self.events.append((progress, message))
+
+
+def _receipt(operation_id: str) -> dict[str, object]:
+    return {
+        "ok": True,
+        "accepted": True,
+        "operation_id": operation_id,
+        "operation_url": f"/api/operations/{operation_id}",
+    }
+
+
+def _record(operation_id: str, state: str, **extra: object) -> dict[str, object]:
+    return {"operation_id": operation_id, "id": operation_id, "state": state, **extra}
+
+
+TRANSFER = {
+    "project_id": "12345678-1234-1234-1234-123456789abc",
+    "deployment_id": "deployment-1234",
+    "source_host_id": "devfleet-primary",
+    "destination_host_id": "devfleet-failover",
+}
+
+
+def _run_transfer(peer, events, *, finalize_source=None):
+    if finalize_source is None:
+        finalize_source = lambda slug, project_id, destination_host_id: events.append(
+            ("finalized", slug, project_id, destination_host_id)
+        )
+    return guided_transfer(
+        "demo",
+        C(),
+        stop=lambda slug: events.append(("stop", slug)),
+        backup=lambda slug: events.append(("backup", slug)),
+        assert_quiesced=lambda slug, project_id: events.append(
+            ("quiesced", slug, project_id)
+        ),
+        finalize_source=finalize_source,
+        peer_call=peer,
+        **TRANSFER,
+    )
+
+
+def test_guided_transfer_rejects_non_distinct_destination_before_stop():
+    with pytest.raises(ValueError, match="distinct destination"):
+        guided_transfer(
+            "demo",
+            C(),
+            stop=lambda _: (_ for _ in ()).throw(RuntimeError("must not run")),
+            backup=lambda _: (_ for _ in ()).throw(RuntimeError("must not run")),
+            assert_quiesced=lambda *_: (_ for _ in ()).throw(
+                RuntimeError("must not run")
+            ),
+            finalize_source=lambda *_: (_ for _ in ()).throw(
+                RuntimeError("must not run")
+            ),
+            peer_call=lambda *_: (_ for _ in ()).throw(RuntimeError("must not run")),
+            **{**TRANSFER, "destination_host_id": "DEVFLEET-PRIMARY"},
+        )
+
+
+def test_guided_transfer_receives_finalizes_then_activates_and_starts_atomically():
+    events = []
+    responses = {
+        ("POST", "/api/transfers/receive"): deque([_receipt("receive-op")]),
+        ("GET", "/api/operations/receive-op"): deque(
+            [_record("receive-op", "running"), _record("receive-op", "completed")]
+        ),
+        ("POST", "/api/transfers/activate"): deque([_receipt("activate-op")]),
+        ("GET", "/api/operations/activate-op"): deque(
+            [_record("activate-op", "running"), _record("activate-op", "completed")]
+        ),
+    }
+
+    def peer(method, path, payload, timeout):
+        events.append(("peer", method, path, payload, timeout))
+        return responses[(method, path)].popleft()
+
+    _run_transfer(peer, events)
+
+    sequence = [(event[1], event[2]) for event in events if event[0] == "peer"]
+    assert sequence == [
+        ("POST", "/api/transfers/receive"),
+        ("GET", "/api/operations/receive-op"),
+        ("GET", "/api/operations/receive-op"),
+        ("POST", "/api/transfers/activate"),
+        ("GET", "/api/operations/activate-op"),
+        ("GET", "/api/operations/activate-op"),
+    ]
+    receive_request = next(
+        event
+        for event in events
+        if event[:3] == ("peer", "POST", "/api/transfers/receive")
+    )
+    assert receive_request[3] == {
+        "slug": "demo",
+        **TRANSFER,
+        "confirm_slug": "demo",
+        "confirm_phrase": "RECEIVE TRANSFER demo",
+    }
+    activate_request = next(
+        event
+        for event in events
+        if event[:3] == ("peer", "POST", "/api/transfers/activate")
+    )
+    assert activate_request[3] == {
+        "slug": "demo",
+        **TRANSFER,
+        "confirm_slug": "demo",
+        "confirm_phrase": "ACTIVATE TRANSFER demo",
+    }
+    assert [event[0] for event in events[:4]] == [
+        "stop",
+        "quiesced",
+        "backup",
+        "quiesced",
+    ]
+    assert all(event[4] > 0 for event in events if event[0] == "peer")
+    finalize_index = next(
+        index for index, event in enumerate(events) if event[0] == "finalized"
+    )
+    receive_completion_index = max(
+        index
+        for index, event in enumerate(events)
+        if event[:3] == ("peer", "GET", "/api/operations/receive-op")
+    )
+    activate_index = next(
+        index
+        for index, event in enumerate(events)
+        if event[:3] == ("peer", "POST", "/api/transfers/activate")
+    )
+    assert receive_completion_index < finalize_index < activate_index
+    assert events[finalize_index] == (
+        "finalized",
+        "demo",
+        TRANSFER["project_id"],
+        TRANSFER["destination_host_id"],
+    )
+
+
+def test_guided_transfer_stops_when_source_is_not_quiesced():
+    events = []
+
+    def assert_quiesced(slug, project_id):
+        events.append(("quiesced", slug, project_id))
+        raise RuntimeError("source runtime remains active")
+
+    with pytest.raises(RuntimeError, match="source runtime remains active"):
+        guided_transfer(
+            "demo",
+            C(),
+            stop=lambda slug: events.append(("stop", slug)),
+            backup=lambda slug: events.append(("backup", slug)),
+            assert_quiesced=assert_quiesced,
+            finalize_source=lambda *_: pytest.fail("source must not finalize"),
+            peer_call=lambda *_: pytest.fail(
+                "peer must not receive an active source"
+            ),
+            **TRANSFER,
+        )
+
+    assert events == [
+        ("stop", "demo"),
+        ("quiesced", "demo", TRANSFER["project_id"]),
+    ]
+
+
+def test_guided_transfer_rechecks_quiescence_after_backup_before_peer_receive():
+    events = []
+    checks = {"count": 0}
+
+    def assert_quiesced(slug, project_id):
+        checks["count"] += 1
+        events.append(("quiesced", slug, project_id))
+        if checks["count"] == 2:
+            raise RuntimeError("source became active during backup")
+
+    with pytest.raises(RuntimeError, match="source became active during backup"):
+        guided_transfer(
+            "demo",
+            C(),
+            stop=lambda slug: events.append(("stop", slug)),
+            backup=lambda slug: events.append(("backup", slug)),
+            assert_quiesced=assert_quiesced,
+            finalize_source=lambda *_: pytest.fail("source must not finalize"),
+            peer_call=lambda *_: pytest.fail(
+                "peer must not receive an active source"
+            ),
+            **TRANSFER,
+        )
+
+    assert events == [
+        ("stop", "demo"),
+        ("quiesced", "demo", TRANSFER["project_id"]),
+        ("backup", "demo"),
+        ("quiesced", "demo", TRANSFER["project_id"]),
+    ]
+
+
+def test_guided_transfer_does_not_start_after_failed_receive_operation():
+    events = []
+
+    def peer(method, path, payload, timeout):
+        events.append((method, path))
+        if method == "POST":
+            return _receipt("receive-op")
+        return _record("receive-op", "failed")
+
+    with pytest.raises(RuntimeError, match="Peer receive transfer operation failed"):
+        _run_transfer(peer, events)
+
+    assert ("POST", "/api/transfers/activate") not in events
+    assert not any(event[0] == "finalized" for event in events)
+
+
+def test_guided_transfer_does_not_activate_when_source_finalization_fails():
+    events = []
+    responses = {
+        ("POST", "/api/transfers/receive"): deque([_receipt("receive-op")]),
+        ("GET", "/api/operations/receive-op"): deque(
+            [_record("receive-op", "completed")]
+        ),
+    }
+
+    def peer(method, path, payload, timeout):
+        events.append(("peer", method, path))
+        return responses[(method, path)].popleft()
+
+    def finalize_source(slug, project_id, destination_host_id):
+        events.append(("finalize", slug, project_id, destination_host_id))
+        raise RuntimeError("sensitive source-finalization detail")
+
+    with pytest.raises(RuntimeError, match="Source transfer finalization failed") as raised:
+        _run_transfer(peer, events, finalize_source=finalize_source)
+
+    assert "sensitive source-finalization detail" not in str(raised.value)
+    assert ("peer", "POST", "/api/transfers/activate") not in events
+
+
+@pytest.mark.parametrize("state", ["failed", "interrupted"])
+def test_guided_transfer_ends_after_unsuccessful_atomic_activation(state):
+    events = []
+    responses = {
+        ("POST", "/api/transfers/receive"): deque([_receipt("receive-op")]),
+        ("GET", "/api/operations/receive-op"): deque(
+            [_record("receive-op", "completed")]
+        ),
+        ("POST", "/api/transfers/activate"): deque([_receipt("activate-op")]),
+        ("GET", "/api/operations/activate-op"): deque(
+            [_record("activate-op", state, error="sensitive activation detail")]
+        ),
+    }
+
+    def peer(method, path, payload, timeout):
+        events.append(("peer", method, path))
+        return responses[(method, path)].popleft()
+
+    with pytest.raises(
+        RuntimeError, match=fr"Peer activate transfer operation {state}"
+    ) as raised:
+        _run_transfer(peer, events)
+
+    assert "sensitive activation detail" not in str(raised.value)
+    assert any(event[0] == "finalized" for event in events)
+
+
+def test_guided_transfer_does_not_activate_after_locked_receive_operation():
+    events = []
+
+    def peer(method, path, payload, timeout):
+        events.append((method, path))
+        if method == "POST":
+            return _receipt("receive-op")
+        return _record(
+            "receive-op", "failed", current_step="locked", error="operation_locked"
+        )
+
+    with pytest.raises(RuntimeError, match="Peer receive transfer operation is locked"):
+        _run_transfer(peer, events)
+
+    assert ("POST", "/api/transfers/activate") not in events
+
+
+def test_guided_transfer_times_out_before_activation(monkeypatch):
+    now = {"value": 0.0}
+    monkeypatch.setattr(failover, "PEER_OPERATION_TIMEOUT_SECONDS", 0.25)
+    monkeypatch.setattr(failover, "PEER_OPERATION_POLL_INTERVAL_SECONDS", 0.25)
+    monkeypatch.setattr(failover.time, "monotonic", lambda: now["value"])
+    monkeypatch.setattr(
+        failover.time,
+        "sleep",
+        lambda seconds: now.__setitem__("value", now["value"] + seconds),
+    )
+    events = []
+
+    def peer(method, path, payload, timeout):
+        events.append((method, path))
+        if method == "POST":
+            return _receipt("receive-op")
+        return _record("receive-op", "running")
+
+    with pytest.raises(RuntimeError, match="Peer receive transfer operation timed out"):
+        _run_transfer(peer, events)
+
+    assert ("POST", "/api/transfers/activate") not in events
+
+
+def test_guided_transfer_rejects_malformed_operation_receipt_before_activation():
+    events = []
+
+    def peer(method, path, payload, timeout):
+        events.append((method, path))
+        return {
+            "ok": True,
+            "accepted": True,
+            "operation_id": "receive-op",
+            "operation_url": "/api/operations/other-op",
+        }
+
+    with pytest.raises(
+        RuntimeError, match="Peer receive transfer operation response was malformed"
+    ):
+        _run_transfer(peer, events)
+
+    assert ("POST", "/api/transfers/receive") in events
+    assert ("POST", "/api/transfers/activate") not in events
+
+```
+
+
+## FILE: source/tests/test_hardening11_red_blue.py
+
+SHA256: c0639e0edc66abb29fdac71605866a0f1a488de357df153d743f825a2898546e | Bytes: 13557 | Git mode: 100644
+
+```
+from __future__ import annotations
+
+import json
+import stat
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import yaml
 
-from devfleet import containers, projects
+from devfleet import auth, containers, core
+from devfleet.analyzer import analyze_project, has_blockers
 from devfleet.core import SETTINGS
 
 
-CONTAINER_ID = "a" * 64
-PROJECT_ID = "12345678-1234-1234-1234-123456789abc"
+def _compose_project(tmp_path: Path, body: str) -> Path:
+    project = tmp_path / "red-compose"
+    project.mkdir()
+    (project / "compose.yaml").write_text(body, encoding="utf-8")
+    return project
 
 
-def _project(tmp_path: Path, *, slug: str = "owned-app") -> dict:
-    project = tmp_path / slug
-    (project / ".devfleet").mkdir(parents=True)
-    metadata = {
-        "schema_version": 5,
-        "managed_by": "devfleet",
-        "project_id": PROJECT_ID,
-        "slug": slug,
-        "runtime_provider": "docker-compose",
-        "runtime_id": "df_owned_app",
-        "deployment_id": "deployment-123",
-        "host_id": "test-node",
-    }
-    (project / ".devfleet/project.json").write_text(json.dumps(metadata), encoding="utf-8")
-    return metadata
+@pytest.mark.parametrize("profile", ["strict", "balanced", "fast"])
+@pytest.mark.parametrize(
+    ("body", "code"),
+    [
+        ("services:\n  app:\n    privileged: true\n", "docker.privileged"),
+        ("services:\n  app:\n    use_api_socket: true\n", "compose.use-api-socket"),
+        ("services:\n  app:\n    volumes_from: [base]\n", "compose.volumes-from"),
+        ("services:\n  app:\n    provider: {type: evil}\n", "compose.provider"),
+        ("services:\n  app:\n    post_start: [{command: whoami, privileged: true}]\n", "compose.post-start"),
+        ("services:\n  app:\n    future_execution_field: true\n", "compose.unknown-field"),
+    ],
+)
+def test_compose_red_attack_corpus_blocks_every_profile(tmp_path: Path, profile: str, body: str, code: str) -> None:
+    findings = analyze_project(_compose_project(tmp_path, body), profile, force=True)
+    assert has_blockers(findings)
+    assert code in {item["code"] for item in findings}
 
 
-def _labels(**changes) -> dict[str, str]:
-    labels = {
-        "io.devfleet.managed-by": "devfleet",
-        "io.devfleet.project-id": PROJECT_ID,
-        "io.devfleet.project-slug": "owned-app",
-        "io.devfleet.runtime-id": "df_owned_app",
-        "io.devfleet.deployment-id": "deployment-123",
-        "io.devfleet.host-id": "test-node",
-        "com.docker.compose.project": "df_owned_app",
-        "com.docker.compose.service": "app",
-    }
-    labels.update(changes)
-    return labels
-
-
-def _inspect(container_id: str = CONTAINER_ID, labels: dict | None = None, name: str = "/renamed-app") -> dict:
-    return {"Id": container_id, "Name": name, "Config": {"Labels": labels if labels is not None else _labels()}}
-
-
-def _runner(first: dict, second: dict | None = None):
-    calls: list[list[str]] = []
-
-    def fake_run(args, **_kwargs):
-        calls.append(list(args))
-        if args[:2] == ["docker", "inspect"]:
-            value = first if len([c for c in calls if c[:2] == ["docker", "inspect"]]) == 1 else second
-            if value is None:
-                return SimpleNamespace(returncode=1, stdout="", stderr="No such container")
-            return SimpleNamespace(returncode=0, stdout=json.dumps([value]), stderr="")
-        return SimpleNamespace(returncode=0, stdout=args[-1], stderr="")
-
-    return fake_run, calls
-
-
-def _configure(monkeypatch, tmp_path):
-    _project(tmp_path)
-    settings = replace(
-        SETTINGS,
-        workspaces=tmp_path,
-        runtime_root=tmp_path / "runtime",
-        node_name="test-node",
-        deployment_id="deployment-123",
+def test_compose_extends_nested_and_host_root_bind_are_not_effective_model_gaps(tmp_path: Path) -> None:
+    project = _compose_project(
+        tmp_path,
+        """services:
+  app:
+    extends:
+      file: middle.yml
+      service: middle
+""",
     )
-    monkeypatch.setattr(containers, "SETTINGS", settings)
-    monkeypatch.setattr(projects, "SETTINGS", settings)
-
-
-def _write_pending_marker(tmp_path: Path) -> None:
-    project = tmp_path / "owned-app"
-    marker = projects._transfer_pending_marker_path(project)
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "workspace_path": str(project.absolute()),
-                "workspace_name": "owned-app",
-                "project_id": PROJECT_ID,
-                "deployment_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
-                "source_host_id": "devfleet-primary",
-                "destination_host_id": "test-node",
-                "state": "pending-source-finalization",
-                "created_at": "2026-09-16T00:00:00Z",
-            }
-        ),
+    (project / "middle.yml").write_text(
+        """services:
+  middle:
+    extends:
+      file: evil.yml
+      service: inherited
+""",
         encoding="utf-8",
     )
-
-
-@pytest.mark.parametrize(
-    "labels",
-    [
-        {},
-        {"io.devfleet.managed-by": "devfleet"},
-        _labels(**{"io.devfleet.project-id": "22345678-1234-1234-1234-123456789abc"}),
-        _labels(**{"io.devfleet.deployment-id": "other-deployment"}),
-        _labels(**{"com.docker.compose.project": "foreign-compose"}),
-    ],
-)
-def test_foreign_partial_and_mismatched_containers_are_preserved(monkeypatch, tmp_path, labels):
-    _configure(monkeypatch, tmp_path)
-    fake_run, calls = _runner(_inspect(labels=labels))
-    monkeypatch.setattr(containers, "run", fake_run)
-
-    with pytest.raises(ValueError, match="ownership"):
-        containers.container_action("foreign-db", "remove")
-
-    assert not any(call[:2] == ["docker", "rm"] for call in calls)
-
-
-@pytest.mark.parametrize(
-    ("action", "docker_command"),
-    [("start", "start"), ("stop", "stop"), ("restart", "restart"), ("pause", "pause"), ("unpause", "unpause"), ("remove", "rm")],
-)
-def test_every_legitimate_action_mutates_verified_immutable_id(monkeypatch, tmp_path, action, docker_command):
-    _configure(monkeypatch, tmp_path)
-    inspected = _inspect(name="/renamed-current-container")
-    fake_run, calls = _runner(inspected, inspected)
-    monkeypatch.setattr(containers, "run", fake_run)
-
-    containers.container_action("old-visible-name", action)
-
-    assert calls[-1] == ["docker", docker_command, CONTAINER_ID]
-    assert not any(call[-1:] == ["old-visible-name"] and call[:2] != ["docker", "inspect"] for call in calls)
-
-
-def test_deleted_recreated_same_name_fails_closed_before_mutation(monkeypatch, tmp_path):
-    _configure(monkeypatch, tmp_path)
-    fake_run, calls = _runner(_inspect(), None)
-    monkeypatch.setattr(containers, "run", fake_run)
-
-    with pytest.raises(ValueError, match="disappeared"):
-        containers.container_action("owned-app-1", "stop")
-
-    assert not any(call[:2] == ["docker", "stop"] for call in calls)
-
-
-def test_id_name_substitution_fails_closed_before_mutation(monkeypatch, tmp_path):
-    _configure(monkeypatch, tmp_path)
-    fake_run, calls = _runner(_inspect(), _inspect(container_id="b" * 64))
-    monkeypatch.setattr(containers, "run", fake_run)
-
-    with pytest.raises(ValueError, match="identity changed"):
-        containers.container_action("owned-app-1", "pause")
-
-    assert not any(call[:2] == ["docker", "pause"] for call in calls)
-
-
-def test_pending_transfer_marker_blocks_mutation_but_not_read(monkeypatch, tmp_path):
-    _configure(monkeypatch, tmp_path)
-    _write_pending_marker(tmp_path)
-    inspected = _inspect()
-    fake_run, calls = _runner(inspected, inspected)
-    monkeypatch.setattr(containers, "run", fake_run)
-
-    assert containers.inspect_container("owned-app")["Id"] == CONTAINER_ID
-    with pytest.raises(ValueError, match="awaits source finalization"):
-        containers.container_action("owned-app", "start")
-
-    assert not any(call[:2] == ["docker", "start"] for call in calls)
-
-
-@pytest.mark.parametrize(
-    ("pending_field", "pending_value"),
-    [
-        ("transfer_state", "pending-source-finalization"),
-        ("lifecycle_status", "ownership-transfer-pending"),
-    ],
-)
-def test_persisted_pending_transfer_blocks_mutation_when_marker_is_deleted(
-    monkeypatch, tmp_path, pending_field, pending_value
-):
-    _configure(monkeypatch, tmp_path)
-    metadata_path = tmp_path / "owned-app/.devfleet/project.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata[pending_field] = pending_value
-    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
-    _write_pending_marker(tmp_path)
-    marker_path = projects._transfer_pending_marker_path(tmp_path / "owned-app")
-    marker_path.unlink()
-    assert not marker_path.exists()
-    inspected = _inspect()
-    fake_run, calls = _runner(inspected, inspected)
-    monkeypatch.setattr(containers, "run", fake_run)
-
-    with pytest.raises(ValueError, match="awaits source finalization"):
-        containers.container_action("owned-app", "restart")
-
-    assert not any(call[:2] == ["docker", "restart"] for call in calls)
-
-
-def test_container_mutation_rechecks_pending_marker_after_shared_lock(
-    monkeypatch, tmp_path
-):
-    _configure(monkeypatch, tmp_path)
-    inspected = _inspect()
-    fake_run, calls = _runner(inspected, inspected)
-    monkeypatch.setattr(containers, "run", fake_run)
-
-    @contextlib.contextmanager
-    def receive_wins_lock(_slug):
-        _write_pending_marker(tmp_path)
-        yield
-
-    monkeypatch.setattr(projects, "project_transfer_lock", receive_wins_lock)
-    with pytest.raises(ValueError, match="awaits source finalization"):
-        containers.container_action("owned-app", "restart")
-
-    assert not any(call[:2] == ["docker", "restart"] for call in calls)
-
-
-def test_compose_override_binds_every_service_to_complete_current_identity(tmp_path):
-    metadata = _project(tmp_path)
-    project = tmp_path / "owned-app"
-    compose = project / "compose.yaml"
-    compose.write_text("services:\n  app:\n    image: example/app\n  db:\n    image: example/db\n", encoding="utf-8")
-
-    override = projects._write_current_compose_ownership(project, compose, metadata)
-    document = yaml.safe_load(override.read_text(encoding="utf-8"))
-
-    expected = _labels()
-    expected.pop("com.docker.compose.project")
-    expected.pop("com.docker.compose.service")
-    assert document == {"services": {"app": {"labels": expected}, "db": {"labels": expected}}}
-    args = projects.compose_args(project, compose)
-    assert str(override) in args
-    assert args[-2:] == ["-p", "df_owned_app"]
-
-```
-
-
-## FILE: source/tests/test_hardening8_manifest_version.py
-
-SHA256: 1573d8d8d6573200b2e6be1d2ae0532d37d5dfdc14fc28e830a4f3c9d1a744d8 | Bytes: 1545 | Git mode: 100644
-
-```
-import re
-from pathlib import Path
-
-from _bundle_layout import resolve_bundle_layout
-
-
-ROOT = Path(__file__).parents[2]
-LAYOUT = resolve_bundle_layout(Path(__file__))
-
-
-def test_application_manifest_tracks_canonical_installer_four_part_version():
-    installer_version = (ROOT / "installer-source/INSTALLER_VERSION").read_text(encoding="utf-8").strip()
-    assert re.fullmatch(r"\d+\.\d+\.\d+", installer_version)
-    manifest = (ROOT / "installer-source/DevFleet.Setup/app.manifest").read_text(encoding="utf-8")
-    identity = re.search(r'<assemblyIdentity\s+version="([^"]+)"\s+name="MTechLabs\.DevFleet\.Setup"', manifest)
-    assert identity
-    assert identity.group(1) == f"{installer_version}.0"
-
-
-def test_release_builder_derives_and_verifies_manifest_identity():
-    build = (ROOT / "installer-source/Build-Release.ps1").read_text(encoding="utf-8")
-    assert '$assemblyVersion="$installerVersion.0"' in build
-    assert "Windows application manifest identity is not synchronized" in build
-
-
-def test_ai_bundle_requires_current_schema_v2_identity_closure():
-    builder = (LAYOUT.release_tooling_root / "Build-AIAuditBundle.ps1").read_text(encoding="utf-8")
-    validator = (ROOT / "source/tools/validate_ai_audit_bundle.py").read_text(encoding="utf-8")
-    for name in ("release-fingerprint.json", "tooling-fingerprint-current.json", "final-artifact-hashes.json"):
-        assert name in builder
-        assert name in validator
-    assert "validate_audit_coherence.py" in builder
-    assert "validate_audit_coherence.py" in validator
-
-```
-
-
-## FILE: source/tests/test_hardening8_restore_journal.py
-
-SHA256: 91a4d0d581078bc37003de7e0002f40151be9b141155fd587b8dfd7991720917 | Bytes: 8866 | Git mode: 100644
-
-```
-import json
-import os
-import stat
-from pathlib import Path
-
-import pytest
-
-from devfleet import workspace_archives
-from devfleet.workspace_archives import reconcile_restore_transaction
-
-
-ROLLBACK_TOKEN = "0123456789abcdef0123456789abcdef"
-
-
-def _paths(tmp_path: Path, slug: str = "demo") -> tuple[Path, Path, Path, Path]:
-    destination = tmp_path / slug
-    transaction_root = tmp_path / workspace_archives.TRANSACTION_ROOT_NAME
-    staging = transaction_root / f".{slug}-restore-ABC12345" if workspace_archives.POSIX_FD_HARDENING else tmp_path / f".{slug}-restore-ABC12345"
-    rollback = tmp_path / f".{slug}.rollback-{ROLLBACK_TOKEN}"
-    journal = tmp_path / f".{slug}.restore-transaction.json"
-    return destination, staging, rollback, journal
-
-
-def _record(destination: Path, staging: Path, rollback: Path, phase: str = "PREPARED") -> dict:
-    if workspace_archives.POSIX_FD_HARDENING:
-        def identity(path: Path):
-            result = path.lstat()
-            return {
-                "st_dev": int(result.st_dev),
-                "st_ino": int(result.st_ino),
-                "st_type": int(stat.S_IFMT(result.st_mode)),
-            }
-
-        destination_identity = identity(destination) if destination.exists() else None
-        rollback_identity = identity(rollback) if rollback.exists() else None
-        restored_identity = destination_identity if phase in {"NEW_PROMOTED", "POSTCHECK_PASSED", "COMMITTED"} else None
-        return {
-            "schema_version": workspace_archives.POSIX_RESTORE_JOURNAL_SCHEMA_VERSION,
-            "slug": destination.name,
-            "destination": str(destination.absolute()),
-            "transaction_root": str(destination.parent / workspace_archives.TRANSACTION_ROOT_NAME),
-            "staging_root": str(staging.absolute()),
-            "rollback": str(rollback.absolute()),
-            "destination_identity": destination_identity if phase != "OLD_MOVED_TO_ROLLBACK" else rollback_identity,
-            "staging_identity": identity(staging) if staging.exists() else None,
-            "rollback_identity": rollback_identity,
-            "restored_identity": restored_identity,
-            "phase": phase,
-        }
-    return {
-        "schema_version": 1,
-        "slug": destination.name,
-        "destination": str(destination),
-        "staging_root": str(staging),
-        "rollback": str(rollback),
-        "phase": phase,
-    }
-
-
-def _write_record(journal: Path, record: dict) -> None:
-    journal.write_text(json.dumps(record), encoding="utf-8")
-
-
-def _assert_refused_without_mutation(tmp_path: Path, record: dict) -> None:
-    destination, staging, rollback, journal = _paths(tmp_path)
-    if workspace_archives.POSIX_FD_HARDENING:
-        staging.parent.mkdir(exist_ok=True)
-    destination.mkdir(exist_ok=True)
-    staging.mkdir(exist_ok=True)
-    rollback.mkdir(exist_ok=True)
-    for path in (destination, staging, rollback):
-        (path / "SENTINEL").write_text(path.name, encoding="utf-8")
-    _write_record(journal, record)
-
-    with pytest.raises(RuntimeError, match="manual recovery required"):
-        reconcile_restore_transaction(destination)
-
-    assert journal.exists()
-    assert (tmp_path / ".demo.restore-manual-recovery.json").is_file()
-    for path in (destination, staging, rollback):
-        assert (path / "SENTINEL").read_text(encoding="utf-8") == path.name
-
-
-@pytest.mark.parametrize(
-    ("field", "unsafe"),
-    [
-        ("staging_root", ""),
-        ("staging_root", None),
-        ("staging_root", "."),
-        ("staging_root", ".."),
-        ("staging_root", "../outside"),
-        ("rollback", ""),
-        ("rollback", None),
-        ("rollback", "."),
-        ("rollback", ".."),
-        ("rollback", "../outside"),
-    ],
-)
-def test_restore_journal_rejects_empty_and_relative_paths_without_mutation(tmp_path, field, unsafe):
-    destination, staging, rollback, _ = _paths(tmp_path)
-    record = _record(destination, staging, rollback)
-    record[field] = unsafe
-    _assert_refused_without_mutation(tmp_path, record)
-
-
-@pytest.mark.parametrize("field", ["staging_root", "rollback"])
-def test_restore_journal_rejects_absolute_outside_paths_and_preserves_sentinel(tmp_path, field):
-    destination, staging, rollback, _ = _paths(tmp_path)
-    outside = tmp_path.parent / f"outside-{field}-{tmp_path.name}"
-    outside.mkdir()
+    (project / "evil.yml").write_text(
+        """services:
+  inherited:
+    privileged: true
+    network_mode: host
+    volumes: ["/:/host"]
+""",
+        encoding="utf-8",
+    )
+    findings = analyze_project(project, "strict", force=True)
+    codes = {item["code"] for item in findings}
+    assert has_blockers(findings)
+    assert "compose.extends" in codes
+    assert "docker.privileged" not in codes or "compose.extends" in codes
+
+
+def test_compose_include_escape_and_symlink_escape_are_blocked(tmp_path: Path) -> None:
+    project = _compose_project(tmp_path, "include:\n  - ../outside.yml\nservices: {}\n")
+    findings = analyze_project(project, "strict", force=True)
+    assert has_blockers(findings)
+    assert "compose.include" in {item["code"] for item in findings}
+    assert "compose.path-reference" in {item["code"] for item in findings}
+
+    outside = tmp_path / "outside.yml"
+    outside.write_text("services: {}\n", encoding="utf-8")
+    link = project / "evil.yml"
     try:
-        sentinel = outside / "UNRELATED-SENTINEL"
-        sentinel.write_text("keep", encoding="utf-8")
-        record = _record(destination, staging, rollback)
-        record[field] = str(outside)
-        _assert_refused_without_mutation(tmp_path, record)
-        assert sentinel.read_text(encoding="utf-8") == "keep"
-    finally:
-        for child in outside.iterdir():
-            child.unlink()
-        outside.rmdir()
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symbolic-link creation unavailable")
+    (project / "compose.yaml").write_text("""services:
+  app:
+    extends: {file: evil.yml, service: x}
+""", encoding="utf-8")
+    findings = analyze_project(project, "strict", force=True)
+    assert {"compose.path-escape", "project.symlink-escape"} & {item["code"] for item in findings}
 
 
-@pytest.mark.parametrize(
-    "mutation",
-    [
-        {"schema_version": 2},
-        {"schema_version": "1"},
-        {"slug": "wrong-slug"},
-        {"destination": None},
-        {"destination": "."},
-        {"phase": "UNKNOWN"},
-    ],
-)
-def test_restore_journal_rejects_wrong_schema_slug_destination_and_phase(tmp_path, mutation):
-    destination, staging, rollback, _ = _paths(tmp_path)
-    record = _record(destination, staging, rollback)
-    record.update(mutation)
-    if mutation.get("destination") is None and "destination" not in mutation:
-        record["destination"] = str(tmp_path / "wrong")
-    _assert_refused_without_mutation(tmp_path, record)
-
-
-def test_restore_journal_rejects_wrong_absolute_destination(tmp_path):
-    destination, staging, rollback, _ = _paths(tmp_path)
-    record = _record(destination, staging, rollback)
-    record["destination"] = str(tmp_path / "other")
-    _assert_refused_without_mutation(tmp_path, record)
-
-
-def test_restore_journal_rejects_swapped_stage_and_rollback(tmp_path):
-    destination, staging, rollback, _ = _paths(tmp_path)
-    record = _record(destination, staging, rollback)
-    record["staging_root"], record["rollback"] = record["rollback"], record["staging_root"]
-    _assert_refused_without_mutation(tmp_path, record)
-
-
-@pytest.mark.parametrize("field", ["staging_root", "rollback"])
-def test_restore_journal_rejects_symlinked_transaction_paths(tmp_path, field):
-    destination, staging, rollback, _ = _paths(tmp_path)
-    target = tmp_path / "foreign-target"
-    target.mkdir()
-    path = staging if field == "staging_root" else rollback
-    if workspace_archives.POSIX_FD_HARDENING:
-        path.parent.mkdir(exist_ok=True)
-    try:
-        os.symlink(target, path, target_is_directory=True)
-    except (OSError, NotImplementedError) as exc:
-        pytest.skip(f"directory symlink creation unavailable: {exc}")
-    other = rollback if field == "staging_root" else staging
-    if workspace_archives.POSIX_FD_HARDENING:
-        other.parent.mkdir(exist_ok=True)
-    other.mkdir()
-    destination.mkdir()
-    for candidate in (destination, target, other):
-        (candidate / "SENTINEL").write_text(candidate.name, encoding="utf-8")
-    record = _record(destination, staging, rollback)
-    journal = tmp_path / ".demo.restore-transaction.json"
-    _write_record(journal, record)
-
-    with pytest.raises(RuntimeError, match="manual recovery required"):
-        reconcile_restore_transaction(destination)
-
-    assert (target / "SENTINEL").read_text(encoding="utf-8") == target.name
-    assert (other / "SENTINEL").read_text(encoding="utf-8") == other.name
-    assert journal.exists()
-
-
-@pytest.mark.parametrize(
-    "phase",
-    ["PREPARED", "OLD_MOVED_TO_ROLLBACK", "NEW_PROMOTED", "POSTCHECK_PASSED", "COMMITTED"],
-)
-def test_restore_journal_reconciles_every_legitimate_phase_and_is_idempotent(tmp_path, phase):
-    destination, staging, rollback, journal = _paths(tmp_path)
-    if workspace_archives.POSIX_FD_HARDENING:
-        staging.parent.mkdir(exist_ok=True)
-    staging.mkdir()
-    (staging / "temporary").write_text("discard", encoding="utf-8")
-    if phase == "OLD_MOVED_TO_ROLLBACK":
-        destination.mkdir()
-        (destination / "known-good").write_text("old", encoding="utf-8")
-        destination.rename(rollback)
-    elif phase in {"NEW_PROMOTED", "POSTCHECK_PASSED", "COMMITTED"}:
-        destination.mkdir()
-        (destination / "canonical").write_text("current", encoding="utf-8")
-        rollback.mkdir()
-        (rollback / "known-good").write_text("old", encoding="utf-8")
-    else:
-        destination.mkdir()
-        (destination / "canonical").write_text("current", encoding="utf-8")
-    _write_record(journal, _record(destination, staging, rollback, phase))
-
-    result = reconcile_restore_transaction(destination)
-
-    assert result == {"recovered": True, "phase": phase, "destination": str(destination)}
-    assert destination.is_dir()
-    assert not staging.exists()
-    assert not rollback.exists()
-    assert not journal.exists()
-    assert reconcile_restore_transaction(destination) is None
-
-```
-
-
-## FILE: source/tests/test_hardening8_secret_recovery.py
-
-SHA256: 6eee62b71d85f1f9971a38c129cc7fe010f4499084ef6ca02dd87e4b4e70d4e5 | Bytes: 2501 | Git mode: 100644
-
-```
-from pathlib import Path
-
-
-ROOT = Path(__file__).parents[1]
-
-
-def test_rekey_is_explicit_transactional_and_commits_last():
-    script = (ROOT / "windows/Repair-DevFleetHostSecrets.ps1").read_text(encoding="utf-8")
-    assert "ValidateSet('REKEY DEVFLEET HOST SECRETS')" in script
-    assert "New-DevFleetSnapshotSafe" in script
-    assert "Get-ExactGuestIdentity" in script
-    assert "Assert-DevFleetTaskBinding" in script
-    assert "-StandardInputText" in script
-    assert "host-secrets.before.json" in script
-    assert "rollback" in script
-    assert "plaintextSecretsLogged=$false" in script
-    assert script.index("$evidence.hostAgent.verified = $true") < script.index("Write-AtomicUtf8 -Path $secretPath")
-    assert script.index("Write-AtomicUtf8 -Path $secretPath") < script.index("$committed = $true")
-
-
-def test_rekey_helpers_bind_identity_verify_and_preserve_rollback_state():
-    compute = (ROOT / "linux/devfleet-rotate-compute-secrets").read_text(encoding="utf-8")
-    vault = (ROOT / "linux/devfleet-rotate-vault-secrets").read_text(encoding="utf-8")
-    assert "/etc/devfleet/node-identity.json" in compute
-    assert "deployment_id" in compute and "node_id" in compute
-    assert "X-DevFleet-Token" in compute and "/api/status" in compute
-    assert 'MODE == rollback' in compute
-    assert "/etc/devfleet-vault-identity.json" in vault
-    assert "deployment_id" in vault and "node_id" in vault
-    assert "htpasswd -iv" in vault
-    assert 'MODE == rollback' in vault
-    assert "rest_password" not in " ".join(line for line in vault.splitlines() if line.startswith("printf '{"))
-
-
-def test_missing_or_corrupt_existing_secrets_never_silently_regenerate():
-    common = (ROOT / "windows/DevFleet.Common.psm1").read_text(encoding="utf-8")
-    missing_guard = "if (Test-ExistingDeploymentState) { throw 'SECRET RECOVERY REQUIRED: host secrets are missing"
-    corrupt_guard = "if (Test-ExistingDeploymentState) { throw 'SECRET RECOVERY REQUIRED: host secrets are corrupt"
-    assert missing_guard in common
-    assert corrupt_guard in common
-    assert "Test-DevFleetSecretRecord" in common
-
-
-def test_cluster_join_persists_deployment_binding_for_future_rekey():
-    complete = (ROOT / "windows/Complete-Cluster.ps1").read_text(encoding="utf-8")
-    assert "$hostIdentity.deployment_id=[string]$primaryNode.deployment_id" in complete
-    assert "$vaultIdentity.deployment_id=[string]$primaryNode.deployment_id" in complete
-    assert "/etc/devfleet-vault-identity.json" in complete
-
-```
-
-
-## FILE: source/tests/test_hardening8_systemd_contract.py
-
-SHA256: 785ff9fe6ec7a77292fe410d5a25dc9eb500c1c19288f35449fd4118d3986fdc | Bytes: 2282 | Git mode: 100644
-
-```
-import json
-from pathlib import Path
-
-
-ROOT = Path(__file__).parents[1]
-
-
-def test_control_service_writable_paths_derive_from_canonical_contract():
-    contract = json.loads((ROOT / "app/systemd/mutable-paths.json").read_text(encoding="utf-8"))
-    service = (ROOT / "app/systemd/devfleet.service").read_text(encoding="utf-8")
-    backup_service = (ROOT / "app/systemd/devfleet-backup.service").read_text(encoding="utf-8")
-    bootstrap = (ROOT / "linux/bootstrap-compute.sh").read_text(encoding="utf-8")
-
-    assert contract == {
-        "schema_version": 1,
-        "workspace": "/home/devrunner/workspaces",
-        "quarantine": "/home/devrunner/.devfleet-quarantine",
-        "transaction_root": "/home/devrunner/workspaces/.devfleet-transactions",
-    }
-    assert "ProtectSystem=strict" in service
-    assert "ProtectHome=read-only" in service
-    assert "User=devfleet-control" in service
-    assert "Group=devfleet-control" in service
-    assert "ReadWritePaths=__WORKSPACES__ __QUARANTINE__ __TRANSACTION_ROOT__ /var/lib/devfleet /var/cache/devfleet" in service
-    assert "/home/devrunner" not in service.replace("__WORKSPACES__", "").replace("__QUARANTINE__", "")
-    assert "ReadOnlyPaths=__WORKSPACES__ __QUARANTINE__" in backup_service
-    assert 'MUTABLE_PATH_CONTRACT="$PAYLOAD/app/systemd/mutable-paths.json"' in bootstrap
-    assert 'WORKSPACES=$(jq -er ".workspace" "$MUTABLE_PATH_CONTRACT")' in bootstrap
-    assert 'QUARANTINE=$(jq -er ".quarantine" "$MUTABLE_PATH_CONTRACT")' in bootstrap
-    assert 'TRANSACTION_ROOT=$(jq -er ".transaction_root" "$MUTABLE_PATH_CONTRACT")' in bootstrap
-    assert '[[ $TRANSACTION_ROOT == "$WORKSPACES/.devfleet-transactions" ]]' in bootstrap
-    assert 'install -d -o root -g devfleet-control -m 0750 "$WORKSPACES" "$QUARANTINE"' in bootstrap
-    assert 'install -d -o devfleet-control -g devfleet-control -m 0700 "$TRANSACTION_ROOT"' in bootstrap
-    assert 'chown -R devrunner:devrunner /home/devrunner/.config "$WORKSPACES"' not in bootstrap
-    assert '--arg workspaces "$WORKSPACES" --arg quarantine "$QUARANTINE"' in bootstrap
-    assert "__WORKSPACES__" in bootstrap and "__QUARANTINE__" in bootstrap
-    assert "/etc/devfleet" not in next(line for line in service.splitlines() if line.startswith("ReadWritePaths="))
-
-```
-
-
-## FILE: source/tests/test_hardening8_windows_integrations.py
-
-SHA256: 4d7f62f7b1950263e5a069faca8fdedb2fec42afc45e7125c13f49dc1e0fb522 | Bytes: 2763 | Git mode: 100644
-
-```
-from pathlib import Path
-
-
-ROOT = Path(__file__).parents[1]
-REPO = ROOT.parent
-
-
-def test_host_agent_install_has_ledger_bound_exact_windows_integrations():
-    install = (ROOT / "windows/Install-DevFleet-HostAgent.ps1").read_text(encoding="utf-8")
-    removal = (ROOT / "windows/Remove-DevFleet-OwnedIntegrations.ps1").read_text(encoding="utf-8")
-    ownership = (ROOT / "windows/DevFleet-WindowsIntegrationOwnership.psm1").read_text(encoding="utf-8")
-
-    assert "DevFleet Host Agent 8790*" not in install
-    assert "Get-NetFirewallRule -DisplayName 'DevFleet Host Agent" not in install
-    assert "-AdoptLegacyDevFleetIntegrations" in install
-    assert "WINDOWS INTEGRATION OWNERSHIP CONFLICT" in install
-    assert "InstallationGeneration" in install
-    assert "ScheduledTasks=@($taskBinding)" in install
-    assert "FirewallRules=@($firewallBindings)" in install
-    assert "Services=@()" in install
-    assert "Assert-DevFleetTaskBinding" in install
-    assert "Assert-DevFleetFirewallBinding" in install
-    assert "Remove-NetFirewallRule -DisplayName" not in removal
-    assert "Get-NetFirewallRule -Name" in removal
-    assert "Assert-DevFleetServiceBinding" in removal
-    assert "Stop-Service -Name" in removal and "Stop-Service -Name ([string]$binding.Name) -Force" not in removal
-    assert "Assert-DevFleetExactFields" in ownership
-
-
-def test_installer_cleanup_requires_extended_ownership_ledger():
-    services = (REPO / "installer-source/DevFleet.Setup/Services/InstallerServices.cs").read_text(encoding="utf-8")
-    lifecycle = (REPO / "installer-source/DevFleet.Setup/Services/InstallerLifecycle.cs").read_text(encoding="utf-8")
-
-    assert "List<OwnedWindowsIntegration> WindowsIntegrations" in services
-    assert "WindowsIntegrationOwnershipPath" in services
-    assert "InstallationGenera
+@pytest.mark.parametrize("argument", [
+    "--privileged", "--network=host", "--network", "host", "--pid=host", "--pid", "host",
+    "--ipc", "--uts", "--userns=host", "--volume=/:/host", "-v", "/:/host", "--mount", "type=bind,src=/,dst=/host",
+    "--device=/dev/kvm", "--cap-add=SYS_ADMIN", "--security-opt", "seccomp=unconfined", "--env-file=/tmp/x",
+])
+@pytest.mark.parametrize("profile", ["strict", "balanced", "fast"])
+def test_devcontainer_structured_runargs_attack_corpus_blocks(tmp_path: Path, argument: str, profile: str) -> None:
+    project = tmp_path / "devcontainer"
+    (project / ".devcontainer").mkdir(parents=True)
+    (project / ".devcontainer/devcontainer.json").write_tex

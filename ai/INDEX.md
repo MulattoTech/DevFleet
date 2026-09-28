@@ -2,9 +2,9 @@
 
 Full source text: [DEVFLEET-FULL-SOURCE.md](DEVFLEET-FULL-SOURCE.md).
 
-968 tracked source/tooling/docs files; 127 text parts, each under 50,000 UTF-8 bytes. Original binary assets are in their normal source paths.
+976 tracked source/tooling/docs files; 130 text parts, each under 50,000 UTF-8 bytes. Original binary assets are in their normal source paths.
 
-The original 31 tracked generated evidence files are in the private outer package, not this GitHub tree. Added AI/export documentation is indexed separately by Git.
+The original 31 tracked generated evidence files remain private on the certification host. Added AI/export documentation is indexed separately by Git.
 
 File hashes/modes: [ORIGINAL-SOURCE-INVENTORY.json](ORIGINAL-SOURCE-INVENTORY.json).
 Part offsets/hashes: [SOURCE-PARTS.json](SOURCE-PARTS.json).
@@ -137,4 +137,7 @@ Part offsets/hashes: [SOURCE-PARTS.json](SOURCE-PARTS.json).
 - [Part 124](source-parts/part-124.md) (46787 bytes)
 - [Part 125](source-parts/part-125.md) (46787 bytes)
 - [Part 126](source-parts/part-126.md) (46787 bytes)
-- [Part 127](source-parts/part-127.md) (29784 bytes)
+- [Part 127](source-parts/part-127.md) (46787 bytes)
+- [Part 128](source-parts/part-128.md) (46787 bytes)
+- [Part 129](source-parts/part-129.md) (46787 bytes)
+- [Part 130](source-parts/part-130.md) (27175 bytes)

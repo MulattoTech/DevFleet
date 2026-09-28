@@ -1,5 +1,11 @@
 # GitHub source import
 
+## 2026-09-28 publishable-source synchronization
+
+The public source snapshot was advanced from the original 2026-09-27 import source HEAD 110fc2ee4fe611518e302b0185e9499a8e8a7e40 to original native checkout HEAD 78e92440a51717f09f92676cba9c0b2e67d7b06c. The update transfers the reviewed 22-path local source/tooling delta and regenerates the inventory and complete text parts for 976 publishable tracked source files. The original 31 tracked generated/private evidence files and all untracked runtime evidence remain on MULATTOTECHBOX. GitHub's commit hash remains distinct from the original native checkout hash.
+
+GitHub can serve as the public **source** reference. It cannot be the certification authority without the original native lab, protected credentials, signed-artifact trust, immutable attempt ledgers and current evidence. The README progress display is a dated snapshot of the original host's reported gate state, never a validator or automatic promotion flag.
+
 The owner authorized uploading the prepared source to https://github.com/MulattoTech/DevFleet and making the repository public on 2026-09-27.
 
 This import extends the repository's existing initial commit a668dfc7bb8796e78d2bbb432c87a70ec45f8287. Its original README description is preserved. No history is force-replaced.
