@@ -2,7 +2,9 @@
 
 DevFleet v1.2.13 certification is **INCOMPLETE**. This public repository provides the current publishable source, installer payload, release tooling, release contracts and review documents. It does not provide the original host's credentials, VM/checkpoints, private ledgers, signed artifacts or proof authority. A GitHub clone cannot inherit native qualification.
 
-Original source snapshot: 78e92440a51717f09f92676cba9c0b2e67d7b06c. Start with [the source index](INDEX.md), [file inventory](ORIGINAL-SOURCE-INVENTORY.json), [certification handoff](CERTIFICATION-HANDOFF.md), [build guide](../BUILD-FROM-CLONE.md), [release DONE contract](../docs/ai/devfleet-release/DONE.md), and [test plan](../docs/ai/devfleet-release/TEST-PLAN.md). The full text and ordered sub-50,000-byte parts are indexed under ai/source-parts; the binary payload remains in its normal source path.
+Original source snapshot: 78e92440a51717f09f92676cba9c0b2e67d7b06c.
+
+Pinned public source commit: [c8073061dbea](https://github.com/MulattoTech/DevFleet/tree/c8073061dbea9a52ee52d9cda4a1f00d06a82857). The later README/documentation commit does not alter the 976 indexed original-source files. Start with [the source index](INDEX.md), [file inventory](ORIGINAL-SOURCE-INVENTORY.json), [certification handoff](CERTIFICATION-HANDOFF.md), [build guide](../BUILD-FROM-CLONE.md), [release DONE contract](../docs/ai/devfleet-release/DONE.md), and [test plan](../docs/ai/devfleet-release/TEST-PLAN.md). The full text and ordered sub-50,000-byte parts are indexed under ai/source-parts; the binary payload remains in its normal source path.
 
 First verify that your tool can actually open this repository. Read source/VERSION and a concrete function in tools/baseline_lineage.py, then state which files you inspected. A URL alone does not prove access; if access fails, request the necessary part files. The complete multi-megabyte source cannot fit into a single model context, so review by subsystem and report coverage honestly.
 
