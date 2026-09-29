@@ -1,10 +1,187 @@
 # DevFleet source part 024
 
 Full-source UTF-8 byte interval [1069500, 1116000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 9cad2dedfbeee1209cb115f81beaea05af776aef92b09c3cbdeb14a36b046041
+Payload SHA-256: 275d3837bdc5e5a59325dffe4ea22c62e1a3da4efee4181539cc1c695e4df232
 
 <!-- BEGIN SOURCE SLICE -->
-lientSecretStore';reason='Tailscale OAuth client secret is not configured';secret=$null;clientId=$clientId;path=$path;invalid=$false}}
+ce.' }
+    Assert-RealUseAcceptanceCandidate -Actual $durableSummary.candidate -Expected $contextCandidate -Label 'REAL-USE-ACCEPTANCE summary candidate' | Out-Null
+    Assert-RealUseAcceptanceExecution -Actual $durableSummary.execution -Expected $PhaseResult.binding.execution -Label 'REAL-USE-ACCEPTANCE summary execution' | Out-Null
+    if (-not (Test-RealUseAcceptanceJsonEqual $durableSummary.preflight $PhaseResult.preflight) -or -not (Test-RealUseAcceptanceJsonEqual $durableSummary.transport $PhaseResult.transport) -or -not (Test-RealUseAcceptanceJsonEqual $durableSummary.restart $PhaseResult.restart)) { throw 'FullRelease rejected divergent durable REAL-USE-ACCEPTANCE execution evidence.' }
+    $summaryJourneys = @($durableSummary.journeys)
+    if ($summaryJourneys.Count -ne 5 -or @('U01','U02','U03','U04','U05' | Where-Object { $id=$_; @($summaryJourneys | Where-Object { [string]$_.id -ceq $id -and [string]$_.status -ceq 'PASS' }).Count -ne 1 }).Count) { throw 'FullRelease rejected incomplete durable REAL-USE-ACCEPTANCE journey summary.' }
+    Assert-RealUseAcceptanceKeys -Value $durableSummary.cleanup -Allowed @('status','ownedOnly','vaultSnapshots') -Required @('status','ownedOnly','vaultSnapshots') -Label 'REAL-USE-ACCEPTANCE summary cleanup' | Out-Null
+    if ([string]$durableSummary.cleanup.status -cne 'PASS' -or $durableSummary.cleanup.ownedOnly -isnot [bool] -or -not [bool]$durableSummary.cleanup.ownedOnly -or [string]$durableSummary.cleanup.vaultSnapshots -cne 'RETAINED_APPEND_ONLY_IN_DISPOSABLE_VAULT') { throw 'FullRelease rejected incomplete durable REAL-USE-ACCEPTANCE cleanup summary.' }
+    Assert-RealUseAcceptanceKeys -Value $durableSummary.evidence -Allowed @('binding','prepare','report') -Required @('binding','prepare','report') -Label 'REAL-USE-ACCEPTANCE summary evidence links' | Out-Null
+    foreach ($name in @('binding','prepare','report')) {
+        Assert-RealUseAcceptanceKeys -Value $durableSummary.evidence.$name -Allowed @('path','sha256') -Required @('path','sha256') -Label "REAL-USE-ACCEPTANCE summary $name link" | Out-Null
+        $pathName="${name}Path";$hashName="${name}Sha256"
+        if ([string]$durableSummary.evidence.$name.path -cne [string]$PhaseResult.evidence.$pathName -or [string]$durableSummary.evidence.$name.sha256 -cne [string]$PhaseResult.evidence.$hashName) { throw "FullRelease rejected divergent REAL-USE-ACCEPTANCE summary $name link." }
+    }
+    return $true
+}
+
+Export-ModuleMember -Function New-RealUseAcceptancePrimaryPairingCapture,Complete-RealUseAcceptanceClusterJoin,Remove-RealUseAcceptancePrivateState,Get-RealUseAcceptanceSurrogateBinding,Assert-RealUseAcceptanceInput,Assert-RealUseAcceptanceReport,Invoke-RealUseAcceptancePhase,Assert-RealUseAcceptancePhaseEvidence
+
+```
+
+
+## FILE: automation/release-e2e/modules/ResumeState.psm1
+
+SHA256: b8ce4a186694603ff0e7eb246f39052e2ee335f002b10bd55ad9c8014eb2f661 | Bytes: 2459 | Git mode: 100644
+
+```
+Set-StrictMode -Version Latest
+
+function Write-AtomicJson {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][object]$Value)
+    $full = [IO.Path]::GetFullPath($Path)
+    $dir = Split-Path -Parent $full
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $tmp = "$full.$([guid]::NewGuid().ToString('N')).tmp"
+    $json = $Value | ConvertTo-Json -Depth 32
+    $bytes = [Text.Encoding]::UTF8.GetBytes($json)
+    $stream = [IO.File]::Open($tmp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+    try { $stream.Write($bytes,0,$bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+    try {
+        for($attempt=1;$attempt -le 4;$attempt++) {
+            try {
+                Move-Item -LiteralPath $tmp -Destination $full -Force
+                return
+            } catch {
+                if($attempt -eq 4){throw}
+                Start-Sleep -Milliseconds (100*$attempt)
+            }
+        }
+    } finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Read-StrictJson {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { throw "State file not found: $Path" }
+    $raw = Get-Content -LiteralPath $Path -Raw -Encoding utf8
+    if ([string]::IsNullOrWhiteSpace($raw)) { throw "State file is empty: $Path" }
+    try { $raw | ConvertFrom-Json -ErrorAction Stop } catch { throw "Invalid JSON state: $Path" }
+}
+
+function New-HarnessRunId { "e2e-$((Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'))-$([guid]::NewGuid().ToString('N').Substring(0,8))" }
+
+function Save-RunState { param([Parameter(Mandatory)][psobject]$State,[Parameter(Mandatory)][string]$Path); Write-AtomicJson -Path $Path -Value $State }
+
+function Assert-ResumeIdentity {
+    param([Parameter(Mandatory)][psobject]$State,[Parameter(Mandatory)][psobject]$Fingerprint,[psobject]$Vm)
+    if ($State.candidateHashes -and $State.candidateHashes.exe -ne $Fingerprint.candidate.sha256) { throw 'Resume refused: candidate hash changed.' }
+    if ($State.candidateHashes -and $State.candidateHashes.tar -ne $Fingerprint.tar.sha256) { throw 'Resume refused: TAR hash changed.' }
+    if ($State.vmId -and $Vm -and $State.vmId -ne $Vm.Id.ToString()) { throw 'Resume refused: disposable VM identity changed.' }
+    $true
+}
+
+Export-ModuleMember -Function Write-AtomicJson,Read-StrictJson,New-HarnessRunId,Save-RunState,Assert-ResumeIdentity
+
+```
+
+
+## FILE: automation/release-e2e/modules/Secrets.psm1
+
+SHA256: 52c0820d2047f6839ad319170045f06ec65726fc1b8bb0ec977d007792182f53 | Bytes: 7992 | Git mode: 100644
+
+```
+Set-StrictMode -Version Latest
+
+function Get-DevFleetE2ESecretPath {
+    Join-Path $env:LOCALAPPDATA 'DevFleet\E2E\secrets.json'
+}
+
+function Protect-DevFleetE2ESecretFile {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        $security = [Security.AccessControl.FileSecurity]::new()
+        $security.SetAccessRuleProtection($true,$false)
+        $security.SetOwner($identity)
+        foreach($rule in @(
+            [Security.AccessControl.FileSystemAccessRule]::new($identity,'FullControl','Allow'),
+            [Security.AccessControl.FileSystemAccessRule]::new('BUILTIN\Administrators','FullControl','Allow'),
+            [Security.AccessControl.FileSystemAccessRule]::new('NT AUTHORITY\SYSTEM','FullControl','Allow')
+        )) { $security.AddAccessRule($rule) | Out-Null }
+        Set-Acl -LiteralPath $Path -AclObject $security -ErrorAction Stop
+    } catch { throw 'Secure E2E credential store ACL could not be established.' }
+}
+
+function Write-DevFleetE2ESecretRecord {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][object]$Data)
+    $parent=Split-Path -Parent $Path
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    $temporary="$Path.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        # The temporary file is ACL'd before credential bytes are written.
+        [IO.File]::WriteAllText($temporary,'',[Text.UTF8Encoding]::new($false))
+        Protect-DevFleetE2ESecretFile -Path $temporary
+        [IO.File]::WriteAllText($temporary,(($Data|ConvertTo-Json -Depth 8)+[Environment]::NewLine),[Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $temporary -Destination $Path -Force
+        Protect-DevFleetE2ESecretFile -Path $Path
+        [IO.File]::SetAttributes($Path,[IO.FileAttributes]::Hidden)
+    } finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+}
+
+function Read-DevFleetE2ESecretRecord {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    $item=Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Secure E2E credential store is a reparse point.' }
+    Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+}
+
+function Save-DevFleetE2ECredential {
+    param([Parameter(Mandatory)][pscredential]$Credential)
+    $path = Get-DevFleetE2ESecretPath
+    $existing = $null
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        try { $existing = Read-DevFleetE2ESecretRecord -Path $path } catch { throw 'Secure E2E credential store is corrupt; repair it before replacing the interactive credential.' }
+    }
+    $data = [ordered]@{ schemaVersion=2; username=$Credential.UserName; passwordDpapi=$Credential.Password | ConvertFrom-SecureString; createdAt=(Get-Date).ToUniversalTime().ToString('o') }
+    if ($existing) {
+        foreach ($name in @('tailscaleOAuthClientId','tailscaleOAuthClientSecretDpapi')) {
+            if ($existing.PSObject.Properties[$name]) { $data[$name] = $existing.$name }
+        }
+    }
+    Write-DevFleetE2ESecretRecord -Path $path -Data $data
+    $path
+}
+
+function ConvertTo-DevFleetPlainSecret {
+    param([Parameter(Mandatory)][securestring]$Secret)
+    $bstr=[IntPtr]::Zero
+    try { $bstr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secret);return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
+    finally { if($bstr -ne [IntPtr]::Zero){[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)} }
+}
+
+function Save-DevFleetTailscaleOAuthCredential {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][securestring]$ClientSecret,[string]$ClientId='')
+    if($ClientId -and ($ClientId.Length -gt 256 -or $ClientId -match '[\r\n]')){throw 'Tailscale OAuth client ID is malformed.'}
+    $plain=ConvertTo-DevFleetPlainSecret -Secret $ClientSecret
+    try {
+        if([string]::IsNullOrWhiteSpace($plain) -or $plain.IndexOfAny([char[]]"`0`r`n") -ge 0 -or $plain.Length -gt 2048){throw 'Tailscale OAuth client secret is empty or malformed.'}
+    } finally { $plain=$null }
+    $path=Get-DevFleetE2ESecretPath;$existing=$null
+    try {$existing=Read-DevFleetE2ESecretRecord -Path $path} catch { throw 'Secure E2E credential store is corrupt; repair it before adding Tailscale OAuth.' }
+    $data=[ordered]@{schemaVersion=2;createdAt=(Get-Date).ToUniversalTime().ToString('o')}
+    if($existing){foreach($name in @('username','passwordDpapi','createdAt')){if($existing.PSObject.Properties[$name]){$data[$name]=$existing.$name}}}
+    if(-not $data.Contains('username')){$data.username='';$data.passwordDpapi=''}
+    $data.tailscaleOAuthClientId=$ClientId
+    $data.tailscaleOAuthClientSecretDpapi=($ClientSecret | ConvertFrom-SecureString)
+    Write-DevFleetE2ESecretRecord -Path $path -Data $data
+    $path
+}
+
+function Get-DevFleetTailscaleOAuthCredential {
+    $path=Get-DevFleetE2ESecretPath;$data=$null
+    try {$data=Read-DevFleetE2ESecretRecord -Path $path} catch { return [pscustomobject]@{available=$false;provider='OAuthClientSecretStore';reason='secure E2E credential store is corrupt';secret=$null;clientId='';path=$path;invalid=$true} }
+    $clientId=if($data -and $data.PSObject.Properties['tailscaleOAuthClientId']){[string]$data.tailscaleOAuthClientId}else{''}
+    if(-not $data -or -not $data.PSObject.Properties['tailscaleOAuthClientSecretDpapi'] -or [string]::IsNullOrWhiteSpace([string]$data.tailscaleOAuthClientSecretDpapi)){return [pscustomobject]@{available=$false;provider='OAuthClientSecretStore';reason='Tailscale OAuth client secret is not configured';secret=$null;clientId=$clientId;path=$path;invalid=$false}}
     try {
         $secure=ConvertTo-SecureString -String ([string]$data.tailscaleOAuthClientSecretDpapi) -ErrorAction Stop
         $plain=ConvertTo-DevFleetPlainSecret -Secret $secure
@@ -490,177 +667,4 @@ function Invoke-TailscaleAuthentication {
     if(-not [bool]$credential.available){return [ordered]@{authenticationAttempted=$false;authenticationSucceeded=$false;provider=[string]$credential.provider;userActionRequired=[bool]$credential.userActionRequired;credentialInvalid=[bool]$credential.invalid;failureClass=if([bool]$credential.invalid){'TAILSCALE_CREDENTIAL_INVALID'}else{'TAILSCALE_CREDENTIAL_MISSING'};reason=[string]$credential.reason}}
     try {
         try {
-            $lock=Invoke-TailscaleRemoteBounded -Session $Session -ScriptBlock {$raw=(& tailscale lock status --json 2>&1|Out-String);$exit=[int]$LASTEXITCODE;try{$json=$raw|ConvertFrom-Json -ErrorAction Stop;if($json.PSObject.Properties['Enabled']){[pscustomobject]@{exitCode=$exit;enabled=[bool]$json.Enabled}}else{[pscustomobject]@{exitCode=$exit;enabled=$null}}}catch{[pscustomobject]@{exitCode=$exit;enabled=$null}}} -OwnerDeadlineUtc $OwnerDeadlineUtc -MaximumSeconds 15
-        } catch { return [ordered]@{authenticationAttempted=$false;authenticationSucceeded=$false;provider=[string]$credential.provider;userActionRequired=$false;failureClass='TAILNET_LOCK_SIGNING_REQUIRED';reason='Tailnet Lock state was not established within the owner deadline.'} }
-        if([int]$lock.exitCode -ne 0){return [ordered]@{authenticationAttempted=$false;authenticationSucceeded=$false;provider=[string]$credential.provider;userActionRequired=$false;failureClass='TAILNET_LOCK_SIGNING_REQUIRED';reason='Tailnet Lock status command failed; automatic enrollment is blocked.'}}
-        if($lock.enabled -eq $true){return [ordered]@{authenticationAttempted=$false;authenticationSucceeded=$false;provider=[string]$credential.provider;userActionRequired=$false;failureClass='TAILNET_LOCK_SIGNING_REQUIRED';reason='Tailnet Lock is enabled; a trusted signing path is required.'}}
-        if($lock.enabled -ne $false){return [ordered]@{authenticationAttempted=$false;authenticationSucceeded=$false;provider=[string]$credential.provider;userActionRequired=$false;failureClass='TAILNET_LOCK_SIGNING_REQUIRED';reason='Tailnet Lock state was not established; automatic enrollment is blocked.'}}
-        $auth=$Config.Authentication;$tag=if($auth.PSObject.Properties['Tag']){[string]$auth.Tag}else{'tag:devfleet-e2e'};$hostname=if($auth.PSObject.Properties['Hostname']){[string]$auth.Hostname}else{'devfleet-e2e-auth'};$ephemeral=if($auth.PSObject.Properties['Ephemeral']){[bool]$auth.Ephemeral}else{$true};$preauth=if($auth.PSObject.Properties['Preauthorized']){[bool]$auth.Preauthorized}else{$true};$unattended=if($auth.PSObject.Properties['Unattended']){[bool]$auth.Unattended}else{$true};$timeout=if($Config.PSObject.Properties['PollTimeoutSeconds']){[int]$Config.PollTimeoutSeconds}else{120}
-        $authKey=[string]$credential.provider -ceq 'AuthKeyEnvironment';$source=Get-TailscaleProviderSource -AuthKey:$authKey
-        $authMaximum=[math]::Max(1,[math]::Min(600,$timeout+5))
-        $result=Invoke-TailscaleRemoteBounded -Session $Session -ScriptBlock {param($secret,$provider,$source,$tag,$hostname,$ephemeral,$preauth,$unattended,$timeout)$fn=[scriptblock]::Create($source);if($provider-ceq'AuthKeyEnvironment'){&$fn -AuthKey $secret -TimeoutSeconds $timeout}else{&$fn -ClientSecret $secret -Tag $tag -Hostname $hostname -Ephemeral:$ephemeral -Preauthorized:$preauth -Unattended:$unattended -TimeoutSeconds $timeout}} -ArgumentList ([string]$credential.secret),[string]$credential.provider,$source,$tag,$hostname,$ephemeral,$preauth,$unattended,$timeout -OwnerDeadlineUtc $OwnerDeadlineUtc -MaximumSeconds $authMaximum
-        $ok=[int]$result.exitCode -eq 0
-        [ordered]@{authenticationAttempted=$true;authenticationSucceeded=$ok;provider=[string]$credential.provider;userActionRequired=$false;credentialInvalid=$false;exitCode=[int]$result.exitCode;output=ConvertTo-TailscaleSafeText ([string]$result.output);failureClass=if($ok){''}else{'TAILSCALE_AUTH_FAILED'}}
-    } catch { [ordered]@{authenticationAttempted=$true;authenticationSucceeded=$false;provider=[string]$credential.provider;userActionRequired=$false;credentialInvalid=[bool]$credential.invalid;failureClass='TAILSCALE_AUTH_FAILED';error='Tailscale authentication provider invocation failed'} }
-}
-
-function Assert-TailscaleAuthenticationResult {
-    param([Parameter(Mandatory)][psobject]$Result)
-    if($Result.PSObject.Properties['failureClass'] -and [string]$Result.failureClass){$reason=if($Result.PSObject.Properties['reason']){[string]$Result.reason}else{''};throw (([string]$Result.failureClass)+$(if($reason){": $reason"}else{''}))}
-    if(-not [bool]$Result.authenticationAttempted){throw 'TAILSCALE-AUTH cannot pass when authenticationAttempted=false.'}
-    if(-not [bool]$Result.authenticationSucceeded){throw 'TAILSCALE-AUTH authentication provider did not establish authentication.'}
-    $true
-}
-
-Export-ModuleMember -Function Get-TailscaleGuestStatus,Test-TailscaleConnected,Get-TailscaleAuthenticationSecret,Invoke-TailscaleAuthKeyFileCommand,Invoke-TailscaleOAuthClientSecretFileCommand,Get-TailscaleReadinessFromStatus,Get-TailscaleReadiness,Get-TailscaleE2EHostname,New-TailscaleE2EEnrollmentProfile,Stage-TailscaleOAuthCredential,Remove-StagedTailscaleOAuthCredential,Write-TailscaleOAuthActionRequired,Invoke-TailscaleAuthentication,Assert-TailscaleAuthenticationResult
-
-```
-
-
-## FILE: automation/release-e2e/modules/executors/Invoke-AuditPhase.ps1
-
-SHA256: b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95 | Bytes: 234 | Git mode: 100644
-
-```
-param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
-Import-Module (Join-Path $PSScriptRoot 'Invoke-RealProductPhase.psm1') -Force
-Invoke-RealProductPhase -ContextJson $ContextJson | ConvertTo-Json -Depth 32 -Compress
-
-```
-
-
-## FILE: automation/release-e2e/modules/executors/Invoke-DependencyMatrix.ps1
-
-SHA256: b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95 | Bytes: 234 | Git mode: 100644
-
-```
-param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
-Import-Module (Join-Path $PSScriptRoot 'Invoke-RealProductPhase.psm1') -Force
-Invoke-RealProductPhase -ContextJson $ContextJson | ConvertTo-Json -Depth 32 -Compress
-
-```
-
-
-## FILE: automation/release-e2e/modules/executors/Invoke-HostAgentPhase.ps1
-
-SHA256: b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95 | Bytes: 234 | Git mode: 100644
-
-```
-param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
-Import-Module (Join-Path $PSScriptRoot 'Invoke-RealProductPhase.psm1') -Force
-Invoke-RealProductPhase -ContextJson $ContextJson | ConvertTo-Json -Depth 32 -Compress
-
-```
-
-
-## FILE: automation/release-e2e/modules/executors/Invoke-HttpHostilePhase.ps1
-
-SHA256: e2d8ba28381c7fc3c3872312d6b7f964ca8e7b48d5dc03ada9d6c6b9a6f17ee1 | Bytes: 3111 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
-$ErrorActionPreference = 'Stop'
-$context = $ContextJson | ConvertFrom-Json -ErrorAction Stop
-$tarPath = [string]$context.candidate.tar.path
-$tarItem = Get-Item -LiteralPath $tarPath -ErrorAction Stop
-$tarHash = (Get-FileHash -LiteralPath $tarItem.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($tarHash -ne [string]$context.candidate.tar.sha256 -or [int64]$tarItem.Length -ne [int64]$context.candidate.tar.bytes) { throw 'HTTP-HOSTILE exact candidate TAR identity changed.' }
-
-$workspace = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
-$python = if (Test-Path -LiteralPath (Join-Path $workspace '.venv-test\Scripts\python.exe')) { Join-Path $workspace '.venv-test\Scripts\python.exe' } else { (Get-Command python.exe -ErrorAction Stop).Source }
-$extractRoot = Join-Path ([string]$context.runDir) 'HTTP-HOSTILE-extracted'
-$outputPath = Join-Path ([string]$context.runDir) 'HTTP-HOSTILE-pytest.txt'
-try {
-    New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
-    & tar.exe -xzf $tarItem.FullName -C $extractRoot
-    if ($LASTEXITCODE -ne 0) { throw 'HTTP-HOSTILE exact candidate TAR extraction failed.' }
-    $testPath = Join-Path $extractRoot 'tests\test_request_admission.py'
-    if (-not (Test-Path -LiteralPath $testPath -PathType Leaf)) { throw 'HTTP-HOSTILE request-admission suite is absent from the exact candidate TAR.' }
-    $priorPythonPath = $env:PYTHONPATH
-    $priorPluginState = $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD
-    try {
-        $env:PYTHONPATH = "$extractRoot;$extractRoot\app"
-        $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = '1'
-        $output = @(& $python -m pytest -q $testPath -rs 2>&1)
-        $exitCode = $LASTEXITCODE
-    } finally {
-        if ($null -eq $priorPythonPath) { Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue } else { $env:PYTHONPATH = $priorPythonPath }
-        if ($null -eq $priorPluginState) { Remove-Item Env:PYTEST_DISABLE_PLUGIN_AUTOLOAD -ErrorAction SilentlyContinue } else { $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = $priorPluginState }
-    }
-    $text = ($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
-    $text | Set-Content -LiteralPath $outputPath -Encoding utf8
-    if ($exitCode -ne 0) { throw "HTTP-HOSTILE exact candidate regression failed; evidence=$outputPath" }
-    $match = [regex]::Match($text, '(?m)(\d+) passed')
-    if (-not $match.Success -or [int]$match.Groups[1].Value -lt 10) { throw 'HTTP-HOSTILE did not report the complete request-admission regression count.' }
-    [ordered]@{status='PASS';phase='HTTP-HOSTILE';contract='exact-candidate-asgi-request-admission-regression';tar=[ordered]@{path=$tarItem.FullName;bytes=[int64]$tarItem.Length;sha256=$tarHash};tests=[ordered]@{passed=[int]$match.Groups[1].Value;failed=0;outputPath=$outputPath};networkBeforeBody=$true;invalidTokenZeroConsumption=$true;declaredAndChunkedLimits=$true} | ConvertTo-Json -Depth 8 -Compress
-} finally {
-    if (Test-Path -LiteralPath $extractRoot) { Remove-Item -LiteralPath $extractRoot -Recurse -Force }
-}
-
-```
-
-
-## FILE: automation/release-e2e/modules/executors/Invoke-LinuxPhase.ps1
-
-SHA256: 37bf83af6eb4acf2d956473bed6e5629bd423d6309ad7d0067b5ab98d0a18858 | Bytes: 237 | Git mode: 100644
-
-```
-param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
-Import-Module (Join-Path $PSScriptRoot 'Invoke-RealProductPhase.psm1') -Force
-Invoke-LinuxBootstrapPhase -ContextJson $ContextJson | ConvertTo-Json -Depth 32 -Compress
-
-```
-
-
-## FILE: automation/release-e2e/modules/executors/Invoke-MaintenancePhase.ps1
-
-SHA256: b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95 | Bytes: 234 | Git mode: 100644
-
-```
-param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
-Import-Module (Join-Path $PSScriptRoot 'Invoke-RealProductPhase.psm1') -Force
-Invoke-RealProductPhase -ContextJson $ContextJson | ConvertTo-Json -Depth 32 -Compress
-
-```
-
-
-## FILE: automation/release-e2e/modules/executors/Invoke-PrimaryPhase.ps1
-
-SHA256: 69f0b4b0b9e7204235b768adc34df5cc265cd77ac632515a79c838b8f8acb541 | Bytes: 234 | Git mode: 100644
-
-```
-param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
-Import-Module (Join-Path $PSScriptRoot 'Invoke-RealProductPhase.psm1') -Force
-Invoke-PrimaryRolePhase -ContextJson $ContextJson | ConvertTo-Json -Depth 32 -Compress
-
-```
-
-
-## FILE: automation/release-e2e/modules/executors/Invoke-ProductLifecycleScenario.py
-
-SHA256: 301a7f1227b24a6315846bd41e495ae038b1d4aa21f5e4707641687ea5e00ad2 | Bytes: 24956 | Git mode: 100644
-
-```
-#!/usr/bin/env python3
-"""Run one bounded release scenario against an extracted exact-candidate tree."""
-from __future__ import annotations
-
-import argparse
-import hashlib
-import ipaddress
-import json
-import os
-import pwd
-import re
-import shutil
-import stat
-import subprocess
-import sys
-import threading
-import time
-from pathlib import Path
-from urllib.parse import urlsplit
-
-
-RELEASE_RUN_ID_PATTERN = re.compile(r"(?:e2e|
+            $lock=Invoke-TailscaleRemoteBounded -Session $Session -ScriptBlock {$raw=(& tailscale lock status --json 2>&1|Out

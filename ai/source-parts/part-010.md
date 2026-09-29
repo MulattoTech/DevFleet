@@ -1,10 +1,114 @@
 # DevFleet source part 010
 
 Full-source UTF-8 byte interval [418500, 465000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 5ad20163a61b8005f189bd1212f9b81ae1cdbff8b52d0c7aeb8f181491b2f88c
+Payload SHA-256: 6e1def3de84d9d8b4553e0aca76f635b1e6d5f53ca498ac91dc831e5006c65fe
 
 <!-- BEGIN SOURCE SLICE -->
-[$name]) -TimeoutSeconds 120}
+er-gt[datetime]::MinValue){$owner.ToString('o')}else{''};producedAtUtc=[datetime]::UtcNow.ToString('o');multipassSha256=$multipassSha;launchCallStarted=[bool]$launchState.callStarted;experiment=if($productLaunch){'M3'}elseif($profile){'M2'}else{'M1'};executionContext=$workerContext;productProfile=$profile;backendBefore=$backendBefore;backendBeforeCleanup=$backendAfter;backendAfterCleanup=$backendFinal;boundaryBefore=$boundaryBefore;preflight=$preflight;sequence=$sequence;cleanup=$cleanup;boundaryAfter=$boundaryAfter;primaryError=$primaryError;productLifecycleStarted=$false;productProgressClaimed=$false}
+    if($resultPath-and(Test-Path -LiteralPath $remoteRoot -PathType Container)){try{Write-FreshAtomicJson -Path $resultPath -Value $result}catch{}}
+    [Console]::Out.Write(($result|ConvertTo-Json -Depth 24 -Compress))
+}
+if([string]$result.status-cne'PASS_DIAGNOSTIC'){exit 1}
+
+```
+
+
+## FILE: automation/release-e2e/Invoke-CampaignEPrerequisiteCheckpoint.ps1
+
+SHA256: 2015812621faeada41d077fbd7cc67390b6c62aef05aaf46f274c9c0ec56add5 | Bytes: 24650 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)][string]$WorkspaceRoot,
+    [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9._-]+$')][string]$RunId,
+    [ValidateRange(1800,3600)][int]$OwnerSeconds=2400
+)
+
+$ErrorActionPreference='Stop'
+$root=(Resolve-Path -LiteralPath $WorkspaceRoot).Path
+$vmId=[guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2'
+$vmName='DevFleet-E2E-Win11-01'
+$cleanId=[guid]'19865b76-4c3a-44f7-ba39-841e9d3c40c9'
+$cleanName='DevFleet-E2E-CLEAN'
+$l2Name='DevFleet-E2E-Linux-01'
+$runDir=Join-Path $root "audit\automation-harness\runs\$RunId"
+$remoteRoot="C:\Users\Public\DevFleet-E2E\$RunId\Prerequisite"
+$checkpointName="DevFleet-E2E-E-PREREQ-$($RunId.ToUpperInvariant())"
+$ownerDeadline=[datetime]::UtcNow.AddSeconds($OwnerSeconds)
+$deadlinePartition=$null
+$terminalizationDeadline=$ownerDeadline.AddSeconds(300)
+$stagingNonce=[guid]::NewGuid()
+$powerShellPayloadTempRoot=$null
+$powerShellPayloadTempOwned=$false
+
+foreach($module in @('Candidate','HostSafety','FullRelease','GuestSession','Evidence','MultipassDiagnostic')){Import-Module (Join-Path $root "automation\release-e2e\modules\$module.psm1") -Force}
+
+$result=[ordered]@{
+    schemaVersion=1;campaign='DF-STABLE-20260906-E';experiment='PREREQUISITE_CHECKPOINT_PREP';status='RESERVED';certificationEligible=$false;proofCredit=$false;runId=$RunId
+    startedAtUtc=[datetime]::UtcNow.ToString('o');ownerDeadlineUtc=$ownerDeadline.ToString('o');exactL1=[ordered]@{name=$vmName;id=$vmId.ToString()};sourceCheckpoint=[ordered]@{name=$cleanName;id=$cleanId.ToString()}
+    requestedCheckpointName=$checkpointName;cleanupOwner='Invoke-CampaignEPrerequisiteCheckpoint.ps1';diagnosticDeviation='Stages an allowlisted official PowerShell MSI selected by the exact candidate GitHub resolver and Microsoft signer policy, installs candidate-required Multipass through candidate dependency policy, configures Hyper-V/no privileged mounts, and never starts a product transaction or writes a product stage marker.'
+}
+$session=$null;$restored=$false;$checkpoint=$null;$workerPassed=$false;$stagingOwned=$false;$initialVmState=$null
+try {
+    New-Item -ItemType Directory -Path $runDir -Force|Out-Null
+    Write-EvidenceJson -Path (Join-Path $runDir 'campaign-e-prerequisite-checkpoint.json') -Value $result
+    $vm=Get-VM -Id $vmId -ErrorAction Stop
+    if([string]$vm.Name-cne$vmName-or$vm.Id-ne$vmId){throw 'Campaign E prerequisite exact L1 identity mismatch.'}
+    Assert-DisposableOwnership -Vm $vm -ExpectedId $vmId.ToString()|Out-Null
+    $initialVmState=[string]$vm.State
+    if($initialVmState-cne'Off'){throw "Campaign E prerequisite preparation will not acquire an already-running L1; observed state $initialVmState."}
+    $clean=@(Get-VMSnapshot -VM $vm -ErrorAction Stop|Where-Object{$_.Name-ceq$cleanName-and$_.Id-eq$cleanId})
+    if($clean.Count-ne1){throw 'Campaign E prerequisite canonical CLEAN name/GUID binding failed.'}
+    if(@(Get-VMSnapshot -VM $vm -ErrorAction Stop|Where-Object{$_.Name-ceq$checkpointName}).Count){throw 'Campaign E prerequisite checkpoint name already exists.'}
+    $safety=Get-HostSafetySnapshot -Vm $vm -ExpectedVmStartCostGiB 14.38
+    $result.hostSafety=[ordered]@{status=if([bool]$safety.startSafe){'PASS'}else{'BLOCKED'};startSafe=[bool]$safety.startSafe;resourceExhaustion=[bool]$safety.resourceExhaustion;availableMemoryGiB=[double]$safety.availableMemoryGiB;projectedPostStartAvailableMemoryGiB=[double]$safety.projectedPostStartAvailableMemoryGiB;observedAtUtc=[datetime]::UtcNow.ToString('o')}
+    if(-not[bool]$safety.startSafe){throw 'BLOCKED - HOST-SAFETY startSafe=false.'}
+    $fingerprint=Get-CandidateFingerprint -WorkspaceRoot $root
+    $authority=Get-Content -LiteralPath (Join-Path $root 'evidence\CURRENT-RELEASE-AUTHORITY.json') -Raw|ConvertFrom-Json -ErrorAction Stop
+    if(-not[bool]$authority.candidateIsCurrent-or[bool]$authority.sourceChangedSinceCandidate-or[bool]$authority.rebuildRequired){throw 'Campaign E prerequisite preparation requires a coherent current candidate.'}
+    $repositoryHead=(&git -C $root rev-parse HEAD).Trim()
+    if([string]$authority.repositoryHead-cne$repositoryHead-or[string]$authority.candidateCommit-cne[string]$fingerprint.gitCommit-or[string]$authority.shippingInputIdentity-cne[string]$fingerprint.shippingInputIdentity-or[string]$authority.releaseFingerprintId-cne[string]$fingerprint.releaseFingerprintId-or[string]$authority.toolingFingerprintId-cne[string]$fingerprint.toolingFingerprintId){throw 'Campaign E prerequisite current authority/fingerprint tuple mismatch.'}
+    $plan=Get-DevFleetCampaignEPrerequisitePlan -PackageRoot (Join-Path $root 'source') -Role Desktop
+    $manifest=Get-Content -LiteralPath (Join-Path $root 'source\dependencies.json') -Raw|ConvertFrom-Json -ErrorAction Stop
+    $powerShellDependencies=@($manifest.dependencies|Where-Object{[string]$_.id-ceq'powershell7'})
+    if($powerShellDependencies.Count-ne1){throw 'Campaign E host payload preparation requires one PowerShell dependency.'}
+    $powerShellPayloadTempRoot=Join-Path ([IO.Path]::GetTempPath()) ("devfleet-e-powershell-$RunId-$($stagingNonce.ToString('N'))")
+    if(Test-Path -LiteralPath $powerShellPayloadTempRoot){throw 'Campaign E host payload staging path already exists.'}
+    New-Item -ItemType Directory -Path $powerShellPayloadTempRoot|Out-Null
+    $hostPayloadOwner=[ordered]@{schemaVersion=1;kind='DEVFLEET_CAMPAIGN_E_HOST_PAYLOAD_OWNER';runId=$RunId;nonce=$stagingNonce.ToString();createdAtUtc=[datetime]::UtcNow.ToString('o')}
+    $hostPayloadOwner|ConvertTo-Json -Compress|Set-Content -LiteralPath (Join-Path $powerShellPayloadTempRoot '.owner.json') -Encoding UTF8
+    $powerShellPayloadTempOwned=$true
+    $powerShellPayload=Get-DevFleetCampaignEOfficialPowerShellPayload -Dependency $powerShellDependencies[0] -DestinationDirectory $powerShellPayloadTempRoot -OwnerDeadlineUtc $ownerDeadline
+    $result.powerShellPayload=[ordered]@{schemaVersion=[int]$powerShellPayload.schemaVersion;kind=[string]$powerShellPayload.kind;status=[string]$powerShellPayload.status;method=[string]$powerShellPayload.method;packageId=[string]$powerShellPayload.packageId;releaseTag=[string]$powerShellPayload.releaseTag;assetName=[string]$powerShellPayload.assetName;metadataHost=[string]$powerShellPayload.metadataHost;assetHost=[string]$powerShellPayload.assetHost;redirectHosts=@($powerShellPayload.redirectHosts);sha256=[string]$powerShellPayload.sha256;bytes=[int64]$powerShellPayload.bytes;signerSubject=[string]$powerShellPayload.signerSubject;startedAtUtc=[string]$powerShellPayload.startedAtUtc;finishedAtUtc=[string]$powerShellPayload.finishedAtUtc;ownerDeadlineUtc=[string]$powerShellPayload.ownerDeadlineUtc;productLifecycleStarted=$false;stageMarkerWritten=$false}
+    $deadlinePartition=Get-DevFleetCampaignEDeadlinePartition -OwnerDeadlineUtc $ownerDeadline -ReservedTerminalizationSeconds 300
+    $childDeadline=([datetime]$deadlinePartition.childDeadlineUtc).ToUniversalTime()
+    $terminalizationDeadline=([datetime]$deadlinePartition.terminalizationDeadlineUtc).ToUniversalTime()
+    $result.deadlinePartition=$deadlinePartition
+    $result.tuple=[ordered]@{repositoryHead=$repositoryHead;candidateCommit=[string]$fingerprint.gitCommit;shippingInputIdentity=[string]$fingerprint.shippingInputIdentity;releaseFingerprintId=[string]$fingerprint.releaseFingerprintId;toolingFingerprintId=[string]$fingerprint.toolingFingerprintId;candidateSha256=[string]$fingerprint.candidate.sha256;payloadSha256=[string]$fingerprint.tar.sha256}
+    $result.plan=$plan
+    $result.status='STARTING'
+    Write-EvidenceJson -Path (Join-Path $runDir 'campaign-e-prerequisite-checkpoint.json') -Value $result
+    $result.restore=Restore-ExactCheckpoint -Vm $vm -Name $cleanName -StartAfterRestore
+    $restored=$true
+    $session=Connect-DevFleetGuest -VmId $vmId
+    $initialL2=Get-DevFleetNestedL2State -Session $session -ExpectedName $l2Name
+    $result.initialL2=$initialL2
+    if([string]$initialL2.status-cne'ABSENT'){throw "Campaign E prerequisite state requires exact initial L2 absence; observed $([string]$initialL2.status)."}
+    $ownership=@(Invoke-DevFleetBoundedGuestCommand -Session $session -TimeoutSeconds 30 -ScriptBlock {param($Path,$RunId,$Nonce)if($Path-notlike'C:\Users\Public\DevFleet-E2E\*\Prerequisite'){throw 'Remote prerequisite staging path is outside the run-owned boundary.'};if(Test-Path -LiteralPath $Path){throw 'Remote prerequisite staging path already exists and will not be adopted or deleted.'};New-Item -ItemType Directory -Path $Path|Out-Null;$record=[ordered]@{schemaVersion=1;kind='DEVFLEET_CAMPAIGN_E_STAGING_OWNER';runId=$RunId;nonce=$Nonce;createdAtUtc=[datetime]::UtcNow.ToString('o')};$record|ConvertTo-Json -Compress|Set-Content -LiteralPath (Join-Path $Path '.owner.json') -Encoding UTF8;[pscustomobject]$record} -ArgumentList @($remoteRoot,$RunId,$stagingNonce.ToString()))|Select-Object -Last 1
+    Assert-DevFleetCampaignEStagingOwnership -Record $ownership -ExpectedRunId $RunId -ExpectedNonce $stagingNonce|Out-Null
+    $stagingOwned=$true
+    $result.stagingOwnership=$ownership
+    $files=[ordered]@{
+        module=Join-Path $root 'automation\release-e2e\modules\MultipassDiagnostic.psm1'
+        worker=Join-Path $root 'automation\release-e2e\Invoke-CampaignEPrerequisiteWorker.ps1'
+        innerWorker=Join-Path $root 'automation\release-e2e\Invoke-CampaignEPrerequisitePwshWorker.ps1'
+        candidateTar=[string]$fingerprint.tar.path
+        powerShellPayload=[string]$powerShellPayload.localPath
+    }
+    $remote=[ordered]@{module=Join-Path $remoteRoot 'MultipassDiagnostic.psm1';worker=Join-Path $remoteRoot 'Invoke-CampaignEPrerequisiteWorker.ps1';innerWorker=Join-Path $remoteRoot 'Invoke-CampaignEPrerequisitePwshWorker.ps1';candidateTar=Join-Path $remoteRoot 'devfleet-v1.2.13.tar.gz';powerShellPayload=Join-Path $remoteRoot ([string]$powerShellPayload.assetName)}
+    $result.stage=[ordered]@{}
+    foreach($name in @('module','worker','innerWorker','candidateTar','powerShellPayload')){$result.stage[$name]=Copy-DevFleetBoundedGuestFile -LocalPath ([string]$files[$name]) -Session $session -RemotePath ([string]$remote[$name]) -TimeoutSeconds 120}
     $hostPayloadOwner=Get-Content -LiteralPath (Join-Path $powerShellPayloadTempRoot '.owner.json') -Raw|ConvertFrom-Json -ErrorAction Stop
     if([string]$hostPayloadOwner.kind-cne'DEVFLEET_CAMPAIGN_E_HOST_PAYLOAD_OWNER'-or[string]$hostPayloadOwner.runId-cne$RunId-or[guid][string]$hostPayloadOwner.nonce-ne$stagingNonce){throw 'Campaign E host payload cleanup ownership identity mismatch.'}
     Remove-Item -LiteralPath $powerShellPayloadTempRoot -Recurse -Force -ErrorAction Stop
@@ -337,102 +441,4 @@ try {
             $match=[regex]::Match([string]$probe.stdout,[string]$dependency.versionProbe.regex)
             if(-not$match.Success){$first=[pscustomobject]@{status='Broken';version='';pathSha256='';detail='Trusted PowerShell version response was malformed.'};continue}
             $version=[Version]$match.Groups[1].Value
-            $status=if($version-lt[Version][string]$dependency.minimumSupportedVersion){'Outdated'}elseif($null-ne$dependency.maximumMajor-and$version.Major-gt[int]$dependency.maximumMajor){'Unsupported-Major'}else{'Compatible'}
-            $value=[pscustomobject]@{status=$status;version=$version.ToString();pathSha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant();detail='Candidate-trusted executable and bounded version probe.'}
-            if($status-ceq'Compatible'){$campaignEAcquisitionState.pwshPath=[string]$path;return $value}
-            if($null-eq$first){$first=$value}
-        }
-        if($null-ne$first){return $first}
-        return [pscustomobject]@{status='Missing';version='';pathSha256='';detail='No candidate-trusted PowerShell executable was found.'}
-    }.GetNewClosure()
-    $authenticityProvider={
-        param($payloadPath,$policy)
-        Test-OfficialSigner -Path $payloadPath -Policy $policy
-        $signature=Get-AuthenticodeSignature -LiteralPath $payloadPath
-        [pscustomobject]@{status=$signature.Status.ToString();signerSubject=if($signature.SignerCertificate){[string]$signature.SignerCertificate.Subject}else{''}}
-    }.GetNewClosure()
-    $installerProvider={
-        param($payloadPath,$arguments,$timeoutSeconds,$deadline)
-        $msiexec=Join-Path $env:SystemRoot 'System32\msiexec.exe'
-        if(-not(Test-TrustedExecutableCandidate -Path $msiexec)){throw 'Candidate-trusted system msiexec.exe is unavailable.'}
-        if($null-eq$campaignEAcquisitionState.identity){$campaignEAcquisitionState.identity=[pscustomobject]@{method='STAGED_OFFICIAL_GITHUB_DIAGNOSTIC';packageId=[string]$powerShellDependency.wingetPackageId;payloadSha256=[string]$powerShellPayload.sha256;assetName=[string]$powerShellPayload.assetName;ownerDeadlineUtc=([datetime]$deadline).ToUniversalTime().ToString('o')}}
-        $observation=Invoke-DevFleetBoundedNativeProbe -Operation 'official-powershell-msi-install' -FilePath $msiexec -ArgumentList @($arguments) -TimeoutSeconds $timeoutSeconds -OwnerDeadlineUtc $deadline -ForceLegacyArgumentString -MaxStdoutCharacters 32768 -MaxStderrCharacters 8192
-        [void]$campaignEAcquisitionState.nativeTrace.Add([pscustomobject][ordered]@{operation=[string]$observation.operation;outcome=[string]$observation.outcome;exitCode=$observation.exitCode;pid=$observation.pid;startedAtUtc=[string]$observation.startedAtUtc;finishedAtUtc=[string]$observation.finishedAtUtc;deadlineUtc=[string]$observation.deadlineUtc;outputComplete=[bool]$observation.outputComplete})
-        return $observation
-    }.GetNewClosure()
-    $campaignEAcquisitionState.identity=[pscustomobject]@{method='STAGED_OFFICIAL_GITHUB_DIAGNOSTIC';packageId=[string]$powerShellDependency.wingetPackageId;payloadSha256=[string]$powerShellPayload.sha256;assetName=[string]$powerShellPayload.assetName;ownerDeadlineUtc=$ownerDeadline.ToString('o')}
-    $acquisition=Invoke-DevFleetCampaignEStagedPowerShellAcquisition -Dependency $powerShellDependency -PayloadEvidence $powerShellPayload -PayloadPath $powerShellPayloadPath -OwnerDeadlineUtc $ownerDeadline -AuthenticityProvider $authenticityProvider -InstallerProvider $installerProvider -PowerShellCompatibilityProvider $compatibilityProvider
-    if([string]$acquisition.status-cne'PASS'-or[bool]$acquisition.productLifecycleStarted-or[bool]$acquisition.stageMarkerWritten){throw 'Campaign E PowerShell acquisition failed or crossed the product boundary.'}
-    if([string]::IsNullOrWhiteSpace([string]$campaignEAcquisitionState.pwshPath)-or-not(Test-Path -LiteralPath ([string]$campaignEAcquisitionState.pwshPath) -PathType Leaf)){throw 'Campaign E PowerShell acquisition did not leave one candidate-compatible trusted pwsh.exe path.'}
-    $innerResultPath=Join-Path $remoteRoot 'prerequisite-result.json'
-    $innerRequest=[ordered]@{runId=[string]$request.runId;vmId=[string]$request.vmId;remoteRoot=$remoteRoot;packageRoot=$packageRoot;diagnosticModulePath=[string]$request.diagnosticModulePath;resultPath=$innerResultPath;role=[string]$request.role;payloadSha256=[string]$request.payloadSha256;inputHashes=$plan.inputHashes;ownerDeadlineUnixMilliseconds=[DateTimeOffset]::new($ownerDeadline).ToUnixTimeMilliseconds();pendingRebootBaseline=$pendingBaseline}|ConvertTo-Json -Depth 8 -Compress
-    $innerBase64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($innerRequest))
-    $innerArgs=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',[string]$request.innerWorkerPath,'-RequestBase64',$innerBase64)
-    $innerSeconds=[int][math]::Min(1200,[math]::Max(1,[math]::Floor(($ownerDeadline-[datetime]::UtcNow).TotalSeconds)))
-    $innerProbe=Invoke-DevFleetBoundedNativeProbe -Operation 'candidate-multipass-prerequisite' -FilePath ([string]$campaignEAcquisitionState.pwshPath) -ArgumentList $innerArgs -TimeoutSeconds $innerSeconds -OwnerDeadlineUtc $ownerDeadline -ForceLegacyArgumentString -MaxStdoutCharacters 32768 -MaxStderrCharacters 8192
-    if(-not(Test-Path -LiteralPath $innerResultPath -PathType Leaf)){throw "Candidate Multipass prerequisite worker did not publish a result: $(ConvertTo-DevFleetDiagnosticSafeText $innerProbe.stderr 1024)"}
-    $result=Get-Content -LiteralPath $innerResultPath -Raw|ConvertFrom-Json -ErrorAction Stop
-    $policyAfter=Get-DevFleetSystemExecutionPolicyProjection
-    $systemChanged=($policyBefore|ConvertTo-Json -Compress)-cne($policyAfter|ConvertTo-Json -Compress)
-    $result.systemPolicyChanged=[bool]$systemChanged
-    $result|Add-Member -NotePropertyName powershellAcquisition -NotePropertyValue $acquisition -Force
-    $result|Add-Member -NotePropertyName worker -NotePropertyValue ([pscustomobject][ordered]@{outcome=[string]$innerProbe.outcome;pid=$innerProbe.pid;startedAtUtc=[string]$innerProbe.startedAtUtc;finishedAtUtc=[string]$innerProbe.finishedAtUtc;outputComplete=[bool]$innerProbe.outputComplete}) -Force
-    $result.startedAtUtc=$started.ToString('o')
-    $result.producedAtUtc=[datetime]::UtcNow.ToString('o')
-    if(([datetime]$result.producedAtUtc).ToUniversalTime()-gt$ownerDeadline){throw 'Campaign E prerequisite result publication crossed the immutable owner deadline.'}
-    Write-FreshAtomicJson -Path (Join-Path $remoteRoot 'prerequisite-worker-result.json') -Value $result
-    if([datetime]::UtcNow-gt$ownerDeadline){throw 'Campaign E durable prerequisite result completed after the immutable owner deadline.'}
-    [Console]::Out.Write(($result|ConvertTo-Json -Depth 20 -Compress))
-    if([string]$innerProbe.outcome-cne'PASS'-or$systemChanged){exit 1}
-} catch {
-    $message=[regex]::Replace([string]$_.Exception.Message,'(?im)\b(password|secret|token|authorization|hmac)\b\s*[:=]\s*\S+','$1=<redacted>')
-    if($null-ne$request-and$validatedRemoteRoot-and(Test-Path -LiteralPath $validatedRemoteRoot -PathType Container)){
-        $primaryError=if($message.Length-gt1024){$message.Substring($message.Length-1024)}else{$message}
-        $failure=[ordered]@{schemaVersion=1;kind='DEVFLEET_CAMPAIGN_E_PREREQUISITE_FAILURE';status='BLOCKED';runId=[string]$request.runId;vmId=[string]$request.vmId;payloadSha256=[string]$request.payloadSha256;producedAtUtc=[datetime]::UtcNow.ToString('o');ownerDeadlineUtc=if($ownerDeadline-gt[datetime]::MinValue){$ownerDeadline.ToUniversalTime().ToString('o')}else{''};primaryError=$primaryError;powershellAcquisition=[ordered]@{status='BLOCKED';identity=$campaignEAcquisitionState.identity;operations=@($campaignEAcquisitionState.nativeTrace);productLifecycleStarted=$false;stageMarkerWritten=$false}}
-        $failurePath=Join-Path $validatedRemoteRoot 'prerequisite-failure.json';$failureTmp="$failurePath.$([guid]::NewGuid().ToString('N')).tmp"
-        try{$failure|ConvertTo-Json -Depth 12 -Compress|Set-Content -LiteralPath $failureTmp -Encoding UTF8;[IO.File]::Move($failureTmp,$failurePath)}catch{Remove-Item -LiteralPath $failureTmp -Force -ErrorAction SilentlyContinue}
-        [Console]::Out.Write(($failure|ConvertTo-Json -Depth 12 -Compress))
-    }
-    [Console]::Error.Write($message)
-    exit 1
-}
-
-```
-
-
-## FILE: automation/release-e2e/Invoke-CampaignEProductM4.ps1
-
-SHA256: ebbb7e1ba24c19b6c61e07433f744ba6381c01b6193c6e451a9f8ef058929d30 | Bytes: 16973 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param(
-    [Parameter(Mandatory)][string]$WorkspaceRoot,
-    [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9._-]+$')][string]$RunId,
-    [Parameter(Mandatory)][string]$CheckpointEvidencePath
-)
-$ErrorActionPreference='Stop'
-$root=(Resolve-Path -LiteralPath $WorkspaceRoot).Path
-$checkpointPath=(Resolve-Path -LiteralPath $CheckpointEvidencePath).Path
-$vmId=[guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2';$vmName='DevFleet-E2E-Win11-01';$cleanId=[guid]'19865b76-4c3a-44f7-ba39-841e9d3c40c9'
-$runDir=Join-Path $root "audit/automation-harness/runs/$RunId";$remoteRoot="C:\Users\Public\DevFleet-E2E\$RunId\M4";$nonce=[guid]::NewGuid().ToString()
-foreach($module in @('Candidate','HostSafety','FullRelease','GuestSession','Evidence','MultipassDiagnostic','HarnessBudget')){Import-Module (Join-Path $root "automation/release-e2e/modules/$module.psm1") -Force -DisableNameChecking}
-$config=Get-Content (Join-Path $root 'automation/release-e2e/config/devfleet-e2e.defaults.json') -Raw|ConvertFrom-Json
-$policy=Get-HarnessBudgetPolicy -Config $config;Assert-HarnessBudgetPolicy $policy|Out-Null
-$owner=[datetime]::UtcNow.AddSeconds([int]$policy.exactProofOuterWatchdogSeconds)
-$result=[ordered]@{schemaVersion=1;campaign='DF-STABLE-20260906-E';experiment='M4';runId=$RunId;status='RESERVED';proofCredit=$false;certificationEligible=$false;startedAtUtc=[datetime]::UtcNow.ToString('o');ownerDeadlineUtc=$owner.ToString('o');baseline='EXACT_DIAGNOSTIC_PREREQUISITE';productRole='Primary / Desktop';productionObserverEnabled=$true;syntheticReboot=$false;providerSeamsUsed=$false;cleanupOwner='Invoke-CampaignEProductM4.ps1';observations=@()}
-$session=$null;$job=$null;$acquired=$false;$stagingOwned=$false;$lifecycleForcedStop=$false;$moduleHash='';$payload='';$snapshotIndex=0;$since=[datetime]::UtcNow;$terminalSnapshot=$null;$checkpoint=$null
-if(Test-Path -LiteralPath $runDir){throw 'M4 refuses to reuse an existing run directory.'}
-function Save-M4Snapshot([string]$Edge){
-    $observation=$null;$captureSession=$null;$observedStart=[datetime]::UtcNow
-    try{
-        $captureSession=Connect-DevFleetGuest -VmId $vmId
-        $cutoff=[datetime]::UtcNow.AddSeconds(40);if($cutoff-gt$owner){$cutoff=$owner}
-        $collector = {
-            param($RequestBase64)
-            $ErrorActionPreference='Stop';$request=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($RequestBase64))|ConvertFrom-Json
-            $Path=[string]$request.path;$Run=[string]$request.run;$Nonce=[string]$request.nonce;$Hash=[string]$request.hash
-            if($Run-notmatch'^[A-Za-z0-9._-]+$'-or$Path-cne("C:\Users\Public\DevFleet-E2E\"+$Run+'\M4')){throw 'M4 collector path escaped exact run ownership.'}
-            $o=Get-Content (Join-Path $Path '.owner.json') -Raw|ConvertFrom-Json
-            if([string]$o.runId-cne$Run-or[string]$o.nonce-cne$Nonce){throw 'M4 collector staging ownership mismatch.'}
-            $self=(Get-Process -Id $PID).Path;if((Get-FileHash $self -Algorithm SHA256).Has
+            $s

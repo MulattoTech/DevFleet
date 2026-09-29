@@ -1,10 +1,389 @@
 # DevFleet source part 098
 
 Full-source UTF-8 byte interval [4510500, 4557000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: a1f092358fce51c971a4cfc79f5823224b62be15f5d80449f8597367859b24ce
+Payload SHA-256: 1fb0fb95204472d614c9560632c6878c24e83515dd14bdd7a246c24e0f495b4d
 
 <!-- BEGIN SOURCE SLICE -->
+encoding="utf-8")
+    assert "[Security.SecureString]$BundlePassphrase" in source
+    assert re.search(r"try\s*\{\s*Expand-EncryptedBundle .* -Passphrase \$BundlePassphrase", source)
+    assert "Primary invitation metadata is incomplete." in source
+    assert "Vault legacy adoption identity does not match the exact local cluster/credential binding." in source
+    assert "finally {\n Remove-Item $dest" in source
+    assert "Convert-SecureStringToBundlePassword" not in source
 
+
+def test_authenticated_bundle_format_and_rejection_guards_are_unchanged():
+    create = bundle_function("New-EncryptedBundle")
+    expand = bundle_function("Expand-EncryptedBundle")
+    assert "$iterations = 600000" in create and "DFENV001" in create
+    assert "$aes.Encrypt($nonce, $plain, $cipher, $tag, $header)" in create
+    for message in (
+        "Encrypted bundle is truncated.",
+        "Unsupported encrypted bundle format.",
+        "Encrypted bundle KDF parameters are invalid.",
+        "Encrypted bundle ciphertext length is invalid.",
+    ):
+        assert message in expand
+    assert "$aes.Decrypt($nonce,$cipher,$tag,$plain,$header)" in expand
+    assert expand.index("$aes.Decrypt(") < expand.index("ExtractToDirectory")
+    assert "Remove-Item $zipPath -Force -ErrorAction SilentlyContinue" in create
+    assert "Remove-Item $zipPath -Force -ErrorAction SilentlyContinue" in expand
+
+```
+
+
+## FILE: source/tests/test_posix_zip_writer.py
+
+SHA256: 6462892dce04a296322461f1046aa5e87ed72923caff2fad024f04cbdb42fff2 | Bytes: 1182 | Git mode: 100644
+
+```
+import json
+import zipfile
+
+from source.tools.write_posix_zip import write_zip
+
+
+def test_zip_writer_marks_unix_origin_and_preserves_contract_modes(tmp_path):
+    stage = tmp_path / "stage"
+    (stage / "source" / "bin").mkdir(parents=True)
+    (stage / "source" / "bin" / "run.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (stage / "source" / "README.md").write_text("readme\n", encoding="utf-8")
+    modes = stage / "SOURCE-MODES.json"
+    modes.write_text(
+        json.dumps(
+            [
+                {"path": "source/README.md", "posixMode": 420},
+                {"path": "source/bin/run.sh", "posixMode": 493},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "audit.zip"
+    write_zip(stage, output, modes)
+
+    with zipfile.ZipFile(output) as archive:
+        entries = {item.filename: item for item in archive.infolist()}
+    assert entries["source/README.md"].create_system == 3
+    assert entries["source/README.md"].external_attr >> 16 & 0o777 == 0o644
+    assert entries["source/bin/run.sh"].create_system == 3
+    assert entries["source/bin/run.sh"].external_attr >> 16 & 0o777 == 0o755
+    assert "source/" not in entries
+
+```
+
+
+## FILE: source/tests/test_profiles.py
+
+SHA256: c2b6c38df7c926f5b7e7151be4f2089786a023849ffd9a0a5d5cc0de2e42156c | Bytes: 195 | Git mode: 100644
+
+```
+from devfleet.profiles import get_profile
+def test_profiles():
+ assert get_profile('strict').block_hardening;assert get_profile('balanced').allow_tailnet;assert get_profile('fast').allow_devices
+
+```
+
+
+## FILE: source/tests/test_project_safety.py
+
+SHA256: eaa01b1294d8f5a0e4b4b4debc59a7cf540305716a90b71dbdfeb9e08fa41187 | Bytes: 673 | Git mode: 100644
+
+```
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[1]
+def test_backup_before_quarantine_code_order():
+ t=(ROOT/'app/devfleet/projects.py').read_text();section=t[t.index('def quarantine_project'):t.index('def list_quarantine')];assert section.index('backup_project')<section.index('project.rename')
+def test_restore_canonical_quarantines_old_copy():
+ t=(ROOT/'linux/devfleet-restore-project').read_text();assert 'transfer-replaced-' in t and '--canonical' in t
+def test_docker_switch_never_migrates_or_deletes_store():
+ t=(ROOT/'linux/devfleet-switch-docker-mode').read_text();assert 'Stores were not migrated or deleted' in t and 'docker system prune' not in t
+
+```
+
+
+## FILE: source/tests/test_release_fingerprint.py
+
+SHA256: c828417c604b08df30002a8af2a26a1070fbdf112b1e7e80dfd8635c883c6dd3 | Bytes: 6392 | Git mode: 100644
+
+```
+import json
+import os
+from pathlib import Path
+import shutil
+
+from tools.release_fingerprint import build_fingerprint
+
+
+def test_shipping_fingerprint_changes_for_shipping_mutation(tmp_path: Path):
+    source = tmp_path / "source"
+    installer = tmp_path / "installer"
+    source.mkdir()
+    installer.mkdir()
+    (source / "VERSION").write_text("1.2.13\n", encoding="utf-8")
+    (source / "payload.sh").write_text("echo one\n", encoding="utf-8")
+    (installer / "INSTALLER_VERSION").write_text("1.4.1\n", encoding="utf-8")
+    first = build_fingerprint(source, installer)
+    (source / "payload.sh").write_text("echo two\n", encoding="utf-8")
+    second = build_fingerprint(source, installer)
+    assert first["releaseFingerprintId"] != second["releaseFingerprintId"]
+
+
+def test_nonshipping_harness_is_outside_shipping_fingerprint(tmp_path: Path):
+    source = tmp_path / "source"
+    installer = tmp_path / "installer"
+    automation = tmp_path / "automation"
+    source.mkdir()
+    installer.mkdir()
+    automation.mkdir()
+    (source / "VERSION").write_text("1.2.13\n", encoding="utf-8")
+    (installer / "INSTALLER_VERSION").write_text("1.4.1\n", encoding="utf-8")
+    first = build_fingerprint(source, installer)
+    (automation / "harness.ps1").write_text("Write-Output pass\n", encoding="utf-8")
+    second = build_fingerprint(source, installer)
+    assert first["releaseFingerprintId"] == second["releaseFingerprintId"]
+    assert first["toolingFingerprint"]["toolingFingerprintId"] != second["toolingFingerprint"]["toolingFingerprintId"]
+
+
+def test_fingerprint_json_is_machine_readable(tmp_path: Path):
+    source = tmp_path / "source"
+    installer = tmp_path / "installer"
+    source.mkdir()
+    installer.mkdir()
+    (source / "VERSION").write_text("1.2.13\n", encoding="utf-8")
+    (installer / "INSTALLER_VERSION").write_text("1.4.1\n", encoding="utf-8")
+    result = build_fingerprint(source, installer)
+    assert result["schemaVersion"] == 2
+    assert len(result["releaseFingerprintId"]) == 64
+    assert json.loads(json.dumps(result))["devfleetVersion"] == "1.2.13"
+
+
+def _tree(root: Path) -> tuple[Path, Path, Path]:
+    source = root / "source"
+    installer = root / "installer"
+    outputs = root / "outputs"
+    (source / "templates/demo/.devfleet").mkdir(parents=True)
+    installer.mkdir()
+    outputs.mkdir()
+    (source / "VERSION").write_text("1.2.13\n", encoding="utf-8")
+    (source / "payload.txt").write_text("same bytes\n", encoding="utf-8")
+    (source / "templates/demo/.devfleet/template.json").write_text('{"bootstrap_command":"./.devfleet/run.sh"}\n', encoding="utf-8")
+    (source / "templates/demo/.devfleet/run.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (installer / "INSTALLER_VERSION").write_text("1.4.1\n", encoding="utf-8")
+    artifact = outputs / "candidate.bin"
+    artifact.write_bytes(b"candidate")
+    return source, installer, artifact
+
+
+def test_schema_v2_is_relocation_invariant_and_has_no_absolute_artifact_path(tmp_path: Path):
+    source_a, installer_a, artifact_a = _tree(tmp_path / "checkout-a")
+    shutil.copytree(tmp_path / "checkout-a", tmp_path / "different absolute checkout")
+    source_b = tmp_path / "different absolute checkout/source"
+    installer_b = tmp_path / "different absolute checkout/installer"
+    artifact_b = tmp_path / "different absolute checkout/outputs/candidate.bin"
+    first = build_fingerprint(source_a, installer_a, {"exe": artifact_a})
+    second = build_fingerprint(source_b, installer_b, {"exe": artifact_b})
+    assert first["releaseFingerprintId"] == second["releaseFingerprintId"]
+    assert first["artifacts"] == [{"name": "exe", "bytes": 9, "sha256": first["artifacts"][0]["sha256"]}]
+    assert "path" not in first["artifacts"][0]
+
+
+def test_checkout_mode_noise_does_not_change_canonical_shipping_identity(tmp_path: Path):
+    source, installer, artifact = _tree(tmp_path / "checkout")
+    first = build_fingerprint(source, installer, {"tar": artifact})
+    for path in (source / "payload.txt", source / "templates/demo/.devfleet/run.sh"):
+        os.chmod(path, 0o755 if not (path.stat().st_mode & 0o111) else 0o644)
+    second = build_fingerprint(source, installer, {"tar": artifact})
+    assert first["releaseFingerprintId"] == second["releaseFingerprintId"]
+
+
+def test_executable_contract_change_is_detected_but_non_executable_mode_noise_is_not(tmp_path: Path):
+    source, installer, _ = _tree(tmp_path / "checkout")
+    run = "templates/demo/.devfleet/run.sh"
+    contracted = build_fingerprint(source, installer, source_executable_paths={run})
+    non_executable = build_fingerprint(source, installer, source_executable_paths=set())
+    assert contracted["releaseFingerprintId"] != non_executable["releaseFingerprintId"]
+    run_entry = next(item for item in contracted["shippingInputs"] if item["root"] == "source" and item["path"] == run)
+    assert run_entry["mode"] == "0755"
+
+
+def test_artifact_byte_mutation_changes_release_id(tmp_path: Path):
+    source, installer, artifact = _tree(tmp_path / "checkout")
+    first = build_fingerprint(source, installer, {"exe": artifact})
+    artifact.write_bytes(b"changed candidate")
+    second = build_fingerprint(source, installer, {"exe": artifact})
+    assert first["releaseFingerprintId"] != second["releaseFingerprintId"]
+
+
+def test_release_pipeline_atomically_emits_current_tooling_schema_v2():
+    script = (Path(__file__).parents[2] / "installer-source/Build-Release.ps1").read_text(encoding="utf-8")
+    assert "releaseFingerprintSchemaVersion=2" in script
+    assert "tooling-fingerprint-current.json" in script
+    assert "Move-Item -LiteralPath $currentToolingTemporary" in script
+    assert "toolingInputs=$fingerprintObject.toolingFingerprint.toolingInputs" in script
+    assert "artifacts=$artifactRows" in script
+
+
+def test_release_pipeline_binds_shipping_identity_into_authority_metadata():
+    script = (Path(__file__).parents[2] / "installer-source/Build-Release.ps1").read_text(encoding="utf-8")
+    assert "shippingInputIdentity=$candidateIdentity.candidateShippingInputIdentity" in script
+    assert "candidateShippingInputIdentity=$candidateIdentity.candidateShippingInputIdentity" in script
+    assert "shipping_input_identity=$candidateIdentity.candidateShippingInputIdentity" in script
+    assert "candidate_shipping_input_identity=$candidateIdentity.candidateShippingInputIdentity" in script
+
+```
+
+
+## FILE: source/tests/test_release_reproducibility.py
+
+SHA256: f4af5c9897f923c4579ad5b5ede734d64067968ff58622b1bd25be24dccef66c | Bytes: 3256 | Git mode: 100644
+
+```
+from __future__ import annotations
+
+import hashlib
+import stat
+import subprocess
+import sys
+import tarfile
+import zipfile
+from pathlib import Path
+
+
+ROOT = Path(__file__).parents[1]
+BUILDER = ROOT / "tools" / "build_release.py"
+sys.path.insert(0, str(ROOT / "tools"))
+from build_release import files
+
+
+FIXTURE_FILES = {
+    "VERSION": b"1.2.13\n",
+    "Zeta.txt": b"upper\n",
+    "alpha.txt": b"lower\n",
+    "app/Cafe.txt": b"ascii\n",
+    "app/caf\u00e9.txt": b"unicode\n",
+}
+
+
+def _source(root: Path, names: list[str]) -> Path:
+    root.mkdir()
+    for name in names:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(FIXTURE_FILES[name])
+    return root
+
+
+def _build(source: Path, old_portable: Path, output: Path, cwd: Path) -> tuple[Path, Path]:
+    output.mkdir()
+    subprocess.run(
+        [
+            sys.executable,
+            str(BUILDER),
+            "--source",
+            str(source),
+            "--old-portable",
+            str(old_portable),
+            "--output-dir",
+            str(output),
+        ],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return (
+        output / "devfleet-v1.2.13.tar.gz",
+        output / "DevFleet-v1.2.13-Portable-Codebase-Verified-r1.zip",
+    )
+
+
+def test_files_use_canonical_utf8_posix_order_independent_of_creation_order(tmp_path: Path):
+    names = list(FIXTURE_FILES)
+    first = _source(tmp_path / "first", names)
+    second = _source(tmp_path / "second", list(reversed(names)))
+    expected = sorted(names, key=lambda name: name.encode("utf-8"))
+    assert [path.relative_to(first).as_posix() for path in files(first)] == expected
+    assert [path.relative_to(second).as_posix() for path in files(second)] == expected
+
+
+def test_two_clean_room_builds_are_byte_identical_with_normalized_metadata(tmp_path: Path):
+    names = list(FIXTURE_FILES)
+    first = _source(tmp_path / "source-one", names)
+    second = _source(tmp_path / "source-two", list(reversed(names)))
+    old_portable = tmp_path / "old-portable.zip"
+    with zipfile.ZipFile(old_portable, "w") as archive:
+        archive.writestr("historical-note.txt", b"preserved\n")
+
+    first_tar, first_zip = _build(first, old_portable, tmp_path / "output-one", tmp_path)
+    second_tar, second_zip = _build(second, old_portable, tmp_path / "output-two", tmp_path / "source-two")
+    assert first_tar.read_bytes() == second_tar.read_bytes()
+    assert first_zip.read_bytes() == second_zip.read_bytes()
+    assert hashlib.sha256(first_tar.read_bytes()).digest() == hashlib.sha256(second_tar.read_bytes()).digest()
+    assert hashlib.sha256(first_zip.read_bytes()).digest() == hashlib.sha256(second_zip.read_bytes()).digest()
+
+    with tarfile.open(first_tar, "r:gz") as archive:
+        for member in archive.getmembers():
+            assert member.mtime == 0
+            assert member.uid == member.gid == 0
+            assert member.mode in {0o644, 0o755}
+    with zipfile.ZipFile(first_zip) as archive:
+        for member in archive.infolist():
+            assert member.date_time == (1980, 1, 1, 0, 0, 0)
+            assert member.create_system == 3
+            assert stat.S_IMODE(member.external_attr >> 16) in {0o644, 0o755}
+
+```
+
+
+## FILE: source/tests/test_remediation_contract.py
+
+SHA256: de0445f35b1c084cd557e7edede914adf0282aa5931dc47fc6dcf86fc00bcdad | Bytes: 6905 | Git mode: 100644
+
+```
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from devfleet.runtime import CONTAINER_PROVIDER, VM_PROVIDER, provider_for
+from devfleet import host_control, workspace_archives
+from devfleet.version import __version__
+from devfleet.workspace_archives import create_workspace_archive, inspect_workspace, validate_archive, write_backup_manifest, restore_workspace_archive
+
+
+def test_version_and_provider_contract():
+    root = Path(__file__).resolve().parents[1]
+    expected = (root / "VERSION").read_text(encoding="utf-8").strip()
+    assert expected == "1.2.13"
+    assert __version__ == expected
+    assert provider_for({}) == CONTAINER_PROVIDER
+    assert provider_for({"runtime_provider": "multipass"}) == VM_PROVIDER
+    assert provider_for({"runtime_isolation": "vm", "runtime_provider": "docker-compose"}) == VM_PROVIDER
+
+
+def test_workspace_archive_is_reopenable_and_identity_bound(tmp_path: Path):
+    workspace = tmp_path / "demo-project"
+    (workspace / ".devfleet").mkdir(parents=True)
+    (workspace / ".devfleet" / "project.json").write_text('{"project_id":"123"}\n', encoding="utf-8")
+    (workspace / "README.md").write_text("hello\n", encoding="utf-8")
+    inspection = inspect_workspace(workspace)
+    assert inspection["safe_for_archive"] is True
+    archive = tmp_path / "backups" / "demo-project.tar.gz"
+    result = create_workspace_archive(workspace, "demo-project", archive)
+    assert result["verified"] is True
+    assert validate_archive(archive, "demo-project")["archive_sha256"] == result["archive_sha256"]
+    manifest = write_backup_manifest(tmp_path / "backups" / "demo-project-1", slug="demo-project", project_id="123", runtime={"provider": "docker-compose"}, archive=result)
+    assert manifest["verification"]["status"] == "verified"
+
+
+def test_workspace_archive_rejects_symbolic_links_when_supported(tmp_path: Path):
+    workspace = tmp_path / "demo-project"
+    (workspace / ".devfleet").mkdir(parents=True)
+    (workspace / ".devfleet" / "project.json").write_text("{}\n", encoding="utf-8")
+    link = workspace / "link"
+    try:
+        link.symlink_to(workspace / ".devfleet" / "project.json")
     except (OSError, NotImplementedError):
         return
     assert inspect_workspace(workspace)["safe_for_archive"] is False
@@ -733,424 +1112,4 @@ def test_connected_dependency_installers_are_bounded_and_fail_over_to_official_s
 def test_multipass_configuration_preserves_matching_restored_settings():
     prereqs = (ROOT / "windows" / "01-Install-Prerequisites.ps1").read_text(encoding="utf-8")
     driver_probe = "Invoke-MultipassConfigurationProbe $mp @('get','local.driver')"
-    mount_probe = "Invoke-MultipassConfigurationProbe $mp @('get','local.privileged-mounts')"
-    assert driver_probe in prereqs
-    assert mount_probe in prereqs
-    assert "if($selectedDriver -ne $desiredDriver)" in prereqs
-    assert "if($selectedPrivilegedMounts -ne 'false')" in prereqs
-    driver_write = 'Invoke-External $mp @(' + "'set',\"local.driver=$desiredDriver\"" + ')'
-    mount_write = "Invoke-External $mp @('set','local.privileged-mounts=false')"
-    assert prereqs.index("if($selectedDriver -ne $desiredDriver)") < prereqs.index(driver_write)
-    assert prereqs.index("if($selectedPrivilegedMounts -ne 'false')") < prereqs.index(mount_write)
-
-
-def test_connected_dependency_probes_and_official_downloads_have_network_deadlines():
-    common = (ROOT / "windows" / "DevFleet.Common.psm1").read_text(encoding="utf-8")
-    assert "ArgumentList @('--version') -TimeoutSeconds 60" in common
-    assert "ArgumentList @('source','list','--disable-interactivity') -TimeoutSeconds 60" in common
-    assert "ArgumentList @('search','--id','Microsoft.PowerShell','--exact','--source','winget','--disable-interactivity') -TimeoutSeconds 60" in common
-    assert "Invoke-RestMethod -UseBasicParsing -TimeoutSec 60" in common
-    assert "Invoke-WebRequest -UseBasicParsing -TimeoutSec 60" in common
-    assert "$client.Timeout=[TimeSpan]::FromSeconds(60)" in common
-
-
-def test_install_defers_node_identity_until_after_reboot_gate():
-    install = (ROOT / "Install-DevFleet.ps1").read_text(encoding="utf-8")
-    identity = "$nodeIdentity = Get-OrCreateNodeIdentity -Role $Role"
-    secrets = "Get-OrCreateSecrets | Out-Null"
-    assert install.count(identity) == 1
-    assert install.count(secrets) == 1
-    assert install.index(secrets) < install.index(identity)
-    assert install.index("if (Test-PendingReboot)") < install.index(identity)
-
-
-def test_install_rechecks_new_pending_reboot_after_windows_tailscale_stage():
-    install = (ROOT / "Install-DevFleet.ps1").read_text(encoding="utf-8")
-    marker = "Write-StageMarker 'windows-tailscale'"
-    next_stage = "if(-not (Test-StageMarker 'host-agent'))"
-    marker_end = install.index(marker) + len(marker)
-    stage_boundary = install[marker_end:install.index(next_stage, marker_end)]
-    assert "Test-PendingReboot" in stage_boundary
-    assert "after the Windows Tailscale stage" in stage_boundary
-    assert "exit 3010" in stage_boundary
-
-```
-
-
-## FILE: source/tests/test_v1211_stopped_capabilities.py
-
-SHA256: 1ceffa011ec0d19a052a4d3551879ee1dfd089d9ee07f21be3b05cd7cb40ab84 | Bytes: 5347 | Git mode: 100644
-
-```
-from __future__ import annotations
-
-import json
-from dataclasses import replace
-from pathlib import Path
-
-import pytest
-from fastapi.testclient import TestClient
-
-from devfleet import main, projects
-
-
-def _project(root: Path, slug: str, state: str, *, isolation: str = "vm") -> Path:
-    project = root / slug
-    (project / ".devfleet").mkdir(parents=True)
-    metadata = {
-        "schema_version": 3,
-        "managed_by": "devfleet",
-        "project_id": "12345678-1234-1234-1234-123456789abc",
-        "slug": slug,
-        "identity": slug,
-        "display_name": "Stopped Project",
-        "runtime_isolation": isolation,
-        "runtime_type": isolation,
-        "runtime_provider": "multipass-host-agent" if isolation == "vm" else "docker-compose",
-        "lifecycle_status": state,
-        "runtime_status": state,
-        "runtime_id": f"devfleet-project-{slug}",
-        "host_id": "test-node",
-        "runtime_address": "172.30.1.20" if state == "running" else "",
-        "ssh_alias": f"devfleet-project-{slug}",
-        "ssh_host_key_pinned": state == "running",
-        "ssh_authenticated": state == "running",
-        "ssh_validation_passed": state == "running",
-        "workspace_provisioned": True,
-        "resource_profile": "large",
-        "resource_limits": {"cpus": 4, "memory": "8G", "memory_gb": 8, "disk_gb": 80},
-    }
-    (project / ".devfleet" / "project.json").write_text(json.dumps(metadata), encoding="utf-8")
-    return project
-
-
-@pytest.mark.parametrize(
-    ("state", "can_start", "can_stop", "live", "transitioning"),
-    [
-        ("stopped", True, False, False, False),
-        ("starting", False, True, False, True),
-        ("running", False, True, True, False),
-        ("stopping", False, False, False, True),
-        ("unreachable", True, False, False, False),
-    ],
-)
-def test_vm_capability_state_matrix(tmp_path, monkeypatch, state, can_start, can_stop, live, transitioning):
-    monkeypatch.setattr(projects, "SETTINGS", replace(projects.SETTINGS, workspaces=tmp_path))
-    _project(tmp_path, state, state)
-    caps = projects.project_capabilities(state)
-    assert caps["can_start"] is can_start
-    assert caps["can_stop"] is can_stop
-    assert caps["runtime_transitioning"] is transitioning
-    assert caps["can_query_live_metrics"] is live
-    assert caps["can_query_application_health"] is live
-    assert caps["can_query_logs"] is live
-
-
-def test_stopped_runtime_endpoint_makes_zero_live_calls(tmp_path, monkeypatch):
-    settings = replace(projects.SETTINGS, workspaces=tmp_path)
-    monkeypatch.setattr(projects, "SETTINGS", settings)
-    monkeypatch.setattr(main, "SETTINGS", settings)
-    _project(tmp_path, "demo", "stopped")
-    monkeypatch.setattr(main, "inspect_runtime", lambda *_: pytest.fail("inspect must not run"))
-    monkeypatch.setattr(main, "runtime_health", lambda *_: pytest.fail("health must not run"))
-    result = main.api_project_runtime("demo")
-    assert result["runtime"]["live_metrics"] == "unavailable"
-    assert result["health"]["status"] == "not-checked"
-
-
-def test_stopped_logs_endpoints_make_zero_guest_calls(tmp_path, monkeypatch):
-    settings = replace(projects.SETTINGS, workspaces=tmp_path)
-    monkeypatch.setattr(projects, "SETTINGS", settings)
-    monkeypatch.setattr(main, "SETTINGS", settings)
-    _project(tmp_path, "demo", "stopped")
-    monkeypatch.setattr(main, "project_logs", lambda *_args, **_kwargs: pytest.fail("logs must not run"))
-    monkeypatch.setattr(main, "ui", lambda *_args, **_kwargs: None)
-    request = type("Request", (), {})()
-    response = main.ui_project_logs(request, "demo")
-    assert response.status_code == 409
-    with pytest.raises(Exception) as exc:
-        main.api_project_logs("demo")
-    assert getattr(exc.value, "status_code", None) == 409
-
-
-def test_stopped_project_html_is_terminal_and_keeps_resources(tmp_path, monkeypatch):
-    settings = replace(projects.SETTINGS, workspaces=tmp_path)
-    monkeypatch.setattr(projects, "SETTINGS", settings)
-    monkeypatch.setattr(main, "SETTINGS", settings)
-    _project(tmp_path, "demo", "stopped")
-    catalog = projects.list_project_catalog()
-    assert catalog[0]["resource_limits"] == {"cpus": 4, "memory": "8G", "memory_gb": 8, "disk_gb": 80}
-    template = (Path(__file__).parents[1] / "app" / "templates" / "index.html").read_text(encoding="utf-8")
-    js = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text(encoding="utf-8")
-    assert "Project is stopped" in template
-    assert "Start the project to view live logs" in template
-    assert "caps.can_query_logs" in template
-    assert "fetchWithTimeout" in js and "AbortController" in js
-
-
-def test_container_workspace_nonregression_when_application_stopped(tmp_path, monkeypatch):
-    monkeypatch.setattr(projects, "SETTINGS", replace(projects.SETTINGS, workspaces=tmp_path))
-    _project(tmp_path, "container-demo", "stopped", isolation="container")
-    meta = projects.load_meta(tmp_path / "container-demo")
-    meta.update({"workspace_host": "devfleet-primary", "ssh_alias": "devfleet-primary", "workspace_accessible": True})
-    ready = projects.workspace_readiness("container-demo", meta)
-    caps = projects.project_capabilities("container-demo", meta)
-    assert ready["ready"] is True
-    assert caps["can_open_workspace"] is True
-    assert caps["can_query_logs"] is False
-
-```
-
-
-## FILE: source/tests/test_v121_auth_performance.py
-
-SHA256: a88a21055e555d85b2ebfa0ba63a18372c49dbb16a2f0c517efd71b3485fff98 | Bytes: 5903 | Git mode: 100644
-
-```
-"""Regression coverage for the v1.2.1 session and dashboard contracts.
-
-These tests intentionally exercise the ASGI app in-process.  They never start a
-service and the performance test uses a mocked five-second peer instead of a
-real network endpoint.
-"""
-
-import re
-import time
-
-import pytest
-
-
-try:
-    from fastapi.testclient import TestClient
-    from devfleet import main
-    from devfleet import status as status_module
-except Exception as exc:  # pragma: no cover - depends on the host test image
-    pytest.skip(
-        f"FastAPI application tests unavailable in this environment: {exc}",
-        allow_module_level=True,
-    )
-
-
-def _no_redirect(client, method, url, **kwargs):
-    """Support both Starlette/TestClient keyword spellings across versions."""
-    try:
-        return getattr(client, method)(url, follow_redirects=False, **kwargs)
-    except TypeError:
-        return getattr(client, method)(url, allow_redirects=False, **kwargs)
-
-
-def _client():
-    try:
-        return TestClient(main.app)
-    except Exception as exc:  # pragma: no cover - dependency-version specific
-        pytest.skip(f"TestClient unavailable in this environment: {exc}")
-
-
-def _csrf(html):
-    match = re.search(r'name="csrf_token" value="([^"]+)"', html)
-    assert match, "expected a rendered CSRF form token"
-    return match.group(1)
-
-
-def _signed_in_client():
-    client = _client()
-    login_page = client.get("/login")
-    assert login_page.status_code == 200
-    token = _csrf(login_page.text)
-    response = _no_redirect(
-        client,
-        "post",
-        "/login",
-        data={
-            "username": "test",
-            "password": "test-password",
-            "next": "/",
-            "csrf_token": token,
-        },
-    )
-    assert response.status_code == 303
-    assert response.headers["location"] == "/"
-    assert "devfleet_session" in client.cookies
-    return client
-
-
-def test_session_login_logout_and_csrf_contract():
-    client = _client()
-
-    login_page = client.get("/login")
-    assert login_page.status_code == 200
-    login_csrf = _csrf(login_page.text)
-    assert "devfleet_login_csrf" in client.cookies
-
-    rejected = _no_redirect(
-        client,
-        "post",
-        "/login",
-        data={
-            "username": "test",
-            "password": "test-password",
-            "next": "/",
-            "csrf_token": "wrong-token",
-        },
-    )
-    assert rejected.status_code == 401
-    assert "devfleet_session" not in client.cookies
-
-    signed_in = _no_redirect(
-        client,
-        "post",
-        "/login",
-        data={
-            "username": "test",
-            "password": "test-password",
-            "next": "/",
-            "csrf_token": login_csrf,
-        },
-    )
-    assert signed_in.status_code == 303
-    assert signed_in.headers["location"] == "/"
-    assert client.cookies.get("devfleet_session")
-
-    index = client.get("/")
-    assert index.status_code == 200
-    session_csrf = _csrf(index.text)
-
-    missing_csrf = _no_redirect(client, "post", "/logout", data={})
-    assert missing_csrf.status_code == 403
-    assert client.get("/").status_code == 200
-
-    logged_out = _no_redirect(
-        client, "post", "/logout", headers={"Sec-Fetch-Site": "same-origin"}, data={"csrf_token": session_csrf}
-    )
-    assert logged_out.status_code == 303
-    assert logged_out.headers["location"].startswith("/login")
-    assert _no_redirect(client, "get", "/").status_code == 303
-
-
-def test_api_token_contract():
-    client = _client()
-
-    assert client.get("/api/status").status_code == 401
-    assert client.get("/api/status", headers={"X-DevFleet-Token": "wrong"}).status_code == 401
-
-    response = client.get("/api/status", headers={"X-DevFleet-Token": "test-token"})
-    assert response.status_code == 200
-    assert response.json()["node"] == "test-node"
-
-
-def test_index_uses_catalog_and_snapshots_without_waiting_for_a_slow_peer(monkeypatch):
-    client = _signed_in_client()
-    catalog_calls = []
-    snapshot_calls = []
-    slow_peer_calls = []
-
-    def catalog():
-        catalog_calls.append(True)
-        return [{"slug": "catalog-only", "display_name": "Catalog project"}]
-
-    def live_projects_must_not_run():
-        raise AssertionError("normal index rendering used live project inspection")
-
-    def slow_peer():
-        slow_peer_calls.append(True)
-        time.sleep(5.0)
-        return {"configured": True, "ok": True}
-
-    def snapshot():
-        snapshot_calls.append(True)
-        return {
-            "updated_at": "2026-08-10T00:00:00Z",
-            "nodes": [],
-            "containers": [],
-            "snapshot": {"stale": False, "refreshing": False},
-        }
-
-    monkeypatch.setattr(status_module, "list_project_catalog", catalog)
-    monkeypatch.setattr(status_module, "list_projects", live_projects_must_not_run)
-    monkeypatch.setattr(status_module, "runtime_snapshot", lambda: status_module._cheap_runtime())
-    monkeypatch.setattr(status_module, "peer_node_status", slow_peer)
-    monkeypatch.setattr(main, "cluster_snapshot", snapshot)
-    monkeypatch.setattr(main, "peer_call", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("peer_call used")))
-    monkeypatch.setattr(main, "get_host_capacity", lambda: (_ for _ in ()).throw(AssertionError("host probe used")))
-    monkeypatch.setattr(main, "get_provider_status", lambda: (_ for _ in ()).throw(AssertionError("provider probe used")))
-    monkeypatch.setattr(main, "analyze_project", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("analyzer used")))
-
-    started = time.perf_counter()
-    response = client.get("/")
-    elapsed = time.perf_counter() - started
-
-    assert response.status_code == 200
-    assert "catalog-only" in response.text
-    assert catalog_calls == [True]
-    assert snapshot_calls == [True]
-    assert slow_peer_calls == []
-    assert elapsed < 2.0, f"index rendering took {elapsed:.2f}s"
-
-```
-
-
-## FILE: source/tests/test_v122_auth_snapshot_package.py
-
-SHA256: e8537161bda817b8cd7539ce4c40a078b8cef1d0a88477c3e8cf33910056f285 | Bytes: 3617 | Git mode: 100644
-
-```
-import os
-import stat
-import tarfile
-from pathlib import Path
-
-import pytest
-
-from devfleet import auth, status
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def test_v122_ttls_and_nonempty_secret_guards():
-    assert auth.SESSION_TTL == 12 * 60 * 60
-    assert auth.REMEMBERED_TTL == 7 * 24 * 60 * 60
-    assert not auth.valid_credentials("", "anything")
-    assert not auth.valid_credentials("test", "")
-    assert auth.session_cookie_options()["samesite"] == "strict"
-
-
-def test_session_csrf_and_credential_generation_invalidation(tmp_path, monkeypatch):
-    monkeypatch.setattr(auth, "_session_path", lambda: tmp_path / "sessions.json")
-    token, ttl, csrf = auth.issue_session("test")
-    assert ttl == auth.SESSION_TTL
-    assert auth.validate_session(token) == "test"
-    record = auth._load_sessions()[token]
-    assert auth.validate_session_csrf(_request_with_cookie(token), csrf)
-    original_password = auth.SETTINGS.admin_password
-    try:
-        object.__setattr__(auth.SETTINGS, "admin_password", "rotated-password")
-        assert auth.validate_session(token) is None
-        assert record["credential_generation"] != auth._credential_generation()
-    finally:
-        object.__setattr__(auth.SETTINGS, "admin_password", original_password)
-
-
-class _Request:
-    def __init__(self, token):
-        self.cookies = {auth.SESSION_COOKIE: token}
-
-
-def _request_with_cookie(token):
-    return _Request(token)
-
-
-def test_login_backoff_is_bounded_and_source_scoped(monkeypatch):
-    auth._LOGIN_FAILURES.clear()
-    for _ in range(20):
-        auth._record_login_failure("bad-user", "source-a", now=100.0)
-    delay = auth.login_backoff_seconds("bad-user", "source-a", now=100.0)
-    assert 0 < delay <= auth._BACKOFF_MAX
-    assert auth.login_backoff_seconds("bad-user", "source-b", now=100.0) == 0
-
-
-def test_snapshot_schedule_reserves_before_submit(monkeypatch):
-    status._SNAPSHOTS["runtime"].update({"refreshing": False, "value": None, "updated_at": 0.0})
-    submitted = []
-    class Executor:
-        def submit(self, fn, name):
-            submitted.append((fn, name)
+    mount_probe =

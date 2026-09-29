@@ -1,10 +1,287 @@
 # DevFleet source part 104
 
 Full-source UTF-8 byte interval [4789500, 4836000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: ff5a3213bc0404cb6fc404d67d0ecca6a20402b9057d2f328ee232ea66c864ef
+Payload SHA-256: 3ecab63c85a9fac451c93196732a4c5a6eccfcab66acf0100344fd5c4af83132
 
 <!-- BEGIN SOURCE SLICE -->
-PASS",
+output = str(result.pop("stdout", ""))
+    result.pop("stderr", None)
+    if not output.strip():
+        raise ValueError("candidate coherence check returned no structured JSON")
+    try:
+        structured = json.loads(output)
+    except json.JSONDecodeError as exc:
+        raise ValueError("candidate coherence check returned malformed JSON") from exc
+    if not isinstance(structured, dict) or set(structured) == set():
+        raise ValueError("candidate coherence check returned a non-object JSON result")
+    status = structured.get("status")
+    if mode == "diagnostic":
+        if status != "PASS_WITH_BLOCKER" or structured.get("releaseEligible") is not False or not isinstance(structured.get("blockerCode"), str) or not structured["blockerCode"]:
+            raise ValueError("diagnostic candidate coherence result was downgraded or contradictory")
+    elif status != "PASS" or structured.get("blockerCode"):
+        raise ValueError("release candidate coherence result contains a blocker")
+    return structured
+
+
+def validate(archive: Path, report_path: Path | None = None, mode: str = "release") -> dict[str, Any]:
+    if mode not in {"diagnostic", "release"}:
+        raise ValueError("validator mode must be diagnostic or release")
+    archive = archive.resolve()
+    if not archive.is_file():
+        raise FileNotFoundError(archive)
+    temp_parent = Path(tempfile.mkdtemp(prefix="DevFleet AI Audit "))
+    extracted = temp_parent / "bundle with spaces"
+    extracted.mkdir()
+    try:
+        names = _extract(archive, extracted)
+        name_set = set(names)
+        required = RELEASE_REQUIRED if mode == "release" else REQUIRED
+        missing = sorted(required - name_set)
+        if missing:
+            raise ValueError(f"required audit files are missing: {missing}")
+        if "source" not in name_set and not any(name.startswith("source/") for name in names):
+            raise ValueError("shipping source is missing")
+        if "installer-source" not in name_set and not any(name.startswith("installer-source/") for name in names):
+            raise ValueError("installer source is missing")
+        # Load the manifest before any failed-attempt record consumer.  The
+        # evidence inventory is part of the failed-attempt contract, so a
+        # malformed or missing manifest must fail closed before validation.
+        manifest = _json(extracted / "AUDIT-MANIFEST.json")
+        failed_attempt = FAILED_ATTEMPT_SNAPSHOT in name_set
+        if failed_attempt and mode == "release":
+            raise ValueError("release mode rejects failed replacement-attempt evidence")
+        if failed_attempt and mode == "diagnostic":
+            _validate_failed_attempt_records(extracted, name_set, manifest)
+        if not any(name.startswith("automation/release-e2e/") for name in names):
+            raise ValueError("release-E2E automation source is missing")
+
+        candidate = _json(extracted / "CURRENT-CANDIDATE.json")
+        attempted_commit = str(candidate.get("candidateCommit") or candidate.get("candidateGitCommit") or "").lower()
+        if mode == "diagnostic" and attempted_commit == "21752fc0e50978183322204c523b40947d073aa0" and not failed_attempt:
+            raise ValueError("failed replacement-attempt snapshot is mandatory for this diagnostic candidate")
+        required_tuple = (
+            "devfleetVersion",
+            "installerVersion",
+            "gitCommit",
+            "shippingInputIdentity",
+            "candidateShippingInputIdentity",
+            "candidateCommit",
+            "releaseFingerprintId",
+            "toolingFingerprintId",
+            "exeSha256",
+            "tarSha256",
+            "portableSha256",
+            "installerSourceSha256",
+            "candidateIsCurrent",
+            "sourceChangedSinceCandidate",
+            "rebuildRequired",
+        )
+        for key in required_tuple:
+            if key not in candidate:
+                raise ValueError(f"current candidate is missing {key}")
+        if candidate["devfleetVersion"] != manifest.get("devfleetVersion"):
+            raise ValueError("manifest and current candidate disagree on DevFleet version")
+        if candidate["installerVersion"] != manifest.get("installerVersion"):
+            raise ValueError("manifest and current candidate disagree on installer version")
+        if candidate["sourceChangedSinceCandidate"] and not candidate["rebuildRequired"]:
+            raise ValueError("sourceChangedSinceCandidate requires rebuildRequired")
+        if candidate["rebuildRequired"] and candidate["candidateIsCurrent"]:
+            raise ValueError("rebuildRequired candidate cannot be current")
+        for key in ("releaseFingerprintId", "toolingFingerprintId"):
+            if not re.fullmatch(r"[0-9a-f]{64}", str(candidate[key])):
+                raise ValueError(f"malformed {key}")
+            if str(candidate[key]) == "0" * 64:
+                raise ValueError(f"zero {key} is not a current identity")
+        if not re.fullmatch(r"[0-9a-fA-F]{40}", str(candidate["candidateCommit"])) or str(candidate["candidateCommit"]).lower() == "0" * 40:
+            raise ValueError("malformed candidateCommit")
+        for key in ("shippingInputIdentity", "candidateShippingInputIdentity"):
+            if not re.fullmatch(r"[0-9a-f]{64}", str(candidate[key])) or str(candidate[key]) == "0" * 64:
+                raise ValueError(f"malformed {key}")
+        for key in ("exeSha256", "tarSha256", "portableSha256", "installerSourceSha256"):
+            if not re.fullmatch(r"[0-9a-f]{64}", str(candidate[key])):
+                raise ValueError(f"malformed candidate artifact hash: {key}")
+        artifact_names = {
+            "exeSha256": {"exe", "installer", "installerexe"},
+            "tarSha256": {"tar", "payload"},
+            "portableSha256": {"portable"},
+            "installerSourceSha256": {"installersource", "installer_source"},
+        }
+        artifact_manifest = _json(extracted / "outputs/final-artifact-hashes.json")
+        artifact_rows = manifest.get("artifacts") or (artifact_manifest.get("artifacts") if isinstance(artifact_manifest, dict) else [])
+        manifest_artifacts = {
+            str(row.get("name") or "").lower().replace("-", "").replace("_", ""): row
+            for row in artifact_rows
+            if isinstance(row, dict)
+        }
+        for candidate_key, expected_names in artifact_names.items():
+            row = next((manifest_artifacts[name.replace("-", "").replace("_", "")] for name in expected_names if name.replace("-", "").replace("_", "") in manifest_artifacts), None)
+            if row is None or str(row.get("sha256") or "").lower() != str(candidate[candidate_key]).lower():
+                raise ValueError(f"candidate artifact tuple does not match manifest: {candidate_key}")
+            bytes_key = candidate_key[:-6] + "Bytes" if candidate_key.endswith("Sha256") else ""
+            if bytes_key and bytes_key in candidate and int(row.get("bytes", -1)) != int(candidate[bytes_key]):
+                raise ValueError(f"candidate artifact tuple byte count does not match manifest: {candidate_key}")
+
+        coherence = _run_candidate_validator(
+            [sys.executable, "source/tools/validate_audit_coherence.py", "--root", str(extracted), "--mode", mode],
+            extracted,
+            mode,
+        )
+        if coherence.get("status") not in ({"PASS_WITH_BLOCKER"} if mode == "diagnostic" else {"PASS"}):
+            raise ValueError(f"candidate coherence check failed: {coherence.get('reason', '')}")
+        if failed_attempt:
+            if mode != "diagnostic" or coherence.get("blockerCode") != FAILED_ATTEMPT_BLOCKER or coherence.get("releaseEligible") is not False:
+                raise ValueError("failed replacement-attempt result was downgraded or made release eligible")
+            if candidate.get("candidateIsCurrent") is not False or candidate.get("sourceChangedSinceCandidate") is not True or candidate.get("rebuildRequired") is not True or candidate.get("artifactTupleMatchesCandidate") is not False:
+                raise ValueError("failed replacement-attempt candidate flags are not truthful")
+
+        inventory = manifest.get("sourceInventory")
+        if not isinstance(inventory, list) or not inventory:
+            raise ValueError("sourceInventory is empty")
+        inventory_paths = {str(item["path"]) for item in inventory}
+        source_paths = {
+            name
+            for name in names
+            if name.startswith(("source/", "installer-source/", "automation/release-e2e/", "release-tooling/"))
+            and not name.endswith("/")
+            and (extracted / name).is_file()
+        }
+        if inventory_paths != source_paths:
+            raise ValueError(
+                "source inventory mismatch: "
+                f"missing={sorted(inventory_paths - source_paths)[:5]} "
+                f"unexpected={sorted(source_paths - inventory_paths)[:5]}"
+            )
+        if int(manifest.get("expectedSourceCount", -1)) != len(source_paths):
+            raise ValueError("expectedSourceCount does not match extracted source")
+        hashes = {}
+        for line in (extracted / "SHA256SUMS.txt").read_text(encoding="utf-8-sig").splitlines():
+            if not line.strip():
+                continue
+            digest, path = line.split("  ", 1)
+            hashes[path] = digest.lower()
+        if set(hashes) != source_paths:
+            raise ValueError("SHA256SUMS.txt does not cover exactly the source closure")
+        for path in sorted(source_paths):
+            actual = _sha(extracted / path)
+            if hashes[path] != actual:
+                raise ValueError(f"source hash mismatch: {path}")
+
+        modes = {str(item["path"]): int(item["posixMode"]) for item in _json(extracted / "SOURCE-MODES.json")}
+        if set(modes) != source_paths:
+            raise ValueError("SOURCE-MODES.json does not cover exactly the source closure")
+        mode_mismatches = []
+        with zipfile.ZipFile(archive) as bundle:
+            for info in bundle.infolist():
+                if info.filename in modes:
+                    archived = (info.external_attr >> 16) & 0o777
+                    if archived != modes[info.filename]:
+                        mode_mismatches.append(info.filename)
+        if mode_mismatches:
+            raise ValueError(f"POSIX mode mismatch: {mode_mismatches[:5]}")
+
+        secret_findings = []
+        for path in sorted(source_paths):
+            try:
+                text = (extracted / path).read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            for pattern in SECRET_PATTERNS:
+                if pattern.search(text):
+                    secret_findings.append(path)
+        if secret_findings:
+            raise ValueError(f"secret-like material found in source: {sorted(set(secret_findings))[:5]}")
+
+        checks: dict[str, Any] = {
+            "pythonCompile": "SKIPPED",
+            "javascriptSyntax": "SKIPPED",
+            "bashSyntax": "SKIPPED",
+            "powershellParse": "SKIPPED",
+            "dotnetBuild": "SKIPPED",
+            "dotnetTests": "SKIPPED",
+        }
+        py_files = [str(path) for path in (extracted / "source").rglob("*.py")]
+        if py_files:
+            checks["pythonCompile"] = _run_optional([sys.executable, "-m", "compileall", "-q", "source"], extracted)["status"]
+            if checks["pythonCompile"] == "FAIL":
+                raise ValueError("Python compile check failed")
+        js_files = [path.relative_to(extracted).as_posix() for path in (extracted / "source").rglob("*.js")]
+        node_available = shutil.which("node")
+        if js_files and node_available:
+            for path in js_files:
+                result = _run_optional([node_available, "--check", path], extracted)
+                if result["status"] == "FAIL":
+                    raise ValueError(f"JavaScript syntax check failed: {path}")
+            checks["javascriptSyntax"] = "PASS"
+        elif js_files:
+            checks["javascriptSyntax"] = "SKIPPED"
+        sh_files = [path.relative_to(extracted).as_posix() for path in (extracted / "source").rglob("*.sh")]
+        bash = shutil.which("bash")
+        if sh_files and bash:
+            probe = _run_optional([bash, "--version"], extracted)
+            if probe["status"] == "PASS":
+                for path in sh_files:
+                    result = _run_optional([bash, "-n", path], extracted)
+                    if result["status"] == "FAIL":
+                        raise ValueError(f"Bash syntax check failed: {path}")
+                checks["bashSyntax"] = "PASS"
+            else:
+                checks["bashSyntax"] = "SKIPPED"
+        ps = shutil.which("pwsh") or shutil.which("powershell")
+        if ps:
+            scripts = [
+                path.relative_to(extracted).as_posix()
+                for root in (extracted / "source", extracted / "installer-source", extracted / "automation")
+                if root.exists()
+                for path in root.rglob("*")
+                if path.suffix.lower() in {".ps1", ".psm1", ".psd1"}
+            ]
+            parse_script_path = extracted / "_audit_parse.ps1"
+            parse_script_path.write_text(
+                "param([Parameter(Mandatory)][string]$Path)\n"
+                "$tokens=$null; $errors=$null\n"
+                "[System.Management.Automation.Language.Parser]::ParseFile($Path,[ref]$tokens,[ref]$errors) | Out-Null\n"
+                "if($errors.Count){ $errors | ForEach-Object { Write-Error $_.Message }; exit 2 }\n",
+                encoding="utf-8",
+            )
+            for path in scripts:
+                result = _run_optional([ps, "-NoProfile", "-NonInteractive", "-File", "_audit_parse.ps1", "-Path", path], extracted)
+                if result["status"] == "FAIL":
+                    raise ValueError(f"PowerShell parse check failed: {path}")
+            checks["powershellParse"] = "PASS"
+        dotnet = shutil.which("dotnet")
+        if dotnet and (extracted / "installer-source").exists():
+            try:
+                probe = subprocess.run([dotnet, "--list-sdks"], cwd=extracted, capture_output=True, text=True, timeout=20)
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                probe = None
+            if probe is not None and probe.returncode == 0 and probe.stdout.strip():
+                build = _run_optional([dotnet, "build", "DevFleet.Setup/DevFleet.Setup.csproj", "--no-restore", "-v:minimal"], extracted / "installer-source", timeout=180)
+                if build["status"] == "FAIL":
+                    raise ValueError(".NET installer build failed")
+                checks["dotnetBuild"] = build["status"]
+                tests = _run_optional([dotnet, "build", "DevFleet.Setup.Tests/DevFleet.Setup.Tests.csproj", "--no-restore", "-v:minimal"], extracted / "installer-source", timeout=180)
+                if tests["status"] == "FAIL":
+                    raise ValueError(".NET installer test project build failed")
+                checks["dotnetTests"] = tests["status"]
+
+        if mode == "release" and (not bool(candidate.get("candidateIsCurrent")) or bool(candidate.get("sourceChangedSinceCandidate")) or bool(candidate.get("rebuildRequired"))):
+            raise ValueError("release mode rejects an invalidated or historical candidate")
+        report = {
+            "status": "PASS_WITH_BLOCKER" if mode == "diagnostic" else "COMPLETE_FOR_AI_AUDIT",
+            "bundleMode": mode,
+            "releaseEligible": mode == "release",
+            "candidateIsCurrent": bool(candidate.get("candidateIsCurrent")),
+            "sourceChangedSinceCandidate": bool(candidate.get("sourceChangedSinceCandidate")),
+            "rebuildRequired": bool(candidate.get("rebuildRequired")),
+            "archive": str(archive),
+            "temporaryExtraction": str(extracted),
+            "expectedSourceCount": len(source_paths),
+            "includedSourceCount": len(source_paths),
+            "releaseE2EToolingIncluded": True,
+            "modeVerification": "PASS",
+            "coherenceVerification": coherence["status"],
+            "coherenceBlockerCode": coherence.get("blockerCode"),
+            "secretScan": "PASS",
             "checks": checks,
         }
         if failed_attempt:
@@ -481,220 +758,4 @@ def _historical_provenance(root: Path, state: dict[str, Any], manifest: dict[str
     record = records[0] if records else None
     if record is None:
         raise ValueError("diagnostic mode requires a structured historicalProvenance record")
-    if any(value != record for value in records[1:]):
-        raise ValueError("diagnostic historical provenance declarations disagree")
-    if str(record.get("candidateCommit") or "").lower() != HISTORICAL_CANDIDATE:
-        raise ValueError("diagnostic historical candidate is not the preserved 2739 object")
-    if str(record.get("provenanceCommit") or record.get("sourceCommit") or "").lower() != HISTORICAL_PROVENANCE:
-        raise ValueError("diagnostic historical provenance is not the preserved f334 object")
-    if str(record.get("materialization") or "") != "git-archive" or record.get("coreAutocrlf") is not False:
-        raise ValueError("historical provenance must use deterministic git-archive materialization with core.autocrlf=false")
-    if str(record.get("lineEndingComparison") or "").upper() not in {"CRLF_ONLY", "CRLF-ONLY"}:
-        raise ValueError("historical provenance must identify a CRLF-only comparison")
-    if str(record.get("historicalShippingInputIdentity") or "").lower() != HISTORICAL_SHIPPING_IDENTITY:
-        raise ValueError("diagnostic historical shipping identity is not the preserved identity")
-    if str(record.get("historicalReleaseFingerprintId") or "").lower() != HISTORICAL_RELEASE_FINGERPRINT:
-        raise ValueError("diagnostic historical release fingerprint is not the preserved fingerprint")
-    labels = record.get("identityLabels") if isinstance(record.get("identityLabels"), dict) else {}
-    if not str(labels.get("preservedCanonicalShippingInputIdentity") or "").lower().startswith(HISTORICAL_PRESERVED_CANONICAL_PREFIX) or not str(labels.get("rawGitShippingInputIdentity") or "").lower().startswith(HISTORICAL_RAW_GIT_PREFIX) or not str(labels.get("rawGitReleaseFingerprintId") or "").lower().startswith(HISTORICAL_RAW_RELEASE_PREFIX):
-        raise ValueError("diagnostic historical identity labels are incomplete")
-    authorization = state.get("authorized_correction") if isinstance(state.get("authorized_correction"), dict) else {}
-    expected_paths = sorted(str(path).replace("\\", "/") for path in authorization.get("shipping_paths", []) if str(path))
-    if set(expected_paths) != AUTHORIZED_SHIPPING_PATHS or len(expected_paths) != len(AUTHORIZED_SHIPPING_PATHS):
-        raise ValueError("diagnostic authorization must contain exactly the seven reviewed shipping paths")
-    recorded_paths = sorted(str(path).replace("\\", "/") for path in record.get("authorizedCurrentShippingPaths", []) if str(path))
-    if not expected_paths or recorded_paths != expected_paths:
-        raise ValueError("diagnostic historical provenance does not bind the exact authorized shipping paths")
-
-    rows = _shipping_rows(candidate.get("candidateShippingInputs"))
-    if not rows:
-        raise ValueError("diagnostic historical candidate rows are mandatory and offline")
-    _validate_row_shape(rows, "diagnostic candidate shipping rows")
-    mode = candidate.get("candidateShippingModeContract") or record.get("shippingModeContract") or {}
-    version = str(candidate.get("devfleetVersion") or manifest.get("devfleetVersion") or "")
-    installer = str(candidate.get("installerVersion") or manifest.get("installerVersion") or "")
-    if version != "1.2.13" or installer != "1.4.1":
-        raise ValueError("diagnostic historical candidate version tuple is not the exact 1.2.13/1.4.1 tuple")
-    if not isinstance(mode, dict) or set(mode) != {"schemaVersion", "defaultMode", "executableMode", "executableByContract"} or mode.get("schemaVersion") != 1 or mode.get("defaultMode") != "0644" or mode.get("executableMode") != "0755" or not isinstance(mode.get("executableByContract"), list) or mode["executableByContract"] != sorted(str(path) for path in mode["executableByContract"]):
-        raise ValueError("diagnostic historical candidate mode contract is incomplete or non-canonical")
-    recomputed = _shipping_identity(rows, mode, version, installer)
-    declared_recomputed = str(record.get("recomputedCandidateShippingInputIdentity") or "").lower()
-    if declared_recomputed != recomputed or recomputed != HISTORICAL_RAW_GIT_SHIPPING_IDENTITY:
-        raise ValueError("diagnostic candidate shipping identity was not recomputed from embedded rows")
-    # When validating in the repository, independently materialize the
-    # candidate object with core.autocrlf disabled.  Bundles intentionally have
-    # no .git directory, so their signed-off offline rows are the required
-    # source of truth there.
-    if (root / ".git").exists():
-        fingerprint, staging = _candidate_fingerprint_from_git(root, HISTORICAL_CANDIDATE)
-        try:
-            materialized = _shipping_rows(fingerprint.get("shippingInputs"))
-            if materialized != rows:
-                raise ValueError("diagnostic embedded candidate rows differ from deterministic Git materialization")
-        finally:
-            shutil.rmtree(staging, ignore_errors=True)
-    _validate_crlf_partition(root, state, manifest, candidate, record)
-
-    # A release row set is required even in diagnostic mode.  This prevents a
-    # historical marker from making a stale artifact tuple look coherent.
-    release = _load(root / "outputs" / "release-fingerprint.json") if (root / "outputs" / "release-fingerprint.json").is_file() else {}
-    if not isinstance(release, dict):
-        raise ValueError("diagnostic release fingerprint is missing")
-    raw_release_rows = release.get("shippingInputs")
-    release_rows = _shipping_rows(raw_release_rows)
-    _validate_row_shape(release_rows, "diagnostic release shipping rows")
-    release_payload = {
-        "schemaVersion": release.get("schemaVersion"),
-        "devfleetVersion": release.get("devfleetVersion"),
-        "installerVersion": release.get("installerVersion"),
-        "shippingModeContract": release.get("shippingModeContract"),
-        # release_fingerprint.py preserves source-root then installer-root
-        # enumeration order; identity rows are not lexicographically sorted
-        # across roots for this schema.
-        "shippingInputs": raw_release_rows,
-        "artifacts": release.get("artifacts", []),
-    }
-    recomputed_release = hashlib.sha256(json.dumps(release_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-    if recomputed_release != HISTORICAL_RELEASE_FINGERPRINT or str(release.get("releaseFingerprintId") or "").lower() != recomputed_release:
-        raise ValueError("diagnostic release fingerprint rows do not recompute to the preserved fingerprint")
-    declared_historical_release = str(record.get("recomputedHistoricalReleaseFingerprintId") or "").lower()
-    if not declared_historical_release or declared_historical_release != recomputed_release:
-        raise ValueError("diagnostic historical release fingerprint closure is not recomputed")
-    artifacts = release.get("artifacts")
-    if not isinstance(artifacts, list) or len(artifacts) < 4 or any(not isinstance(row, dict) or len(str(row.get("sha256") or "")) != 64 or int(row.get("bytes", -1)) < 1 for row in artifacts):
-        raise ValueError("diagnostic historical artifact tuple is incomplete")
-    def artifact_key(value: Any) -> str:
-        return str(value or "").lower().replace("-", "").replace("_", "")
-    release_artifacts = {artifact_key(row.get("name")): row for row in artifacts if isinstance(row, dict)}
-    state_artifacts = {}
-    if isinstance(state.get("candidate"), dict):
-        state_artifacts = {artifact_key(value.get("name") or key): value for key, value in state["candidate"].items() if isinstance(value, dict)}
-    if not state_artifacts:
-        raise ValueError("diagnostic historical candidate artifact tuple is missing")
-    for key in ("exe", "tar", "portable", "installersource"):
-        expected = next((row for name, row in release_artifacts.items() if key in name), None)
-        observed = next((row for name, row in state_artifacts.items() if key in name), None)
-        if expected is None or observed is None or str(expected.get("sha256") or "").lower() != str(observed.get("sha256") or "").lower() or int(expected.get("bytes", -1)) != int(observed.get("bytes", -2)):
-            raise ValueError(f"diagnostic artifact closure mismatch: {key}")
-    flags = {
-        "candidateIsCurrent": state.get("candidate_is_current"),
-        "sourceChangedSinceCandidate": state.get("source_changed_since_candidate"),
-        "rebuildRequired": state.get("rebuild_required"),
-        "fullReleasePassed": state.get("full_release_passed"),
-        "internalPromotionAllowed": state.get("internal_promotion_allowed"),
-        "publicPromotionAllowed": state.get("public_promotion_allowed"),
-    }
-    if flags != {"candidateIsCurrent": False, "sourceChangedSinceCandidate": True, "rebuildRequired": True, "fullReleasePassed": False, "internalPromotionAllowed": False, "publicPromotionAllowed": False}:
-        raise ValueError("diagnostic historical authority flags are not truthful")
-    if record.get("releaseEligible") is not False or record.get("promotionAllowed") is not False:
-        raise ValueError("historical diagnostic provenance cannot be release eligible or promotable")
-    return {"candidateShippingInputIdentity": recomputed, "historicalReleaseFingerprintId": recomputed_release, "provenanceCommit": HISTORICAL_PROVENANCE}
-
-
-def _validate_split_identity(root: Path, state: dict[str, Any], manifest: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
-    """Validate the candidate/repository split without allowing unknown drift.
-
-    A tooling-only HEAD may advance while the candidate remains byte-identical.
-    If shipping rows differ, the candidate is permitted to remain historical only
-    when the current authority explicitly records the narrow authorized paths;
-    otherwise the validator fails closed on an unclassified shipping change.
-    """
-    candidate_commit = str(state.get("candidate_git_commit") or manifest.get("candidateGitCommit") or candidate.get("candidateCommit") or "")
-    if len(candidate_commit) != 40 or any(ch not in "0123456789abcdefABCDEF" for ch in candidate_commit) or candidate_commit.lower() == "0" * 40:
-        raise ValueError("candidate commit must be explicit for split-identity validation")
-    candidate_declarations = [str(value).lower() for value in (
-        state.get("candidate_shipping_input_identity"), state.get("shipping_input_identity"),
-        manifest.get("candidateShippingInputIdentity"), candidate.get("candidateShippingInputIdentity")) if value]
-    live_declarations = [str(value).lower() for value in (manifest.get("shippingInputIdentity"), candidate.get("shippingInputIdentity")) if value]
-    if not candidate_declarations or not live_declarations:
-        raise ValueError("current candidate and live shipping-input identities are required")
-    if len(set(candidate_declarations)) != 1 or len(set(live_declarations)) != 1:
-        raise ValueError("candidate or live shipping-input identity declarations disagree")
-    candidate_shipping, live_shipping = candidate_declarations[0], live_declarations[0]
-    if any(not re.fullmatch(r"[0-9a-f]{64}", value) or value == "0" * 64 for value in (candidate_shipping, live_shipping)):
-        raise ValueError("candidate and live shipping-input identities are malformed")
-
-    release = _load(root / "outputs" / "release-fingerprint.json") if (root / "outputs" / "release-fingerprint.json").is_file() else {}
-    embedded_candidate_rows = _shipping_rows(candidate.get("candidateShippingInputs"))
-    candidate_fingerprint = None
-    if embedded_candidate_rows:
-        candidate_rows = embedded_candidate_rows
-        candidate_mode = candidate.get("candidateShippingModeContract") or {}
-    else:
-        candidate_fingerprint, staging = _candidate_fingerprint_from_git(root, candidate_commit)
-        try:
-            candidate_rows = _shipping_rows(candidate_fingerprint.get("shippingInputs"))
-            candidate_mode = candidate_fingerprint.get("shippingModeContract") or {}
-        finally:
-            shutil.rmtree(staging, ignore_errors=True)
-    _validate_row_shape(candidate_rows, "candidate shipping rows")
-    inventory = _shipping_rows(manifest.get("sourceInventory"))
-    if not inventory:
-        # A workspace invocation has no staged AUDIT-MANIFEST.  Recompute the
-        # live deterministic rows from the actual shipping trees; a bundle
-        # invocation uses its manifest inventory above.
-        try:
-            tools_dir = root / "source" / "tools"
-            sys.path.insert(0, str(tools_dir))
-            from release_fingerprint import build_fingerprint  # type: ignore
-            live_fingerprint = build_fingerprint(root / "source", root / "installer-source")
-            inventory = _shipping_rows(live_fingerprint.get("shippingInputs"))
-            live_mode = live_fingerprint.get("shippingModeContract") or {}
-            live_version = str(live_fingerprint.get("devfleetVersion") or "")
-            live_installer = str(live_fingerprint.get("installerVersion") or "")
-        except (ImportError, OSError, ValueError):
-            inventory = {}
-        finally:
-            if str(tools_dir) in sys.path:
-                sys.path.remove(str(tools_dir))
-    else:
-        live_mode = manifest.get("shippingModeContract") or candidate.get("shippingModeContract") or candidate_mode
-        live_version = str(manifest.get("devfleetVersion") or state.get("release_version") or "")
-        live_installer = str(manifest.get("installerVersion") or state.get("installer_version") or "")
-    if not inventory:
-        raise ValueError("live shipping rows are required")
-    _validate_row_shape(inventory, "live shipping rows")
-    if not candidate_mode or not live_mode:
-        raise ValueError("candidate and live shipping mode contracts are required")
-    # AUDIT-MANIFEST sourceInventory rows carry byte identity, while the
-    # executable mode contract is transported separately in SOURCE-MODES.
-    # Apply that contract before hashing the live rows so the validator uses
-    # exactly the same canonical mode values as release_fingerprint.py.
-    modes_path = root / "SOURCE-MODES.json"
-    if inventory and modes_path.is_file():
-        modes = _load(modes_path)
-        if isinstance(modes, list):
-            for item in modes:
-                if not isinstance(item, dict):
-                    continue
-                raw_path = str(item.get("path") or "").replace("\\", "/")
-                if raw_path.startswith("source/"):
-                    key = ("source", raw_path[len("source/"):])
-                elif raw_path.startswith("installer-source/"):
-                    key = ("installer-source", raw_path[len("installer-source/"):])
-                else:
-                    continue
-                if key in inventory:
-                    canonical_mode = "0755" if int(item.get("posixMode", 420)) == 493 else "0644"
-                    if inventory[key].get("mode") != canonical_mode:
-                        raise ValueError(f"shipping row mode disagrees with SOURCE-MODES.json: {key[0]}/{key[1]}")
-                    inventory[key]["mode"] = canonical_mode
-    # Independently walk the extracted shipping trees as well as validating
-    # the manifest inventory.  A builder omission/addition must be diagnosed
-    # as a concrete row mismatch instead of surfacing only as an opaque digest
-    # disagreement.
-    tools_dir = root / "source" / "tools"
-    sys.path.insert(0, str(tools_dir))
-    try:
-        from release_fingerprint import build_fingerprint  # type: ignore
-
-        direct_fingerprint = build_fingerprint(root / "source", root / "installer-source")
-    finally:
-        if str(tools_dir) in sys.path:
-            sys.path.remove(str(tools_dir))
-    direct_rows = _shipping_rows(direct_fingerprint.get("shippingInputs"))
-    if direct_rows != inventory:
-        differing_keys = sorted(set(direct_rows) | set(inventory), key=lambda key: (key[0], key[1].casefold()))
-        first = next(key for key in differing_keys if direct_rows.get(key) != inventory.get(key))
-        raise ValueError(f"sourceInventory disagrees with extracted shipping bytes: {first[0]}/{first[1]}")
-    computed_candidate = _shipping_identity(candidate_rows, candidate_mode, str(state.get("release_version") or candidate.get("devf
+    if any(value != record for value 

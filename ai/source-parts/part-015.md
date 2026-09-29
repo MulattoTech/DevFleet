@@ -1,10 +1,128 @@
 # DevFleet source part 015
 
 Full-source UTF-8 byte interval [651000, 697500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 7e3c1ac939848e45a541a584a330e036056724390680be3245df9cba9998e2e6
+Payload SHA-256: 5409cea9fb9b30f133b43e475cca68f9067c76b177954681afe1aef6f0668e00
 
 <!-- BEGIN SOURCE SLICE -->
-@{selfTest=$SelfTest;hostAuthenticode=[ordered]@{profile=$Fingerprint.privateSigningProfile;thumbprint=$Fingerprint.privateSigningCertificateThumbprint;publicPublisherTrust=$Fingerprint.publicPublisherTrust;publicPromotionAllowed=$Fingerprint.publicPromotionAllowed}}
+ariant=[Globalization.CultureInfo]::InvariantCulture
+        if(-not[datetimeoffset]::TryParse($nestedUtcText,$invariant,$roundtrip,[ref]$nestedUtc)-or$nestedUtc.Offset-ne[timespan]::Zero-or-not[datetimeoffset]::TryParse($l1UtcText,$invariant,$roundtrip,[ref]$l1Utc)-or$l1Utc.Offset-ne[timespan]::Zero-or$nestedUtc-gt$l1Utc){throw 'Post-cleanup nested and L1 observations have invalid or out-of-order UTC timestamps.'}
+        if([string]$nested.runId -cne $runId -or [string]$nested.status -cne 'ABSENT' -or $nested.present -isnot [bool] -or $nested.present -ne $false -or [string]$nested.expectedName -cne $expectedL2 -or [string]$nested.nestedScope -cne 'inside the exact L1 guest session' -or [string]$nested.observer -cne 'Get-DevFleetNestedL2State' -or [string]$nested.l1.name -cne [string]$Vm.Name -or [string]$nested.l1.id -cne [string]$Vm.Id){throw 'Post-cleanup nested observation source does not match the terminal claim.'}
+        if(($nested.exactMatchCount -isnot [int] -and $nested.exactMatchCount -isnot [long]) -or [long]$nested.exactMatchCount -ne 0){throw 'Post-cleanup nested observation exact-match result is absent or invalid.'}
+        $candidateTuplePatterns=[ordered]@{
+            repositoryHead='^[0-9a-f]{40}$'
+            candidateCommit='^[0-9a-f]{40}$'
+            shippingInputIdentity='^[0-9a-f]{64}$'
+            releaseFingerprintId='^[0-9a-f]{64}$'
+            toolingFingerprintId='^[0-9a-f]{64}$'
+        }
+        foreach($key in $candidateTuplePatterns.Keys){
+            $tupleValue=''
+            if($State.candidateHashes -is [System.Collections.IDictionary]){$tupleValue=[string]$State.candidateHashes[$key]}
+            elseif($State.candidateHashes){$tupleProperty=$State.candidateHashes.PSObject.Properties[$key];if($tupleProperty){$tupleValue=[string]$tupleProperty.Value}}
+            if($tupleValue -cnotmatch $candidateTuplePatterns[$key]){throw 'Post-cleanup finalization candidate tuple is malformed or incomplete.'}
+        }
+        foreach($key in $candidateTuplePatterns.Keys){
+            if([string]$l2.candidate.$key -cne [string]$State.candidateHashes.$key -or [string]$nested.candidate.$key -cne [string]$State.candidateHashes.$key -or [string]$cleanupValue.candidate.$key -cne [string]$State.candidateHashes.$key){throw "Post-cleanup nested evidence is stale for candidate field $key."}
+        }
+        if($l2UtcText -cne $nestedUtcText -or [string]$l2.verificationMethod -cne [string]$nested.verification -or [string]::IsNullOrWhiteSpace([string]$nested.verification)){throw 'Post-cleanup nested observation verification method or timestamp is absent or changed.'}
+        if([string]$nested.verification -ceq 'Bounded Multipass JSON inventory inside exact L1'){
+            if(($nested.inventoryCount -isnot [int] -and $nested.inventoryCount -isnot [long]) -or [long]$nested.inventoryCount -lt 0){throw 'Post-cleanup Multipass inventory completeness is missing.'}
+        }elseif([string]$nested.verification -ceq 'Multipass CLI absent; complete read-only inventories from every supported in-L1 virtualization backend'){
+            $backendRows=@($nested.backendInventories)
+            if($backendRows.Count -ne 2){throw 'Post-cleanup nested absence is missing a supported backend inventory.'}
+            foreach($provider in @('Hyper-V','VirtualBox')){
+                $rows=@($backendRows|Where-Object{[string]$_.provider -ceq $provider})
+                if($rows.Count -ne 1 -or [string]$rows[0].status -cne 'PASS' -or $rows[0].names -isnot [array] -or [string]::IsNullOrWhiteSpace([string]$rows[0].verification)){throw "Post-cleanup $provider nested inventory is incomplete or ambiguous."}
+                $instanceNames=[Collections.Generic.List[string]]::new()
+                foreach($instanceName in $rows[0].names){
+                    if($instanceName -isnot [string] -or [string]::IsNullOrWhiteSpace([string]$instanceName)){throw "Post-cleanup $provider nested inventory contains an invalid instance name."}
+                    if($instanceNames.Contains([string]$instanceName)){throw "Post-cleanup $provider nested inventory contains a duplicate instance name."}
+                    if([string]$instanceName -ceq $expectedL2){throw "Post-cleanup $provider nested inventory still contains the exact L2 target."}
+                    $instanceNames.Add([string]$instanceName)
+                }
+            }
+        }else{throw 'Post-cleanup nested absence uses an unsupported inventory method.'}
+        # The host-side exact-name lookup is only an additional foreign-resource exclusion.
+        $live=Get-VM -Id ([guid][string]$Vm.Id) -ErrorAction Stop
+        if($live.Name -cne [string]$Vm.Name -or [guid][string]$live.Id -ne [guid][string]$Vm.Id -or [string]$live.State -ne 'Off'){throw 'Post-cleanup live L1 verification failed.'}
+        $hostL2Exclusion=Get-DevFleetHostNameExclusion -Name $expectedL2
+        if([string]$hostL2Exclusion.name -cne $expectedL2 -or [string]$hostL2Exclusion.inventoryScope -cne 'host Hyper-V exact-name exclusion only' -or $hostL2Exclusion.present -isnot [bool]){throw 'Post-cleanup host exclusion result is malformed or has the wrong scope.'}
+        $hostRows=@($hostL2Exclusion.resources)
+        if(($hostL2Exclusion.present -eq $false -and ([string]$hostL2Exclusion.status -cne 'ABSENT' -or $hostRows.Count -ne 0)) -or ($hostL2Exclusion.present -eq $true -and ([string]$hostL2Exclusion.status -cne 'PRESENT' -or $hostRows.Count -lt 1))){throw 'Post-cleanup host exclusion result is incomplete or inconsistent.'}
+        if($hostL2Exclusion.present){throw 'Post-cleanup host inventory found a same-name resource; it was preserved and nested evidence cannot override the host conflict.'}
+        $value=[ordered]@{schemaVersion=3;status='PASS';contract='authoritative-post-cleanup-finalization';runId=$runId;cleanupConsumed=$true;cleanupRecordStatus=[string]$cleanup.status;cleanupEvidenceHash=$bound.cleanup.sha256;terminalL1='l1-terminal-state.json';terminalL1Hash=$bound.l1.sha256;terminalL1Timestamp=[string]$l1.timestampUtc;terminalL2='l2-terminal-state.json';terminalL2Hash=$bound.l2.sha256;terminalL2Timestamp=$nestedUtcText;nestedL2Observation='nested-l2-terminal-observation.json';nestedL2ObservationSha256=$bound.nested.sha256;expectedL2Name=$expectedL2;candidate=$l2.candidate;liveChecks=[ordered]@{l1ExactOff=$true;l2ExactAbsent=$true;hostSameNameL2Absent=$true;foreignResourcesMutated=$false};reconcileAfterCleanup=$true;timestampUtc=(Get-Date).ToUniversalTime().ToString('o')}
+        Write-EvidenceJson -Path (Join-Path $resolvedRunDir 'post-cleanup-finalization.json') -Value $value
+        return $value
+    } finally { foreach($stream in $boundStreams){$stream.Dispose()} }
+}
+
+function Set-FullReleasePassState {
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$FinalizationState,
+        [Parameter(Mandatory)][psobject]$Result,
+        [Parameter(Mandatory)][string]$ExpectedRunId
+    )
+    if ([string]::IsNullOrWhiteSpace($ExpectedRunId)) { throw 'FullRelease PASS cannot be promoted without a RunId.' }
+    if ([string]$Result.status -cne 'PASS') { throw 'FullRelease PASS promotion requires a PASS result.' }
+    if ([string]$Result.runId -cne $ExpectedRunId) { throw 'FullRelease PASS result RunId does not match the current authority RunId.' }
+    $postCleanup = $Result.postCleanupFinalization
+    if (-not $postCleanup -or [string]$postCleanup.status -cne 'PASS' -or -not [bool]$postCleanup.cleanupConsumed -or -not [bool]$postCleanup.reconcileAfterCleanup) {
+        throw 'FullRelease PASS promotion requires current post-cleanup finalization evidence.'
+    }
+    $liveChecks = $postCleanup.liveChecks
+    if (-not $liveChecks -or -not [bool]$liveChecks.l1ExactOff -or -not [bool]$liveChecks.l2ExactAbsent) {
+        throw 'FullRelease PASS promotion requires exact L1 OFF and L2 ABSENT live checks.'
+    }
+    $FinalizationState['full_release_run_id'] = $ExpectedRunId
+    $FinalizationState['full_release_current'] = $true
+    $FinalizationState['full_release_passed'] = $true
+    $FinalizationState['validation_evidence_current'] = $true
+    $FinalizationState['internal_promotion_allowed'] = $false
+    $FinalizationState['public_promotion_allowed'] = $false
+    $FinalizationState['public_publisher_trust'] = $false
+    $FinalizationState['release_status'] = 'BLOCKED'
+    $FinalizationState['status'] = 'BLOCKED — FullRelease PASS recorded; exact proofs and remaining acceptance gates required'
+    $FinalizationState['current_phase'] = 'FULLRELEASE-PASS'
+    $FinalizationState['last_completed_phase'] = 'CLEANUP'
+    return $FinalizationState
+}
+
+function Invoke-FullReleaseRun {
+    param(
+        [Parameter(Mandatory)][psobject]$State,
+        [Parameter(Mandatory)][psobject]$Fingerprint,
+        [Parameter(Mandatory)][psobject]$Vm,
+        [Parameter(Mandatory)][psobject]$Config,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][string]$RunDir,
+        [Parameter(Mandatory)][string]$StatePath,
+        [Parameter(Mandatory)][psobject]$HostSnapshot,
+        [Parameter(Mandatory)][psobject]$SelfTest
+    )
+    $effectiveStartAuthorized = if($HostSnapshot.PSObject.Properties['effectiveE2EStartAuthorized']){[bool]$HostSnapshot.effectiveE2EStartAuthorized}else{[bool]$HostSnapshot.startSafe}
+    if (-not $effectiveStartAuthorized) { throw 'USER ACTION REQUIRED — FREE HOST RAM' }
+    $baseline=Set-DevFleetBaselineBinding -WorkspaceRoot $WorkspaceRoot -Fingerprint $Fingerprint
+    $phases=Get-FullReleasePhasePlan
+    $records = [System.Collections.Generic.List[object]]::new()
+    $context = [ordered]@{ runId=$State.runId; phaseId=''; label=''; checkpoint=$null; destructive=$false; candidate=$Fingerprint; vmName=$Vm.Name; vmId=$Vm.Id.ToString(); statePath=$StatePath; runDir=$RunDir; workspaceRoot=$WorkspaceRoot; config=$Config }
+    $realUsePairingCapture = $null
+    $realUsePairingPrivateState = $null
+    $realUseSurrogateEvidence = $null
+    foreach ($phase in $phases) {
+        $context.phaseId=$phase.id
+        $context.label=$phase.label;$context.checkpoint=$phase.checkpoint;$context.destructive=[bool]$phase.destructive
+        $State.currentPhase=$phase.id
+        Save-RunState -State $State -Path $StatePath
+        $record = [ordered]@{ id=$phase.id; label=$phase.label; checkpoint=$phase.checkpoint; destructive=[bool]$phase.destructive; status='NOT RUN'; evidence=$null; startedAt=(Get-Date).ToUniversalTime().ToString('o') }
+        try {
+            if ($phase.id -eq 'HOST-SAFETY') {
+                if (-not $effectiveStartAuthorized) { throw 'Host safety threshold was not met.' }
+                $record.status='PASS';$record.evidence=$HostSnapshot
+            } elseif ($phase.id -eq 'CANDIDATE-VERIFY') {
+                $checks=$SelfTest.requiredChecks
+                $bad=if ($checks -is [System.Collections.IDictionary]) { @($checks.GetEnumerator() | Where-Object { -not [bool]$_.Value }) } else { @($checks.PSObject.Properties | Where-Object { -not [bool]$_.Value }) }
+                if ($SelfTest.result -ne 'PASS' -or @($bad).Count -gt 0) { throw 'Candidate self-test is not a complete PASS.' }
+                $record.status='PASS';$record.evidence=[ordered]@{selfTest=$SelfTest;hostAuthenticode=[ordered]@{profile=$Fingerprint.privateSigningProfile;thumbprint=$Fingerprint.privateSigningCertificateThumbprint;publicPublisherTrust=$Fingerprint.publicPublisherTrust;publicPromotionAllowed=$Fingerprint.publicPromotionAllowed}}
             } elseif ($phase.id -eq 'MAINTENANCE-READY') {
                 $maintenance=Ensure-MaintenanceReadyFixture -Vm $Vm -Fingerprint $Fingerprint -Config $Config -WorkspaceRoot $WorkspaceRoot -RunId ([string]$State.runId) -RunDir $RunDir
                 $context.maintenanceVault=$maintenance.vault
@@ -464,148 +582,4 @@ function Get-HarnessBudgetPolicy {
         export = 300
         verification = 300
     }
-    if ($configured -and $configured.PSObject.Properties['OperationMaximumsSeconds']) {
-        foreach ($property in $configured.OperationMaximumsSeconds.PSObject.Properties) {
-            $key = [string]$property.Name
-            if ($operation.Contains($key) -and $key -ne 'guestBootstrap') { $operation[$key] = [int]$property.Value }
-            elseif ($key -eq 'guestBootstrap' -and [int]$property.Value -ne $derivedGuestBootstrap) { throw "guestBootstrap must equal the sum of GuestBootstrapComponentsSeconds ($derivedGuestBootstrap); refusing an un-derived timeout override." }
-        }
-    }
-    $derivedPrerequisites = (6 * ([int]$operation.dependencyProbe + [int]$operation.dependencyHealth + [int]$operation.dependencyInstall + [int]$operation.dependencyVerification)) + [int]$operation.windowsCapability + [int]$operation.windowsFeature + (4 * [int]$operation.multipassConfiguration) + (3 * [int]$operation.vscodeExtension)
-    if ($configured -and $configured.OperationMaximumsSeconds -and $configured.OperationMaximumsSeconds.PSObject.Properties['prerequisites'] -and [int]$configured.OperationMaximumsSeconds.prerequisites -ne $derivedPrerequisites) { throw "prerequisites must equal the sum of its finite operation maxima ($derivedPrerequisites); refusing an un-derived timeout override." }
-    $operation.prerequisites = $derivedPrerequisites
-    foreach ($entry in $operation.GetEnumerator()) {
-        if ([int]$entry.Value -le 0) { throw "Deadline policy operation maximum '$($entry.Key)' must be positive." }
-    }
-
-    $stage = [ordered]@{
-        compute = [int]$operation.multipassLaunch + [int]$operation.multipassReadiness + [int]$operation.payloadTransfer + [int]$operation.guestBootstrap + [int]$operation.sshAndMarker
-        vault = [int]$operation.vaultSnapshot + [int]$operation.multipassLaunch + [int]$operation.multipassReadiness + [int]$operation.payloadTransfer + [int]$operation.vaultBootstrap + [int]$operation.sshAndMarker
-    }
-    $desktop = [int]$operation.bootstrap + [int]$operation.preflight + [int]$operation.prerequisites + [int]$operation.windowsTailscale + [int]$operation.hostAgent + $stage.compute + [int]$operation.tailscale + [int]$operation.shortcuts + [int]$operation.export + [int]$operation.verification
-    $laptop = [int]$operation.bootstrap + [int]$operation.preflight + [int]$operation.prerequisites + [int]$operation.windowsTailscale + [int]$operation.hostAgent + $stage.compute + $stage.vault + ([int]$operation.tailscale * 2) + [int]$operation.vaultClient + [int]$operation.shortcuts + [int]$operation.export + [int]$operation.verification
-    $transactionMargin = 600
-    $observerMargin = 600
-    $fullReleaseMargin = 600
-    $exactProofMargin = 600
-    $maxRebootBoundaries = 3
-    $observerNoProgress = 1800
-    if ($configured) {
-        foreach ($name in @('TransactionTerminalizationMarginSeconds','ObserverTerminalizationMarginSeconds','FullReleaseTerminalizationMarginSeconds','ExactProofTerminalizationMarginSeconds','MaxRebootBoundaries','ObserverNoProgressBudgetSeconds')) {
-            if ($configured.PSObject.Properties[$name]) {
-                $value = [int]$configured.$name
-                if ($value -le 0 -and $name -ne 'MaxRebootBoundaries') { throw "Deadline policy '$name' must be positive." }
-                if ($name -eq 'TransactionTerminalizationMarginSeconds') { $transactionMargin = $value }
-                elseif ($name -eq 'ObserverTerminalizationMarginSeconds') { $observerMargin = $value }
-                elseif ($name -eq 'FullReleaseTerminalizationMarginSeconds') { $fullReleaseMargin = $value }
-                elseif ($name -eq 'ExactProofTerminalizationMarginSeconds') { $exactProofMargin = $value }
-                elseif ($name -eq 'MaxRebootBoundaries') { $maxRebootBoundaries = $value }
-                elseif ($name -eq 'ObserverNoProgressBudgetSeconds') { $observerNoProgress = $value }
-            }
-        }
-    }
-    if ($maxRebootBoundaries -lt 1) { throw 'Deadline policy must permit at least one bounded reboot boundary.' }
-    $transaction = [ordered]@{ Desktop = $desktop + $transactionMargin; Laptop = $laptop + $transactionMargin }
-    $observerAbsoluteByRole = [ordered]@{
-        Desktop = [int]$transaction.Desktop + $observerMargin
-        Laptop = [int]$transaction.Laptop + $observerMargin
-    }
-    # Keep legacy scalar consumers conservative: the scalar is the largest
-    # role budget, while lifecycle callers select the exact role value.
-    $productTransaction = [int]($transaction.Values | Measure-Object -Maximum).Maximum
-    $observerAbsolute = [int]($observerAbsoluteByRole.Values | Measure-Object -Maximum).Maximum
-    $wpfAction = 600
-    $rebootBoundary = 420
-    $servicingSettlement = 180
-    $interactiveDesktop = 300
-    $checkpointPolling = 900
-    $lifecycleInner = $wpfAction + (($maxRebootBoundaries + 1) * $observerAbsolute) + ($maxRebootBoundaries * ($wpfAction + $rebootBoundary + $servicingSettlement + $interactiveDesktop)) + $checkpointPolling + $transactionMargin
-    $fullReleaseInner = $lifecycleInner
-    $fullReleaseWatchdog = $fullReleaseInner + $fullReleaseMargin
-    $exactProofInner = 300 + $fullReleaseInner
-    $exactProofOuter = $exactProofInner + $exactProofMargin
-    $maximumOuter = 90000
-    if ($configured -and $configured.PSObject.Properties['MaximumExactProofOuterWatchdogSeconds']) { $maximumOuter = [int]$configured.MaximumExactProofOuterWatchdogSeconds }
-    $policy = [pscustomobject][ordered]@{
-        version = $script:DeadlinePolicyVersion
-        operationMaximumsSeconds = [pscustomobject]$operation
-        guestBootstrapComponentsSeconds = [pscustomobject]$guestBootstrapComponents
-        stageBudgetsSeconds = [pscustomobject]$stage
-        transactionBudgetsSeconds = [pscustomobject]$transaction
-        transactionTerminalizationMarginSeconds = $transactionMargin
-        observerTerminalizationMarginSeconds = $observerMargin
-        fullReleaseTerminalizationMarginSeconds = $fullReleaseMargin
-        exactProofTerminalizationMarginSeconds = $exactProofMargin
-        observerNoProgressBudgetSeconds = $observerNoProgress
-        observerAbsoluteBudgetSeconds = $observerAbsolute
-        observerAbsoluteBudgetsSeconds = [pscustomobject]$observerAbsoluteByRole
-        productTransactionAbsoluteBudgetSeconds = $productTransaction
-        productLifecycleInnerBoundSeconds = $lifecycleInner
-        fullReleaseInnerBoundSeconds = $fullReleaseInner
-        fullReleaseWatchdogSeconds = $fullReleaseWatchdog
-        exactProofInnerBoundSeconds = $exactProofInner
-        exactProofOuterWatchdogSeconds = $exactProofOuter
-        maximumExactProofOuterWatchdogSeconds = $maximumOuter
-        maxRebootBoundaries = $maxRebootBoundaries
-        inequalities = [ordered]@{
-            stageDominatesOperations = ([int]$stage.compute -gt ([int]$operation.guestBootstrap + [int]$operation.sshAndMarker))
-            stageDominatesComputeOperations = ([int]$stage.compute -gt ([int]$operation.guestBootstrap + [int]$operation.sshAndMarker))
-            stageDominatesVaultOperations = ([int]$stage.vault -gt ([int]$operation.vaultBootstrap + [int]$operation.sshAndMarker))
-            observerDominatesDesktopTransaction = ([int]$observerAbsoluteByRole.Desktop -gt [int]$transaction.Desktop)
-            observerDominatesLaptopTransaction = ([int]$observerAbsoluteByRole.Laptop -gt [int]$transaction.Laptop)
-            observerDominatesTransaction = (($observerAbsoluteByRole.Values | Where-Object { $_ -gt 0 }).Count -eq 2 -and [int]$observerAbsoluteByRole.Desktop -gt [int]$transaction.Desktop -and [int]$observerAbsoluteByRole.Laptop -gt [int]$transaction.Laptop)
-            fullReleaseDominatesObserver = ($fullReleaseWatchdog -gt $observerAbsolute)
-            exactProofDominatesInner = ($exactProofOuter -gt $exactProofInner)
-        }
-    }
-    Assert-HarnessBudgetPolicy -Policy $policy | Out-Null
-    return $policy
-}
-
-function Assert-HarnessBudgetPolicy {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][psobject]$Policy)
-    foreach ($name in @('productTransactionAbsoluteBudgetSeconds','observerAbsoluteBudgetSeconds','fullReleaseWatchdogSeconds','exactProofInnerBoundSeconds','exactProofOuterWatchdogSeconds')) {
-        if (-not $Policy.PSObject.Properties[$name] -or [int]$Policy.$name -le 0) { throw "Deadline policy is missing a finite positive '$name'." }
-    }
-    foreach ($role in @('Desktop','Laptop')) {
-        if (-not $Policy.observerAbsoluteBudgetsSeconds.PSObject.Properties[$role]) { throw "Deadline policy is missing observer absolute budget for $role." }
-        if ([int]$Policy.observerAbsoluteBudgetsSeconds.$role -le [int]$Policy.transactionBudgetsSeconds.$role) { throw "Invalid deadline hierarchy: observer absolute must strictly exceed $role transaction." }
-    }
-    if ([int]$Policy.observerAbsoluteBudgetSeconds -lt [int]$Policy.observerAbsoluteBudgetsSeconds.Laptop) { throw 'Legacy observer absolute scalar must conservatively cover Laptop.' }
-    if ([int]$Policy.fullReleaseWatchdogSeconds -le [int]$Policy.observerAbsoluteBudgetSeconds) { throw 'Invalid deadline hierarchy: FullRelease watchdog must strictly exceed observer absolute.' }
-    if ([int]$Policy.exactProofOuterWatchdogSeconds -le [int]$Policy.exactProofInnerBoundSeconds) { throw 'Invalid deadline hierarchy: exact-proof outer watchdog must strictly exceed its calculated inner bound.' }
-    if ([int]$Policy.exactProofOuterWatchdogSeconds -gt [int]$Policy.maximumExactProofOuterWatchdogSeconds) { throw "Deadline policy requires exact-proof outer watchdog $($Policy.exactProofOuterWatchdogSeconds)s, exceeding configured maximum $($Policy.maximumExactProofOuterWatchdogSeconds)s; refusing to truncate." }
-    return $true
-}
-
-function Get-DeadlineRemainingSeconds {
-    param([Parameter(Mandatory)][datetime]$DeadlineUtc, [datetime]$NowUtc = ([datetime]::UtcNow))
-    [int][math]::Floor(($DeadlineUtc.ToUniversalTime() - $NowUtc.ToUniversalTime()).TotalSeconds)
-}
-
-function Get-EffectiveDeadlineTimeoutSeconds {
-    param([Parameter(Mandatory)][int]$OperationMaximumSeconds, [Parameter(Mandatory)][datetime]$DeadlineUtc, [datetime]$NowUtc = ([datetime]::UtcNow))
-    if ($OperationMaximumSeconds -le 0) { throw 'Operation maximum must be positive.' }
-    $remaining = Get-DeadlineRemainingSeconds -DeadlineUtc $DeadlineUtc -NowUtc $NowUtc
-    if ($remaining -le 0) { throw 'Owning deadline has expired; refusing to start another child operation.' }
-    [math]::Min($OperationMaximumSeconds, $remaining)
-}
-
-Export-ModuleMember -Function Get-HarnessBudgetPolicy,Assert-HarnessBudgetPolicy,Get-DeadlineRemainingSeconds,Get-EffectiveDeadlineTimeoutSeconds
-
-```
-
-
-## FILE: automation/release-e2e/modules/HostSafety.psm1
-
-SHA256: 9dcbac957f5aa060f0441eb8d372e39a190aab54cbf9af718a05368e567cb6c1 | Bytes: 8910 | Git mode: 100644
-
-```
-Set-StrictMode -Version Latest
-
-function Get-DisposableVm {
-    param([string]$VmName,[string]$Pattern = 'DevFleet-E2E-*')
-    if ($VmName) { $vms = @(Get-VM -Name $VmName -ErrorAction Stop) } else { $vms = @(Get-VM | Where-Object { $_.Name -like $Pattern }) }
-    if ($vms.Count -eq 0) { throw 'No ownership-scoped disposable DevFleet-E2E VM was found.' }
-    if ($vms.Count -gt 1 -and -not $VmName) { throw "Dis
+    if ($configured 

@@ -1,7 +1,7 @@
 # DevFleet source part 004
 
 Full-source UTF-8 byte interval [139500, 186000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: cabf3038e6005d99189205ed9e55f71e7a49fd1fd0d57939f9bd0e09aaa2f6ec
+Payload SHA-256: 5c621ea8e6af940bd06933783a80e058e053b8dd64ba8ca511601df4d586158c
 
 <!-- BEGIN SOURCE SLICE -->
       l1Id = $startVm.Id.ToString()
@@ -108,7 +108,7 @@ if (-not $LiveGuestAuth -and -not $result.staticPrerequisitesPass) { exit 2 }
 
 ## FILE: .agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py
 
-SHA256: ff071a21d1c16ec3edd272eb8dd4ed163c3a32b021f5d9459c12923f0842cc08 | Bytes: 33508 | Git mode: 100644
+SHA256: 76c5735d847a268bffd0587926ad214ed7385acb65df48eb6b3fde57687ef05a | Bytes: 37284 | Git mode: 100644
 
 ```
 """Prospective DevFleet attempt journal; never produces certification evidence.
@@ -134,11 +134,13 @@ REPAIR_ID = POLICY_ID + '-R2-REPAIR-1'
 REPAIR2_ID = POLICY_ID + '-R2-REPAIR-2'
 REPAIR3_ID = POLICY_ID + '-R2-REPAIR-3'
 REPAIR4_ID = POLICY_ID + '-R2-REPAIR-4'
+REPAIR5_ID = POLICY_ID + '-R2-REPAIR-5'
 REPAIR3_CANDIDATE_COMMIT = 'be0f1473838b4c2255d22efd99b25a58fd588a78'
 REPAIR3_SHIPPING_SHA256 = '4d7d2dcfd486adb622e413ed9abe894df6d105457e91aa0f96779d776a5e4b44'
 REPAIR3_SIGNED_EXE_SHA256 = '1ee8059ea9ae253ab358b9aec5241aae1019676cb54544b5f352080cdf132908'
 REPAIR3_FAILED_LEDGER_SHA256 = 'dffe7810cc2f1833ed73a9514a8a49e4d65eed67eac0bf936bf81a1c8d6521ff'
 REPAIR3_RECEIPT_SHA256 = 'b071752cc2042b3405c05856780f74bbecdc11d0c647c8b602404c73829034b6'
+REPAIR5_PREDECESSOR_SHA256 = 'bc9401e921754628b95f1f5ceff6308bc3607ae790690cfca786222eadf71ee4'
 LIMITS = {'standard-token': 3, 'laptop-proof': 3, 'desktop-proof': 3,
           'fullrelease': 3, 'diagnostic': 6, 'maintenance': 3, 'build-sign': 3}
 ONE_DIAGNOSTIC_LIMITS = {operation: (1 if operation == 'diagnostic' else 0)
@@ -164,6 +166,8 @@ REPAIR3_LIMITS = {operation: (1 if operation in ('standard-token', 'diagnostic',
 REPAIR3_SEQUENCE = REPAIR_SEQUENCE
 REPAIR4_LIMITS = dict(REPAIR3_LIMITS)
 REPAIR4_SEQUENCE = REPAIR_SEQUENCE
+REPAIR5_LIMITS = dict(REPAIR4_LIMITS)
+REPAIR5_SEQUENCE = REPAIR_SEQUENCE
 
 
 def sequence_for(policy_id):
@@ -173,6 +177,8 @@ def sequence_for(policy_id):
         return REPAIR3_SEQUENCE
     if policy_id == REPAIR4_ID:
         return REPAIR4_SEQUENCE
+    if policy_id == REPAIR5_ID:
+        return REPAIR5_SEQUENCE
     return REPAIR_SEQUENCE
 
 
@@ -187,6 +193,8 @@ def limits_for(policy_id):
         return REPAIR3_LIMITS
     if policy_id == REPAIR4_ID:
         return REPAIR4_LIMITS
+    if policy_id == REPAIR5_ID:
+        return REPAIR5_LIMITS
     if policy_id in (POLICY_ID, POLICY_ID + '-R2'):
         return LIMITS
     raise ValueError('Unsupported explicitly authorized campaign')
@@ -302,7 +310,27 @@ def _load_repair3_receipt(path):
 
 def initialize(ledger, authorization, predecessors, policy_id=POLICY_ID, artifact_receipt=None):
     limits = limits_for(policy_id)
-    if policy_id == REPAIR4_ID:
+    if policy_id == REPAIR5_ID:
+        if len(predecessors) != 2 or safe_path(predecessors[0]) == safe_path(predecessors[1]):
+            raise ValueError('Fifth repair successor requires distinct terminal snapshot and live repair4 predecessor')
+        if safe_path(authorization) in (safe_path(predecessors[0]), safe_path(predecessors[1]), safe_path(ledger)):
+            raise ValueError('Fifth repair authorization must be a distinct source')
+        if digest(predecessors[0]) != digest(predecessors[1]):
+            raise ValueError('Fifth repair predecessor snapshot differs from live repair4 ledger')
+        if digest(predecessors[0]) != REPAIR5_PREDECESSOR_SHA256:
+            raise ValueError('Fifth repair predecessor differs from the exact owner-reviewed terminal repair4 bytes')
+        parents = [load(p) for p in predecessors]
+        if any(p['policyId'] != REPAIR4_ID or p['activeRunId'] is not None
+               or len(p['attempts']) != 1
+               or p['attempts'][0].get('state') != 'TERMINAL'
+               or p['attempts'][0].get('operation') != 'standard-token'
+               or p['attempts'][0].get('exitCode') != 0
+               or p['attempts'][0].get('classification') != 'PASS_NATIVE_STANDARD_TOKEN'
+               for p in parents):
+            raise ValueError('Fifth repair successor requires terminal one-qualification repair4 predecessor')
+        if parents[0]['authorization']['sha256'] == digest(authorization):
+            raise ValueError('Fifth repair successor requires separate explicit authorization')
+    elif policy_id == REPAIR4_ID:
         if len(predecessors) != 2 or safe_path(predecessors[0]) == safe_path(predecessors[1]):
             raise ValueError('Fourth repair successor requires distinct terminal snapshot and live repair3 predecessor')
         if safe_path(authorization) in (safe_path(predecessors[0]), safe_path(predecessors[1]), safe_path(ledger)):
@@ -397,7 +425,7 @@ def initialize(ledger, authorization, predecessors, policy_id=POLICY_ID, artifac
 
 def load(ledger):
     data = strict_json(ledger)
-    if not isinstance(data,dict) or type(data.get('schemaVersion')) is not int or data['schemaVersion'] != 1 or data.get('policyId') not in (POLICY_ID, POLICY_ID+'-R2', ONE_DIAGNOSTIC_ID, REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID):
+    if not isinstance(data,dict) or type(data.get('schemaVersion')) is not int or data['schemaVersion'] != 1 or data.get('policyId') not in (POLICY_ID, POLICY_ID+'-R2', ONE_DIAGNOSTIC_ID, REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID):
         raise ValueError('Unsupported campaign schema/identity')
     if data.get('certificationCredit') is not False:
         raise ValueError('Attempt accounting cannot grant certification credit')
@@ -514,6 +542,32 @@ def load(ledger):
             raise ValueError('Fourth repair predecessor is not the terminal blocked repair3 FullRelease')
         if parents[0]['authorization']['sha256'] == auth['sha256']:
             raise ValueError('Fourth repair authorization repeats repair3 source')
+    if data['policyId'] == REPAIR5_ID:
+        predecessors = data.get('predecessors')
+        if not isinstance(predecessors, list) or len(predecessors) != 2:
+            raise ValueError('Fifth repair predecessors are missing')
+        paths = [safe_path(p['path']) for p in predecessors]
+        if paths[0] in (paths[1], safe_path(ledger)) or paths[1] == safe_path(ledger):
+            raise ValueError('Fifth repair predecessors are not distinct from successor')
+        if safe_path(auth['path']) in (*paths, safe_path(ledger)):
+            raise ValueError('Fifth repair authorization is not a distinct source')
+        if any(digest(path) != row.get('sha256') for path, row in zip(paths, predecessors)):
+            raise ValueError('Fifth repair predecessor changed')
+        if digest(paths[0]) != digest(paths[1]):
+            raise ValueError('Fifth repair snapshot and live predecessor diverged')
+        if digest(paths[0]) != REPAIR5_PREDECESSOR_SHA256:
+            raise ValueError('Fifth repair predecessor differs from exact terminal repair4 bytes')
+        parents = [load(path) for path in paths]
+        if any(parent['policyId'] != REPAIR4_ID or parent['activeRunId'] is not None
+               or len(parent['attempts']) != 1
+               or parent['attempts'][0].get('state') != 'TERMINAL'
+               or parent['attempts'][0].get('operation') != 'standard-token'
+               or parent['attempts'][0].get('exitCode') != 0
+               or parent['attempts'][0].get('classification') != 'PASS_NATIVE_STANDARD_TOKEN'
+               for parent in parents):
+            raise ValueError('Fifth repair predecessor is not terminal one-qualification repair4')
+        if parents[0]['authorization']['sha256'] == auth['sha256']:
+            raise ValueError('Fifth repair authorization repeats repair4 source')
     if data['policyId'] == ONE_DIAGNOSTIC_ID:
         predecessors = data.get('predecessors')
         if not isinstance(predecessors, list) or len(predecessors) != 1:
@@ -552,7 +606,7 @@ def load(ledger):
         raise ValueError('Ambiguous active attempt')
     if any(sum(a['operation']==op for a in attempts)>limit for op,limit in expected_limits.items()):
         raise ValueError('Campaign allowance exceeded')
-    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID):
+    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID):
         sequence = sequence_for(data['policyId'])
         if len(attempts) > len(sequence):
             raise ValueError('Repair successor has too many phases')
@@ -589,7 +643,7 @@ def prepare(data, request):
     if data['activeRunId'] is not None: raise ValueError('Active attempt must be reconciled; crash is not a free replay')
     if any(a['runId']==request['runId'] for a in data['attempts']): raise ValueError('RunId has already been charged')
     if sum(a['operation']==request['operation'] for a in data['attempts'])>=limits[request['operation']]: raise ValueError('Operation allowance exhausted')
-    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID):
+    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID):
         sequence = sequence_for(data['policyId'])
         prior = data['attempts']
         if (len(prior) >= len(sequence)
@@ -628,7 +682,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command',choices=['initialize','status','reserve','finish'])
     parser.add_argument('--ledger',required=True); parser.add_argument('--authorization'); parser.add_argument('--predecessor',action='append',default=[])
-    parser.add_argument('--policy-id',choices=[POLICY_ID,POLICY_ID+'-R2',ONE_DIAGNOSTIC_ID,REPAIR_ID,REPAIR2_ID,REPAIR3_ID,REPAIR4_ID],default=POLICY_ID)
+    parser.add_argument('--policy-id',choices=[POLICY_ID,POLICY_ID+'-R2',ONE_DIAGNOSTIC_ID,REPAIR_ID,REPAIR2_ID,REPAIR3_ID,REPAIR4_ID,REPAIR5_ID],default=POLICY_ID)
     parser.add_argument('--artifact-receipt')
     parser.add_argument('--request'); parser.add_argument('--dry-run',action='store_true')
     args=parser.parse_args()
@@ -732,64 +786,3 @@ def diagnose(report_path, expected_report_sha256, expected_log_sha256,
     require(report.get('scope') == 'OFFLINE_READ_ONLY_GUEST_EVENT_INSPECTION',
             'Report has wrong inspection scope')
     require(report.get('vmId') == EXACT_VM and report.get('parentCheckpointId') == EXACT_CLEAN,
-            'Report is not bound to exact L1 and predecessor CLEAN')
-    for key in ('diskReadOnlyVerified', 'dismounted', 'diskFileSizeUnchanged',
-                'diskWriteTimeUnchanged', 'ledgerUnchanged'):
-        require(report.get(key) is True, 'Unverified read-only source chain: ' + key)
-    require(report.get('guestAuthenticationAttempted') is False and report.get('vmStarted') is False,
-            'Report is not a read-only offline inspection')
-    require(report.get('securityLogSha256') == expected_log_sha256.lower(),
-            'Guest Security log hash is not independently pinned')
-
-    require(ledger.get('policyId') == 'DF-FRESH-CERTIFICATION-20260926-R2',
-            'Wrong R2 journal')
-    attempts = [a for a in ledger.get('attempts', []) if isinstance(a, dict)
-                and a.get('runId') == run_id]
-    require(len(attempts) == 1 and ledger.get('activeRunId') is None,
-            'Run is missing, ambiguous, or still active')
-    attempt = attempts[0]
-    require(attempt.get('operation') == 'diagnostic' and attempt.get('state') == 'TERMINAL'
-            and attempt.get('certificationCredit') is False
-            and attempt.get('classification') == 'E2E_CREDENTIAL_REJECTED_BY_EXACT_CLEAN',
-            'Run is not the terminal historical-source diagnostic')
-    start, end = instant(attempt.get('reservedUtc')), instant(attempt.get('terminalUtc'))
-    require(start < end, 'Invalid terminal window')
-
-    lab = readiness.get('lab') or {}
-    auth = readiness.get('liveGuestAuth') or {}
-    admission = readiness.get('admission') or {}
-    require(lab.get('l1Id') == EXACT_VM and lab.get('cleanId') == EXACT_CLEAN,
-            'Readiness lab identity differs')
-    require(admission.get('runId') == run_id and admission.get('operation') == 'diagnostic',
-            'Readiness admission differs')
-    require(auth.get('attempted') is True and auth.get('cleanRestored') is True
-            and auth.get('connected') is False and auth.get('finalL1State') == 'Off'
-            and auth.get('failureClass') == 'System.Management.Automation.Remoting.PSDirectException'
-            and 'E2E_CREDENTIAL_REJECTED_BY_EXACT_CLEAN' in readiness.get('blockers', [])
-            and readiness.get('certificationCredit') is False,
-            'Readiness did not record the exact generic authentication rejection')
-
-    matching = []
-    events = report.get('events')
-    require(isinstance(events, list) and events, 'Missing guest failure events')
-    record_ids = set()
-    for event in events:
-        require(isinstance(event, dict) and type(event.get('recordId')) is int
-                and event['recordId'] > 0 and event['recordId'] not in record_ids,
-                'Malformed or duplicate event record identity')
-        record_ids.add(event['recordId'])
-        require(event.get('eventId') == 4625 and STATUS.fullmatch(str(event.get('status', '')))
-                and STATUS.fullmatch(str(event.get('subStatus', ''))),
-                'Malformed guest failure event')
-        event_time = instant(event.get('timeUtc'))
-        if start <= event_time <= end and event.get('targetUser') == EXACT_ACCOUNT \
-                and event.get('computer', '').lower() == EXACT_COMPUTER.lower():
-            matching.append(event)
-    require(len(matching) == 1, 'Missing or conflicting exact account failures in run window')
-    event = matching[0]
-    status, substatus = event['status'].lower(), event['subStatus'].lower()
-    return {
-        'schemaVersion': 1, 'scope': 'SUPPLEMENTARY_HISTORICAL_DIAGNOSIS',
-        'runId': run_id, 'classification': CLASSIFICATIONS.get((status, substatus),
-                                                               'UNKNOWN_AUTH_FAILURE'),
-        'historicalLedgerClassification': attempt['classificatio

@@ -1,10 +1,380 @@
 # DevFleet source part 077
 
 Full-source UTF-8 byte interval [3534000, 3580500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 5658ab3376a5cb089f1b75686c84ae9cfea7e5f505b9529434f96d449de4284c
+Payload SHA-256: afdb5422229b1f929f29fcf51fee2809d639b9335375ebf5941b479f3c703972
 
 <!-- BEGIN SOURCE SLICE -->
-estore journal phase is unsupported.")
+ not _identity_matches(actual, _object_identity(observed)):
+            raise ValueError("Workspace root identity changed before it could be authorized.")
+        return fd, actual, lexical
+    except Exception:
+        os.close(fd)
+        raise
+
+
+@dataclass
+class _AuthorizedEntry:
+    name: str
+    kind: int
+    result: os.stat_result
+    fd: int | None
+
+
+def _scan_generated_fd(fd: int) -> tuple[int, int]:
+    count = 0
+    total = 0
+    for name in sorted(os.listdir(fd)):
+        result = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        kind = stat.S_IFMT(result.st_mode)
+        if kind == stat.S_IFLNK:
+            continue
+        if kind == stat.S_IFDIR:
+            child_fd, _ = _open_verified_child(fd, name, stat.S_IFDIR)
+            try:
+                child_count, child_total = _scan_generated_fd(child_fd)
+                count += child_count
+                total += child_total
+            finally:
+                os.close(child_fd)
+        elif kind == stat.S_IFREG:
+            child_fd, child_result = _open_verified_child(fd, name, stat.S_IFREG)
+            os.close(child_fd)
+            count += 1
+            total += int(child_result.st_size)
+        else:
+            raise ValueError(f"Unsupported generated workspace entry: {name}")
+    return count, total
+
+
+def _capture_workspace_posix(root: Path, *, include_generated: bool) -> tuple[dict[str, Any], list[_AuthorizedEntry]]:
+    root_fd, root_result, lexical_root = _open_verified_root(root)
+    entries: list[_AuthorizedEntry] = [_AuthorizedEntry("", stat.S_IFDIR, root_result, root_fd)]
+    symlinks: list[str] = []
+    symlink_targets: dict[str, str] = {}
+    generated: list[str] = []
+    generated_details: list[dict[str, Any]] = []
+    files = 0
+    bytes_total = 0
+
+    def walk(parent_fd: int, prefix: str) -> None:
+        nonlocal files, bytes_total
+        for name in sorted(os.listdir(parent_fd)):
+            rel = f"{prefix}/{name}" if prefix else name
+            result = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            kind = stat.S_IFMT(result.st_mode)
+            if kind == stat.S_IFLNK:
+                symlinks.append(rel)
+                symlink_targets[rel] = os.readlink(name, dir_fd=parent_fd)
+                continue
+            if kind == stat.S_IFDIR:
+                child_fd, child_result = _open_verified_child(parent_fd, name, stat.S_IFDIR)
+                if name in GENERATED_DIR_NAMES and not include_generated:
+                    try:
+                        excluded_files, excluded_bytes = _scan_generated_fd(child_fd)
+                    finally:
+                        os.close(child_fd)
+                    generated.append(rel)
+                    generated_details.append({"path": rel, "files": excluded_files, "bytes": excluded_bytes})
+                    continue
+                entries.append(_AuthorizedEntry(rel, kind, child_result, child_fd))
+                walk(child_fd, rel)
+                continue
+            if kind != stat.S_IFREG:
+                raise ValueError(f"Unsupported workspace entry: {rel}")
+            child_fd, child_result = _open_verified_child(parent_fd, name, stat.S_IFREG)
+            entries.append(_AuthorizedEntry(rel, kind, child_result, child_fd))
+            files += 1
+            bytes_total += int(child_result.st_size)
+
+    try:
+        walk(root_fd, "")
+        included_paths = len(entries) - 1
+        inspection = {
+            "workspace": str(lexical_root),
+            "files": files,
+            "bytes": bytes_total,
+            "symlinks": sorted(symlinks),
+            "symlink_targets": dict(sorted(symlink_targets.items())),
+            "generated_dirs": sorted(generated),
+            "generated_details": sorted(generated_details, key=lambda item: item["path"]),
+            "generated_bytes": sum(item["bytes"] for item in generated_details),
+            "estimated_archive_bytes": bytes_total + (files * 512),
+            "safe_for_archive": not symlinks,
+            "included_path_count": included_paths,
+            "included_file_count": files,
+            "included_byte_count": bytes_total,
+            "omitted_paths": sorted(generated),
+            "omission_policy_source": "routine-generated-directory-policy" if generated else "none",
+        }
+        return inspection, entries
+    except Exception:
+        for entry in reversed(entries):
+            if entry.fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(entry.fd)
+        raise
+
+
+def _close_authorized_entries(entries: list[_AuthorizedEntry]) -> None:
+    for entry in reversed(entries):
+        if entry.fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(entry.fd)
+
+
+def _tarinfo_from_authorized(entry: _AuthorizedEntry, name: str) -> tarfile.TarInfo:
+    info = tarfile.TarInfo(name)
+    info.mode = stat.S_IMODE(entry.result.st_mode)
+    info.mtime = int(entry.result.st_mtime)
+    info.uid = int(entry.result.st_uid)
+    info.gid = int(entry.result.st_gid)
+    info.uname = ""
+    info.gname = ""
+    if entry.kind == stat.S_IFDIR:
+        info.type = tarfile.DIRTYPE
+    else:
+        info.type = tarfile.REGTYPE
+        info.size = int(entry.result.st_size)
+    return info
+
+
+def _write_authorized_tar(path: Path, slug: str, entries: list[_AuthorizedEntry]) -> None:
+    with tarfile.open(path, "w:gz", dereference=False) as archive:
+        for entry in entries:
+            name = slug if not entry.name else f"{slug}/{entry.name}"
+            info = _tarinfo_from_authorized(entry, name)
+            if entry.kind == stat.S_IFREG:
+                if entry.fd is None:
+                    raise ValueError(f"Authorized file has no stable descriptor: {name}")
+                current = os.fstat(entry.fd)
+                if not _identity_matches(current, _object_identity(entry.result)):
+                    raise ValueError(f"Authorized file identity changed before archive read: {name}")
+                with os.fdopen(os.dup(entry.fd), "rb") as stream:
+                    archive.addfile(info, stream)
+            else:
+                archive.addfile(info)
+
+
+def _relative_path(root: Path, candidate: Path) -> str:
+    try:
+        relative = candidate.resolve(strict=False).relative_to(root.resolve())
+    except ValueError as exc:
+        raise ValueError("Workspace entry escapes the workspace root.") from exc
+    text = relative.as_posix()
+    if not text or text == "." or text.startswith("../") or "/../" in f"/{text}":
+        raise ValueError("Workspace entry has an unsafe relative path.")
+    return text
+
+
+def inspect_workspace(root: Path, *, include_generated: bool = False) -> dict[str, Any]:
+    if POSIX_FD_HARDENING:
+        inspection, entries = _capture_workspace_posix(root, include_generated=include_generated)
+        _close_authorized_entries(entries)
+        return inspection
+    root = root.resolve()
+    if not root.is_dir() or root.is_symlink():
+        raise ValueError("Workspace must be a real directory.")
+    symlinks: list[str] = []
+    symlink_targets: dict[str, str] = {}
+    generated: list[str] = []
+    generated_details: list[dict[str, Any]] = []
+    generated_bytes = 0
+    files = 0
+    bytes_total = 0
+    included_paths = 0
+    for current, dirs, names in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        kept_dirs: list[str] = []
+        for name in dirs:
+            path = current_path / name
+            rel = _relative_path(root, path)
+            if path.is_symlink():
+                symlinks.append(rel)
+                symlink_targets[rel] = os.readlink(path)
+                continue
+            if name in GENERATED_DIR_NAMES and not include_generated:
+                generated.append(rel)
+                excluded_files = 0
+                excluded_bytes = 0
+                for excluded_current, _, excluded_names in os.walk(path, topdown=True, followlinks=False):
+                    for excluded_name in excluded_names:
+                        excluded_path = Path(excluded_current) / excluded_name
+                        if excluded_path.is_symlink():
+                            continue
+                        if excluded_path.is_file():
+                            excluded_files += 1
+                            excluded_bytes += excluded_path.stat().st_size
+                generated_bytes += excluded_bytes
+                generated_details.append({"path": rel, "files": excluded_files, "bytes": excluded_bytes})
+                continue
+            kept_dirs.append(name)
+            included_paths += 1
+        dirs[:] = kept_dirs
+        for name in names:
+            path = current_path / name
+            rel = _relative_path(root, path)
+            if path.is_symlink():
+                symlinks.append(rel)
+                symlink_targets[rel] = os.readlink(path)
+                continue
+            if not path.is_file():
+                raise ValueError(f"Unsupported workspace entry: {rel}")
+            files += 1
+            bytes_total += path.stat().st_size
+    return {
+        "workspace": str(root),
+        "files": files,
+        "bytes": bytes_total,
+        "symlinks": sorted(symlinks),
+        "symlink_targets": dict(sorted(symlink_targets.items())),
+        "generated_dirs": sorted(generated),
+        "generated_details": sorted(generated_details, key=lambda item: item["path"]),
+        "generated_bytes": generated_bytes,
+        "estimated_archive_bytes": bytes_total + (files * 512),
+        "safe_for_archive": not symlinks,
+        "included_path_count": included_paths + files,
+        "included_file_count": files,
+        "included_byte_count": bytes_total,
+        "omitted_paths": sorted(generated),
+        "omission_policy_source": "routine-generated-directory-policy" if generated else "none",
+    }
+
+
+def _validate_members(archive: tarfile.TarFile, slug: str) -> list[str]:
+    names: list[str] = []
+    prefix = f"{slug}/"
+    for member in archive.getmembers():
+        name = member.name.replace("\\", "/")
+        parts = name.split("/")
+        if name.startswith("/") or name.startswith("../") or "/../" in f"/{name}" or "\x00" in name or any(part in {"", ".", ".."} for part in parts):
+            raise ValueError(f"Archive contains an unsafe path: {member.name}")
+        if not name.startswith(prefix) and name != slug:
+            raise ValueError("Archive must contain exactly one project-root directory.")
+        if member.issym() or member.islnk() or member.isdev() or not (member.isdir() or member.isfile()):
+            raise ValueError(f"Archive contains an unsupported entry type: {member.name}")
+        names.append(name)
+    if not any(name == slug for name in names):
+        raise ValueError("Archive is missing its project-root directory.")
+    return names
+
+
+def validate_archive(path: Path, slug: str) -> dict[str, Any]:
+    slug = validate_slug(slug)
+    digest = hashlib.sha256()
+    size = path.stat().st_size
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    with tarfile.open(path, "r:gz") as archive:
+        members = _validate_members(archive, slug)
+        if not any(name.startswith(f"{slug}/.devfleet/") for name in members):
+            raise ValueError("Archive is missing .devfleet metadata.")
+    return {"archive_sha256": digest.hexdigest(), "archive_bytes": size, "entries": len(members), "verified": True}
+
+
+def _assert_same_filesystem(staging: Path, destination_parent: Path) -> None:
+    """Require atomic rename topology before moving an existing workspace."""
+    try:
+        staging_device = os.stat(staging).st_dev
+        destination_device = os.stat(destination_parent).st_dev
+    except OSError as exc:
+        raise ValueError("Workspace restore cannot verify same-filesystem atomic promotion.") from exc
+    if staging_device != destination_device:
+        raise ValueError("Workspace restore refused: staging and destination are on different filesystems.")
+
+
+def _restore_journal_path(destination: Path) -> Path:
+    return destination.parent / f".{destination.name}.restore-transaction.json"
+
+
+RESTORE_JOURNAL_SCHEMA_VERSION = 1
+RESTORE_JOURNAL_PHASES = frozenset({
+    "PREPARED",
+    "OLD_MOVED_TO_ROLLBACK",
+    "NEW_PROMOTED",
+    "POSTCHECK_PASSED",
+    "COMMITTED",
+})
+
+
+@dataclass(frozen=True)
+class _RestoreJournal:
+    schema_version: int
+    slug: str
+    destination: Path
+    staging_root: Path
+    rollback: Path
+    phase: str
+
+
+def _is_reparse_point(path: Path) -> bool:
+    """Return true for symlinks and Windows junction/reparse objects."""
+    if path.is_symlink():
+        return True
+    try:
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+
+
+def _canonical_journal_path(value: Any, field: str) -> tuple[Path, Path]:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Restore journal {field} must be a non-empty absolute path.")
+    raw = Path(value)
+    if not raw.is_absolute() or value.strip() in {".", ".."}:
+        raise ValueError(f"Restore journal {field} must be an absolute path.")
+    lexical = Path(os.path.abspath(os.fspath(raw)))
+    canonical = raw.resolve(strict=False)
+    if os.path.normcase(os.fspath(lexical)) != os.path.normcase(os.fspath(canonical)):
+        raise ValueError(f"Restore journal {field} uses a symlink, reparse point, or alias path.")
+    return lexical, canonical
+
+
+def _require_direct_safe_transaction_child(path: Path, parent: Path, field: str) -> None:
+    if path == parent or path.parent != parent:
+        raise ValueError(f"Restore journal {field} is not a direct transaction sibling.")
+    if path.exists() or path.is_symlink():
+        if _is_reparse_point(path):
+            raise ValueError(f"Restore journal {field} is a symlink or reparse point.")
+
+
+def _parse_restore_journal(journal: Any, requested_destination: Path) -> _RestoreJournal:
+    if not isinstance(journal, dict):
+        raise ValueError("Restore journal must be a JSON object.")
+    schema_version = journal.get("schema_version")
+    if type(schema_version) is not int or schema_version != RESTORE_JOURNAL_SCHEMA_VERSION:
+        raise ValueError("Restore journal schema version is unsupported.")
+
+    expected_slug = validate_slug(requested_destination.name)
+    slug = journal.get("slug")
+    if not isinstance(slug, str) or slug != expected_slug:
+        raise ValueError("Restore journal slug does not match the requested workspace.")
+
+    destination_lexical, destination = _canonical_journal_path(journal.get("destination"), "destination")
+    staging_lexical, staging_root = _canonical_journal_path(journal.get("staging_root"), "staging_root")
+    rollback_lexical, rollback = _canonical_journal_path(journal.get("rollback"), "rollback")
+    if destination != requested_destination or destination_lexical != requested_destination:
+        raise ValueError("Restore journal destination does not match the requested workspace.")
+
+    parent = requested_destination.parent
+    for path, field in ((staging_root, "staging_root"), (rollback, "rollback")):
+        if path in {requested_destination, parent}:
+            raise ValueError(f"Restore journal {field} aliases the destination or transaction parent.")
+        _require_direct_safe_transaction_child(path, parent, field)
+
+    stage_pattern = re.compile(rf"^\.{re.escape(expected_slug)}-restore-[A-Za-z0-9_-]{{6,64}}$")
+    rollback_pattern = re.compile(rf"^\.{re.escape(expected_slug)}\.rollback-[0-9a-f]{{32}}$")
+    if not stage_pattern.fullmatch(staging_lexical.name):
+        raise ValueError("Restore journal staging_root has an invalid transaction identity.")
+    if not rollback_pattern.fullmatch(rollback_lexical.name):
+        raise ValueError("Restore journal rollback has an invalid transaction identity.")
+    if staging_root == rollback:
+        raise ValueError("Restore journal staging and rollback identities overlap.")
+
+    phase = journal.get("phase")
+    if not isinstance(phase, str) or phase not in RESTORE_JOURNAL_PHASES:
+        raise ValueError("Restore journal phase is unsupported.")
     return _RestoreJournal(schema_version, slug, destination, staging_root, rollback, phase)
 
 
@@ -554,253 +924,4 @@ def create_workspace_archive(
     temp_path = Path(temp_name)
     try:
         with tarfile.open(temp_path, "w:gz", dereference=False) as archive:
-            archive.add(
-                root,
-                arcname=slug,
-                recursive=True,
-                filter=lambda info: _archive_filter(info, slug, include_generated=include_generated),
-            )
-        verification = validate_archive(temp_path, slug)
-        os.replace(temp_path, destination)
-        return {
-            **inspection,
-            **verification,
-            "archive_path": str(destination),
-            "created_at": now_iso(),
-            "consistency_level": consistency_level,
-        }
-    finally:
-        temp_path.unlink(missing_ok=True)
-
-
-def _archive_filter(
-    info: tarfile.TarInfo,
-    slug: str,
-    *,
-    include_generated: bool = False,
-) -> tarfile.TarInfo | None:
-    relative_parts = Path(info.name).parts[1:]
-    if not include_generated and any(part in GENERATED_DIR_NAMES for part in relative_parts):
-        return None
-    # The source walk rejects symlinks and unsupported filesystem entries; this
-    # second check protects against a race between inspection and tar.add().
-    if info.issym() or info.islnk() or info.isdev() or not (info.isdir() or info.isfile()):
-        raise ValueError(f"Workspace contains an unsupported archive entry: {info.name}")
-    return info
-
-
-def write_backup_manifest(directory: Path, *, slug: str, project_id: str, runtime: dict[str, Any], archive: dict[str, Any], consistency_level: str = "live-best-effort") -> dict[str, Any]:
-    if consistency_level not in {"live-best-effort", "quiesced", "application-consistent"}:
-        raise ValueError("Unknown backup consistency level.")
-    directory.mkdir(parents=True, exist_ok=True)
-    manifest = {
-        "schema_version": 1,
-        "backup_id": directory.name,
-        "created_at": archive.get("created_at") or now_iso(),
-        "project_id": project_id,
-        "slug": validate_slug(slug),
-        "runtime": runtime,
-        "workspace": {key: archive.get(key) for key in ("archive_path", "archive_sha256", "archive_bytes", "files", "bytes", "entries", "generated_dirs", "generated_details", "generated_bytes", "estimated_archive_bytes", "symlinks", "symlink_targets", "included_path_count", "included_file_count", "included_byte_count", "omitted_paths", "omission_policy_source")},
-        "verification": {"status": "verified", "integrity_verified": True, "consistency_level": consistency_level, "consistency_level_source": "transaction-parameter", "verified_at": now_iso()},
-    }
-    atomic_json(directory / "manifest.json", manifest)
-    return manifest
-
-```
-
-
-## FILE: source/app/requirements-hashed.txt
-
-SHA256: fe238c807b668a2f7e0f2b929e24859260e6a7f76bd6762ac7b6b10ad7daac33 | Bytes: 54467 | Git mode: 100644
-
-```
-#
-# This file is autogenerated by pip-compile with Python 3.12
-# by the following command:
-#
-#    pip-compile --generate-hashes --output-file=source/app/requirements-hashed.h10.txt source/app/requirements.txt
-#
-annotated-doc==0.0.5 \
-    --hash=sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101 \
-    --hash=sha256:c7e58ce09192557605d8bbd92836d7e1d520ac9580096042c0bfd197efacf1bb
-    # via fastapi
-annotated-types==0.8.0 \
-    --hash=sha256:13b2beaad985e05e2d6407ee4c4f35590b11f8d693a258a561055cac8f64cab7 \
-    --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
-    # via pydantic
-anyio==4.14.2 \
-    --hash=sha256:9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494 \
-    --hash=sha256:cfa139f3ed1a23ee8f88a145ddb5ac7605b8bbfd8592baacd7ce3d8bb4313c7f
-    # via
-    #   httpx
-    #   starlette
-    #   watchfiles
-certifi==2026.7.22 \
-    --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775 \
-    --hash=sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55
-    # via
-    #   httpcore
-    #   httpx
-click==8.4.2 \
-    --hash=sha256:9a6cea6e60b17ebe0a44c5cc636d94f09bd66142c1cd7d8b4cd731c4917a15f6 \
-    --hash=sha256:e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76
-    # via uvicorn
-fastapi==0.141.1 \
-    --hash=sha256:bfb91aa2d334c61cb35ba9a116fc123b3d3df31640b801cf57a7a78ec3f603b3 \
-    --hash=sha256:e8822fc40db1e1858054d7a949a888695bc9bdce70139178e33bd2871a453ca1
-    # via -r source/app/requirements.txt
-h11==0.16.0 \
-    --hash=sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1 \
-    --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
-    # via
-    #   httpcore
-    #   uvicorn
-httpcore==1.0.9 \
-    --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55 \
-    --hash=sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8
-    # via httpx
-httptools==0.8.0 \
-    --hash=sha256:0770728beb05094c809b98e814edff5fef69d26ad7d21185f2f6d5884a0ba683 \
-    --hash=sha256:0ea897f0c729581ebf72131a438a7932d9b14efef72d75ada966700cac3caaeb \
-    --hash=sha256:159e9ab5f701ccd42e555a12f1ad8ff69702910fc1c996cf2bb66e5fcb7a231b \
-    --hash=sha256:19d1ee275bb59ba2643ba9a3a1e51cc0c788caf2b8df506368e03f56fdd08527 \
-    --hash=sha256:20b4aac66ff65f7db06a375808b78f42a94970aa22e826b3cb2b43eb09174124 \
-    --hash=sha256:2a021c3a8e65cc125390d72f59b968afca3bdcaff25bd67965e0a055a14946ca \
-    --hash=sha256:2c032fa028f46871ec7e1fc59fc15e8023eab3e6bbe6ece786a1611719a5d081 \
-    --hash=sha256:2d689918c15a013c65ef52d9fd495d766893ab831a2c8d89f2ac5940a5df847c \
-    --hash=sha256:384c17174464c8e873398b7af24f0b1f44d992c820328413951a625323155d77 \
-    --hash=sha256:425f83884fd6343828d8c565f046cb72b6d19063f6924093e11bcd8e1548cd09 \
-    --hash=sha256:48774d39cbb70e2b1f71f88852a3087ae1d3a1eb80482bb48c13067ab080c14f \
-    --hash=sha256:52dd695b865fe96d9d2b16b64a895f3f57bf3cb064e8383cd3b5713a069e8085 \
-    --hash=sha256:57278e6fa0424c42a8a3e454828ab4f0aff27b40cddf9679579b98c6dce6a376 \
-    --hash=sha256:5931891fb7b441b8a3853cf1b85c82c903defce084dd5f6771ca46e31bf862c5 \
-    --hash=sha256:5d7fa4ba7292c1139c0526f0b5aad507c6263c948206ea1b1cbca015c8af1b62 \
-    --hash=sha256:5eb911c515b96ee44bbd861e42cbefc488681d450545b1d02127f6136e3a86f5 \
-    --hash=sha256:614ceea8ea606848bece2338ac03b3ce5324bcb4be8dc7d377ed708012fa4db8 \
-    --hash=sha256:6a43c9dd399758ccc0531acb0a3c4a6c299ee893ee9400e9c893b7bdcfae0681 \
-    --hash=sha256:6b2a32f18d97e16e90827d7a819ffa8dbd8cc245fc4e1fa9d1095b54ef4bd999 \
-    --hash=sha256:7685df791fad561384bfb139e77fde27a1ffd93134e016f95a0db424ffbf77b1 \
-    --hash=sha256:7b71e7d7031928c650e1006e6c03e911bf967f7c69c011d37d541c3e7bf55005 \
-    --hash=sha256:880490234c10f70a9830743097e8958d6e4b9f5a0ffc24515023afeef984054d \
-    --hash=sha256:88bdd940f2b5d487b4d032c6afa5489a7dc4694410d43de3c38c4fb3af0dc45d \
-    --hash=sha256:88eead8ec8680a9f146c655bc88445a325bd7921cfd8194c7337e9467282427d \
-    --hash=sha256:9518c406d7b310f05adb1a37f80acabac40504a575d7c0da6d3e365c695ac20d \
-    --hash=sha256:9878eb2785ba5eb70631ad269b37976f73d647955e26c91d490eb8a4edfda4ba \
-    --hash=sha256:9fc1644f415372cec4f8a5be3a64183737398f10dbb1263602a036427fe75247 \
-    --hash=sha256:a1afd7c9fbff0d9f5d489c4ce2768bd09c84a46ddefc7161e6aa82ae35c85745 \
-    --hash=sha256:a1b4c8e7a489a0d750d91894e9a8cdc295838f1924c0ca903ae993456fddec07 \
-    --hash=sha256:a3b7387147361c3fd47a0bde763c5c91b5b4cd4dc9989b8ece84ff436c99843b \
-    --hash=sha256:a6f21e2a3b0067bbe7f67e34cfd16276af556e5e52f4c7503be0cb5f90e905e4 \
-    --hash=sha256:b15fc622b0f869d19207c4089a501d9bcc63ca5e071ffdd2f03f922df882dcb2 \
-    --hash=sha256:b205e5f5523fa039679da0dfe5a10132b2a4abeae6a86fdd1ddc035f7f836557 \
-    --hash=sha256:bbb8caadb2b742d293169d2b458b5c001ef70e3158704aa3d3ef9597624c5d1d \
-    --hash=sha256:bf3b6f807c8541503cecfbb8a8dffb385640d0d96102f3d112aa8740f9b7c826 \
-    --hash=sha256:c08ffe3e79756e0963cbc8fe410139f38a5884874b6f2e17761bef6563fdcd9b \
-    --hash=sha256:c0d726cc107fceb7d45f978483b4b70dd8caa836f5914d3434bb18628eb73813 \
-    --hash=sha256:c4a9f1707e4823d54dfec6c33fa3697d302aed536ed352a7ebb5a061ddb869d0 \
-    --hash=sha256:cd96f29b4bab1d42fa6e3d008711c75e0f79e94e06827330160e3a304227f150 \
-    --hash=sha256:d76ad7b951387e3632c8716a9bb03ac5b45c5f16119aa409db0459520887944e \
-    --hash=sha256:da684f2e1aa2ee9bdcb083f3f3a68c5956750b375bc5df864d3a5f0c42a40b77 \
-    --hash=sha256:de1ed58a974e75d56560acc7e7fed01a454994429456f65209789992e41f2568 \
-    --hash=sha256:de242a49b5d18e0a8776e654e9f6bf6d89f3875a5c35b425a0e7ce940feb3fd6 \
-    --hash=sha256:df31ef5494f406ab6cf827b7e64a22841c6e2d654100e6a116ea15b46d02d5e8 \
-    --hash=sha256:e93c227b595c6926c1acee96891dd9da4be338cfbe82e5cd3bb9d8dd7dc4ac0b \
-    --hash=sha256:eb3028cca2fc0a6d720e52ef61d8ebb62fcbfeb1de56874546d858d3f25a26b7 \
-    --hash=sha256:ed377e64805bdba4943c82717333f8f8603a13b09aff9cead2717c6c817fb168 \
-    --hash=sha256:ef7c3c97f4311c7be57e2986629df89d49cb434dbff78eafcd48c2bff986b15a \
-    --hash=sha256:f256d6ce930c52ca1cb2a960b7da03548c454e7d28b06059ad41bfe789036ce0 \
-    --hash=sha256:fe2a4c95aeba2209434e7b31172da572846cae8ca0bf1e7013e61b99fbbf5e72
-    # via uvicorn
-httpx==0.28.1 \
-    --hash=sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc \
-    --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
-    # via -r source/app/requirements.txt
-idna==3.19 \
-    --hash=sha256:5e0811a4383b21dc5838069f801c4fb62113b7447663d2530d2bd6e77b49bf15 \
-    --hash=sha256:815e7be7a7806d54abb586dc943addc79e8b2ee16915059658cbeff4b1b43bf4
-    # via
-    #   anyio
-    #   httpx
-jinja2==3.1.6 \
-    --hash=sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d \
-    --hash=sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
-    # via -r source/app/requirements.txt
-markupsafe==3.0.3 \
-    --hash=sha256:0303439a41979d9e74d18ff5e2dd8c43ed6c6001fd40e5bf2e43f7bd9bbc523f \
-    --hash=sha256:068f375c472b3e7acbe2d5318dea141359e6900156b5b2ba06a30b169086b91a \
-    --hash=sha256:0bf2a864d67e76e5c9a34dc26ec616a66b9888e25e7b9460e1c76d3293bd9dbf \
-    --hash=sha256:0db14f5dafddbb6d9208827849fad01f1a2609380add406671a26386cdf15a19 \
-    --hash=sha256:0eb9ff8191e8498cca014656ae6b8d61f39da5f95b488805da4bb029cccbfbaf \
-    --hash=sha256:0f4b68347f8c5eab4a13419215bdfd7f8c9b19f2b25520968adfad23eb0ce60c \
-    --hash=sha256:1085e7fbddd3be5f89cc898938f42c0b3c711fdcb37d75221de2666af647c175 \
-    --hash=sha256:116bb52f642a37c115f517494ea5feb03889e04df47eeff5b130b1808ce7c219 \
-    --hash=sha256:12c63dfb4a98206f045aa9563db46507995f7ef6d83b2f68eda65c307c6829eb \
-    --hash=sha256:133a43e73a802c5562be9bbcd03d090aa5a1fe899db609c29e8c8d815c5f6de6 \
-    --hash=sha256:1353ef0c1b138e1907ae78e2f6c63ff67501122006b0f9abad68fda5f4ffc6ab \
-    --hash=sha256:15d939a21d546304880945ca1ecb8a039db6b4dc49b2c5a400387cdae6a62e26 \
-    --hash=sha256:177b5253b2834fe3678cb4a5f0059808258584c559193998be2601324fdeafb1 \
-    --hash=sha256:1872df69a4de6aead3491198eaf13810b565bdbeec3ae2dc8780f14458ec73ce \
-    --hash=sha256:1b4b79e8ebf6b55351f0d91fe80f893b4743f104bff22e90697db1590e47a218 \
-    --hash=sha256:1b52b4fb9df4eb9ae465f8d0c228a00624de2334f216f178a995ccdcf82c4634 \
-    --hash=sha256:1ba88449deb3de88bd40044603fafffb7bc2b055d626a330323a9ed736661695 \
-    --hash=sha256:1cc7ea17a6824959616c525620e387f6dd30fec8cb44f649e31712db02123dad \
-    --hash=sha256:218551f6df4868a8d527e3062d0fb968682fe92054e89978594c28e642c43a73 \
-    --hash=sha256:26a5784ded40c9e318cfc2bdb30fe164bdb8665ded9cd64d500a34fb42067b1c \
-    --hash=sha256:2713baf880df847f2bece4230d4d094280f4e67b1e813eec43b4c0e144a34ffe \
-    --hash=sha256:2a15a08b17dd94c53a1da0438822d70ebcd13f8c3a95abe3a9ef9f11a94830aa \
-    --hash=sha256:2f981d352f04553a7171b8e44369f2af4055f888dfb147d55e42d29e29e74559 \
-    --hash=sha256:32001d6a8fc98c8cb5c947787c5d08b0a50663d139f1305bac5885d98d9b40fa \
-    --hash=sha256:3524b778fe5cfb3452a09d31e7b5adefeea8c5be1d43c4f810ba09f2ceb29d37 \
-    --hash=sha256:3537e01efc9d4dccdf77221fb1cb3b8e1a38d5428920e0657ce299b20324d758 \
-    --hash=sha256:35add3b638a5d900e807944a078b51922212fb3dedb01633a8defc4b01a3c85f \
-    --hash=sha256:38664109c14ffc9e7437e86b4dceb442b0096dfe3541d7864d9cbe1da4cf36c8 \
-    --hash=sha256:3a7e8ae81ae39e62a41ec302f972ba6ae23a5c5396c8e60113e9066ef893da0d \
-    --hash=sha256:3b562dd9e9ea93f13d53989d23a7e775fdfd1066c33494ff43f5418bc8c58a5c \
-    --hash=sha256:457a69a9577064c05a97c41f4e65148652db078a3a509039e64d3467b9e7ef97 \
-    --hash=sha256:4bd4cd07944443f5a265608cc6aab442e4f74dff8088b0dfc8238647b8f6ae9a \
-    --hash=sha256:4e885a3d1efa2eadc93c894a21770e4bc67899e3543680313b09f139e149ab19 \
-    --hash=sha256:4faffd047e07c38848ce017e8725090413cd80cbc23d86e55c587bf979e579c9 \
-    --hash=sha256:509fa21c6deb7a7a273d629cf5ec029bc209d1a51178615ddf718f5918992ab9 \
-    --hash=sha256:5678211cb9333a6468fb8d8be0305520aa073f50d17f089b5b4b477ea6e67fdc \
-    --hash=sha256:591ae9f2a647529ca990bc681daebdd52c8791ff06c2bfa05b65163e28102ef2 \
-    --hash=sha256:5a7d5dc5140555cf21a6fefbdbf8723f06fcd2f63ef108f2854de715e4422cb4 \
-    --hash=sha256:69c0b73548bc525c8cb9a251cddf1931d1db4d2258e9599c28c07ef3580ef354 \
-    --hash=sha256:6b5420a1d9450023228968e7e6a9ce57f65d148ab56d2313fcd589eee96a7a50 \
-    --hash=sha256:722695808f4b6457b320fdc131280796bdceb04ab50fe1795cd540799ebe1698 \
-    --hash=sha256:729586769a26dbceff69f7a7dbbf59ab6572b99d94576a5592625d5b411576b9 \
-    --hash=sha256:77f0643abe7495da77fb436f50f8dab76dbc6e5fd25d39589a0f1fe6548bfa2b \
-    --hash=sha256:795e7751525cae078558e679d646ae45574b47ed6e7771863fcc079a6171a0fc \
-    --hash=sha256:7be7b61bb172e1ed687f1754f8e7484f1c8019780f6f6b0786e76bb01c2ae115 \
-    --hash=sha256:7c3fb7d25180895632e5d3148dbdc29ea38ccb7fd210aa27acbd1201a1902c6e \
-    --hash=sha256:7e68f88e5b8799aa49c85cd116c932a1ac15caaa3f5db09087854d218359e485 \
-    --hash=sha256:83891d0e9fb81a825d9a6d61e3f07550ca70a076484292a70fde82c4b807286f \
-    --hash=sha256:8485f406a96febb5140bfeca44a73e3ce5116b2501ac54fe953e488fb1d03b12 \
-    --hash=sha256:8709b08f4a89aa7586de0aadc8da56180242ee0ada3999749b183aa23df95025 \
-    --hash=sha256:8f71bc33915be5186016f675cd83a1e08523649b0e33efdb898db577ef5bb009 \
-    --hash=sha256:915c04ba3851909ce68ccc2b8e2cd691618c4dc4c4232fb7982bca3f41fd8c3d \
-    --hash=sha256:949b8d66bc381ee8b007cd945914c721d9aba8e27f71959d750a46f7c282b20b \
-    --hash=sha256:94c6f0bb423f739146aec64595853541634bde58b2135f27f61c1ffd1cd4d16a \
-    --hash=sha256:9a1abfdc021a164803f4d485104931fb8f8c1efd55bc6b748d2f5774e78b62c5 \
-    --hash=sha256:9b79b7a16f7fedff2495d684f2b59b0457c3b493778c9eed31111be64d58279f \
-    --hash=sha256:a320721ab5a1aba0a233739394eb907f8c8da5c98c9181d1161e77a0c8e36f2d \
-    --hash=sha256:a4afe79fb3de0b7097d81da19090f4df4f8d3a2b3adaa8764138aac2e44f3af1 \
-    --hash=sha256:ad2cf8aa28b8c020ab2fc8287b0f823d0a7d8630784c31e9ee5edea20f406287 \
-    --hash=sha256:b8512a91625c9b3da6f127803b166b629725e68af71f8184ae7e7d54686a56d6 \
-    --hash=sha256:bc51efed119bc9cfdf792cdeaa4d67e8f6fcccab66ed4bfdd6bde3e59bfcbb2f \
-    --hash=sha256:bdc919ead48f234740ad807933cdf545180bfbe9342c2bb451556db2ed958581 \
-    --hash=sha256:bdd37121970bfd8be76c5fb069c7751683bdf373db1ed6c010162b2a130248ed \
-    --hash=sha256:be8813b57049a7dc738189df53d69395eba14fb99345e0a5994914a3864c8a4b \
-    --hash=sha256:c0c0b3ade1c0b13b936d7970b1d37a57acde9199dc2aecc4c336773e1d86049c \
-    --hash=sha256:c47a551199eb8eb2121d4f0f15ae0f923d31350ab9280078d1e5f12b249e0026 \
-    --hash=sha256:c4ffb7ebf07cfe8931028e3e4c85f0357459a3f9f9490886198848f4fa002ec8 \
-    --hash=sha256:ccfcd093f13f0f0b7fdd0f198b90053bf7b2f02a3927a30e63f3ccc9df56b676 \
-    --hash=sha256:d2ee202e79d8ed691ceebae8e0486bd9a2cd4794cec4824e1c99b6f5009502f6 \
-    --hash=sha256:d53197da72cc091b024dd97249dfc7794d6a56530370992a5e1a08983ad9230e \
-    --hash=sha256:d6dd0be5b5b189d31db7cda48b91d7e0a9795f31430b7f271219ab30f1d3ac9d \
-    --hash=sha256:d88b440e37a16e651bda4c7c2b930eb586fd15ca7406cb39e211fcff3bf3017d \
-    --hash=sha256:de8a88e63464af587c950061a5e6a67d3632e36df62b986892331d4620a35c01 \
-    --hash=sha256:df2449253ef108a379b8b5d6b43f4b1a8e81a061d6537becd5582fba5f9196d7 \
-    --hash=sha256:e1c1493fb6e50ab01d20a22826e57520f1284df32f2d8601fdd90b6304601419 \
-    --hash=sha256:e1cf1972137e83c5d4c136c43ced9ac51d0e124706ee1c8aa8532c1287fa8795 \
-    --hash=sha256:e2103a929dfa2fcaf9bb4e7c091983a49c9ac3b19c9061b6d5427dd7d14d81a1 \
-    --hash=sha256:e56b7d45a839a697b5eb268c82a71bd8c7f6c94d6fd50c3d577fa39a9f14
+           

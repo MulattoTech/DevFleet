@@ -1,10 +1,183 @@
 # DevFleet source part 025
 
 Full-source UTF-8 byte interval [1116000, 1162500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: fd2a0183bf1db77219f72a9b7531efa7844976dd0bac52526b6b14954a8ececb
+Payload SHA-256: c1552ff3ae3d2661f0be1011f2feae2d0fe1202ed36d566e74c46363d96df164
 
 <!-- BEGIN SOURCE SLICE -->
-fullrelease)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
+-String);$exit=[int]$LASTEXITCODE;try{$json=$raw|ConvertFrom-Json -ErrorAction Stop;if($json.PSObject.Properties['Enabled']){[pscustomobject]@{exitCode=$exit;enabled=[bool]$json.Enabled}}else{[pscustomobject]@{exitCode=$exit;enabled=$null}}}catch{[pscustomobject]@{exitCode=$exit;enabled=$null}}} -OwnerDeadlineUtc $OwnerDeadlineUtc -MaximumSeconds 15
+        } catch { return [ordered]@{authenticationAttempted=$false;authenticationSucceeded=$false;provider=[string]$credential.provider;userActionRequired=$false;failureClass='TAILNET_LOCK_SIGNING_REQUIRED';reason='Tailnet Lock state was not established within the owner deadline.'} }
+        if([int]$lock.exitCode -ne 0){return [ordered]@{authenticationAttempted=$false;authenticationSucceeded=$false;provider=[string]$credential.provider;userActionRequired=$false;failureClass='TAILNET_LOCK_SIGNING_REQUIRED';reason='Tailnet Lock status command failed; automatic enrollment is blocked.'}}
+        if($lock.enabled -eq $true){return [ordered]@{authenticationAttempted=$false;authenticationSucceeded=$false;provider=[string]$credential.provider;userActionRequired=$false;failureClass='TAILNET_LOCK_SIGNING_REQUIRED';reason='Tailnet Lock is enabled; a trusted signing path is required.'}}
+        if($lock.enabled -ne $false){return [ordered]@{authenticationAttempted=$false;authenticationSucceeded=$false;provider=[string]$credential.provider;userActionRequired=$false;failureClass='TAILNET_LOCK_SIGNING_REQUIRED';reason='Tailnet Lock state was not established; automatic enrollment is blocked.'}}
+        $auth=$Config.Authentication;$tag=if($auth.PSObject.Properties['Tag']){[string]$auth.Tag}else{'tag:devfleet-e2e'};$hostname=if($auth.PSObject.Properties['Hostname']){[string]$auth.Hostname}else{'devfleet-e2e-auth'};$ephemeral=if($auth.PSObject.Properties['Ephemeral']){[bool]$auth.Ephemeral}else{$true};$preauth=if($auth.PSObject.Properties['Preauthorized']){[bool]$auth.Preauthorized}else{$true};$unattended=if($auth.PSObject.Properties['Unattended']){[bool]$auth.Unattended}else{$true};$timeout=if($Config.PSObject.Properties['PollTimeoutSeconds']){[int]$Config.PollTimeoutSeconds}else{120}
+        $authKey=[string]$credential.provider -ceq 'AuthKeyEnvironment';$source=Get-TailscaleProviderSource -AuthKey:$authKey
+        $authMaximum=[math]::Max(1,[math]::Min(600,$timeout+5))
+        $result=Invoke-TailscaleRemoteBounded -Session $Session -ScriptBlock {param($secret,$provider,$source,$tag,$hostname,$ephemeral,$preauth,$unattended,$timeout)$fn=[scriptblock]::Create($source);if($provider-ceq'AuthKeyEnvironment'){&$fn -AuthKey $secret -TimeoutSeconds $timeout}else{&$fn -ClientSecret $secret -Tag $tag -Hostname $hostname -Ephemeral:$ephemeral -Preauthorized:$preauth -Unattended:$unattended -TimeoutSeconds $timeout}} -ArgumentList ([string]$credential.secret),[string]$credential.provider,$source,$tag,$hostname,$ephemeral,$preauth,$unattended,$timeout -OwnerDeadlineUtc $OwnerDeadlineUtc -MaximumSeconds $authMaximum
+        $ok=[int]$result.exitCode -eq 0
+        [ordered]@{authenticationAttempted=$true;authenticationSucceeded=$ok;provider=[string]$credential.provider;userActionRequired=$false;credentialInvalid=$false;exitCode=[int]$result.exitCode;output=ConvertTo-TailscaleSafeText ([string]$result.output);failureClass=if($ok){''}else{'TAILSCALE_AUTH_FAILED'}}
+    } catch { [ordered]@{authenticationAttempted=$true;authenticationSucceeded=$false;provider=[string]$credential.provider;userActionRequired=$false;credentialInvalid=[bool]$credential.invalid;failureClass='TAILSCALE_AUTH_FAILED';error='Tailscale authentication provider invocation failed'} }
+}
+
+function Assert-TailscaleAuthenticationResult {
+    param([Parameter(Mandatory)][psobject]$Result)
+    if($Result.PSObject.Properties['failureClass'] -and [string]$Result.failureClass){$reason=if($Result.PSObject.Properties['reason']){[string]$Result.reason}else{''};throw (([string]$Result.failureClass)+$(if($reason){": $reason"}else{''}))}
+    if(-not [bool]$Result.authenticationAttempted){throw 'TAILSCALE-AUTH cannot pass when authenticationAttempted=false.'}
+    if(-not [bool]$Result.authenticationSucceeded){throw 'TAILSCALE-AUTH authentication provider did not establish authentication.'}
+    $true
+}
+
+Export-ModuleMember -Function Get-TailscaleGuestStatus,Test-TailscaleConnected,Get-TailscaleAuthenticationSecret,Invoke-TailscaleAuthKeyFileCommand,Invoke-TailscaleOAuthClientSecretFileCommand,Get-TailscaleReadinessFromStatus,Get-TailscaleReadiness,Get-TailscaleE2EHostname,New-TailscaleE2EEnrollmentProfile,Stage-TailscaleOAuthCredential,Remove-StagedTailscaleOAuthCredential,Write-TailscaleOAuthActionRequired,Invoke-TailscaleAuthentication,Assert-TailscaleAuthenticationResult
+
+```
+
+
+## FILE: automation/release-e2e/modules/executors/Invoke-AuditPhase.ps1
+
+SHA256: b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95 | Bytes: 234 | Git mode: 100644
+
+```
+param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
+Import-Module (Join-Path $PSScriptRoot 'Invoke-RealProductPhase.psm1') -Force
+Invoke-RealProductPhase -ContextJson $ContextJson | ConvertTo-Json -Depth 32 -Compress
+
+```
+
+
+## FILE: automation/release-e2e/modules/executors/Invoke-DependencyMatrix.ps1
+
+SHA256: b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95 | Bytes: 234 | Git mode: 100644
+
+```
+param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
+Import-Module (Join-Path $PSScriptRoot 'Invoke-RealProductPhase.psm1') -Force
+Invoke-RealProductPhase -ContextJson $ContextJson | ConvertTo-Json -Depth 32 -Compress
+
+```
+
+
+## FILE: automation/release-e2e/modules/executors/Invoke-HostAgentPhase.ps1
+
+SHA256: b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95 | Bytes: 234 | Git mode: 100644
+
+```
+param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
+Import-Module (Join-Path $PSScriptRoot 'Invoke-RealProductPhase.psm1') -Force
+Invoke-RealProductPhase -ContextJson $ContextJson | ConvertTo-Json -Depth 32 -Compress
+
+```
+
+
+## FILE: automation/release-e2e/modules/executors/Invoke-HttpHostilePhase.ps1
+
+SHA256: e2d8ba28381c7fc3c3872312d6b7f964ca8e7b48d5dc03ada9d6c6b9a6f17ee1 | Bytes: 3111 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
+$ErrorActionPreference = 'Stop'
+$context = $ContextJson | ConvertFrom-Json -ErrorAction Stop
+$tarPath = [string]$context.candidate.tar.path
+$tarItem = Get-Item -LiteralPath $tarPath -ErrorAction Stop
+$tarHash = (Get-FileHash -LiteralPath $tarItem.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($tarHash -ne [string]$context.candidate.tar.sha256 -or [int64]$tarItem.Length -ne [int64]$context.candidate.tar.bytes) { throw 'HTTP-HOSTILE exact candidate TAR identity changed.' }
+
+$workspace = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+$python = if (Test-Path -LiteralPath (Join-Path $workspace '.venv-test\Scripts\python.exe')) { Join-Path $workspace '.venv-test\Scripts\python.exe' } else { (Get-Command python.exe -ErrorAction Stop).Source }
+$extractRoot = Join-Path ([string]$context.runDir) 'HTTP-HOSTILE-extracted'
+$outputPath = Join-Path ([string]$context.runDir) 'HTTP-HOSTILE-pytest.txt'
+try {
+    New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
+    & tar.exe -xzf $tarItem.FullName -C $extractRoot
+    if ($LASTEXITCODE -ne 0) { throw 'HTTP-HOSTILE exact candidate TAR extraction failed.' }
+    $testPath = Join-Path $extractRoot 'tests\test_request_admission.py'
+    if (-not (Test-Path -LiteralPath $testPath -PathType Leaf)) { throw 'HTTP-HOSTILE request-admission suite is absent from the exact candidate TAR.' }
+    $priorPythonPath = $env:PYTHONPATH
+    $priorPluginState = $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD
+    try {
+        $env:PYTHONPATH = "$extractRoot;$extractRoot\app"
+        $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = '1'
+        $output = @(& $python -m pytest -q $testPath -rs 2>&1)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        if ($null -eq $priorPythonPath) { Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue } else { $env:PYTHONPATH = $priorPythonPath }
+        if ($null -eq $priorPluginState) { Remove-Item Env:PYTEST_DISABLE_PLUGIN_AUTOLOAD -ErrorAction SilentlyContinue } else { $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = $priorPluginState }
+    }
+    $text = ($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+    $text | Set-Content -LiteralPath $outputPath -Encoding utf8
+    if ($exitCode -ne 0) { throw "HTTP-HOSTILE exact candidate regression failed; evidence=$outputPath" }
+    $match = [regex]::Match($text, '(?m)(\d+) passed')
+    if (-not $match.Success -or [int]$match.Groups[1].Value -lt 10) { throw 'HTTP-HOSTILE did not report the complete request-admission regression count.' }
+    [ordered]@{status='PASS';phase='HTTP-HOSTILE';contract='exact-candidate-asgi-request-admission-regression';tar=[ordered]@{path=$tarItem.FullName;bytes=[int64]$tarItem.Length;sha256=$tarHash};tests=[ordered]@{passed=[int]$match.Groups[1].Value;failed=0;outputPath=$outputPath};networkBeforeBody=$true;invalidTokenZeroConsumption=$true;declaredAndChunkedLimits=$true} | ConvertTo-Json -Depth 8 -Compress
+} finally {
+    if (Test-Path -LiteralPath $extractRoot) { Remove-Item -LiteralPath $extractRoot -Recurse -Force }
+}
+
+```
+
+
+## FILE: automation/release-e2e/modules/executors/Invoke-LinuxPhase.ps1
+
+SHA256: 37bf83af6eb4acf2d956473bed6e5629bd423d6309ad7d0067b5ab98d0a18858 | Bytes: 237 | Git mode: 100644
+
+```
+param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
+Import-Module (Join-Path $PSScriptRoot 'Invoke-RealProductPhase.psm1') -Force
+Invoke-LinuxBootstrapPhase -ContextJson $ContextJson | ConvertTo-Json -Depth 32 -Compress
+
+```
+
+
+## FILE: automation/release-e2e/modules/executors/Invoke-MaintenancePhase.ps1
+
+SHA256: b01b6c2141955adb2c9544ecf9ab4d7d4ce3322ec01e62bfffd20009e216da95 | Bytes: 234 | Git mode: 100644
+
+```
+param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
+Import-Module (Join-Path $PSScriptRoot 'Invoke-RealProductPhase.psm1') -Force
+Invoke-RealProductPhase -ContextJson $ContextJson | ConvertTo-Json -Depth 32 -Compress
+
+```
+
+
+## FILE: automation/release-e2e/modules/executors/Invoke-PrimaryPhase.ps1
+
+SHA256: 69f0b4b0b9e7204235b768adc34df5cc265cd77ac632515a79c838b8f8acb541 | Bytes: 234 | Git mode: 100644
+
+```
+param([string]$ContextJson = $env:DEVFLEET_FULLRELEASE_CONTEXT_JSON)
+Import-Module (Join-Path $PSScriptRoot 'Invoke-RealProductPhase.psm1') -Force
+Invoke-PrimaryRolePhase -ContextJson $ContextJson | ConvertTo-Json -Depth 32 -Compress
+
+```
+
+
+## FILE: automation/release-e2e/modules/executors/Invoke-ProductLifecycleScenario.py
+
+SHA256: 301a7f1227b24a6315846bd41e495ae038b1d4aa21f5e4707641687ea5e00ad2 | Bytes: 24956 | Git mode: 100644
+
+```
+#!/usr/bin/env python3
+"""Run one bounded release scenario against an extracted exact-candidate tree."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import ipaddress
+import json
+import os
+import pwd
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+from urllib.parse import urlsplit
+
+
+RELEASE_RUN_ID_PATTERN = re.compile(r"(?:e2e|fullrelease)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
 VAULT_SCENARIOS = {"permanent-delete", "delete-restore", "vault"}
 VAULT_INSTALLED_BIN = Path("/usr/local/bin")
 VAULT_STATUS_CONFIG = Path("/var/lib/devfleet/backup-status/config.json")
@@ -401,7 +574,7 @@ if __name__ == "__main__":
 
 ## FILE: automation/release-e2e/modules/executors/Invoke-RealProductPhase.psm1
 
-SHA256: cbfcbfcdd2322fb4dc92f49d61a49c58a98608648a213360d130b5cb4451e3ef | Bytes: 347094 | Git mode: 100644
+SHA256: ca0085ca9ecaee5342b5c1af71c4c853287aaafd6adc39a9e2935288645c3a34 | Bytes: 347707 | Git mode: 100644
 
 ```
 Set-StrictMode -Version Latest
@@ -535,104 +708,4 @@ function Resolve-DevFleetLifecycleStageMarkerObservation {
     $markersFound=$false;$markers=@(Get-LifecycleProperty $Observation 'stageMarkers' ([ref]$markersFound));if(-not $markersFound){$markers=@()}
     $errorsFound=$false;$existingErrors=@(Get-LifecycleProperty $Observation 'stageMarkerErrors' ([ref]$errorsFound));if(-not $errorsFound){$existingErrors=@()}
     $accepted=[Collections.Generic.List[object]]::new();$rejected=[Collections.Generic.List[object]]::new()
-    foreach($existing in $existingErrors){$nameFound=$false;$name=[string](Get-LifecycleProperty $existing 'name' ([ref]$nameFound));$errorFound=$false;$detail=[string](Get-LifecycleProperty $existing 'error' ([ref]$errorFound));$rejected.Add([pscustomobject][ordered]@{name=if($nameFound){$name}else{''};error=if($errorFound -and $detail){$detail}else{'stage marker was rejected by the collector'}})}
-    $start=[datetime]::MinValue;if(-not [datetime]::TryParse($InvocationStartUtc,[ref]$start)){throw 'TERMINAL_FAILURE: lifecycle invocation start is malformed.'};$start=$start.ToUniversalTime()
-    foreach($marker in $markers){
-        $nameFound=$false;$name=[string](Get-LifecycleProperty $marker 'name' ([ref]$nameFound));$reason=''
-        if(-not $nameFound -or $name -notmatch $AllowedPattern){$reason='stage marker name is not allowlisted'}
-        $values=[ordered]@{};foreach($field in @('transactionId','payloadSha256','action','role','stage','completedUtc')){$found=$false;$values[$field]=Get-LifecycleProperty $marker $field ([ref]$found);if(-not $found -and -not $reason){$reason='stage marker is malformed'}}
-        $completed=[datetime]::MinValue;if(-not $reason -and (-not [datetime]::TryParse([string]$values.completedUtc,[ref]$completed) -or $completed.ToUniversalTime() -lt $start)){$reason='stage marker is stale, malformed, or not bound to the current lifecycle'}
-        if(-not $reason -and (([string]$values.transactionId) -notmatch '^[0-9a-fA-F]{32}$' -or ([string]$values.payloadSha256) -cne $PayloadSha256 -or ([string]$values.action) -cne $Action -or ([string]$values.role) -cne $ExpectedStageRole -or ($TransactionId -and ([string]$values.transactionId) -cne $TransactionId) -or (([string]$values.stage)+'.complete') -cne $name)){$reason='stage marker is stale, malformed, or not bound to the current lifecycle'}
-        if($reason){$rejected.Add([pscustomobject][ordered]@{name=$name;error=$reason});continue}
-        $pathFound=$false;$path=[string](Get-LifecycleProperty $marker 'path' ([ref]$pathFound));$shaFound=$false;$sha=[string](Get-LifecycleProperty $marker 'sha256' ([ref]$shaFound));$lastWriteFound=$false;$lastWrite=[string](Get-LifecycleProperty $marker 'lastWriteUtc' ([ref]$lastWriteFound))
-        $accepted.Add([pscustomobject][ordered]@{name=$name;path=if($pathFound){$path}else{''};transactionId=[string]$values.transactionId;payloadSha256=[string]$values.payloadSha256;action=[string]$values.action;role=[string]$values.role;stage=[string]$values.stage;completedUtc=$completed.ToUniversalTime().ToString('o');lastWriteUtc=if($lastWriteFound){$lastWrite}else{''};sha256=if($shaFound){$sha}else{''}})
-    }
-    $set={param($target,$name,$value)if($target -is [System.Collections.IDictionary]){$target[$name]=$value}else{$target|Add-Member -NotePropertyName $name -NotePropertyValue $value -Force}}
-    &$set $Observation 'stageMarkers' @($accepted);&$set $Observation 'stageMarkerErrors' @($rejected)
-    return $Observation
-}
-
-function Get-WpfFailureDescriptor {
-    param([Parameter(Mandatory)][object]$Report)
-    $errorFound=$false;$errorValue=Get-LifecycleProperty $Report 'error' ([ref]$errorFound)
-    $classFound=$false;$classValue=Get-LifecycleProperty $Report 'failureClass' ([ref]$classFound)
-    [pscustomobject]@{
-        failureClass=if($classFound -and [string]$classValue){[string]$classValue}else{'UNCLASSIFIED_PRODUCT_FAILURE'}
-        error=if($errorFound -and [string]$errorValue){[string]$errorValue}else{'WPF boundary returned no primary error.'}
-    }
-}
-
-function Test-RebootBoundaryIdentity {
-    param(
-        [Parameter(Mandatory)][psobject]$PriorCheckpoint,
-        [AllowNull()][psobject]$CurrentCheckpoint,
-        [int]$MaxGeneration = 3
-    )
-    if (-not $CurrentCheckpoint) { return $false }
-    foreach($required in @('checkpointGeneration','transactionId','action','role','payloadSha256','state')){if(-not (Test-LifecycleProperty -Value $CurrentCheckpoint -Name $required)){return $false}}
-    # Exactly one product generation is allowed to authorize one reboot.  A
-    # jump (for example 1 -> 3) is an ambiguous/foreign lifecycle and must
-    # never be treated as a valid boundary.
-    $found=$false;$currentGeneration=Get-LifecycleProperty $CurrentCheckpoint 'checkpointGeneration' ([ref]$found);if(-not $found){return $false};$found=$false;$priorGenerationValue=Get-LifecycleProperty $PriorCheckpoint 'checkpointGeneration' ([ref]$found);if(-not $found){return $false};$generation=0;$priorGeneration=0;if(-not [int]::TryParse([string]$currentGeneration,[ref]$generation)-or-not [int]::TryParse([string]$priorGenerationValue,[ref]$priorGeneration)){return $false}
-    # checkpointGeneration -ne PriorCheckpoint.checkpointGeneration + 1 is
-    # the fail-closed rule (expressed with parsed numeric values below).
-    if ($generation -ne ($priorGeneration + 1)) { return $false }
-    if ($generation -gt $MaxGeneration) { return $false }
-    foreach ($name in @('transactionId','action','role','payloadSha256')) {
-        $currentFound=$false;$currentValue=Get-LifecycleProperty $CurrentCheckpoint $name ([ref]$currentFound);$priorFound=$false;$priorValue=Get-LifecycleProperty $PriorCheckpoint $name ([ref]$priorFound);if(-not $currentFound -or -not $priorFound -or [string]$currentValue -cne [string]$priorValue) { return $false }
-    }
-    $found=$false;$state=Get-LifecycleProperty $CurrentCheckpoint 'state' ([ref]$found);return ($found -and [string]$state -eq 'waiting-for-reboot')
-}
-
-function ConvertTo-CanonicalLifecycleCheckpoint {
-    param([AllowNull()][object]$Checkpoint)
-    if(-not $Checkpoint){return $null}
-    $hasCheckpointGeneration=Test-LifecycleProperty -Value $Checkpoint -Name 'checkpointGeneration'
-    $hasGeneration=Test-LifecycleProperty -Value $Checkpoint -Name 'generation'
-    if(-not $hasCheckpointGeneration -and -not $hasGeneration){return $null}
-    $checkpointGeneration=0;$generation=0
-    $found=$false;$checkpointGenerationValue=Get-LifecycleProperty $Checkpoint 'checkpointGeneration' ([ref]$found);if($hasCheckpointGeneration -and -not [int]::TryParse([string]$checkpointGenerationValue,[ref]$checkpointGeneration)){return $null}
-    $found=$false;$generationValue=Get-LifecycleProperty $Checkpoint 'generation' ([ref]$found);if($hasGeneration -and -not [int]::TryParse([string]$generationValue,[ref]$generation)){return $null}
-    if(-not $hasCheckpointGeneration){$checkpointGeneration=$generation}
-    if(-not $hasGeneration){$generation=$checkpointGeneration}
-    if($generation -ne $checkpointGeneration){return $null}
-    $copy=[ordered]@{}
-    if($Checkpoint -is [System.Collections.IDictionary]){foreach($key in $Checkpoint.Keys){$copy[[string]$key]=$Checkpoint[$key]}}else{foreach($property in $Checkpoint.PSObject.Properties){$copy[$property.Name]=$property.Value}}
-    $copy.generation=$generation
-    $copy.checkpointGeneration=$checkpointGeneration
-    return [pscustomobject]$copy
-}
-
-function Test-NoActiveProductCheckpoint {
-    param([AllowNull()][object]$Value,[int]$Depth=0,[System.Collections.Generic.HashSet[int]]$Seen,[string]$Path='root')
-    if($null -eq $Value -or $Value -is [string] -or $Value.GetType().IsPrimitive -or $Value -is [datetime] -or $Value -is [guid]){return $true}
-    if($Depth -gt 12){return $false}
-    if(-not $Seen){$Seen=[System.Collections.Generic.HashSet[int]]::new()};$identity=[Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($Value);if(-not $Seen.Add($identity)){return $false}
-    # IDictionary (including [ordered] test/projection payloads) is enumerable,
-    # but its entries are lifecycle fields rather than a signal-free list. Walk
-    # entries by key so generation/checkpoint fields cannot be hidden, while
-    # avoiding the false cycle reports caused by enumerating dictionary views.
-    if($Value -is [System.Collections.IDictionary]){
-        foreach($entry in $Value.GetEnumerator()){
-            $lower=([string]$entry.Key).ToLowerInvariant();$item=$entry.Value;$childPath=if($Path -eq 'root'){([string]$entry.Key)}else{"$Path.$([string]$entry.Key)"}
-            if($lower -eq 'rawactivelifecyclesignals' -and $item -and @($item).Count -gt 0){foreach($signal in @($item)){$kindFound=$false;$kind=Get-LifecycleProperty $signal 'kind' ([ref]$kindFound);$pathFound=$false;$signalPath=Get-LifecycleProperty $signal 'path' ([ref]$pathFound);$valueFound=$false;$signalValue=Get-LifecycleProperty $signal 'value' ([ref]$valueFound);$zero=0;$benign=($kindFound -and [string]$kind -ieq 'checkpointgeneration' -and $pathFound -and [string]$signalPath -eq 'progress.checkpointGeneration' -and [int]::TryParse([string]$signalValue,[ref]$zero) -and $zero -eq 0 -and [string]$signalValue -match '^0$');if(-not $benign){return $false}}}
-            if($lower -eq 'checkpoint' -and $null -ne $item){return $false}
-            if($lower -eq 'checkpointpresent' -and [bool]$item){return $false}
-            if($lower -in @('checkpointgeneration','generation')){$zeroValue=0;$zeroAllowed=($lower -eq 'checkpointgeneration' -and ($Path -eq 'progress' -or $Path -match '\.progress$') -and [int]::TryParse([string]$item,[ref]$zeroValue) -and $zeroValue -eq 0 -and [string]$item -match '^0$');if(-not $zeroAllowed){return $false}}
-            if($lower -eq 'state' -and [string]$item -ieq 'waiting-for-reboot'){return $false}
-            if($lower -in @('installledger','ownershipledger','installstate','ownership','receipt')){continue}
-            $childSeen=[System.Collections.Generic.HashSet[int]]::new($Seen);if(-not (Test-NoActiveProductCheckpoint -Value $item -Depth ($Depth+1) -Seen $childSeen -Path $childPath)){return $false}
-        }
-        return $true
-    }
-    if($Value -is [System.Collections.IEnumerable]){foreach($item in $Value){$childSeen=[System.Collections.Generic.HashSet[int]]::new($Seen);if(-not (Test-NoActiveProductCheckpoint -Value $item -Depth ($Depth+1) -Seen $childSeen -Path ($Path+'[]'))){return $false}};return $true}
-    foreach($property in @($Value.PSObject.Properties)){
-        $name=[string]$property.Name;$item=$property.Value;$lower=$name.ToLowerInvariant()
-        if($lower -eq 'rawactivelifecyclesignals' -and $item -and @($item).Count -gt 0){foreach($signal in @($item)){$kindFound=$false;$kind=Get-LifecycleProperty $signal 'kind' ([ref]$kindFound);$pathFound=$false;$signalPath=Get-LifecycleProperty $signal 'path' ([ref]$pathFound);$valueFound=$false;$signalValue=Get-LifecycleProperty $signal 'value' ([ref]$valueFound);$zero=0;$benign=($kindFound -and [string]$kind -ieq 'checkpointgeneration' -and $pathFound -and [string]$signalPath -eq 'progress.checkpointGeneration' -and [int]::TryParse([string]$signalValue,[ref]$zero) -and $zero -eq 0 -and [string]$signalValue -match '^0$');if(-not $benign){return $false}}}
-        if($lower -eq 'checkpoint' -and $null -ne $item){return $false}
-        if($lower -eq 'checkpointpresent' -and [bool]$item){return $false}
-        if($lower -in @('checkpointgeneration','generation')){
-            $zeroValue=0;$zeroAllowed=($lower -eq 'checkpointgeneration' -and ($Path -eq 'progress' -or $Path -match '\.progress$') -and [int]::TryParse([string]$item,[ref]$zeroValue) -and $zeroValue -eq 0 -and [string]$item -match '^0$');if(-not $zeroAllowed){return $false}
-        }
-        if($lower -eq 'state' -and [string]$item -ieq 'waiting-for-reboot'){return $false}
-        if($lower -in @('installledger'
+    foreach($existing in $existingErrors){$nameFound=$false;$name=[string](Get-LifecycleProperty $existing 'name' ([ref]$nameFound));$errorFound=$

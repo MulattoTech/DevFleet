@@ -1,10 +1,316 @@
 # DevFleet source part 067
 
 Full-source UTF-8 byte interval [3069000, 3115500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 4f7428aded9a1c7b5020b38d24510fee194efb28746063590483b8863aebfcd8
+Payload SHA-256: 2e55dfd7a882914d46a521c8d46913425d7e3165771b590d4976274a1d964d60
 
 <!-- BEGIN SOURCE SLICE -->
+, "runArgs", "privileged", "capAdd", "securityOpt", "features", "overrideFeatureInstallOrder",
+    "initializeCommand", "onCreateCommand", "updateContentCommand", "postCreateCommand", "postStartCommand",
+    "postAttachCommand", "forwardPorts", "portsAttributes", "otherPortsAttributes", "appPort", "init", "customizations",
+    "hostRequirements", "waitFor", "userEnvProbe", "secrets",
+}
 
+
+def finding(severity: str, code: str, message: str, file: str = "") -> dict[str, str]:
+    return {"severity": severity, "code": code, "message": message, "file": file}
+
+
+def _unsafe_source(source: str) -> str | None:
+    source = source.strip()
+    norm = source.replace("\\", "/")
+    if not source:
+        return "empty path"
+    if "$" in source:
+        return "environment-variable interpolation"
+    if WINDOWS_PATH.search(source) or UNC_PATH.search(source):
+        return "Windows/UNC host path"
+    if DOCKER_SOCKET.search(source):
+        return "Docker socket"
+    if source.startswith(("/", "~")):
+        return "absolute host path"
+    if ".." in PurePosixPath(norm).parts:
+        return "parent-directory traversal"
+    return None
+
+
+def _severity(profile: str, kind: str) -> str:
+    p = get_profile(profile)
+    if kind in {"hardening", "health"}:
+        return "critical" if p.block_hardening else "warning"
+    if kind in {"device", "privileged"}:
+        return "warning" if p.name == "fast" else "critical"
+    return "critical"
+
+
+def _inside_project(project: Path, candidate: Path) -> bool:
+    try:
+        candidate.resolve(strict=False).relative_to(project.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _contains_symlink(project: Path, candidate: Path) -> bool:
+    try:
+        relative = candidate.relative_to(project)
+    except ValueError:
+        return True
+    current = project
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
+
+
+def _reference(project: Path, base: Path, raw: Any, rel: str, kind: str, findings: list[dict[str, str]], references: set[Path], *, required: bool = False) -> Path | None:
+    path_code = "docker.mount-resolution" if kind == "bind mount source" else "docker.build-context" if kind == "build.context" else "compose.path-escape"
+    value = str(raw or "").strip()
+    reason = _unsafe_source(value)
+    if reason:
+        findings.append(finding("critical", "compose.path-reference", f"{kind} is unsafe ({reason}): {value!r}.", rel))
+        return None
+    candidate = (base / value).resolve(strict=False)
+    if not _inside_project(project, candidate):
+        findings.append(finding("critical", path_code, f"{kind} resolves outside the project boundary: {value!r}.", rel))
+        return None
+    lexical = base / value
+    if _contains_symlink(project, lexical):
+        findings.append(finding("critical", path_code, f"{kind} may not traverse a symlink: {value!r}.", rel))
+        return None
+    if required and not candidate.is_file():
+        findings.append(finding("critical", "compose.missing-reference", f"Referenced {kind} does not exist: {value!r}.", rel))
+        return None
+    references.add(candidate)
+    return candidate
+
+
+def _short_bind_source(value: str) -> str | None:
+    value = value.strip()
+    if not value:
+        return None
+    if WINDOWS_PATH.search(value) or UNC_PATH.search(value) or DOCKER_SOCKET.search(value):
+        return value
+    if ":" not in value:
+        return value if value.startswith((".", "..", "/", "~")) else None
+    return value.split(":", 1)[0]
+
+
+def _volume_source(value: Any) -> tuple[str, bool]:
+    if isinstance(value, dict):
+        kind = str(value.get("type", "volume")).lower()
+        source = str(value.get("source") or value.get("src") or "")
+        return source, kind == "bind"
+    source = _short_bind_source(str(value))
+    return source or "", source is not None
+
+
+def _parse_yaml(path: Path) -> dict[str, Any] | None:
+    try:
+        value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _iter_env_files(value: Any) -> Iterable[Any]:
+    if isinstance(value, (str, dict)):
+        return (value,)
+    return value or ()
+
+
+def _strings(value: Any) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from _strings(key)
+            yield from _strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+
+
+def _preflight_compose(project: Path, path: Path, findings: list[dict[str, str]], references: set[Path], seen: set[Path], state: dict[str, int], depth: int) -> dict[str, Any] | None:
+    rel = str(path.relative_to(project)) if _inside_project(project, path) else str(path)
+    if depth > MAX_REFERENCE_DEPTH:
+        findings.append(finding("critical", "compose.reference-depth", "Compose reference depth exceeds the bounded policy.", rel))
+        return None
+    path = path.resolve(strict=False)
+    if path in seen:
+        return _parse_yaml(path)
+    if len(seen) >= MAX_REFERENCE_FILES:
+        findings.append(finding("critical", "compose.reference-count", "Compose reference count exceeds the bounded policy.", rel))
+        return None
+    seen.add(path)
+    if not path.is_file():
+        findings.append(finding("critical", "compose.missing-reference", "Compose configuration is missing.", rel))
+        return None
+    state["bytes"] += path.stat().st_size
+    if state["bytes"] > MAX_REFERENCE_BYTES:
+        findings.append(finding("critical", "compose.reference-bytes", "Compose referenced input bytes exceed the bounded policy.", rel))
+        return None
+    data = _parse_yaml(path)
+    if data is None:
+        findings.append(finding("error", "yaml.invalid", "Compose configuration is not a YAML object.", rel))
+        return None
+    if any("${" in text for text in _strings(data)):
+        findings.append(finding("critical", "compose.interpolation", "Compose environment interpolation is blocked in the security-reviewed subset.", rel))
+    for key in data:
+        if not str(key).startswith("x-") and key not in COMPOSE_TOP_LEVEL_KEYS:
+            findings.append(finding("critical", "compose.unknown-field", f"Unreviewed top-level Compose field is blocked: {key!r}.", rel))
+    includes = data.get("include")
+    if includes:
+        findings.append(finding("critical", "compose.include", "Compose include is blocked until a bounded resolver is certified.", rel))
+        entries = includes if isinstance(includes, list) else [includes]
+        for entry in entries:
+            include_path = entry.get("path") if isinstance(entry, dict) else entry
+            included = _reference(project, path.parent, include_path, rel, "Compose include", findings, references)
+            if included and included.is_file():
+                _preflight_compose(project, included, findings, references, seen, state, depth + 1)
+    services = data.get("services") or {}
+    if not isinstance(services, dict):
+        findings.append(finding("error", "compose.services", "Compose services must be a mapping.", rel))
+        return data
+    for name, service in services.items():
+        if not isinstance(service, dict):
+            findings.append(finding("error", "compose.service", f"Compose service {name!r} must be a mapping.", rel))
+            continue
+        for key in service:
+            if key not in COMPOSE_SERVICE_KEYS and not str(key).startswith("x-"):
+                findings.append(finding("critical", "compose.unknown-field", f"Unreviewed service field is blocked: {name}.{key}.", rel))
+        extends = service.get("extends")
+        if extends:
+            findings.append(finding("critical", "compose.extends", "Compose extends is blocked until effective-model resolution is certified.", rel))
+            if isinstance(extends, dict) and extends.get("file"):
+                inherited = _reference(project, path.parent, extends.get("file"), rel, "Compose extends file", findings, references)
+                if inherited and inherited.is_file():
+                    _preflight_compose(project, inherited, findings, references, seen, state, depth + 1)
+        for env_file in _iter_env_files(service.get("env_file")):
+            env_path = env_file.get("path") if isinstance(env_file, dict) else env_file
+            _reference(project, path.parent, env_path, rel, "env_file", findings, references)
+        build = service.get("build")
+        if isinstance(build, str):
+            _reference(project, path.parent, build, rel, "build.context", findings, references)
+        elif isinstance(build, dict):
+            context = build.get("context")
+            if context:
+                context_path = _reference(project, path.parent, context, rel, "build.context", findings, references)
+                if context_path and build.get("dockerfile"):
+                    _reference(project, context_path.parent, build.get("dockerfile"), rel, "build.dockerfile", findings, references, required=True)
+        for volume in service.get("volumes") or ():
+            source, is_bind = _volume_source(volume)
+            if is_bind:
+                _reference(project, path.parent, source, rel, "bind mount source", findings, references)
+        for key in ("secrets", "configs"):
+            value = service.get(key)
+            if value:
+                findings.append(finding("critical", "compose.secret-config", f"Service {name}.{key} is blocked until host-file authorization is certified.", rel))
+    for key in ("secrets", "configs"):
+        declarations = data.get(key)
+        if isinstance(declarations, dict):
+            for name, declaration in declarations.items():
+                if isinstance(declaration, dict) and declaration.get("file"):
+                    _reference(project, path.parent, declaration["file"], rel, f"{key}.{name} file", findings, references, required=True)
+                if declaration:
+                    findings.append(finding("critical", "compose.secret-config", f"Top-level {key}.{name} is blocked until host-file authorization is certified.", rel))
+    return data
+
+
+def _scan_compose_service(project: Path, path: Path, name: str, svc: dict[str, Any], profile: str, out: list[dict[str, str]]) -> None:
+    rel = str(path.relative_to(project))
+    metadata: dict[str, Any] = {}
+    try:
+        value = read_project_metadata(project).value
+        metadata = value if isinstance(value, dict) else {}
+    except Exception:
+        pass
+    for key in COMPOSE_UNSUPPORTED_KEYS:
+        if key in svc and svc.get(key) not in (None, False, [], {}):
+            out.append(finding("critical", f"compose.{key.replace('_', '-')}", f"{name}.{key} is blocked by the supported Compose security policy.", rel))
+    if svc.get("container_name"):
+        out.append(finding("critical" if profile == "strict" else "warning", "docker.container-name", f"{name}: explicit container_name can collide across projects.", rel))
+    if svc.get("privileged") is True:
+        severity = _severity(profile, "privileged")
+        if profile == "fast" and not metadata.get("allow_privileged"):
+            severity = "critical"
+        out.append(finding(severity, "docker.privileged", f"{name}: privileged mode requires Fast Trusted plus project-level acknowledgement.", rel))
+    for key in COMPOSE_HOST_NAMESPACE_KEYS:
+        value = str(svc.get(key, "")).lower()
+        if value == "host" or value.startswith(("container:", "service:")):
+            out.append(finding("critical", "docker.host-namespace", f"{name}: {key}={value} is forbidden.", rel))
+    caps = [str(x).upper() for x in (svc.get("cap_add") or [])]
+    if caps:
+        severity = _severity(profile, "device")
+        if profile == "fast" and not metadata.get("allow_privileged"):
+            severity = "critical"
+        out.append(finding(severity, "docker.capabilities", f"{name}: capabilities require explicit reviewed acknowledgement: {caps}.", rel))
+    if svc.get("devices"):
+        severity = _severity(profile, "device")
+        if profile == "fast" and not metadata.get("allow_devices"):
+            severity = "critical"
+        out.append(finding(severity, "docker.devices", f"{name}: device access requires Fast Trusted plus project-level acknowledgement.", rel))
+    for volume in svc.get("volumes") or ():
+        source, is_bind = _volume_source(volume)
+        if is_bind:
+            reason = _unsafe_source(source)
+            if reason:
+                out.append(finding("critical", "docker.mount", f"{name}: rejected {reason}: {source!r}.", rel))
+    build = svc.get("build")
+    if build:
+        context = build if isinstance(build, str) else str(build.get("context", "."))
+        reason = _unsafe_source(context)
+        if reason and context not in {".", "./"}:
+            out.append(finding("critical", "docker.build-context", f"{name}: rejected {reason}: {context}.", rel))
+        if isinstance(build, dict) and build.get("privileged"):
+            out.append(finding("critical", "docker.build-privileged", f"{name}: privileged image builds are blocked.", rel))
+        if isinstance(build, dict) and build.get("secrets"):
+            out.append(finding("critical", "docker.build-secrets", f"{name}: build secrets are blocked.", rel))
+        context_path = (path.parent / context).resolve(strict=False)
+        dockerfile_name = "Dockerfile" if isinstance(build, str) else str(build.get("dockerfile", "Dockerfile"))
+        dockerfile = (context_path / dockerfile_name).resolve(strict=False)
+        if _inside_project(project, dockerfile) and dockerfile.is_file():
+            users = []
+            for line in dockerfile.read_text(encoding="utf-8", errors="ignore").splitlines():
+                parts = line.split(None, 1)
+                if len(parts) == 2 and parts[0].upper() == "USER":
+                    users.append(parts[1].strip())
+            if not users or users[-1].lower() in {"root", "0", "0:0"}:
+                out.append(finding(_severity(profile, "hardening"), "docker.non-root-user", f"{name}: Dockerfile does not finish with a non-root USER.", str(dockerfile.relative_to(project))))
+    for env_file in _iter_env_files(svc.get("env_file")):
+        value = str(env_file.get("path", "")) if isinstance(env_file, dict) else str(env_file)
+        reason = _unsafe_source(value)
+        if reason:
+            out.append(finding("critical", "docker.env-file", f"{name}: unsafe env_file ({reason}): {value}.", rel))
+    for port in svc.get("ports") or ():
+        state, text = _port_state(port)
+        if state == "public":
+            out.append(finding("critical", "docker.port-public", f"{name}: public/unbound port publication is forbidden: {text}.", rel))
+        elif state == "tailnet" and not (get_profile(profile).allow_tailnet and SETTINGS.allow_tailnet_ports):
+            out.append(finding("critical", "docker.port-tailnet", f"{name}: tailnet port requires policy approval: {text}.", rel))
+    if "healthcheck" not in svc:
+        out.append(finding(_severity(profile, "health"), "docker.healthcheck", f"{name}: no container healthcheck is defined.", rel))
+    image = str(svc.get("image", ""))
+    if image.endswith(":latest") or (image and ":" not in image):
+        out.append(finding(_severity(profile, "hardening"), "docker.unpinned-image", f"{name}: development image is not pinned.", rel))
+    security = [str(x).lower() for x in (svc.get("security_opt") or [])]
+    if any("unconfined" in x for x in security):
+        out.append(finding("critical", "docker.unconfined", f"{name}: unconfined security profile is forbidden.", rel))
+    if not any("no-new-privileges" in x for x in security):
+        out.append(finding(_severity(profile, "hardening"), "docker.no-new-privileges", f"{name}: no-new-privileges is not set.", rel))
+
+
+def _strip_jsonc(text: str) -> str:
+    result: list[str] = []
+    i = 0
+    in_string = False
+    escaped = False
+    while i < len(text):
+        char = text[i]
+        if in_string:
+            result.append(char)
+            if escaped:
+                escaped = False
             elif char == "\\":
                 escaped = True
             elif char == '"':
@@ -720,379 +1026,4 @@ _ACTIONS = {
     "restart": "restart",
     "pause": "pause",
     "unpause": "unpause",
-    "remove": "rm",
-}
-_IMMUTABLE_CONTAINER_ID = re.compile(r"^[0-9a-fA-F]{64}$")
-OWNERSHIP_LABELS = {
-    "managed_by": "io.devfleet.managed-by",
-    "project_id": "io.devfleet.project-id",
-    "slug": "io.devfleet.project-slug",
-    "runtime_id": "io.devfleet.runtime-id",
-    "deployment_id": "io.devfleet.deployment-id",
-    "host_id": "io.devfleet.host-id",
-}
-
-
-def container_ownership_labels(metadata: dict[str, Any]) -> dict[str, str]:
-    values = {
-        "managed_by": str(metadata.get("managed_by") or "").strip().lower(),
-        "project_id": str(metadata.get("project_id") or "").strip(),
-        "slug": str(metadata.get("slug") or "").strip(),
-        "runtime_id": str(metadata.get("runtime_id") or "").strip(),
-        "deployment_id": str(metadata.get("deployment_id") or "").strip(),
-        "host_id": str(metadata.get("host_id") or "").strip(),
-    }
-    if values["managed_by"] != "devfleet":
-        raise ValueError("Container ownership binding is missing the DevFleet manager identity.")
-    validate_project_id(values["project_id"])
-    validate_slug(values["slug"])
-    if any(not values[key] for key in ("runtime_id", "deployment_id", "host_id")):
-        raise ValueError("Container ownership binding is incomplete.")
-    return {label: values[field] for field, label in OWNERSHIP_LABELS.items()}
-
-
-def _authoritative_container_binding(inspected: dict[str, Any]) -> tuple[str, dict[str, str]]:
-    immutable_id = str(inspected.get("Id") or "").strip()
-    if not _IMMUTABLE_CONTAINER_ID.fullmatch(immutable_id):
-        raise ValueError("Container ownership verification failed: Docker returned no canonical immutable ID.")
-    config = inspected.get("Config")
-    labels = config.get("Labels") if isinstance(config, dict) else None
-    if not isinstance(labels, dict):
-        raise ValueError("Container ownership verification failed: container labels are missing.")
-    slug = str(labels.get(OWNERSHIP_LABELS["slug"]) or "")
-    try:
-        slug = validate_slug(slug)
-        project = safe_child(SETTINGS.workspaces, slug)
-    except ValueError as exc:
-        raise ValueError("Container ownership verification failed: project slug binding is invalid.") from exc
-    try:
-        metadata = read_project_metadata(project).value
-    except (OSError, ValueError, UnicodeError, TypeError) as exc:
-        raise ValueError("Container ownership verification failed: authoritative project state is unreadable.") from exc
-    if not isinstance(metadata, dict) or str(metadata.get("runtime_provider") or "") != "docker-compose":
-        raise ValueError("Container ownership verification failed: project is not currently Compose-managed.")
-    expected = container_ownership_labels(metadata)
-    if expected[OWNERSHIP_LABELS["deployment_id"]] != SETTINGS.deployment_id or expected[OWNERSHIP_LABELS["host_id"]] != SETTINGS.host_id:
-        raise ValueError("Container ownership verification failed: project deployment or host binding is not current.")
-    mismatches = [key for key, value in expected.items() if str(labels.get(key) or "") != value]
-    compose_project = str(labels.get("com.docker.compose.project") or "")
-    compose_service = str(labels.get("com.docker.compose.service") or "")
-    if compose_project != expected[OWNERSHIP_LABELS["runtime_id"]] or not compose_service:
-        mismatches.append("com.docker.compose.project/service")
-    if mismatches:
-        raise ValueError("Container ownership verification failed: complete DevFleet/Compose binding does not match current project state (" + ", ".join(sorted(set(mismatches))) + ").")
-    return immutable_id, expected
-
-
-def validate_container_ref(value: str) -> str:
-    value = str(value or "").strip()
-    if not _CONTAINER_ID.fullmatch(value):
-        raise ValueError("Invalid container reference.")
-    return value
-
-
-def _json_lines(args: list[str], timeout: int = 8) -> list[dict[str, Any]]:
-    result = run(args, check=False, timeout=timeout)
-    rows: list[dict[str, Any]] = []
-    for line in (result.stdout or "").splitlines():
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(value, dict):
-            rows.append(value)
-    return rows
-
-
-def _docker_inspect(ref: str) -> dict[str, Any]:
-    result = run(["docker", "inspect", ref], check=False, timeout=10)
-    if result.returncode:
-        raise ValueError((result.stderr or "Container not found.").strip()[-1000:])
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise ValueError("Docker returned invalid inspect data.") from exc
-    if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], dict):
-        raise ValueError("Container not found.")
-    return data[0]
-
-
-def _authorized_read(ref: str) -> tuple[str, dict[str, str], dict[str, Any]]:
-    """Resolve, bind, and revalidate a read before data can leave the service."""
-    inspected = _docker_inspect(ref)
-    immutable_id, expected = _authoritative_container_binding(inspected)
-    try:
-        current = _docker_inspect(immutable_id)
-    except ValueError as exc:
-        raise ValueError("Container ownership verification failed: immutable container disappeared before the read.") from exc
-    current_id, current_expected = _authoritative_container_binding(current)
-    if current_id != immutable_id or current_expected != expected:
-        raise ValueError("Container ownership verification failed: immutable identity changed before the read.")
-    return immutable_id, expected, current
-
-
-def list_containers() -> list[dict[str, Any]]:
-    """Return a safe, Portainer-style summary without exposing the Docker socket."""
-    containers = _json_lines([
-        "docker", "ps", "-a", "--no-trunc", "--format",
-        "{{json .}}",
-    ])
-    stats = _json_lines([
-        "docker", "stats", "--no-stream", "--format", "{{json .}}",
-    ])
-    stats_by_id = {str(item.get("ID") or ""): item for item in stats}
-    result: list[dict[str, Any]] = []
-    for item in containers:
-        ref = str(item.get("ID") or "")
-        if not ref:
-            continue
-        try:
-            immutable_id, expected, inspected = _authorized_read(ref)
-        except ValueError:
-            # A Docker-engine container without a current authoritative DevFleet
-            # binding is deliberately absent, including from metrics.
-            continue
-        stat = stats_by_id.get(immutable_id) or {}
-        name = str(inspected.get("Name") or item.get("Names") or immutable_id[:12]).lstrip("/")
-        result.append({
-            "id": immutable_id,
-            "short_id": immutable_id[:12],
-            "name": name,
-            "image": item.get("Image") or "",
-            "state": item.get("State") or "unknown",
-            "status": item.get("Status") or "",
-            "created": item.get("CreatedAt") or "",
-            "ports": item.get("Ports") or "",
-            "labels": expected,
-            "cpu_percent": stat.get("CPUPerc") or "—",
-            "memory_usage": stat.get("MemUsage") or "—",
-            "memory_percent": stat.get("MemPerc") or "—",
-            "network_io": stat.get("NetIO") or "—",
-            "block_io": stat.get("BlockIO") or "—",
-            "pids": stat.get("PIDs") or "—",
-        })
-    return result
-
-
-def inspect_container(ref: str) -> dict[str, Any]:
-    ref = validate_container_ref(ref)
-    _, _, inspected = _authorized_read(ref)
-    return inspected
-
-
-def container_logs(ref: str, tail: int = 200) -> str:
-    ref = validate_container_ref(ref)
-    tail = max(1, min(int(tail), 1000))
-    immutable_id, _, _ = _authorized_read(ref)
-    result = run([
-        "docker", "logs", "--timestamps", "--tail", str(tail), immutable_id,
-    ], check=False, timeout=15)
-    output = ((result.stdout or "") + (result.stderr or "")).strip()
-    return output[-30000:] or "No container log output."
-
-
-def container_action(ref: str, action: str) -> str:
-    ref = validate_container_ref(ref)
-    command = _ACTIONS.get(str(action or "").lower())
-    if not command:
-        raise ValueError("Unsupported container action.")
-    inspected = _docker_inspect(ref)
-    immutable_id, expected = _authoritative_container_binding(inspected)
-    slug = expected[OWNERSHIP_LABELS["slug"]]
-    project_id = expected[OWNERSHIP_LABELS["project_id"]]
-    # Lazy import avoids the projects -> containers module dependency cycle.
-    # Both paths use the same cross-process lock and control-owned marker.
-    from .projects import (
-        load_authoritative_project_identity_for_mutation,
-        project_transfer_lock,
-    )
-
-    with project_transfer_lock(slug):
-        try:
-            current = _docker_inspect(ref)
-        except ValueError as exc:
-            raise ValueError("Container ownership verification failed: immutable container disappeared before mutation; no same-name replacement was touched.") from exc
-        current_id, current_expected = _authoritative_container_binding(current)
-        if current_id != immutable_id or current_expected != expected:
-            raise ValueError("Container ownership verification failed: immutable identity changed before mutation.")
-        project = safe_child(SETTINGS.workspaces, slug)
-        authoritative = load_authoritative_project_identity_for_mutation(project)
-        if (
-            str(authoritative.get("runtime_provider") or "") != "docker-compose"
-            or container_ownership_labels(authoritative) != expected
-            or str(authoritative.get("project_id") or "") != project_id
-        ):
-            raise ValueError(
-                "Container ownership verification failed: authoritative project identity changed before mutation."
-            )
-        # Reinspect the immutable ID after the authority decision. A receiver cannot
-        # create pending authority or promote a replacement while this lock is held.
-        try:
-            final = _docker_inspect(immutable_id)
-        except ValueError as exc:
-            raise ValueError(
-                "Container ownership verification failed: immutable container disappeared before mutation."
-            ) from exc
-        final_id, final_expected = _authoritative_container_binding(final)
-        if final_id != immutable_id or final_expected != expected:
-            raise ValueError(
-                "Container ownership verification failed: immutable identity changed before mutation."
-            )
-        result = run(["docker", command, immutable_id], check=False, timeout=60)
-        if result.returncode:
-            raise ValueError((result.stderr or result.stdout or "Docker action failed.").strip()[-2000:])
-        return (result.stdout or result.stderr or f"Container {action} completed.").strip()[-4000:]
-
-```
-
-
-## FILE: source/app/devfleet/core.py
-
-SHA256: 244499e96e005ac615042edbe10082a93110f186de8340cdc8a77c95341ac77c | Bytes: 13760 | Git mode: 100644
-
-```
-"""Shared DevFleet settings, validation, and crash-safe filesystem helpers.
-
-This module deliberately contains no host-management logic.  Host changes are
-made only through the narrow authenticated host-agent client.
-"""
-from __future__ import annotations
-
-import json
-import ipaddress
-import os
-import re
-import secrets
-import stat
-import subprocess
-import tempfile
-import time
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
-
-from .metadata_io import enable_inherited_backup_read
-
-try:
-    import pwd
-except ImportError:  # pragma: no cover - Windows has no pwd module.
-    pwd = None
-
-
-CONFIG_PATH = Path(os.environ.get("DEVFLEET_CONFIG_PATH", "/etc/devfleet/config.json"))
-SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,62}$")
-PROJECT_ID_RE = re.compile(r"^[0-9a-fA-F-]{36}$")
-
-
-@dataclass(frozen=True)
-class Settings:
-    node_name: str
-    deployment_id: str
-    node_role: str
-    friendly_name: str
-    portal_port: int
-    workspaces: Path
-    quarantine: Path
-    peer_file: Path
-    runtime_root: Path
-    cache_root: Path
-    ollama_base_url: str
-    ollama_model: str
-    ollama_profile: str
-    development_profile: str
-    docker_mode: str
-    docker_host: str
-    docker_owner_uid: int | None
-    enable_shared_caches: bool
-    enable_analyzer_cache: bool
-    auto_start_codexpro: bool
-    allow_tailnet_ports: bool
-    backup_before_rebuild: bool
-    backup_before_quarantine: bool
-    allow_permanent_delete: bool
-    host_control_enabled: bool
-    host_control_url: str
-    host_control_token: str
-    expected_host_name: str
-    host_agent_timeout_seconds: int
-    host_resource_policy: dict[str, Any]
-    admin_user: str
-    admin_password: str
-    api_token: str
-    require_tailscale: bool
-    tailnet_cidr: str
-    public_binding_allowed: bool
-
-    @property
-    def operations(self) -> Path:
-        return self.runtime_root / "operations"
-
-    @property
-    def host_id(self) -> str:
-        return self.node_name
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _default_config() -> dict[str, Any]:
-    root = Path(os.environ.get("DEVFLEET_TEST_ROOT", "/tmp/devfleet"))
-    return {
-        "node_name": os.environ.get("DEVFLEET_NODE_NAME", "devfleet-primary"),
-        "deployment_id": os.environ.get("DEVFLEET_DEPLOYMENT_ID", ""),
-        "node_role": "primary",
-        "friendly_name": "DevFleet",
-        "portal_port": 8787,
-        "workspaces": str(root / "workspaces"),
-        "quarantine": str(root / "quarantine"),
-        "peer_file": str(root / "peer.json"),
-        "runtime_root": str(root / "runtime"),
-        "cache_root": str(root / "cache"),
-        "docker_mode": "rootless",
-        "docker_host": os.environ.get("DOCKER_HOST", ""),
-        "host_resource_policy": {},
-        "require_tailscale": True,
-        "tailnet_cidr": "100.64.0.0/10",
-        "public_binding_allowed": False,
-    }
-
-
-def load_settings() -> Settings:
-    if CONFIG_PATH.exists():
-        try:
-            if os.name != "nt" and str(CONFIG_PATH).startswith("/etc/devfleet/"):
-                stat = CONFIG_PATH.stat()
-                if stat.st_uid != 0 or stat.st_mode & 0o022:
-                    raise ValueError("security configuration ownership or permissions are unsafe")
-            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, TypeError) as exc:
-            raise ValueError("security configuration is missing, malformed, or unreadable; refusing fail-open defaults") from exc
-        if not isinstance(cfg, dict):
-            raise ValueError("security configuration must be a JSON object")
-    else:
-        cfg = _default_config()
-    policy = dict(cfg.get("host_resource_policy") or {})
-    return Settings(
-        node_name=str(cfg.get("node_name", cfg.get("host_id", "devfleet-primary"))),
-        deployment_id=str(cfg.get("deployment_id", "")),
-        node_role=str(cfg.get("node_role", "primary")),
-        friendly_name=str(cfg.get("friendly_name", cfg.get("node_name", "DevFleet"))),
-        portal_port=int(cfg.get("portal_port", 8787)),
-        workspaces=Path(cfg.get("workspaces", "/var/lib/devfleet/workspaces")),
-        quarantine=Path(cfg.get("quarantine", "/var/lib/devfleet/quarantine")),
-        peer_file=Path(cfg.get("peer_file", "/etc/devfleet/peer.json")),
-        runtime_root=Path(cfg.get("runtime_root", "/var/lib/devfleet/runtime")),
-        cache_root=Path(cfg.get("cache_root", "/var/cache/devfleet")),
-        ollama_base_url=str(cfg.get("ollama_base_url", "")),
-        ollama_model=str(cfg.get("ollama_model", "")),
-        ollama_profile=str(cfg.get("ollama_profile", "stable-interactive")),
-        development_profile=str(cfg.get("development_profile", "strict")),
-        docker_mode=str(cfg.get("docker_mode", "rootless")),
-        docker_host=str(os.environ.get("DOCKER_HOST", cfg.get("docker_host", ""))),
-        docker_owner_uid=(int(os.environ["DEVFLEET_DOCKER_OWNER_UID"]) if os.environ.get("DEVFLEET_DOCKER_OWNER_UID") else (int(cfg["docker_owner_uid"]) if cfg.get("docker_owner_uid") is not None else None)),
-        enable_shared_caches=bool(cfg.get("enable_shared_caches", False)),
-        enable_an
+    "rem

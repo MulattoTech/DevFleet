@@ -1,667 +1,727 @@
 # DevFleet source part 128
 
 Full-source UTF-8 byte interval [5905500, 5952000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: bf5bde62323a80d6abc8bf92be81db5bfc243ba9fd31b93b4e7f9ca8661dec68
+Payload SHA-256: 52ba1a5be61022efd4c54143cae769933cb3bfd69f6de85ad22b2d1cbd67c38f
 
 <!-- BEGIN SOURCE SLICE -->
-link() or sha(path) != artifact_hash):
-        raise ValueError('generation-4 signed-output receipt is absent or hash-mismatched')
-    return json.loads(path.read_text(encoding='utf-8-sig'))
+dardTokenRunId": standard_id, "proofRunIds": proof_ids})
+    audit_pointer = {"schemaVersion": 1, "contract": "devfleet-pre-acceptance-release-audit-v1", "runId": audit_id, "status": "PASS", "bundleMode": "release", "releaseEligible": False, "internalPromotionAllowed": False, "publicPromotionAllowed": False, "publicPublisherTrust": False, "candidate": tuple_value, "fullReleaseRunId": run_id, "standardTokenRunId": standard_id, "proofRunIds": proof_ids, "inputs": {"fullReleaseRunStateSha256": full_bindings["runStateSha256"], "fullReleasePhaseRecordsSha256": full_bindings["phaseRecordsSha256"], "realUseBindingSha256": real_binding_hash, "realUsePrepareSha256": real_prepare_hash, "realUseReportSha256": real_hash, "realUseSummarySha256": full_bindings["realUseSummarySha256"], "cleanupSha256": full_bindings["cleanupSha256"], "postCleanupSha256": full_bindings["postCleanupSha256"], "terminalL1Sha256": l1_hash, "terminalL2Sha256": l2_hash, "standardTokenPointerSha256": digest(entries["evidence/CURRENT-STANDARD-TOKEN.json"]), "proofRunIds": proof_ids}, "evidence": {"archive": {"workspacePath": f"audit/release-audits/{audit_id}/release-audit.zip", "bundlePath": None, "bytes": 1234, "sha256": synthetic_archive_hash}, "report": {"workspacePath": f"audit/release-audits/{audit_id}/ai-audit-bundle-self-test.json", "bundlePath": report_name, "bytes": len(entries[report_name]), "sha256": digest(entries[report_name])}, "manifest": {"workspacePath": f"audit/release-audits/{audit_id}/release-audit.manifest.json", "bundlePath": audit_manifest_name, "bytes": len(entries[audit_manifest_name]), "sha256": digest(entries[audit_manifest_name])}, "releaseValidation": {"workspacePath": f"audit/release-audits/{audit_id}/pre-acceptance-validation.json", "bundlePath": audit_validation_name, "bytes": len(entries[audit_validation_name]), "sha256": digest(entries[audit_validation_name])}}, "checks": {"cleanExtraction": "PASS", "secrets": "PASS", "coherence": "PASS", "sourceCount": "PASS", "releaseValidation": "PASS"}, "gates": {"candidate": "PASS", "proofs": "2/2 PASS", "fullRelease": "PASS", "realUseAcceptance": "U01-U05 PASS", "maintenance": "5/5 PASS", "standardToken": "PASS", "reconcile": "PASS", "cleanup": "PASS", "l1": "OFF", "l2": "ABSENT", "releaseAudit": "PASS"}}
+    put(entries, "evidence/CURRENT-RELEASE-AUDIT.json", audit_pointer)
+
+    binding_values = {"standardTokenPointerSha256": digest(entries["evidence/CURRENT-STANDARD-TOKEN.json"]), "standardTokenCanonicalSha256": digest(entries[canonical_name]), "standardTokenRawReportSha256": digest(entries[raw_name]), "fullReleaseRunStateSha256": full_bindings["runStateSha256"], "fullReleasePhaseRecordsSha256": full_bindings["phaseRecordsSha256"], "realUseBindingSha256": real_binding_hash, "realUsePrepareSha256": real_prepare_hash, "realUseReportSha256": real_hash, "realUseSummarySha256": full_bindings["realUseSummarySha256"], "cleanupSha256": full_bindings["cleanupSha256"], "postCleanupSha256": full_bindings["postCleanupSha256"], "terminalL1Sha256": l1_hash, "terminalL2Sha256": l2_hash, "releaseAuditPointerSha256": digest(entries["evidence/CURRENT-RELEASE-AUDIT.json"]), "releaseAuditArchiveSha256": synthetic_archive_hash, "releaseAuditReportSha256": digest(entries[report_name]), "releaseAuditManifestSha256": digest(entries[audit_manifest_name]), "releaseAuditValidationSha256": digest(entries[audit_validation_name])}
+    final = {"schemaVersion": 1, "contract": "devfleet-internal-final-acceptance-v1", "status": "PASS", "releaseEligible": True, "internalPromotionAllowed": True, "publicPromotionAllowed": False, "publicPublisherTrust": False, "candidate": {**tuple_value, "artifacts": {row["name"]: {"sha256": row["sha256"], "bytes": row["bytes"]} for row in release_record["artifacts"]}, "authenticode": {"status": "PASS", "signatureStatus": "Valid", "signerThumbprint": "DE42CD7369A01E9357BDA13597C0173E5E703E9D", "signerSubject": "CN=DevFleet Private Personal Code Signing", "codeSigningEkuVerified": True, "rsaBits": 3072, "exactCertificateMatch": True, "privateKeyExported": False}}, "proofRunIds": proof_ids, "fullReleaseRunId": run_id, "standardTokenRunId": standard_id, "releaseAuditRunId": audit_id, "bindings": binding_values, "gates": audit_pointer["gates"], "safety": {"f005Attempted": False, "formatterOnlyAuditCleanupPerformed": False, "f005StructuralRefactoringPerformed": False, "protectedProductionMutated": False, "hostRebooted": False, "amdRadeonTouched": False, "biosUefiTouched": False, "mulattoTechSurfaceTouched": False, "githubPushed": False, "privateSigningKeyExported": False, "ramPressureOverrideUsed": False, "productionUnchanged": True, "disposableLabOnly": True}}
+    put(entries, "evidence/FINAL-ACCEPTANCE.json", final)
+    return entries
 
 
-def _validate_repair3_receipt_hash_binding(binding: dict, artifact_hash: str) -> None:
-    if binding.get('artifactReceiptSha256') != artifact_hash:
-        raise ValueError('generation-4 baseline and signed-output receipt hashes differ')
+def write_archive(entries: dict[str, bytes], path: Path) -> None:
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in entries.items():
+            archive.writestr(name, data)
 
 
-def _validate_repair3_attempts(attempts: object, candidate: dict) -> None:
-    if (not isinstance(attempts, list) or len(attempts) != 1
-            or len([a for a in attempts if a.get('operation') == 'build-sign']) != 0
-            or len({a.get('operation') for a in attempts}) != len(attempts)
-            or attempts[0].get('operation') != 'standard-token'
-            or attempts[0].get('state') != 'TERMINAL'
-            or attempts[0].get('exitCode') != 0
-            or attempts[0].get('classification') != 'PASS_NATIVE_STANDARD_TOKEN'
-            or attempts[0].get('tuple') != candidate
-            or attempts[0].get('certificationCredit') is not False
-            or not isinstance(attempts[0].get('evidence'), list)
-            or not attempts[0]['evidence']):
-        raise ValueError('generation-4 qualification source lacks exact REPAIR-3 standard token')
+def must_fail(entries: dict[str, bytes], mutate, label: str, mode: str = "final") -> None:
+    changed = copy.deepcopy(entries)
+    mutate(changed)
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "synthetic.zip"
+        write_archive(changed, path)
+        try:
+            validate(path, mode)
+        except ValueError:
+            return
+    raise AssertionError(f"negative bundle was accepted: {label}")
 
 
-def load_accepted_baseline(root: Path, expected: dict[str, str], artifacts: dict[str, str],
-                           _pointer: dict | None = None) -> dict[str, str | None]:
-    """Resolve only the original CLEAN or a packaged, immutable adoption receipt."""
-    def strict_baseline_json(path: Path) -> dict:
-        if not path.is_file() or path.is_symlink() or path.stat().st_size > 4_000_000:
-            raise ValueError("accepted baseline evidence is absent, linked, or oversized")
-        def pairs(items):
-            result = {}
-            for key, value in items:
-                if key in result:
-                    raise ValueError("accepted baseline JSON has duplicate keys")
-                result[key] = value
-            return result
-        value = json.loads(path.read_text(encoding="utf-8-sig"), object_pairs_hook=pairs,
-                           parse_constant=lambda _: (_ for _ in ()).throw(ValueError("nonfinite baseline JSON")))
+def main() -> None:
+    # LATEST is the generic current-candidate diagnostic baseline. Historical
+    # source checks have a separate deterministic fixture, independent of the
+    # archive's optional historical pointer and old hard-coded candidate ID.
+    diagnostic_result = validate(ARCHIVE, "diagnostic")
+    assert diagnostic_result.get("status") == "PASS_WITH_BLOCKER"
+    assert diagnostic_result.get("releaseEligible") is False
+    # A pending diagnostic may truthfully have no current proof after rebind.
+    # Compare with its actual pointer; final-mode acceptance remains strict.
+    with zipfile.ZipFile(ARCHIVE) as archive:
+        diagnostic_proof = json.loads(archive.read("evidence/CURRENT-PROOF.json").decode("utf-8-sig"))
+    assert diagnostic_proof.get("outcome") in {"PASS", "NOT_OBSERVED"}
+    assert diagnostic_result.get("proofOutcome") == diagnostic_proof["outcome"]
+    assert diagnostic_result.get("candidateIsCurrent") is True
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        relative = "release-tooling/historical/fixture-proof/proof-start.json"
+        historical_root = (root / relative).parent
+        historical_root.mkdir(parents=True)
+        source_map = {"proofScriptSha256": "run-exact-candidate-proof.ps1", "invokeRealProductPhaseSha256": "Invoke-RealProductPhase.psm1", "invokeWpfUiAutomationSha256": "Invoke-WpfUiAutomation.ps1"}
+        provenance = {}
+        for key, name in source_map.items():
+            content = name.encode()
+            (historical_root / name).write_bytes(content)
+            provenance[key] = digest(content)
+        (root / relative).write_text(json.dumps({"provenance": provenance}), encoding="utf-8")
+        current = {"proofStartHistoricalPath": relative}
+        validate_historical_proof_sources(root, current)
+        source_path = historical_root / "run-exact-candidate-proof.ps1"
+        original = source_path.read_bytes()
+        for mutation in ("missing", "wrong"):
+            if mutation == "missing":
+                source_path.unlink()
+            else:
+                source_path.write_bytes(b"wrong historical bytes")
+            try:
+                validate_historical_proof_sources(root, current)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"{mutation} historical source was accepted")
+            source_path.write_bytes(original)
+    entries = final_entries()
+    full_state = read_json(entries, "evidence/current-fullrelease/run-state.json")
+    full_run_id = str(full_state["runId"])
+    terminal_l1 = read_json(entries, "evidence/current-fullrelease/l1-terminal-state.json")
+    terminal_l2 = read_json(entries, "evidence/current-fullrelease/l2-terminal-state.json")
+    candidate_tuple = {key: str(full_state["candidateHashes"][key]) for key in ("repositoryHead", "candidateCommit", "shippingInputIdentity", "releaseFingerprintId", "toolingFingerprintId")}
+    nested_validation_cases = 3
+    nested_symlink_skipped = []
+    with tempfile.TemporaryDirectory() as nested_directory:
+        nested_root = Path(nested_directory)
+        for name in ("nested-l2-terminal-observation.json",):
+            (nested_root / name).write_bytes(entries[f"evidence/current-fullrelease/{name}"])
+        _validate_nested_l2_terminal(nested_root, terminal_l2, terminal_l1, candidate_tuple, full_run_id)
+        legacy_l2 = {"expectedName": "DevFleet-E2E-Linux-01", "status": "ABSENT", "present": False, "timestampUtc": "2026-08-30T00:00:01Z", "verificationMethod": "Get-VM -Name exact returned no VM"}
+        try:
+            _validate_nested_l2_terminal(nested_root, legacy_l2, terminal_l1, candidate_tuple, full_run_id)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("host-only L2 absence passed the nested terminal validator")
+        nested_path = nested_root / "nested-l2-terminal-observation.json"
+        valid_nested_bytes = nested_path.read_bytes()
+        valid_nested = json.loads(valid_nested_bytes)
+        for label, field, bad_value, message in (
+            ("boolean exact-match count", "exactMatchCount", False, "zero exact matches"),
+            ("boolean inventory count", "inventoryCount", True, "inventory completeness"),
+        ):
+            bad_nested = {**valid_nested, field: bad_value}
+            bad_bytes = json.dumps(bad_nested).encode()
+            nested_path.write_bytes(bad_bytes)
+            bad_terminal = {**terminal_l2, "sourceEvidenceSha256": digest(bad_bytes)}
+            try:
+                _validate_nested_l2_terminal(nested_root, bad_terminal, terminal_l1, candidate_tuple, full_run_id)
+            except ValueError as exc:
+                if message not in str(exc):
+                    raise AssertionError(f"{label} rejected for the wrong reason: {exc}") from exc
+            else:
+                raise AssertionError(f"{label} was accepted as exact nested terminal evidence")
+        backend_verification = "Multipass CLI absent; complete read-only inventories from every supported in-L1 virtualization backend"
+        duplicate_backend = {
+            **valid_nested,
+            "verification": backend_verification,
+            "inventoryCount": 2,
+            "backendInventories": [
+                {"provider": "Hyper-V", "status": "PASS", "names": ["foreign-instance", "foreign-instance"], "verification": "bounded Hyper-V inventory"},
+                {"provider": "VirtualBox", "status": "PASS", "names": [], "verification": "bounded VirtualBox inventory"},
+            ],
+        }
+        duplicate_bytes = json.dumps(duplicate_backend).encode()
+        nested_path.write_bytes(duplicate_bytes)
+        duplicate_terminal = {**terminal_l2, "verificationMethod": backend_verification, "sourceEvidenceSha256": digest(duplicate_bytes)}
+        try:
+            _validate_nested_l2_terminal(nested_root, duplicate_terminal, terminal_l1, candidate_tuple, full_run_id)
+        except ValueError as exc:
+            if "duplicate instance name" not in str(exc):
+                raise AssertionError(f"duplicate backend names were rejected for the wrong reason: {exc}") from exc
+        else:
+            raise AssertionError("duplicate nested backend names were accepted as complete absence evidence")
+        nested_validation_cases += 1
+        nested_path.write_bytes(valid_nested_bytes)
+        with tempfile.TemporaryDirectory() as external_directory:
+            outside = Path(external_directory) / "outside-nested-evidence.json"
+            outside.write_bytes(valid_nested_bytes)
+            nested_path.unlink()
+            try:
+                nested_path.symlink_to(outside)
+            except (OSError, NotImplementedError) as exc:
+                nested_path.write_bytes(valid_nested_bytes)
+                nested_symlink_skipped.append(f"source symlink rejection ({type(exc).__name__})")
+            else:
+                try:
+                    try:
+                        _validate_nested_l2_terminal(nested_root, terminal_l2, terminal_l1, candidate_tuple, full_run_id)
+                    except ValueError as exc:
+                        if "reparse or symlink escape" not in str(exc):
+                            raise AssertionError(f"source symlink rejected for the wrong reason: {exc}") from exc
+                    else:
+                        raise AssertionError("nested source symlink outside the FullRelease run root was accepted")
+                    nested_validation_cases += 1
+                finally:
+                    nested_path.unlink(missing_ok=True)
+                    nested_path.write_bytes(valid_nested_bytes)
+    with tempfile.TemporaryDirectory() as directory:
+        good = Path(directory) / "good.zip"
+        write_archive(entries, good)
+        validate(good, "final")
+    must_fail(
+        entries,
+        lambda e: put(
+            e,
+            "evidence/current-fullrelease/run-state.json",
+            {**read_json(e, "evidence/current-fullrelease/run-state.json"), "finalStatus": "BLOCKED"},
+        ),
+        "incomplete FullRelease remains pending and cannot validate",
+    )
+    must_fail(entries, lambda e: [e.update({f"evidence/proof-runs/e2e-proof2-synthetic/proof-start.json": json.dumps({**read_json(e, "evidence/proof-runs/e2e-proof2-synthetic/proof-start.json"), "provenance": {**read_json(e, "evidence/proof-runs/e2e-proof2-synthetic/proof-start.json")["provenance"], "transactionId": "transaction-1", "checkpointLineageId": "lineage-1"}}).encode()})], "reused transaction/lineage")
+    must_fail(entries, lambda e: [e.update({"evidence/proof-runs/e2e-proof2-synthetic/proof-final.json": json.dumps({"runId": "wrong-run", "status": "PASS"}).encode()})], "mixed RunId")
+    must_fail(entries, lambda e: [e.update({"evidence/current-fullrelease/post-cleanup-finalization.json": json.dumps({"status": "PASS", "runId": "FullRelease-synthetic-current", "cleanupConsumed": True, "reconcileAfterCleanup": True}).encode()})], "absent liveChecks")
+    must_fail(entries, lambda e: [e.update({"evidence/current-fullrelease/post-cleanup-finalization.json": json.dumps({**read_json(e, "evidence/current-fullrelease/post-cleanup-finalization.json"), "liveChecks": {"l1ExactOff": False, "l2ExactAbsent": True}}).encode()})], "false liveChecks")
+    must_fail(entries, lambda e: [e.update({"evidence/current-fullrelease/final-cleanup.json": b"{\"status\":\"tampered\"}"})], "cleanup hash mismatch")
+    must_fail(entries, lambda e: [e.update({"evidence/l1-terminal-state.json": b"{\"state\":\"Running\"}"})], "terminal hash mismatch")
+    must_fail(entries, lambda e: e.pop("evidence/FINAL-ACCEPTANCE.json"), "omitted FINAL-ACCEPTANCE")
+    raw_path = read_json(entries, "evidence/CURRENT-STANDARD-TOKEN.json")["rawReportPath"]
+    must_fail(entries, lambda e: e.update({raw_path: e[raw_path] + b"tamper\n"}), "tampered immutable standard-token raw report")
+    must_fail(entries, lambda e: put(e, "evidence/FINAL-ACCEPTANCE.json", {**read_json(e, "evidence/FINAL-ACCEPTANCE.json"), "fullReleaseRunId": "FullRelease-stale"}), "stale FINAL-ACCEPTANCE tuple/lineage")
+    audit_report_path = read_json(entries, "evidence/CURRENT-RELEASE-AUDIT.json")["evidence"]["report"]["bundlePath"]
+    must_fail(entries, lambda e: e.update({audit_report_path: e[audit_report_path] + b"\n"}), "tampered immutable release-audit report")
+    pre_entries = copy.deepcopy(entries)
+    pre_entries.pop("evidence/FINAL-ACCEPTANCE.json")
+    pre_entries.pop("evidence/CURRENT-RELEASE-AUDIT.json")
+    for name in list(pre_entries):
+        if name.startswith("evidence/release-audits/"):
+            del pre_entries[name]
+    with tempfile.TemporaryDirectory() as directory:
+        pre_good = Path(directory) / "pre-good.zip"
+        write_archive(pre_entries, pre_good)
+        pre_result = validate(pre_good, "pre-acceptance")
+        assert pre_result["status"] == "PASS" and pre_result["releaseEligible"] is False
+    must_fail(pre_entries, lambda e: e.update({"evidence/FINAL-ACCEPTANCE.json": entries["evidence/FINAL-ACCEPTANCE.json"]}), "pre-acceptance FINAL cycle", "pre-acceptance")
+    print(json.dumps({"status": "PASS", "cases": 13 + nested_validation_cases, "skipped": nested_symlink_skipped}))
+
+
+if __name__ == "__main__":
+    main()
+
+```
+
+
+## FILE: tools/test_validate_release_bundle_generation5.py
+
+SHA256: b3cc6cd0a57807586655b7dc13de0ae9a0d98d72a433a96352634461f1fb9471 | Bytes: 6130 | Git mode: 100644
+
+```
+"""VM-free generation-5 validator checks for the immutable gen4 chain."""
+import copy
+import json
+import unittest
+
+from test_baseline_generation4 import Generation4Tests
+from validate_release_bundle import load_accepted_baseline, sha
+
+
+class Generation5ValidatorTests(unittest.TestCase):
+    def setUp(self):
+        self.case = Generation4Tests(methodName='runTest')
+        self.case.setUp()
+        self.addCleanup(self.case.doCleanups)
+        self.root = self.case.root
+        self.case.bind()
+        pointer_path = self.root / 'evidence/baselines/CURRENT.json'
+        self.previous_pointer = json.loads(pointer_path.read_text(encoding='utf-8'))
+        previous_bytes = pointer_path.read_bytes()
+        previous_hash = sha(pointer_path)
+        (self.root / 'evidence/baselines/history' / (previous_hash + '.json')).write_bytes(previous_bytes)
+        self.old = self.case.v4_tuple
+        self.new = {**self.old, 'repositoryHead': 'e' * 40,
+                    'toolingFingerprintId': '1' * 64}
+        sources = self.root / 'evidence/baselines/sources'
+        old_receipt = json.loads(
+            (self.root / 'evidence/baselines/receipts' /
+             self.previous_pointer['receiptFile']).read_text(encoding='utf-8'))
+        old_ledger_path = sources / (old_receipt['successorLedgerSha256'] + '.json')
+        ledger = json.loads(old_ledger_path.read_text(encoding='utf-8'))
+        ledger['policyId'] = 'DF-FRESH-CERTIFICATION-20260926-R2-REPAIR-5'
+        ledger['attempts'] = [{**ledger['attempts'][0], 'tuple': self.new,
+                              'operation': 'standard-token', 'state': 'TERMINAL',
+                              'exitCode': 0, 'classification': 'PASS_NATIVE_STANDARD_TOKEN',
+                              'certificationCredit': False, 'evidence': ['gen5-proof.json']}]
+        ledger_path = self.root / 'gen5-ledger.json'
+        ledger_path.write_text(json.dumps(ledger), encoding='utf-8')
+        inventory_path = sources / (old_receipt['nativeInventorySha256'] + '.json')
+        ledger_hash = sha(ledger_path)
+        inventory_hash = sha(inventory_path)
+        sources.joinpath(ledger_hash + '.json').write_bytes(ledger_path.read_bytes())
+        receipt_id = '5' * 32
+        receipt = {
+            'schemaVersion': 5, 'contract': 'devfleet-baseline-rebind-receipt-v5',
+            'receiptId': receipt_id, 'status': 'REBOUND',
+            'certificationCredit': False, 'secretValuesRecorded': False,
+            'previousPointerSha256': previous_hash,
+            'previousReceiptSha256': self.previous_pointer['receiptSha256'],
+            'replacement': self.previous_pointer['checkpoint'],
+            'previousCandidate': self.old, 'candidate': self.new,
+            'approvalSha256': 'a' * 64,
+            'approval': {
+                'schemaVersion': 4, 'contract': 'devfleet-baseline-rebind-approval-v4',
+                'decision': 'APPROVE', 'approvedBy': 'ACCOUNT_OWNER',
+                'shippingChangeApproved': False, 'previousCandidate': self.old,
+                'candidate': self.new, 'replacement': self.previous_pointer['checkpoint'],
+                'previousReceiptSha256': self.previous_pointer['receiptSha256'],
+                'sourceSha256': 'a' * 64},
+            'finalL1': {'name': 'DevFleet-E2E-Win11-01',
+                        'id': '84b7d8b8-ee6c-4085-aa29-4b0adc316de2', 'state': 'Off'},
+            'successorPolicyId': 'DF-FRESH-CERTIFICATION-20260926-R2-REPAIR-5',
+            'successorLedgerSha256': ledger_hash,
+            'nativeInventorySha256': inventory_hash,
+        }
+        receipt_path = self.root / 'evidence/baselines/receipts' / (receipt_id + '.json')
+        receipt_path.write_text(json.dumps(receipt), encoding='utf-8')
+        pointer = {'schemaVersion': 5, 'contract': 'devfleet-accepted-baseline-v5',
+                   'generation': 5, 'status': 'ACCEPTED',
+                   'receiptFile': receipt_id + '.json', 'receiptSha256': sha(receipt_path),
+                   'previousPointerSha256': previous_hash,
+                   'checkpoint': self.previous_pointer['checkpoint']}
+        pointer_path.write_text(json.dumps(pointer), encoding='utf-8')
+
+    def validate(self):
+        expected = {'repositoryHead': self.new['repositoryHead'],
+                    'candidateCommit': self.new['candidateBuildCommit'],
+                    'shippingInputIdentity': self.new['shippingInputIdentity'],
+                    'releaseFingerprintId': self.new['releaseFingerprintId'],
+                    'toolingFingerprintId': self.new['toolingFingerprintId']}
+        return load_accepted_baseline(self.root, expected, {'exe': self.new['candidateSha256']})
+
+    def test_exact_gen5_chain_is_accepted(self):
+        result = self.validate()
+        self.assertTrue(result['receiptSha256'])
+        self.assertEqual(result['name'], 'DevFleet-E2E-CLEAN-R2')
+
+    def test_gen5_requires_owner_schema_and_single_terminal_attempt(self):
+        receipt_path = self.root / 'evidence/baselines/receipts' / ('5' * 32 + '.json')
+        receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
+        receipt['approval']['schemaVersion'] = 2
+        receipt_path.write_text(json.dumps(receipt), encoding='utf-8')
+        with self.assertRaises(ValueError):
+            self.validate()
+        receipt['approval']['schemaVersion'] = 4
+        receipt_path.write_text(json.dumps(receipt), encoding='utf-8')
+        pointer = json.loads((self.root / 'evidence/baselines/CURRENT.json').read_text(encoding='utf-8'))
+        pointer['receiptSha256'] = sha(receipt_path)
+        (self.root / 'evidence/baselines/CURRENT.json').write_text(json.dumps(pointer), encoding='utf-8')
+        source_hash = receipt['successorLedgerSha256']
+        source = self.root / 'evidence/baselines/sources' / (source_hash + '.json')
+        ledger = json.loads(source.read_text(encoding='utf-8'))
+        ledger['attempts'].append(copy.deepcopy(ledger['attempts'][0]))
+        source.write_text(json.dumps(ledger), encoding='utf-8')
+        with self.assertRaises(ValueError):
+            self.validate()
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+```
+
+
+## FILE: tools/validate_audit_coherence.py
+
+SHA256: 13f4bfa1db5cedd99da67b211c0d18e3330d19e1291e8e027aa4152aff812b90 | Bytes: 18596 | Git mode: 100644
+
+```
+"""Validate current release-tooling authorities without rewriting identity."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import subprocess
+from pathlib import Path
+from typing import Any, Iterable
+
+CURRENT_AUTHORITIES = (
+    "AUDIT-MANIFEST.json", "CURRENT-CANDIDATE.json", "finalization-state.json",
+    "outputs/final-artifact-hashes.json", "evidence/CURRENT-STATUS.json",
+    "evidence/CURRENT-GATES.json", "evidence/CURRENT-PROOF.json",
+    "evidence/FULLRELEASE-SUMMARY.json", "audit/CURRENT-HANDOFF.json",
+    "evidence/CURRENT-HANDOFF.json",
+)
+REQUIRED_SOURCE_PROOF = "release-tooling/proof-entrypoints/run-exact-candidate-proof.ps1"
+FAILED_ATTEMPT_SNAPSHOT = "audit/luna-high-failed-attempt-freeze-20260831T002237512571Z.json"
+FAILED_ATTEMPT_SNAPSHOT_SHA256 = "ac37997945b6fa5ae9326b083ee730494b2c0c2e60d4809e7b49fc9707c0caac"
+FAILED_ATTEMPT_BLOCKER = "REPLACEMENT_CANDIDATE_BINDING_MISMATCH"
+
+
+def load(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def walk(value: Any, location: str) -> Iterable[tuple[str, dict[str, Any]]]:
+    if isinstance(value, dict):
+        yield location, value
+        for key, child in value.items():
+            yield from walk(child, f"{location}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from walk(child, f"{location}[{index}]")
+
+
+def bool_value(value: Any, location: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{location} must be a JSON boolean")
+    return value
+
+
+def git_head(root: Path) -> str:
+    try:
+        return subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+
+
+def validate_failed_attempt_authority(root: Path, state: dict[str, Any]) -> dict[str, Any] | None:
+    snapshot_path = root / Path(*FAILED_ATTEMPT_SNAPSHOT.split("/"))
+    if not snapshot_path.is_file():
+        return None
+    if sha256(snapshot_path) != FAILED_ATTEMPT_SNAPSHOT_SHA256:
+        raise ValueError("failed replacement-attempt snapshot is missing or hash-mismatched")
+    snapshot = load(snapshot_path)
+    if snapshot.get("immutableSnapshot") is not True or snapshot.get("freezeType") != "LUNA_HIGH_FAILED_ATTEMPT_EVIDENCE_FREEZE":
+        raise ValueError("failed replacement-attempt snapshot is not immutable evidence")
+    shipping = snapshot.get("shippingIdentity") if isinstance(snapshot.get("shippingIdentity"), dict) else {}
+    archive = shipping.get("gitArchive") if isinstance(shipping.get("gitArchive"), dict) else {}
+    live = shipping.get("buildTimeLive") if isinstance(shipping.get("buildTimeLive"), dict) else {}
+    if archive.get("rowCount") != 730 or live.get("rowCount") != 730 or archive.get("identity") != "6e0bac4b4eebc83cdcd9eddda2008607ba15c8835e5c72a931792f5b83c653f4" or live.get("identity") != "3a65fd54d70fe05565ac3a32f73100ca2c81a77a4008feb361f99f229f025f8a":
+        raise ValueError("failed replacement-attempt snapshot shipping identity is invalid")
+    diff = shipping.get("normalizedRowDiff") if isinstance(shipping.get("normalizedRowDiff"), dict) else {}
+    rows = diff.get("rows")
+    if diff.get("rowCount") != 28 or diff.get("crlfOnlyRows") != 25 or diff.get("exactChangedRows") != 3 or not isinstance(rows, list) or len(rows) != 28:
+        raise ValueError("failed replacement-attempt snapshot row partition is invalid")
+    generated = {"source/CHECKSUMS.sha256", "installer-source/DevFleet.Setup/PayloadManifest.cs", "installer-source/INSTALLER-BUILD-MANIFEST.json"}
+    if {f"{r.get('root')}/{r.get('path')}" for r in rows if isinstance(r, dict) and r.get("comparison") == "CONTENT_OR_GENERATED_CHANGE"} != generated or sum(1 for r in rows if isinstance(r, dict) and r.get("comparison") == "CRLF_ONLY_NORMALIZED_EQUAL") != 25:
+        raise ValueError("failed replacement-attempt snapshot generated/CRLF partition is invalid")
+    candidate_commit = str(
+        state.get("candidate_git_commit")
+        or state.get("candidateGitCommit")
+        or state.get("candidateCommit")
+        or ""
+    ).lower()
+    failed_attempt_bound = (
+        candidate_commit == "21752fc0e50978183322204c523b40947d073aa0"
+        or str(state.get("blocker_code") or "") == FAILED_ATTEMPT_BLOCKER
+    )
+    if not failed_attempt_bound:
+        # The immutable failed-attempt snapshot is retained for historical
+        # review.  Once current authority has advanced to another candidate,
+        # it must not force the current state back to the old blocked tuple.
+        return {
+            "historicalFailedAttempt": True,
+            "historicalFailedAttemptPath": FAILED_ATTEMPT_SNAPSHOT,
+            "releaseEligible": False,
+        }
+    attempt = state.get("failed_replacement_attempt")
+    if not isinstance(attempt, dict) or attempt.get("snapshotPath") != FAILED_ATTEMPT_SNAPSHOT or attempt.get("snapshotSha256") != FAILED_ATTEMPT_SNAPSHOT_SHA256 or attempt.get("blockerCode") != FAILED_ATTEMPT_BLOCKER or attempt.get("artifactTupleValid") is not True or attempt.get("artifactTupleMatchesCandidate") is not False:
+        raise ValueError("current authority does not bind the failed replacement attempt")
+    if (state.get("candidate_is_current"), state.get("source_changed_since_candidate"), state.get("rebuild_required"), state.get("artifact_tuple_matches_candidate"), state.get("full_release_passed"), state.get("internal_promotion_allowed"), state.get("public_promotion_allowed")) != (False, True, True, False, False, False, False):
+        raise ValueError("failed replacement-attempt authority flags are not truthful")
+    if state.get("status") != "BLOCKED — USER ACTION REQUIRED" or state.get("blocker_code") != FAILED_ATTEMPT_BLOCKER:
+        raise ValueError("failed replacement-attempt status is not user-action blocked")
+    return {"status": "PASS_WITH_BLOCKER", "blockerCode": FAILED_ATTEMPT_BLOCKER, "releaseEligible": False}
+
+
+def validate(root: Path) -> dict[str, Any]:
+    root = root.resolve()
+    state_path = root / "finalization-state.json"
+    manifest_path = root / "outputs" / "final-artifact-hashes.json"
+    if not state_path.is_file() or not manifest_path.is_file():
+        raise ValueError("Current finalization state and artifact manifest are required")
+    state, manifest = load(state_path), load(manifest_path)
+    if not isinstance(state, dict) or not isinstance(manifest, dict):
+        raise ValueError("Current state and artifact manifest must be JSON objects")
+    failed_result = validate_failed_attempt_authority(root, state)
+    live_head = git_head(root)
+    expected_head = live_head or str(state.get("repository_head") or manifest.get("repositoryHead") or "")
+    candidate = str(state.get("candidate_git_commit") or state.get("candidateGitCommit") or manifest.get("candidateGitCommit") or "")
+    release = str(state.get("releaseFingerprintId") or manifest.get("releaseFingerprintId") or "")
+    tooling = str(state.get("toolingFingerprintId") or manifest.get("toolingFingerprintId") or "")
+    candidate_shipping = str(state.get("shipping_input_identity") or state.get("shippingInputIdentity") or manifest.get("shippingInputIdentity") or "")
+    # A bundle may expose both the immutable candidate shipping identity in
+    # current state/artifact metadata and the freshly hashed live identity in
+    # AUDIT-MANIFEST.  Accept exactly this two-value split; every other value
+    # remains a fail-closed contradiction.
+    audit_manifest_path = root / "AUDIT-MANIFEST.json"
+    audit_manifest = load(audit_manifest_path) if audit_manifest_path.is_file() else {}
+    live_shipping = str(audit_manifest.get("shippingInputIdentity") or candidate_shipping)
+    working_shipping = str(state.get("working_tree_shipping_input_identity") or "")
+    working_tooling = str(state.get("working_tree_tooling_fingerprint_id") or "")
+    if len(expected_head) != 40 or len(candidate) != 40:
+        raise ValueError("Current repository HEAD or signed candidate commit is missing/malformed")
+    if any(len(value) != 64 for value in (release, tooling, candidate_shipping, live_shipping)):
+        raise ValueError("Current release/tooling/shipping identity tuple is incomplete")
+    if bool(working_shipping) != bool(working_tooling) or any(len(value) != 64 for value in (working_shipping, working_tooling) if value):
+        raise ValueError("Working-tree shipping/tooling identity tuple is incomplete")
+
+    def check_working_tree(value: dict[str, Any], location: str) -> None:
+        if not working_shipping:
+            return
+        observed_shipping = str(value.get("shippingInputIdentity") or value.get("shipping_input_identity") or "")
+        observed_tooling = str(value.get("toolingFingerprintId") or value.get("tooling_fingerprint_id") or "")
+        canonicalized = str(value.get("canonicalizedShippingInputIdentity") or "")
+        if observed_shipping and observed_shipping != working_shipping:
+            raise ValueError(f"{location}.shippingInputIdentity disagrees with the working-tree tuple")
+        if observed_tooling and observed_tooling != working_tooling:
+            raise ValueError(f"{location}.toolingFingerprintId disagrees with the working-tree tuple")
+        if canonicalized and canonicalized != live_shipping:
+            raise ValueError(f"{location}.canonicalizedShippingInputIdentity disagrees with the bundled live identity")
+
+    def check_identity(value: dict[str, Any], location: str, candidate_context: bool = False) -> None:
+        for key in ("repositoryHead", "repository_head", "gitCommit", "git_commit"):
+            if key in value:
+                expected = candidate if candidate_context and key in ("gitCommit", "git_commit") else expected_head
+                if str(value[key]) != expected:
+                    raise ValueError(f"{location}.{key} disagrees with its bound Git identity")
+        for key in ("candidateGitCommit", "candidate_git_commit", "candidateCommit", "candidate_commit"):
+            if key in value and str(value[key]) != candidate:
+                raise ValueError(f"{location}.{key} disagrees with signed candidate commit")
+        for key in ("releaseFingerprintId", "toolingFingerprintId"):
+            expected = release if key == "releaseFingerprintId" else tooling
+            if key in value and str(value[key]) != expected:
+                raise ValueError(f"{location}.{key} disagrees with current identity tuple")
+        for key in ("shippingInputIdentity", "shipping_input_identity"):
+            if key in value and str(value[key]) not in {candidate_shipping, live_shipping}:
+                raise ValueError(f"{location}.{key} disagrees with current shipping identity")
+
+    check_identity(state, "finalization-state.json")
+    check_identity(manifest, "outputs/final-artifact-hashes.json")
+    if str(state.get("repository_head") or "") != expected_head:
+        raise ValueError("finalization-state.json.repository_head is required")
+    if str(manifest.get("repositoryHead") or "") != expected_head:
+        raise ValueError("final-artifact-hashes.json.repositoryHead is required")
+    if str(manifest.get("candidateGitCommit") or "") != candidate:
+        raise ValueError("final-artifact-hashes.json.candidateGitCommit is required")
+
+    checked: list[Path] = [state_path, manifest_path]
+    for relative in CURRENT_AUTHORITIES:
+        path = root / relative
+        if not path.is_file() or path.resolve() in {p.resolve() for p in checked}:
+            continue
+        value = load(path)
+        # A preserved interrupted proof/old FullRelease record is useful
+        # diagnostic evidence, but it is not a current authority.  The
+        # builder marks these records diagnosticOnly so they cannot poison the
+        # current identity tuple or masquerade as a release result.
+        if isinstance(value, dict) and (value.get("historical") is True or value.get("diagnosticOnly") is True or value.get("historicalEvidenceOnly") is True):
+            continue
         if not isinstance(value, dict):
-            raise ValueError("accepted baseline JSON root is invalid")
-        return value
-    old_id = "19865b76-4c3a-44f7-ba39-841e9d3c40c9"
-    pointer_path = root / "evidence/baselines/CURRENT.json"
-    if not pointer_path.exists():
-        return {"id": old_id, "name": "DevFleet-E2E-CLEAN", "receiptSha256": None}
-    pointer = _pointer if _pointer is not None else strict_baseline_json(pointer_path)
-    if pointer.get('generation') == 4:
-        if (pointer.get('schemaVersion') != 4
-                or pointer.get('contract') != 'devfleet-accepted-baseline-v4'
-                or pointer.get('status') != 'ACCEPTED'):
-            raise ValueError('generation-4 baseline pointer contract is invalid')
-        old_hash, name = pointer.get('previousPointerSha256', ''), pointer.get('receiptFile', '')
-        if not re.fullmatch(r'[0-9a-f]{64}', old_hash) or not re.fullmatch(r'[0-9a-f]{32}\.json', name):
-            raise ValueError('generation-4 baseline lineage reference is invalid')
-        history_path = root / 'evidence/baselines/history' / (old_hash + '.json')
-        receipt_path = root / 'evidence/baselines/receipts' / name
-        if (not history_path.is_file() or history_path.is_symlink() or sha(history_path) != old_hash
-                or not receipt_path.is_file() or receipt_path.is_symlink()
-                or sha(receipt_path) != pointer.get('receiptSha256')):
-            raise ValueError('generation-4 baseline chain is absent or hash mismatched')
-        previous = strict_baseline_json(history_path)
-        if previous.get('generation') != 3:
-            raise ValueError('generation-4 predecessor is not generation 3')
-        binding = strict_baseline_json(receipt_path)
-        old_tuple = binding.get('previousCandidate') or {}
-        new_tuple = binding.get('candidate') or {}
-        prior_expected = {'repositoryHead': old_tuple.get('repositoryHead'),
-                          'candidateCommit': old_tuple.get('candidateBuildCommit'),
-                          'shippingInputIdentity': old_tuple.get('shippingInputIdentity'),
-                          'releaseFingerprintId': old_tuple.get('releaseFingerprintId'),
-                          'toolingFingerprintId': old_tuple.get('toolingFingerprintId')}
-        prior = load_accepted_baseline(root, prior_expected,
-                                       {'exe': old_tuple.get('candidateSha256')}, previous)
-        actual = {'repositoryHead': expected['repositoryHead'],
-                  'candidateBuildCommit': expected['candidateCommit'],
-                  'shippingInputIdentity': expected['shippingInputIdentity'],
-                  'releaseFingerprintId': expected['releaseFingerprintId'],
-                  'toolingFingerprintId': expected['toolingFingerprintId'],
-                  'candidateSha256': artifacts['exe']}
-        tuple_keys = ('repositoryHead', 'candidateBuildCommit', 'shippingInputIdentity',
-                      'releaseFingerprintId', 'toolingFingerprintId', 'candidateSha256')
-        if (binding.get('schemaVersion') != 4
-                or binding.get('contract') != 'devfleet-baseline-rebind-receipt-v4'
-                or binding.get('status') != 'REBOUND'
-                or binding.get('certificationCredit') is not False
-                or binding.get('secretValuesRecorded') is not False
-                or not isinstance(binding.get('receiptId'), str)
-                or binding['receiptId'] + '.json' != name
-                or binding.get('previousPointerSha256') != old_hash
-                or binding.get('previousReceiptSha256') != prior['receiptSha256']
-                or binding.get('replacement') != pointer.get('checkpoint')
-                or binding.get('replacement') != previous.get('checkpoint')
-                or new_tuple != actual
-                or any(old_tuple.get(key) == new_tuple.get(key) for key in tuple_keys)):
-            raise ValueError('generation-4 receipt or signed material tuple differs')
-        approval = binding.get('approval') or {}
-        final_l1 = {'name': 'DevFleet-E2E-Win11-01',
-                    'id': '84b7d8b8-ee6c-4085-aa29-4b0adc316de2', 'state': 'Off'}
-        if (approval.get('schemaVersion') != 3
-                or approval.get('contract') != 'devfleet-baseline-rebind-approval-v3'
-                or approval.get('decision') != 'APPROVE'
-                or approval.get('approvedBy') != 'ACCOUNT_OWNER'
-                or approval.get('shippingChangeApproved') is not True
-                or approval.get('previousCandidate') != old_tuple
-                or approval.get('candidate') != new_tuple
-                or approval.get('replacement') != pointer['checkpoint']
-                or approval.get('previousReceiptSha256') != prior['receiptSha256']
-                or approval.get('sourceSha256') != binding.get('approvalSha256')
-                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('approvalSha256', '')))
-                or binding.get('finalL1') != final_l1
-                or binding.get('successorPolicyId') != 'DF-FRESH-CERTIFICATION-20260926-R2-REPAIR-3'
-                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('successorLedgerSha256', '')))
-                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('nativeInventorySha256', '')))):
-            raise ValueError('generation-4 authorization or terminal lab differs')
-        sources = root / 'evidence/baselines/sources'
-        ledger_hash, inventory_hash = binding['successorLedgerSha256'], binding['nativeInventorySha256']
-        ledger_path, inventory_path = sources / (ledger_hash + '.json'), sources / (inventory_hash + '.json')
-        if (not ledger_path.is_file() or ledger_path.is_symlink() or sha(ledger_path) != ledger_hash
-                or not inventory_path.is_file() or inventory_path.is_symlink()
-                or sha(inventory_path) != inventory_hash):
-            raise ValueError('generation-4 qualification or inventory source is absent or altered')
-        ledger, inventory = strict_baseline_json(ledger_path), strict_baseline_json(inventory_path)
-        attempts = ledger.get('attempts')
-        limits = {'standard-token': 1, 'diagnostic': 1, 'laptop-proof': 1,
-                  'desktop-proof': 1, 'fullrelease': 1, 'maintenance': 0, 'build-sign': 0}
-        artifact_binding = ledger.get('artifactReceipt') or {}
-        artifact_hash = str(artifact_binding.get('sha256', '')).lower()
-        _validate_repair3_receipt_hash_binding(binding, artifact_hash)
-        artifact_receipt = _load_packaged_repair3_receipt(sources, artifact_hash)
-        _validate_repair3_signed_output_receipt(artifact_receipt, new_tuple)
-        if (ledger.get('policyId') != binding['successorPolicyId']
-                or ledger.get('limits') != limits
-                or ledger.get('activeRunId') is not None):
-            raise ValueError('generation-4 qualification source lacks exact REPAIR-3 standard token')
-        _validate_repair3_attempts(attempts, new_tuple)
-        snapshots = inventory.get('snapshots')
-        exact = [row for row in snapshots if isinstance(row, dict)
-                 and row.get('name') == 'DevFleet-E2E-CLEAN-R2'] if isinstance(snapshots, list) else []
-        if (inventory.get('scope') != 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
-                or inventory.get('vm') != final_l1
-                or len(exact) != 1 or exact[0].get('id') != pointer['checkpoint']['id']
-                or exact[0].get('vmId') != final_l1['id']
-                or exact[0].get('parentSnapshotId') != '19865b76-4c3a-44f7-ba39-841e9d3c40c9'):
-            raise ValueError('generation-4 inventory does not prove accepted checkpoint and L1 Off')
-        return {'id': prior['id'], 'name': prior['name'],
-                'receiptSha256': pointer['receiptSha256']}
-    if pointer.get('generation') == 3:
-        if (pointer.get('schemaVersion') != 3
-                or pointer.get('contract') != 'devfleet-accepted-baseline-v3'
-                or pointer.get('status') != 'ACCEPTED'):
-            raise ValueError('generation-3 baseline pointer contract is invalid')
-        old_hash = pointer.get('previousPointerSha256', '')
-        name = pointer.get('receiptFile', '')
-        if not re.fullmatch(r'[0-9a-f]{64}', old_hash) or not re.fullmatch(r'[0-9a-f]{32}\.json', name):
-            raise ValueError('generation-3 baseline lineage reference is invalid')
-        history_path = root / 'evidence/baselines/history' / (old_hash + '.json')
-        receipt_path = root / 'evidence/baselines/receipts' / name
-        if (not history_path.is_file() or sha(history_path) != old_hash
-                or not receipt_path.is_file() or sha(receipt_path) != pointer.get('receiptSha256')):
-            raise ValueError('generation-3 baseline chain is absent or hash mismatched')
-        previous = strict_baseline_json(history_path)
-        if previous.get('generation') != 2:
-            raise ValueError('generation-3 predecessor is not generation 2')
-        binding = strict_baseline_json(receipt_path)
-        old_tuple = binding.get('previousCandidate') or {}
-        new_tuple = binding.get('candidate') or {}
-        old_expected = {'repositoryHead': old_tuple.get('repositoryHead'),
-                        'candidateCommit': old_tuple.get('candidateBuildCommit'),
-                        'shippingInputIdentity': old_tuple.get('shippingInputIdentity'),
-                        'releaseFingerprintId': old_tuple.get('releaseFingerprintId'),
-                        'toolingFingerprintId': old_tuple.get('toolingFingerprintId')}
-        prior = load_accepted_baseline(root, old_expected,
-                                       {'exe': old_tuple.get('candidateSha256')}, previous)
-        actual = {'repositoryHead': expected['repositoryHead'],
-                  'candidateBuildCommit': expected['candidateCommit'],
-                  'shippingInputIdentity': expected['shippingInputIdentity'],
-                  'releaseFingerprintId': expected['releaseFingerprintId'],
-                  'toolingFingerprintId': expected['toolingFingerprintId'],
-                  'candidateSha256': artifacts['exe']}
-        if (binding.get('schemaVersion') != 3
-                or binding.get('contract') != 'devfleet-baseline-rebind-receipt-v3'
-                or binding.get('status') != 'REBOUND'
-                or binding.get('certificationCredit') is not False
-                or binding.get('secretValuesRecorded') is not False
-                or not isinstance(binding.get('receiptId'), str)
-                or binding['receiptId'] + '.json' != name
-                or binding.get('previousPointerSha256') != old_hash
-                or binding.get('previousReceiptSha256') != prior['receiptSha256']
-                or binding.get('replacement') != pointer.get('checkpoint')
-                or binding.get('replacement') != previous.get('checkpoint')
-                or new_tuple != actual
-                or old_tuple.get('repositoryHead') == new_tuple.get('repositoryHead')
-                or old_tuple.get('toolingFingerprintId') == new_tuple.get('toolingFingerprintId')
-                or any(old_tuple.get(key) != new_tuple.get(key) for key in
-                       ('candidateBuildCommit', 'shippingInputIdentity',
-                        'releaseFingerprintId', 'candidateSha256'))):
-            raise ValueError('generation-3 receipt or material tuple differs')
-        approval = binding.get('approval') or {}
-        if (approval.get('schemaVersion') != 2
-                or approval.get('contract') != 'devfleet-baseline-rebind-approval-v2'
-                or approval.get('decision') != 'APPROVE'
-                or approval.get('approvedBy') != 'ACCOUNT_OWNER'
-                or approval.get('candidate') != new_tuple
-                or approval.get('replacement') != pointer['checkpoint']
-                or approval.get('previousReceiptSha256') != prior['receiptSha256']
-                or approval.get('sourceSha256') != binding.get('approvalSha256')
-                or not isinstance(binding.get('approvalSha256'), str)
-                or not re.fullmatch(r'[0-9a-f]{64}', binding['approvalSha256'])
-                or binding.get('finalL1') != {'name': 'DevFleet-E2E-Win11-01',
-                                             'id': '84b7d8b8-ee6c-4085-aa29-4b0adc316de2',
-                                             'state': 'Off'}
-                or binding.get('successorPolicyId') != 'DF-FRESH-CERTIFICATION-20260926-R2-REPAIR-1'
-                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('successorLedgerSha256', '')))
-                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('nativeInventorySha256', '')))):
-            raise ValueError('generation-3 authorization or terminal lab differs')
-        source_dir = root / 'evidence/baselines/sources'
-        ledger_hash = binding['successorLedgerSha256']
-        inventory_hash = binding['nativeInventorySha256']
-        ledger_path = source_dir / (ledger_hash + '.json')
-        inventory_path = source_dir / (inventory_hash + '.json')
-        if (not ledger_path.is_file() or ledger_path.is_symlink()
-                or not inventory_path.is_file() or inventory_path.is_symlink()
-                or sha(ledger_path) != ledger_hash or sha(inventory_path) != inventory_hash):
-            raise ValueError('generation-3 qualification or inventory source is absent or altered')
-        ledger = strict_baseline_json(ledger_path)
-        inventory = strict_baseline_json(inventory_path)
-        attempts = ledger.get('attempts')
-        required_remaining = {'standard-token': 1, 'diagnostic': 1,
-                              'laptop-proof': 1, 'desktop-proof': 1,
-                              'fullrelease': 1, 'maintenance': 0, 'build-sign': 0}
-        if (ledger.get('policyId') != binding['successorPolicyId']
-                or ledger.get('limits') != required_remaining
-                or ledger.get('activeRunId') is not None
-                or not isinstance(attempts, list) or len(attempts) != 1
-                or attempts[0].get('operation') != 'standard-token'
-                or attempts[0].get('state') != 'TERMINAL'
-                or attempts[0].get('exitCode') != 0
-                or attempts[0].get('classification') != 'PASS_NATIVE_STANDARD_TOKEN'
-                or attempts[0].get('tuple') != new_tuple
-                or attempts[0].get('certificationCredit') is not False
-                or not isinstance(attempts[0].get('evidence'), list)
-                or not attempts[0]['evidence']):
-            raise ValueError('generation-3 qualification source does not prove terminal standard token')
-        snapshots = inventory.get('snapshots')
-        exact = [row for row in snapshots if isinstance(row, dict)
-                 and row.get('name') == 'DevFleet-E2E-CLEAN-R2'] if isinstance(snapshots, list) else []
-        if (inventory.get('scope') != 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
-                or inventory.get('vm') != binding['finalL1']
-                or len(exact) != 1 or exact[0].get('id') != pointer['checkpoint']['id']
-                or exact[0].get('vmId') != binding['finalL1']['id']
-                or exact[0].get('parentSnapshotId') != '19865b76-4c3a-44f7-ba39-841e9d3c40c9'):
-            raise ValueError('generation-3 inventory source does not prove accepted checkpoint and L1 Off')
-        return {'id': prior['id'], 'name': prior['name'],
-                'receiptSha256': pointer['receiptSha256']}
-    if pointer.get('generation') == 2:
-        if (pointer.get('schemaVersion') != 2
-                or pointer.get('contract') != 'devfleet-accepted-baseline-v2'
-                or pointer.get('status') != 'ACCEPTED'):
-            raise ValueError('rebound baseline pointer contract is invalid')
-        old_hash = pointer.get('previousPointerSha256', '')
-        name = pointer.get('receiptFile', '')
-        if not re.fullmatch(r'[0-9a-f]{64}', old_hash) or not re.fullmatch(r'[0-9a-f]{32}\.json', name):
-            raise ValueError('rebound baseline lineage reference is invalid')
-        history_path = root / 'evidence/baselines/history' / (old_hash + '.json')
-        receipt_path = root / 'evidence/baselines/receipts' / name
-        if (not history_path.is_file() or sha(history_path) != old_hash
-                or not receipt_path.is_file() or sha(receipt_path) != pointer.get('receiptSha256')):
-            raise ValueError('rebound baseline chain is absent or hash mismatched')
-        previous = strict_baseline_json(history_path)
-        if previous.get('generation') != 1:
-            raise ValueError('rebound baseline predecessor is not generation 1')
-        binding = strict_baseline_json(receipt_path)
-        old_tuple = binding.get('previousCandidate') or {}
-        new_tuple = binding.get('candidate') or {}
-        if (binding.get('schemaVersion') != 2
-                or binding.get('contract') != 'devfleet-baseline-rebind-receipt-v2'
-                or binding.get('status') != 'REBOUND'
-                or binding.get('certificationCredit') is not False
-                or binding.get('secretValuesRecorded') is not False
-                or not isinstance(binding.get('receiptId'), str)
-                or binding['receiptId'] + '.json' != name
-                or binding.get('previousPointerSha256') != old_hash
-                or binding.get('previousReceiptSha256') != previous.get('receiptSha256')
-                or binding.get('replacement') != pointer.get('checkpoint')
-                or binding.get('replacement') != previous.get('checkpoint')):
-            raise ValueError('rebound baseline receipt lineage is invalid')
-        old_expected = {'repositoryHead': old_tuple.get('repositoryHead'),
-                        'candidateCommit': old_tuple.get('candidateBuildCommit'),
-                        'shippingInputIdentity': old_tuple.get('shippingInputIdentity'),
-                        'releaseFingerprintId': old_tuple.get('releaseFingerprintId'),
-                        'toolingFingerprintId': old_tuple.get('toolingFingerprintId')}
-        prior = load_accepted_baseline(root, old_expected,
-                                       {'exe': old_tuple.get('candidateSha256')}, previous)
-        actual = {'repositoryHead': expected['repositoryHead'],
-                  'candidateBuildCommit': expected['candidateCommit'],
-                  'shippingInputIdentity': expected['shippingInputIdentity'],
-                  'releaseFingerprintId': expected['releaseFingerprintId'],
-                  'toolingFingerprintId': expected['toolingFingerprintId'],
-                  'candidateSha256': artifacts['exe']}
-        if (new_tuple != actual or binding['previousReceiptSha256'] != prior['receiptSha256']
-                or old_tuple.get('repositoryHead') == new_tuple.get('repositoryHead')
-                or old_tuple.get('toolingFingerprintId') == new_tuple.get('toolingFingerprintId')
-                or any(old_tuple.get(k) != new_tuple.get(k) for k in
-                       ('candidateBuildCommit', 'shippingInputIdentity',
-                        'releaseFingerprintId', 'candidateSha256'))):
-            raise ValueError('rebound baseline tuple differs')
-        approval = binding.get('approval') or {}
-        if (approval.get('decision') != 'APPROVE'
-                or approval.get('approvedBy') != 'ACCOUNT_OWNER'
-                or approval.get('candidate') != new_tuple
-                or approval.get('replacement') != pointer['checkpoint']
-                or approval.get('previousReceiptSha256') != prior['receiptSha256']
-                or approval.get('sourceSha256') != binding.get('approvalSha256')
-                or not isinstance(binding.get('approvalSha256'), str)
-                or not re.fullmatch(r'[0-9a-f]{64}', binding['approvalSha256'])
-                or binding.get('finalL1') != {'name': 'DevFleet-E2E-Win11-01',
-                                             'id': '84b7d8b8-ee6c-4085-aa29-4b0adc316de2',
-                                             'state': 'Off'}
-                or binding.get('successorPolicyId') != 'DF-FRESH-CERTIFICATION-20260926-R2-D1'
-                or not re.fullmatch(r'[0-9a-f]{64}', str(binding.get('successorLedgerSha256', '')))):
-            raise ValueError('rebound baseline authorization or terminal lab differs')
-        return {'id': prior['id'], 'name': prior['name'],
-                'receiptSha256': pointer['receiptSha256']}
-    name = pointer.get("receiptFile", "")
-    if (pointer.get("schemaVersion") != 1
-            or pointer.get("contract") != "devfleet-accepted-baseline-v1" or pointer.get("generation") != 1
-            or pointer.get("status") != "ACCEPTED" or not re.fullmatch(r"[0-9a-f]{32}\.json", name)):
-        raise ValueError("accepted baseline pointer contract is invalid")
-    receipt_path = root / "evidence/baselines/receipts" / name
-    if not receipt_path.is_file() or pointer.get("receiptSha256") != sha(receipt_path):
-        raise ValueError("accepted baseline receipt is missing or hash mismatched")
-    receipt = strict_baseline_json(receipt_path)
-    new = receipt.get("replacement", {})
-    old = receipt.get("predecessor", {})
-    if (receipt.get("schemaVersion") != 1
-            or receipt.get("contract") != "devfleet-baseline-adoption-receipt-v1"
-            or receipt.get("status") != "ADOPTED" or receipt.get("certificationCredit") is not False
-            or receipt.get("secretValuesRecorded") is not False
-            or not isinstance(receipt.get("receiptId"), str)
-            or receipt["receiptId"] + ".json" != name
-            or old != {"name": "DevFleet-E2E-CLEAN", "id": old_id}
-            or new.get("name") != "DevFleet-E2E-CLEAN-R2"
-            or new.get("vmId") != "84b7d8b8-ee6c-4085-aa29-4b0adc316de2"
-            or new.get("parentSnapshotId") != old_id or new.get("id") == old_id
-            or pointer.get("checkpoint") != new):
-        raise ValueError("accepted baseline receipt lineage is invalid")
-    try:
-        if str(uuid.UUID(new["id"])) != new["id"]:
-            raise ValueError("replacement GUID is not canonical")
-    except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError("replacement GUID is invalid") from exc
-    tuple_expected = {"repositoryHead": expected["repositoryHead"],
-                      "candidateBuildCommit": expected["candidateCommit"],
-                      "shippingInputIdentity": expected["shippingInputIdentity"],
-                      "releaseFingerprintId": expected["releaseFingerprintId"],
-                      "toolingFingerprintId": expected["toolingFingerprintId"],
-                      "candidateSha256": artifacts["exe"]}
-    if receipt.get("candidate") != tuple_expected:
-        raise ValueError("accepted baseline material tuple differs")
-    def utc_baseline(value):
-        moment = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
-        if moment.tzinfo is None or moment.utcoffset().total_seconds() != 0:
-            raise ValueError("accepted baseline credential instant is not UTC")
-        return moment
-    expiry = utc_baseline(receipt.get("passwordExpiresUtc"))
-    last_set = utc_baseline(receipt.get("passwordLastSetUtc"))
-    store_updated = utc_baseline(receipt.get("protectedStoreUpdatedUtc"))
-    auth_observed = utc_baseline(receipt.get("authenticatedGuest", {}).get("sourceObservedUtc"))
-    if expiry <= datetime.now(timezone.utc) or not last_set <= store_updated <= auth_observed < expiry:
-        raise ValueError("accepted baseline account expiry is unknown or elapsed")
-    nested = receipt.get("nestedL2", {})
-    inventories = nested.get("backendInventories")
-    sources = receipt.get("sources") or {}
-    if (receipt.get("adoptionAuthority", {}).get("decision") != "APPROVE"
-            or receipt.get("adoptionAuthority", {}).get("approvedBy") != "ACCOUNT_OWNER"
-            or receipt.get("adoptionAuthority", {}).get("sourceSha256") != sources.get("approvalSha256")
-            or receipt.get("authenticatedGuest", {}).get("computerName") != "DEVFLEET-E2E-01"
-            or receipt.get("authenticatedGuest", {}).get("principal") != "DEVFLEET-E2E-01\\E2EAdmin"
-            or receipt.get("authenticatedGuest", {}).get("accountEnabled") is not True
-            or nested.get("status") != "ABSENT" or nested.get("present") is not False
-            or nested.get("expectedName") != "DevFleet-E2E-Linux-01"
-            or type(nested.get("exactMatchCount")) is not int or nested.get("exactMatchCount") != 0
-            or not isinstance(inventories, list) or len(inventories) != 2
-            or not all(isinstance(row, dict) for row in inventories)
-            or {row.get("provider") for row in inventories} != {"Hyper-V", "VirtualBox"}
-            or any(row.get("status") != "PASS" or not isinstance(row.get("names"), list)
-                   or any(not isinstance(n, str) or not n.strip() or n == "DevFleet-E2E-Linux-01"
-                          for n in row["names"])
-                   or not isinstance(row.get("verification"), str)
-                   or not row["verification"].strip() for row in inventories)
-            or receipt.get("finalL1") != {"name": "DevFleet-E2E-Win11-01",
-                                           "id": "84b7d8b8-ee6c-4085-aa29-4b0adc316de2",
-                                           "state": "Off"}):
-        raise ValueError("accepted baseline guest, nested inventory, approval, or L1 terminal state is invalid")
-    for key in ("proposalSha256", "predecessorEvidenceSha256", "approvalSha256",
-                "authenticatedGuestSha256", "nativeInventorySha256",
-                "currentTupleSha256", "r2LedgerSha256"):
-        if not isinstance(sources.get(key), str) or not re.fullmatch(r"[0-9a-f]{64}", sources[key]):
-            raise ValueError(f"accepted baseline source hash missing: {key}")
-    return {"id": new["id"], "name": new["name"], "receiptSha256": pointer["receiptSha256"]}
+            raise ValueError(f"{relative} must be a JSON object")
+        check_identity(value, relative, candidate_context=(relative == "CURRENT-CANDIDATE.json"))
+        for location, record in walk(value, relative):
+            if ".workingTree" in location or ".working_tree" in location:
+                check_working_tree(record, location)
+                continue
+            if not (record.get("historical") is True or record.get("diagnosticOnly") is True or record.get("historicalEvidenceOnly") is True):
+                check_identity(record, location, candidate_context=(".candidate" in location or location.endswith("CURRENT-CANDIDATE.json")))
+        checked.append(path)
 
+    for relative in ("outputs/release-fingerprint.json", "outputs/tooling-fingerprint-current.json"):
+        path = root / relative
+        if path.is_file():
+            check_identity(load(path), relative)
+            checked.append(path)
+    artifacts = {str(row.get("name", "")).lower().replace("_", "").replace("-", ""): row for row in manifest.get("artifacts", []) if isinstance(row, dict)}
+    if not {"exe", "tar", "portable", "installersource"}.issubset(artifacts):
+        raise ValueError("Current artifact manifest is missing a required artifact row")
+    for name, row in artifacts.items():
+        path, digest = root / str(row.get("path") or ""), str(row.get("sha256") or "").lower()
+        # Universal audit bundles intentionally exclude compiled binaries; in
+        # that mode the artifact manifest is an evidence-only tuple and the
+        # live workspace validator remains responsible for byte verification.
+        bundle_manifest_path = root / "AUDIT-MANIFEST.json"
+        embedded = True
+        if bundle_manifest_path.is_file():
+            try:
+                embedded = bool(load(bundle_manifest_path).get("compiledArtifactsEmbedded", True))
+            except (OSError, ValueError, json.JSONDecodeError):
+                embedded = True
+        if not path.is_file() and not embedded and len(digest) == 64 and int(row.get("bytes") or 0) > 0:
+            continue
+        if not path.is_file() or len(digest) != 64 or sha256(path) != digest:
+            raise ValueError(f"Current artifact bytes/hash mismatch: {name}")
 
-def validate_native_proof(run: Path, config_path: Path, sources: dict[str, Path], expected: dict[str, str], artifacts: dict[str, str], baseline: dict[str, str | None] | None = None) -> tuple[str, str, str]:
-    """Validate immutable start provenance against terminal native product evidence."""
-    start, final = read_json(run / "proof-start.json"), read_json(run / "proof-final.json")
-    provenance = start.get("provenance", {})
-    if start.get("runId") != run.name or final.get("runId") != run.name:
-        raise ValueError("proof RunId disagreement")
-    if final.get("status") != "PASS" or final.get("outcome") != "PASS":
-        raise ValueError("proof terminal status/outcome disagreement")
-    if provenance.get("diagnosticOnly") is not False or provenance.get("certificationEligible") is not True or final.get("diagnosticOnly") is not False or final.get("certificationEligible") is not True:
-        raise ValueError("diagnostic or ineligible proof cannot receive release credit")
-    if final.get("proofStartSha256") != sha(run / "proof-start.json") or final.get("provenance") != provenance:
-        raise ValueError("proof terminal provenance does not bind its immutable start")
-    for key, value in expected.items():
-        if provenance.get(key) != value:
-            raise ValueError(f"proof tuple mismatch: {key}")
-    for key, source in sources.items():
-        if provenance.get(key) != sha(source):
-            raise ValueError(f"proof source hash missing or mismatched: {key}")
-    if final.get("candidate") != start.get("candidate"):
-        raise ValueError("proof start/final artifact tuple disagreement")
-    for name, field in (("exe", "candidate"), ("tar", "tar"), ("portable", "portable"), ("installerSource", "installerSource")):
-        if not re.fullmatch(r"[0-9a-f]{64}", artifacts.get(name, "")) or final.get("candidate", {}).get(field, {}).get("sha256") != artifacts[name]:
-            raise ValueError(f"proof artifact differs from current candidate: {name}")
-    for key, field in (("repositoryHead", "repositoryHead"), ("candidateCommit", "gitCommit"), ("shippingInputIdentity", "shippingInputIdentity"), ("releaseFingerprint", "releaseFingerprintId"), ("toolingFingerprint", "toolingFingerprintId")):
-        if final.get("candidate", {}).get(field) != expected[key]:
-            raise ValueError(f"proof terminal candidate tuple mismatch: {field}")
-    binding = final.get("proofBinding", {})
-    tx, lineage, role = binding.get("transactionId", ""), binding.get("checkpointLineageId", ""), binding.get("role", "")
-    if not re.fullmatch(r"[0-9a-f]{32}", tx) or not re.fullmatch(r"[0-9a-f]{32}", lineage):
-        raise ValueError("proof lacks native transaction or invocation lineage")
-    if final.get("transactionId") != tx or final.get("checkpointLineageId") != lineage or final.get("role") != role or provenance.get("role") != role:
-        raise ValueError("proof terminal identity disagreement")
-    phases = {"Primary / Desktop": "REBOOT-RESUME", "Laptop / Surrogate": "SURROGATE-DISPOSABLE"}
-    if role not in phases or binding.get("phaseId") != phases[role] or provenance.get("phaseId") != phases[role]:
-        raise ValueError("proof role/phase disagreement")
-    if baseline is None:
-        baseline = {"id": "19865b76-4c3a-44f7-ba39-841e9d3c40c9", "name": "DevFleet-E2E-CLEAN", "receiptSha256": None}
-    if provenance.get("cleanCheckpointId") != baseline["id"]:
-        raise ValueError("proof does not bind accepted CLEAN checkpoint identity")
-    if baseline["receiptSha256"] is not None:
-        if (provenance.get("cleanCheckpointName") != baseline["name"]
-                or provenance.get("baselineReceiptSha256") != baseline["receiptSha256"]
-                or final.get("cleanCheckpoint", {}).get("id") != baseline["id"]
-                or final.get("cleanCheckpoint", {}).get("name") != baseline["name"]):
-            raise ValueError("proof does not bind the immutable accepted baseline receipt")
-    elif provenance.get("baselineReceiptSha256") not in (None, ""):
-        raise ValueError("original CLEAN proof cannot claim an adoption receipt")
-    payload = start["candidate"]["tar"]["sha256"]
-    if binding.get("payloadSha256") != payload:
-        raise ValueError("proof payload differs from the signed candidate")
-    records = binding.get("evidence", [])
-    files = [record.get("file", "") for record in records]
-    if len(files) != len(set(files)) or files.count("product-lifecycle-completion-authority.json") != 1:
-        raise ValueError("proof native evidence missing or duplicated")
-    for record in records:
-        name = record.get("file", "")
-        if not re.fullmatch(r"product-lifecycle-(?:completion-authority|generation-[1-3])\.json", name) or record.get("sha256") != sha(run / name):
-            raise ValueError("proof native evidence path/hash mismatch")
-    authority = read_json(run / "product-lifecycle-completion-authority.json")
-    if authority.get("status") != "REAL E2E PASS" or authority.get("contract") != "product-lifecycle-completion-authority" or authority.get("completionVerified") is not True or authority.get("authenticatedHealth") is not True:
-        raise ValueError("proof native completion authority is incomplete")
-    if (authority.get("transactionId"), authority.get("invocationId"), authority.get("role"), authority.get("payloadSha256")) != (tx, lineage, role, payload):
-        raise ValueError("proof native completion identity disagreement")
-    guest = authority.get("guest", {})
-    if guest.get("completionVerified") is not True or guest.get("transactionId") != tx or guest.get("role") != role:
-        raise ValueError("proof native guest completion disagreement")
-    role_evidence = guest.get("roleEvidence", {})
-    if role_evidence != binding.get("roleEvidence") or role_evidence.get("configSha256") != sha(config_path):
-        raise ValueError("proof role evidence is not candidate-config bound")
-    config = read_json(config_path)
-    targets = [(config["Primary"]["InstanceName"], "primary")] if role == "Primary / Desktop" else [(config["Failover"]["InstanceName"], "surrogate"), (config["Vault"]["InstanceName"], "vault")]
-    required = [(entry.get("instanceName"), entry.get("nodeRole")) for entry in role_evidence.get("requiredTargets", [])]
-    markers = role_evidence.get("markers", [])
-    observed = [(entry.get("instanceName"), entry.get("nodeRole")) for entry in markers]
-    if sorted(required) != sorted(targets) or sorted(observed) != sorted(targets):
-        raise ValueError("proof lacks exact role target coverage")
-    for entry in markers:
-        marker = entry.get("marker", {})
-        if (marker.get("transactionId"), marker.get("payloadSha256"), marker.get("nodeRole"), marker.get("component"), marker.get("state")) != (tx, payload, entry["nodeRole"], "bootstrap", "COMPLETED"):
-            raise ValueError("proof target bootstrap has not completed")
-    generation_files = sorted(name for name in files if name.startswith("product-lifecycle-generation-"))
-    if not generation_files or generation_files != [f"product-lifecycle-generation-{i}.json" for i in range(1, len(generation_files) + 1)]:
-        raise ValueError("proof reboot generations are missing or noncontiguous")
-    for number, name in enumerate(generation_files, 1):
-        generation = read_json(run / name)
-        reboot = generation.get("reboot", {})
-        checkpoint = reboot.get("checkpoint", {})
-        if generation.get("generation") != number or generation.get("invocationId") != lineage or reboot.get("bootIdentityChanged") is not True or generation.get("resume", {}).get("status") != "REAL E2E OBSERVER HANDOFF":
-            raise ValueError("proof lacks changed boot and resumed WPF evidence")
-        if (checkpoint.get("transactionId"), checkpoint.get("payloadSha256"), checkpoint.get("role"), checkpoint.get("action")) != (tx, payload, role, "FreshInstall"):
-            raise ValueError("proof reboot checkpoint identity disagreement")
-    return tx, lineage, role
-
-
-def validate_proof_independence(run_ids, transactions, lineages, roles):
-    if len(run_ids) != 2 or len(set(run_ids)) != 2:
-        raise ValueError("release bundle does not contain two independent passing proof runs")
-    if len(transactions) != 2 or len(set(transactions)) != 2:
-        raise ValueError("proof runs reuse a transaction identity")
-    if len(lineages) != 2 or len(set(lineages)) != 2:
-        raise ValueError("proof runs reuse checkpoint lineage")
-    if set(roles) != {"Primary / Desktop", "Laptop / Surrogate"}:
-        raise ValueError("release proofs lack Desktop and Laptop/Surrogate role coverage")
-
-
-def _safe_relative(value: object, label: str) -> str:
-    relative = str(value or "").replace("\\", "/")
-    path = PurePosixPath(relative)
-    if not relative or path.is_absolute() or ".." in path.parts or "." in path.parts or "//" in relative:
-        raise ValueError(f"{label} is not a safe relative path")
-    return path.as_posix()
-
-
-def _checked_file(root: Path, relative: object, expected_hash: object, label: str, expected_bytes: object | None = None) -> Path:
-    normalized = _safe_relative(relative, label)
-    path = root / Path(*PurePosixPath(normalized).parts)
-    digest = str(expected_hash or "").lower()
-    if not path.is_file() or not re.fullmatch(r"[0-9a-f]{64}", digest) or sha(path) != digest:
-        raise ValueError(f"{label} is missing or hash-mismatched")
-    if expected_bytes is not None and int(expected_bytes) != path.stat().st_size:
-        raise ValueError(f"{label} byte count disagrees")
-    return path
-
-
-def _parse_utc(value: object, label: str) -> datetime:
-    text = str(value or "")
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError(f"{label} is not a valid ISO-8601 timestamp") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
-        raise ValueError(f"{label} is not explicitly UTC")
-    return parsed.astimezone(timezone.utc)
-
-
-def _validate_nested_l2_terminal(
-    full_root: Path,
-    l2: dict[str, object],
-    l1: dict[str, object],
-    expected: dict[str, str],
-    run_id: str,
-) -> None:
-    """Require exact current FullRelease evidence captured inside the bound L1."""
-    if (l2.get("expectedName") != "DevFleet-E2E-Linux-01" or l2.get("status") != "ABSENT"
-            or l2.get("present") is not False or l2.get("runId") != run_id
-            or l2.get("sourceRunId") != run_id or l2.get("nestedScope") != "inside the exact L1 guest session"
-            or l2.get("l1Name") != "DevFleet-E2E-Win11-01"
-            or str(l2.get("l1Id") or "") != "84b7d8b8-ee6c-4085-aa29-4b0adc316de2"
-            or l2.get("evidenceClass") != "FullRelease run-bound nested observation"):
-        raise ValueError("FullRelease terminal L2 lacks exact current nested scope, L1, and RunId provenance")
-    _assert_tuple(l2.get("candidate"), expected, "FullRelease terminal L2")
-    source_relative = _safe_relative(l2.get("sourceEvidence"), "nested L2 source evidence")
-    if source_relative != "nested-l2-terminal-observation.json":
-        raise ValueError("FullRelease nested L2 source is outside its exact run root")
-    source_path = full_root / source_relative
-    if not source_path.is_file():
-        raise ValueError("FullRelease nested L2 source evidence is missing")
-    try:
-        full_root_absolute = Path(os.path.abspath(full_root))
-        source_absolute = Path(os.path.abspath(source_path))
-        full_root_resolved = full_root.resolve(strict=True)
-        source_resolved = source_path.resolve(strict=True)
-    except OSError as exc:
-        raise ValueError("FullRelease nested L2 source path cannot be resolved safely") from exc
-    if (os.path.normcase(str(full_root_absolute)) != os.path.normcase(str(full_root_resolved))
-            or os.path.normcase(str(source_absolute)) != os.path.normcase(str(source_resolved))):
-        raise ValueError("FullRelease nested L2 source path contains a reparse or symlink escape")
-    raw = source_path.read_bytes()
-    source_hash = hashlib.sha256(raw).hexdigest()
-    if not re.fullmatch(r"[0-9a-f]{64}", str(l2.get("sourceEvidenceSha256") or "").lower()) or source_hash != str(l2.get("sourceEvidenceSha256")).lower():
-        raise ValueError("FullRelease nested L2 source evidence hash mismatch")
-    try:
-        nested = json.loads(raw.decode("utf-8-sig"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("FullRelease nested L2 source evidence is malformed") from exc
-    if not isinstance(nested, dict):
-        raise ValueError("FullRelease nested L2 source evidence is not an object")
-    if (nested.get("runId") != run_id or nested.get("status") != "ABSENT" or nested.get("present") is not False
-            or nested.get("expectedName") != "DevFleet-E2E-Linux-01"
-            or nested.get("nestedScope") != "inside the exact L1 guest session"
-            or nested.get("observer") != "Get-DevFleetNestedL2State"
-            or nested.get("evidenceClass") != "FullRelease run-bound nested observation"
-            or not isinstance(nested.get("l1"), dict)
-            or nested["l1"].get("name") != "DevFleet-E2E-Win11-01"
-            or str(nested["l1"].get("id") or "") != "84b7d8b8-ee6c-4085-aa29-4b0adc316de2"):
-        raise ValueError("FullRelease nested L2 source record does not support exact absence")
-    _assert_tuple(nested.get("candidate"), expected, "nested L2 source")
-    if str(l2.get("verificationMethod") or "") != str(nested.get("verification") or ""):
-        raise ValueError("FullRelease terminal L2 verification method changed from its source")
-    exact_match_count = nested.get("exactMatchCount")
-    if isinstance(exact_match_count, bool) or not isinstance(exact_match_count, int) or exact_match_count != 0:
-        raise ValueError("FullRelease nested L2 inventory did not record zero exact matches")
-    verification = str(nested.get("verification") or "")
-    if verification == "Bounded Multipass JSON inventory inside exact L1":
-        count = nested.get("inventoryCount")
-        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
-            raise ValueError("FullRelease Multipass inventory completeness is missing")
-    elif verification == "Multipass CLI absent; complete read-only inventories from every supported in-L1 virtualization backend":
-        inventories = nested.get("backendInventories")
-        if not isinstance(inventories, list) or len(inventories) != 2:
-            raise ValueError("FullRelease nested inventory does not contain the complete supported backend set")
-        providers: set[str] = set()
-        for row in inventories:
-            if not isinstance(row, dict):
-                raise ValueError("FullRelease nested backend inventory row is malformed")
-            provider = str(row.get("provider") or "")
-            if provider not in {"Hyper-V", "VirtualBox"} or provider in providers or row.get("status") != "PASS" or not isinstance(row.get("names"), list) or not str(row.get("verification") or ""):
-                raise ValueError("FullRelease nested backend inventory is incomplete or ambiguous")
-            if any(not isinstance(name, str) or not name for name in row["names"]):
-                raise ValueError("FullRelease nested backend inventory contains an invalid instance name")
-            if len(set(row["names"])) != len(row["names"]):
-                raise ValueError("FullRelease nested backend inventory contains a duplicate instance name")
-            if "DevFleet-E2E-Linux-01" in row["names"]:
-                raise ValueError("FullRelease nested backend inventory still contains the expected L2")
-            providers.add(provider)
-        if providers != {"Hyper-V", "VirtualBox"}:
-            raise ValueError("FullRelease nested backend inventory omitted a supported provider")
-    else:
-        raise ValueError("FullRelease nested L2 observation method is not a supported complete inventory")
-    nested_time = _parse_utc(nested.get("observedUtc"), "nested L2 observation time")
-    if str(l2.get("timestampUtc") or l2.get("timestamp") or "") != str(nested.get("observedUtc") or ""):
-        raise ValueError("FullRelease terminal L2 timestamp was rewritten after the nested observation")
-    l1_time = _parse_utc(l1.get("timestampUtc") or l1.get("timestamp"), "L1 terminal observation time")
-    if nested_time > l1_time:
-        raise ValueError("FullRelease nested L2 observation occurred after L1 shutdown")
-
-
-def _tuple_from_state(state: dict[str, object]) -> dict[str, str]:
-    result = {
-        "repositoryHead": str(state.get("repository_head") or state.get("repositoryHead") or ""),
-        "candidateCommit": str(state.get("candidate_git_commit") or state.get("candidateGitCommit") or ""),
-        "shippingInputIdentity": str(state.get("shipping_input_identity") or state.get("shippingInputIdentity") or ""),
-        "releaseFingerprintId": str(state.get("releaseFingerprintId") or ""),
-        "toolingFingerprintId": str(state.get("toolingFingerprintId") or ""),
-    }
-    for name, value in result.items():
-        size = 40 if name in {"repositoryHead", "candidateCommit"} else 64
-        if not re.fullmatch(rf"[0-9a-f]{{{size}}}", value):
-            raise ValueError(f"current authority tuple is malformed: {name}")
+    passed = bool_value(state.get("full_release_passed", False), "finalization-state.json.full_release_passed")
+    if not passed:
+        # The current blocked state must still describe the one latest proof;
+        # it is intentionally not required to contain final-release evidence.
+        current_proof_path = root / "evidence/CURRENT-PROOF.json"
+        if current_proof_path.is_file():
+            current_proof = load(current_proof_path)
+            if not isinstance(current_proof, dict):
+                raise ValueError("evidence/CURRENT-PROOF.json must be a JSON object")
+            outcome = str(current_proof.get("outcome") or "")
+            if outcome == "PASS":
+                # A natural exact proof can complete before FullRelease. Keep
+                # its outcome truthful without granting any release promotion.
+                final = current_proof.get("proofFinal")
+                run_id = str(current_proof.get("runId") or "")
+                if (not run_id or current_proof.get("status") != "PASS"
+                        or current_proof.get("proofStartCurrent") is not True
+                        or current_proof.get("certificationEligible") is not True
+                        or current_proof.get("diagnosticOnly") is not False
+                        or not isinstance(final, dict)
+                        or final.get("status") != "PASS"
+                        or final.get("runId") != run_id
+                        or final.get("certificationEligible") is not True
+                        or final.get("diagnosticOnly") is not False
+                        or not isinstance(final.get("cleanup"), dict)
+                        or final["cleanup"].get("status") != "PASS"):
+                    raise ValueError("Intermediate PASS lacks a current qualifying natural proof and completed safety cleanup")
+                if any(state.get(key) is not False for key in (
+                        "validation_evidence_current", "internal_promotion_allowed",
+                        "public_promotion_allowed")):
+                    raise ValueError("Incomplete FullRelease cannot carry release promotion")
+            elif outcome != "NOT_OBSERVED":
+                raise ValueError("Incomplete current proof outcome is not fail-closed")
+            elif str(current_proof.get("status") or "") not in {"BLOCKED", "NOT_OBSERVED"}:
+                raise ValueError("Blocked current proof status is not fail-closed")
+    if passed:
+        missing = [relative for relative in CURRENT_AUTHORITIES if not (root / relative).is_file()]
+        if missing or not (root / REQUIRED_SOURCE_PROOF).is_file():
+            raise ValueError(f"Final authority/source evidence missing: {missing or [REQUIRED_SOURCE_PROOF]}")
+        proof = load(root / "evidence/CURRENT-PROOF.json")
+        if str(proof.get("outcome") or "") not in {"PASS", "REAL E2E PASS", "COMPLETED"}:
+            raise ValueError("Final current proof is not PASS")
+        for relative in ("evidence/l1-terminal-state.json", "evidence/l2-terminal-state.json"):
+            if not (root / relative).is_file():
+                raise ValueError(f"Final terminal evidence missing: {relative}")
+    result = {"status": "PASS", "filesChecked": len({p.resolve() for p in checked}), "currentRepositoryHead": expected_head, "candidateCommit": candidate, "shippingInputIdentity": live_shipping, "candidateShippingInputIdentity": candidate_shipping, "currentReleaseFingerprintId": release, "currentToolingFingerprintId": tooling}
+    if failed_result:
+        result.update(failed_result)
     return result
 
 
-def _artifact_map(root: Path) -> dict[str, dict[str, object]]:
-    release = read_json(root / "outputs/release-fingerprint.json")
-    rows = release.get("artifacts") if isinstance(release, dict) else None
-    if not isinstance(rows, list):
-        raise ValueError("release fingerprint artifact rows are missing")
-    result = {str(row.get("name")): row for row in rows if isinstance(row, dict)}
-    if set(result) != {"exe", "tar", "portable", "installerSource"}:
-        raise ValueError("release fingerprint does not contain the exact artifact tuple")
-    for name, row in result.items():
-        if not re.fullmatch(r"[0-9a-f]{64}", str(row.get("sha256") or "")) or int(row.get("bytes", 0)) <= 0:
-            raise ValueError(f"release artifact identity is malformed: {name}")
-    return result
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", type=Path, required=True)
+    args = parser.parse_args()
+    try:
+        print(json.dumps(validate(args.root), sort_keys=True))
+        return 0
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"AUDIT COHERENCE FAIL: {exc}")
+        return 1
 
 
-def _assert_tuple(record: object, expected: dict[str, str], label: str, *, proof_names: bool = Fa
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+```
+
+
+## FILE: tools/validate_release_bundle.py
+
+SHA256: 1228d4de2428f2c9adbaadabed05ac581c14f5b7f48ec99613f16fe8dafdca8a | Bytes: 136303 | Git mode: 100644
+
+```
+"""Strict post-cleanup release-bundle gate (release tooling only).
+
+The candidate-bound source validator intentionally remains byte-identified.
+This validator adds current proof, terminal-state, and post-cleanup authority
+requirements without changing shipping inputs.
+"""
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import uuid
+import zipfile
+import stat
+from pathlib import Path, PurePosixPath
+
+HISTORICAL_CANDIDATE = "2739e0366d070285e44b4fc764ef9247d40b2f94"
+HISTORICAL_PROVENANCE = "f334a6eff999287b170fdbd9b6a31c3ef24a6119"
+HISTORICAL_SHIPPING_IDENTITY = "daa30ef9f521a47fedb4bacce91e3440c20e1a8f05543b4d5e823e5c3541e64e"
+HISTORICAL_RAW_GIT_SHIPPING_IDENTITY = "cdabf0791016282b1dc116c2e0d407718e7d7249d93935f90cc681afd737e92e"
+HISTORICAL_RELEASE_FINGERPRINT = "80c8b88c2f2ec828f5ab0f9713d63fa3f4cc4cbad7c382aa2f154f3196c3de84"
+FAILED_ATTEMPT_SNAPSHOT = "audit/luna-high-failed-attempt-freeze-20260831T002237512571Z.json"
+FAILED_ATTEMPT_BLOCKER = "REPLACEMENT_CANDIDATE_BINDING_MISMATCH"
+FAILED_ATTEMPT_CURRENT_RECORDS = {
+    "evidence/CURRENT-PROOF.json",
+    "audit/attemptedReplacementCandidate.json",
+    "audit/candidateBindingFailure.json",
+}
+FAILED_ATTEMPT_INVENTORY_FILES = {"EVIDENCE-MODES.json", "EVIDENCE-SHA256SUMS.txt"}
+AUTHORIZED_SHIPPING_PATHS = {
+    "installer-source/DevFleet.Setup/Services/InstallerLifecycle.cs",
+    "installer-source/DevFleet.Setup/Services/InstallerServices.cs",
+    "installer-source/DevFleet.Setup.Tests/Program.cs",
+    "source/tools/validate_audit_coherence.py",
+    "source/tools/validate_ai_audit_bundle.py",
+    "source/tests/test_audit_coherence.py",
+    "source/windows/DevFleet.Common.psm1",
+}
+
+REQUIRED = {
+    "AUDIT-MANIFEST.json", "CURRENT-CANDIDATE.json", "finalization-state.json",
+    "outputs/final-artifact-hashes.json", "evidence/CURRENT-STATUS.json",
+    "outputs/dependency-advisory-gate.json", "outputs/independent-osv-reconciliation.json",
+    "evidence/CURRENT-GATES.json", "evidence/CURRENT-PROOF.json",
+    "evidence/FULLRELEASE-SUMMARY.json", "audit/CURRENT-HANDOFF.json",
+    "evidence/l1-terminal-state.json", "evidence/l2-terminal-state.json",
+    "evidence/current-fullrelease/run-state.json",
+    "evidence/current-fullrelease/fullrelease-phase-records.json",
+    "evidence/current-fullrelease/final-cleanup.json",
+    "evidence/current-fullrelease/post-cleanup-finalization.json",
+    "evidence/current-fullrelease/real-use-acceptance-binding.json",
+    "evidence/current-fullrelease/real-use-acceptance-prepare.json",
+    "evidence/current-fullrelease/real-use-acceptance-report.json",
+    "evidence/current-fullrelease/real-use-acceptance-evidence.json",
+    "evidence/FINAL-ACCEPTANCE.json",
+    "evidence/CURRENT-STANDARD-TOKEN.json",
+    "evidence/CURRENT-RELEASE-AUDIT.json",
+    "release-tooling/proof-entrypoints/run-exact-candidate-proof.ps1",
+    "release-tooling/proof-entrypoints/Invoke-RealProductPhase.psm1",
+    "release-tooling/proof-entrypoints/Invoke-WpfUiAutomation.ps1",
+    "release-tooling/proof-entrypoints/WpfLaunchContract.psm1",
+}
+
+PRE_ACCEPTANCE_REQUIRED = (REQUIRED - {
+    "evidence/FINAL-ACCEPTANCE.json",
+    "evidence/CURRENT-RELEASE-AUDIT.json",
+})
+
+STANDARD_TOKEN_CHECKS = {
+    "pass", "payloadExtraction", "bootstrapEntrypoint", "parameterContract",
+    "embeddedTarCount", "factoryResetBackupGate", "planSafety",
+    "devfleetVersion", "installerVersion", "payloadSha",
+}
+
+MAINTENANCE_PHASES = {"REPAIR", "CLEAN-REINSTALL", "UNINSTALL", "FACTORY-RESET", "REBOOT-RESUME"}
+REQUIRED_FULLRELEASE_PHASES = {
+    "HOST-SAFETY", "CANDIDATE-VERIFY", "RESTORE-CLEAN", "ESTABLISH-SESSION",
+    "DEPENDENCY-MATRIX", "SECURITY-POISON", "FRESH-INSTALL-WPF", "PRIMARY",
+    "LINUX", "HTTP-HOSTILE", "MAINTENANCE-READY", "WINDOWS-SENTINELS",
+    "REPAIR", "CLEAN-REINSTALL", "UNINSTALL", "FACTORY-RESET", "REBOOT-RESUME",
+    "PERMANENT-DELETE", "DELETE-RESTORE", "STOPPED-PROJECT", "HOST-CONCURRENCY",
+    "OPERATION-RECOVERY", "OWNERSHIP", "VAULT", "SURROGATE-DISPOSABLE",
+    "REAL-USE-ACCEPTANCE", "TAILSCALE-DEFERRED", "TAILSCALE-AUTH", "AI-BUNDLE",
+    "RECONCILE", "CLEANUP",
+}
+
+DIAGNOSTIC_REQUIRED = {
+    "AUDIT-MANIFEST.json", "CURRENT-CANDIDATE.json", "finalization-state.json",
+    "outputs/final-artifact-hashes.json", "evidence/CURRENT-STATUS.json",
+    "outputs/dependency-advisory-gate.json", "outputs/independent-osv-reconciliation.json",
+    "evidence/CURRENT-GATES.json", "evidence/CURR

@@ -1,10 +1,240 @@
 # DevFleet source part 111
 
 Full-source UTF-8 byte interval [5115000, 5161500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 57a1a2e4d26cd0ef2b2e580d6925d1e0bc60d373d40c4bbed1026362d46a077a
+Payload SHA-256: febd32d445feb9181dd87bed89f2ae1c735bdcc0c4cd4e9a74abdcabb4bf0fa9
 
 <!-- BEGIN SOURCE SLICE -->
-notmatch '^\d+$' }).Count -gt 0) { continue }
+TaskStatus]::RanToCompletion){$stdoutTask.GetAwaiter().GetResult()}else{''}
+        $stderr=if($stderrTask.Status -eq [Threading.Tasks.TaskStatus]::RanToCompletion){$stderrTask.GetAwaiter().GetResult()}else{''}
+        $combined=($stdout+"`n"+$stderr).Trim()
+        if($logWriter){$logWriter.Write($combined);if(-not $outputComplete){$logWriter.Write("`n[DEVFLEET_OUTPUT_INCOMPLETE_AFTER_PROCESS_EXIT]")};$logWriter.Flush()}
+        $diagnostic=if($combined.Length -gt $MaxDiagnosticChars){$combined.Substring($combined.Length-$MaxDiagnosticChars)}else{$combined}
+        if(-not $outputComplete){
+            $message="External command exited with code $exitCode, but redirected output was incomplete after the bounded post-exit drain: $FilePath $($safeArguments -join ' ')"
+            if($Capture){throw $message}
+            if($exitCode -notin $AllowedExitCodes -and -not $IgnoreExitCode){throw "$message`n$diagnostic"}
+            Write-Warning $message
+            return
+        }
+        if($exitCode -notin $AllowedExitCodes -and -not $IgnoreExitCode){throw "$FilePath failed with exit code $exitCode`n$diagnostic"}
+        if($inputError){throw "External command input delivery failed: $FilePath $($safeArguments -join ' ')`n$inputError"}
+        if($Capture){return $combined}
+    } finally {if($logWriter){$logWriter.Dispose()};$process.Dispose()}
+}
+
+function Invoke-MultipassWithStandardInput {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string]$InstanceName,
+        [Parameter(Mandatory)][string[]]$CommandArgumentList,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$StandardInputText,
+        [int]$TimeoutSeconds=900,
+        [datetime]$DeadlineUtc=[datetime]::MinValue,
+        [switch]$Capture,
+        [string]$ExpectedCompletionMarkerPattern=''
+    )
+    if($InstanceName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' -or -not $CommandArgumentList.Count){throw 'Multipass input command identity is malformed.'}
+    if([string]::IsNullOrEmpty($StandardInputText)){throw 'Multipass input delivery requires a nonempty byte stream.'}
+    $remoteCommand=(@($CommandArgumentList|ForEach-Object{ConvertTo-ShellSingleQuotedScalar $_}) -join ' ')
+    $ownerDeadline=[datetime]::UtcNow.AddSeconds($TimeoutSeconds)
+    if($DeadlineUtc -gt [datetime]::MinValue -and $DeadlineUtc.ToUniversalTime() -lt $ownerDeadline){$ownerDeadline=$DeadlineUtc.ToUniversalTime()}
+    $context=Get-DevFleetDeadlineContext
+    if($context -and ([datetime]$context.StageDeadlineUtc).ToUniversalTime() -lt $ownerDeadline){$ownerDeadline=([datetime]$context.StageDeadlineUtc).ToUniversalTime()}
+    # Reserve cleanup inside the existing owner; no command receives a fresh
+    # full timeout after staging or a slow transfer.
+    $workDeadline=$ownerDeadline.AddSeconds(-15)
+    $cleanupDeadline=$ownerDeadline.AddSeconds(-5)
+    if($workDeadline -le [datetime]::UtcNow){throw 'Insufficient owning deadline for Multipass input delivery and cleanup.'}
+    $directory='/run/devfleet-input-'+[guid]::NewGuid().ToString('N')
+    $inputPath="$directory/input"
+    $quotedDirectory=ConvertTo-ShellSingleQuotedScalar $directory
+    $quotedInput=ConvertTo-ShellSingleQuotedScalar $inputPath
+    # Windows Multipass exec reads console events, not redirected stdin.
+    # SFTP transfer '-' supports a byte stream. Create its destination first
+    # in a fresh private tmpfs directory, so no host plaintext file or secret
+    # argument is needed and SFTP cannot create a publicly reachable file.
+    $prepare=@'
+set -Eeuo pipefail; d=__DIRECTORY__; f=__INPUT__; created=0; trap 'rc=$?; if (( created )); then sudo rm -f -- "$f" || true; sudo rmdir -- "$d" || true; fi; exit "$rc"' EXIT; sudo mkdir -m 0700 -- "$d"; created=1; sudo chown "$(id -u):$(id -g)" -- "$d"; umask 077; : > "$f"; chmod 0600 -- "$f"; test ! -L "$d"; test "$(stat -c '%a:%u' -- "$d")" = "700:$(id -u)"; test ! -L "$f"; test "$(stat -c '%a:%u' -- "$f")" = "600:$(id -u)"; trap - EXIT
+'@
+    $consume=@'
+set -Eeuo pipefail; d=__DIRECTORY__; f=__INPUT__; test ! -L "$d"; test -d "$d"; test "$(stat -c '%a:%u' -- "$d")" = "700:$(id -u)"; test ! -L "$f"; test -f "$f"; test -s "$f"; test "$(stat -c '%a:%u' -- "$f")" = "600:$(id -u)"; exec 3< "$f"; rm -f -- "$f"; sudo rmdir -- "$d"; exec 0<&3; exec 3<&-; exec __COMMAND__
+'@
+    $cleanup=@'
+set -Eeuo pipefail; d=__DIRECTORY__; f=__INPUT__; if test -e "$d" || test -L "$d"; then test ! -L "$d"; test -d "$d"; test "$(stat -c '%a:%u' -- "$d")" = "700:$(id -u)"; if test -e "$f" || test -L "$f"; then test ! -L "$f"; test -f "$f"; test "$(stat -c '%u' -- "$f")" = "$(id -u)"; rm -f -- "$f"; fi; sudo rmdir -- "$d"; fi
+'@
+    $prepare=$prepare.Replace('__DIRECTORY__',$quotedDirectory).Replace('__INPUT__',$quotedInput)
+    $consume=$consume.Replace('__DIRECTORY__',$quotedDirectory).Replace('__INPUT__',$quotedInput).Replace('__COMMAND__',$remoteCommand)
+    $cleanup=$cleanup.Replace('__DIRECTORY__',$quotedDirectory).Replace('__INPUT__',$quotedInput)
+    $acquired=$false;$primaryError=$null;$cleanupError=$null;$output=$null
+    try {
+        Invoke-External $FilePath @('exec',$InstanceName,'--','bash','-lc',$prepare) -TimeoutSeconds 60 -DeadlineUtc $workDeadline
+        $acquired=$true
+        Invoke-External $FilePath @('transfer','-',"${InstanceName}:$inputPath") -TimeoutSeconds 60 -DeadlineUtc $workDeadline -StandardInputText $StandardInputText
+        if($ExpectedCompletionMarkerPattern){
+            if(-not $Capture){throw 'Expected Multipass completion-marker handling requires captured output.'}
+            # A guest command that changes its own network can finish the
+            # authenticated operation and emit its sentinel while the outer
+            # Multipass transport reports a nonzero status as its connection
+            # is torn down. Accept that status only for this explicit marker
+            # contract; preparation, transfer, cleanup, and all generic
+            # callers remain strict about external exit codes.
+            $output=Invoke-External $FilePath @('exec',$InstanceName,'--','bash','-lc',$consume) -TimeoutSeconds $TimeoutSeconds -DeadlineUtc $workDeadline -Capture -IgnoreExitCode
+            if(-not [regex]::IsMatch([string]$output,$ExpectedCompletionMarkerPattern,[Text.RegularExpressions.RegexOptions]::Multiline)){
+                throw 'Multipass input command returned without its expected completion marker.'
+            }
+        }else{
+            $output=Invoke-External $FilePath @('exec',$InstanceName,'--','bash','-lc',$consume) -TimeoutSeconds $TimeoutSeconds -DeadlineUtc $workDeadline -Capture:$Capture
+        }
+    } catch {$primaryError=$_}
+    finally {
+        # No secret is sent until preparation acknowledges a fresh private
+        # directory. Once acknowledged, cleanup is exact and non-recursive.
+        if($acquired){
+            try {Invoke-External $FilePath @('exec',$InstanceName,'--','bash','-lc',$cleanup) -TimeoutSeconds 10 -DeadlineUtc $cleanupDeadline}
+            catch {$cleanupError=$_}
+        }
+        $StandardInputText=$null
+    }
+    if($primaryError){
+        if($cleanupError){throw "Multipass input command failed: $($primaryError.Exception.Message)`nGuest input cleanup failed: $($cleanupError.Exception.Message)"}
+        $PSCmdlet.ThrowTerminatingError($primaryError)
+    }
+    if($cleanupError){$PSCmdlet.ThrowTerminatingError($cleanupError)}
+    if($Capture){return $output}
+}
+
+function New-DevFleetBootstrapBoundary {
+    param(
+        [Parameter(Mandatory)][ValidateSet('compute','vault')][string]$Kind,
+        [Parameter(Mandatory)][string]$InstanceName,
+        [Parameter(Mandatory)][string]$TransactionId,
+        [Parameter(Mandatory)][string]$PayloadSha256,
+        [Parameter(Mandatory)][int]$BootstrapMaxSeconds,
+        [Parameter(Mandatory)][string]$PackageVersion,
+        [Parameter(Mandatory)][string]$NodeRole
+    )
+    if($InstanceName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'){throw 'Bootstrap instance identity is malformed.'}
+    if($TransactionId -notmatch '^[0-9a-fA-F]{32}$' -or $PayloadSha256 -notmatch '^[0-9a-fA-F]{64}$'){throw 'Bootstrap transaction or payload identity is malformed.'}
+    if($BootstrapMaxSeconds -le 0){throw 'Bootstrap maximum must be a positive finite duration.'}
+    if($Kind -eq 'compute'){
+        if($PackageVersion -notmatch '^\d+\.\d+\.\d+$' -or $NodeRole -notin @('primary','surrogate')){throw 'Compute bootstrap version or role identity is malformed.'}
+        $extraction="set -Eeuo pipefail; sudo rm -rf /tmp/devfleet-payload; mkdir /tmp/devfleet-payload; if ! unzip -q /tmp/devfleet-payload.zip -d /tmp/devfleet-payload; then sudo rm -rf /tmp/devfleet-payload /tmp/devfleet-payload.zip; exit 70; fi; test -f /tmp/devfleet-payload/linux/bootstrap-compute.sh"
+        $bootstrap="set -Eeuo pipefail; trap 'sudo rm -rf /tmp/devfleet-payload /tmp/devfleet-payload.zip' EXIT; sudo bash /tmp/devfleet-payload/linux/bootstrap-compute.sh /tmp/devfleet-payload --secrets-stdin --transaction-id '$TransactionId' --payload-sha256 '$PayloadSha256' --bootstrap-max-seconds '$BootstrapMaxSeconds' --package-version '$PackageVersion' --node-role '$NodeRole'"
+        $prefix="compute-$InstanceName"
+    }else{
+        if($PackageVersion -cne 'vault' -or $NodeRole -cne 'vault'){throw 'Vault bootstrap version or role identity is malformed.'}
+        $extraction="set -Eeuo pipefail; sudo rm -rf /tmp/devfleet-vault-payload; mkdir /tmp/devfleet-vault-payload; if ! unzip -q /tmp/devfleet-vault-payload.zip -d /tmp/devfleet-vault-payload; then sudo rm -rf /tmp/devfleet-vault-payload /tmp/devfleet-vault-payload.zip; exit 70; fi; test -f /tmp/devfleet-vault-payload/linux/bootstrap-vault.sh"
+        $bootstrap="set -Eeuo pipefail; trap 'sudo rm -rf /tmp/devfleet-vault-payload /tmp/devfleet-vault-payload.zip' EXIT; sudo bash /tmp/devfleet-vault-payload/linux/bootstrap-vault.sh /tmp/devfleet-vault-payload --secrets-stdin --transaction-id '$TransactionId' --payload-sha256 '$PayloadSha256' --bootstrap-max-seconds '$BootstrapMaxSeconds' --package-version 'vault' --node-role 'vault'"
+        $prefix='vault'
+    }
+    [pscustomobject]@{
+        kind=$Kind
+        instanceName=$InstanceName
+        multipassResolvedStageName="$prefix-multipass-resolved"
+        isolationVerifiedStageName="$prefix-isolation-verified"
+        instancePresentStageName="$prefix-instance-present"
+        instanceAbsentStageName="$prefix-instance-absent"
+        instanceStartedStageName="$prefix-instance-started"
+        instanceLaunchedStageName="$prefix-instance-launched"
+        instanceReadyStageName="$prefix-instance-ready"
+        payloadTransferredStageName="$prefix-payload-transferred"
+        payloadExtractedStageName="$prefix-payload-extracted"
+        completionStageName=$prefix
+        extractionCommand=$extraction
+        bootstrapCommand=$bootstrap
+        remoteCommand="$extraction; $bootstrap"
+        bootstrapMaxSeconds=$BootstrapMaxSeconds
+    }
+}
+
+function Test-CommandExists { param([string]$Name) [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
+
+function Get-DevFleetPowerShell {
+    foreach($candidate in @(
+        (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'),
+        (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe')
+    )) { if($candidate -and (Test-TrustedExecutableCandidate $candidate)){return $candidate} }
+    throw 'No trusted machine PowerShell executable was found.'
+}
+
+function Get-CanonicalDependencyManifest {
+    param([Parameter(Mandatory)][string]$PackageRoot)
+    $path = Join-Path $PackageRoot 'dependencies.json'
+    if (-not (Test-Path -LiteralPath $path)) { throw "Canonical dependency manifest is missing: $path" }
+    $manifest = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+    if ($manifest.schemaVersion -ne 1 -or $manifest.manifestVersion -ne (Get-Content (Join-Path $PackageRoot 'VERSION') -Raw).Trim()) { throw 'Canonical dependency manifest schema/version mismatch.' }
+    if (-not $manifest.dependencies -or @($manifest.dependencies).Count -lt 1) { throw 'Canonical dependency manifest contains no dependency records.' }
+    return $manifest
+}
+
+function Expand-DependencyLocation {
+    param([Parameter(Mandatory)][string]$Path)
+    return [Environment]::ExpandEnvironmentVariables($Path)
+}
+
+function Resolve-DependencyExecutable {
+    param([Parameter(Mandatory)]$Dependency)
+    foreach ($candidate in (Get-TrustedDependencyCandidates $Dependency)) { return $candidate }
+    return $null
+}
+
+function Test-PrimitiveMutationRights {
+    param([Parameter(Mandatory)][Security.AccessControl.FileSystemRights]$Rights)
+    # Keep this mask primitive-only.  Modify and FullControl are composites;
+    # their primitive mutation bits still intersect the mask naturally.
+    $mutationMask = [Security.AccessControl.FileSystemRights]::WriteData -bor
+        [Security.AccessControl.FileSystemRights]::AppendData -bor
+        [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+        [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    return (($Rights -band $mutationMask) -ne 0)
+}
+
+function Test-BroadUntrustedPrincipal {
+    param([Parameter(Mandatory)][string]$Identity)
+    return $Identity.Equals('Everyone',[StringComparison]::OrdinalIgnoreCase) -or
+        $Identity.EndsWith('\Users',[StringComparison]::OrdinalIgnoreCase) -or
+        $Identity.Equals('NT AUTHORITY\Authenticated Users',[StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-TrustedSystemRootForExecutable {
+    param([Parameter(Mandatory)][string]$FullPath)
+    try {
+        $candidate = [IO.Path]::GetFullPath($FullPath).TrimEnd('\')
+        $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:WINDIR) |
+            Where-Object { $_ } |
+            ForEach-Object { [IO.Path]::GetFullPath([string]$_).TrimEnd('\') } |
+            Select-Object -Unique |
+            Where-Object { $candidate.StartsWith($_ + '\',[StringComparison]::OrdinalIgnoreCase) }
+        if (@($roots).Count -ne 1) { return $null }
+        return [string]@($roots)[0]
+    } catch { return $null }
+}
+
+function Get-TrustedWingetPackageCandidates {
+    $result = [Collections.Generic.List[object]]::new()
+    try {
+        $windowsApps = [IO.Path]::GetFullPath((Join-Path $env:ProgramFiles 'WindowsApps')).TrimEnd('\')
+        $windowsAppsInfo = Get-Item -LiteralPath $windowsApps -Force -ErrorAction Stop
+        if (($windowsAppsInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return @() }
+        foreach ($package in @(Get-AppxPackage -AllUsers -Name 'Microsoft.DesktopAppInstaller' -ErrorAction Stop)) {
+            $installLocation = [string]$package.InstallLocation
+            if ([string]::IsNullOrWhiteSpace($installLocation)) { continue }
+            $root = [IO.Path]::GetFullPath($installLocation).TrimEnd('\')
+            $rootInfo = Get-Item -LiteralPath $root -Force -ErrorAction Stop
+            $basename = [IO.Path]::GetFileName($root)
+            if (-not $package.Name.Equals('Microsoft.DesktopAppInstaller',[StringComparison]::OrdinalIgnoreCase) -or
+                -not ([string]$package.PublisherId).Equals('8wekyb3d8bbwe',[StringComparison]::OrdinalIgnoreCase) -or
+                -not ([IO.Path]::GetDirectoryName($root)).Equals($windowsApps,[StringComparison]::OrdinalIgnoreCase) -or
+                -not $basename.StartsWith('Microsoft.DesktopAppInstaller_',[StringComparison]::OrdinalIgnoreCase) -or
+                -not $basename.EndsWith('_x64__8wekyb3d8bbwe',[StringComparison]::OrdinalIgnoreCase) -or
+                ($rootInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            $version = $basename.Substring('Microsoft.DesktopAppInstaller_'.Length, $basename.Length - 'Microsoft.DesktopAppInstaller_'.Length - '_x64__8wekyb3d8bbwe'.Length)
+            if ([string]::IsNullOrWhiteSpace($version) -or @($version.Split('.') | Where-Object { $_ -notmatch '^\d+$' }).Count -gt 0) { continue }
             $candidate = Join-Path $root 'winget.exe'
             if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
             $candidateInfo = Get-Item -LiteralPath $candidate -Force -ErrorAction Stop
@@ -489,230 +719,4 @@ function Invoke-MultipassLaunchWithReadinessRecovery {
     if ($before.Count -ne 0) { throw "Fresh Multipass launch recovery refused existing instance $InstanceName." }
     $launchBudgetRemaining = $LaunchTimeoutSeconds
     if ($DeadlineUtc -gt [datetime]::MinValue) {
-        $launchBudgetRemaining = [math]::Min($launchBudgetRemaining, [int][math]::Floor(($DeadlineUtc.ToUniversalTime() - [datetime]::UtcNow).TotalSeconds))
-    }
-    $minimumEnvelopeSeconds = $recoveryBudgetSeconds + $supervisorGraceSeconds + $minimumOperationSeconds
-    if ($launchBudgetRemaining -lt $minimumEnvelopeSeconds) {
-        throw "Multipass launch recovery requires at least $minimumEnvelopeSeconds seconds of remaining bounded stage time; only $launchBudgetRemaining remain."
-    }
-    $launchAttemptSeconds = [Math]::Min(600, $launchBudgetRemaining - $recoveryBudgetSeconds - $supervisorGraceSeconds)
-    $launchSupervisorSeconds = $launchAttemptSeconds + $supervisorGraceSeconds
-    $tail = if ($launchArgs.Count -gt 1) { @($launchArgs[1..($launchArgs.Count - 1)]) } else { @() }
-    $launchArgs = @('launch','--timeout',[string]$launchAttemptSeconds) + $tail
-
-    $launchSucceeded = $false
-    $launchError = $null
-    try {
-        Invoke-External -FilePath $mp -ArgumentList $launchArgs -TimeoutSeconds $launchSupervisorSeconds -DeadlineUtc $DeadlineUtc
-        $launchSucceeded = $true
-    } catch {
-        $launchError = $_.Exception.Message
-    }
-
-    if ($launchSucceeded) {
-        if ($OnInstanceEstablished) { & $OnInstanceEstablished ([pscustomobject]@{ recovery = 'none'; launchTimedOut = $false }) }
-        Wait-MultipassReady -Name $InstanceName -TimeoutSeconds $ReadinessTimeoutSeconds -DeadlineUtc $DeadlineUtc
-        return [pscustomobject]@{ instanceName = $InstanceName; launchTimedOut = $false; recovery = 'none'; ready = $true }
-    }
-
-    # Multipass can leave the exact new Hyper-V VM running after its client
-    # launch operation times out, while the management IP/SSH path is absent.
-    # Confirm one exact post-launch instance before any recovery and surface the
-    # original launch error if the instance was never established.
-    $recoveryDeadlineUtc = [datetime]::UtcNow.AddSeconds($recoveryBudgetSeconds)
-    if ($DeadlineUtc -gt [datetime]::MinValue -and $DeadlineUtc.ToUniversalTime() -lt $recoveryDeadlineUtc) {
-        $recoveryDeadlineUtc = $DeadlineUtc.ToUniversalTime()
-    }
-    $controlPlaneRecovery = $null
-    $postLaunchProbeDeadline = [datetime]::UtcNow.AddSeconds(60)
-    if ($recoveryDeadlineUtc -lt $postLaunchProbeDeadline) { $postLaunchProbeDeadline = $recoveryDeadlineUtc }
-    try {
-        $after = @(Invoke-MultipassInventoryWithBoundedRetry -InventoryScript $inventory -DeadlineUtc $postLaunchProbeDeadline -MaximumAttempts 1 | Where-Object { [string]$_.name -ceq $InstanceName })
-    } catch {
-        $postLaunchInventoryError = $_.Exception.Message
-        if ($postLaunchInventoryError -notmatch '(?i)(timed out|cannot connect|connection|socket|failed with exit code)') {
-            throw "Multipass launch failed after bounded fresh-instance inventory recovery. Original launch error: $launchError. Post-launch inventory error: $postLaunchInventoryError"
-        }
-        $recoveryInvoker = if ($ControlPlaneRecoveryProvider) { $ControlPlaneRecoveryProvider } else { ${function:Invoke-DevFleetMultipassControlPlaneRecovery} }
-        try {
-            $controlPlaneRecovery = & $recoveryInvoker 'POST_LAUNCH_INVENTORY_TRANSPORT_FAILURE' $mp $recoveryDeadlineUtc
-            if (-not $controlPlaneRecovery -or [string]$controlPlaneRecovery.status -cne 'PASS') { throw 'Multipass service recovery did not return PASS.' }
-        } catch {
-            throw "Multipass launch failed and exact control-plane recovery failed. Original launch error: $launchError. Post-launch inventory error: $postLaunchInventoryError. Control-plane recovery error: $($_.Exception.Message)"
-        }
-        $remainingAfterControlPlaneRecovery = [int][math]::Floor(($recoveryDeadlineUtc - [datetime]::UtcNow).TotalSeconds)
-        $instanceRecoveryReserveSeconds = $minimumOperationSeconds + $supervisorGraceSeconds
-        if ($remainingAfterControlPlaneRecovery -le $instanceRecoveryReserveSeconds) {
-            throw "Multipass launch failed and exact control-plane recovery left insufficient time for exact-instance recovery. Original launch error: $launchError. Post-launch inventory error: $postLaunchInventoryError"
-        }
-        $inventoryReprobeSeconds = [math]::Min(60, $remainingAfterControlPlaneRecovery - $instanceRecoveryReserveSeconds)
-        $inventoryReprobeDeadline = [datetime]::UtcNow.AddSeconds($inventoryReprobeSeconds)
-        if ($recoveryDeadlineUtc -lt $inventoryReprobeDeadline) { $inventoryReprobeDeadline = $recoveryDeadlineUtc }
-        try {
-            $after = @(Invoke-MultipassInventoryWithBoundedRetry -InventoryScript $inventory -DeadlineUtc $inventoryReprobeDeadline -MaximumAttempts 1 | Where-Object { [string]$_.name -ceq $InstanceName })
-        } catch {
-            throw "Multipass launch failed and inventory remained unavailable after exact control-plane recovery. Original launch error: $launchError. Initial inventory error: $postLaunchInventoryError. Re-probe error: $($_.Exception.Message)"
-        }
-    }
-    if ($after.Count -ne 1) {
-        throw "Multipass launch failed without establishing exactly one $InstanceName instance: $launchError"
-    }
-    if ($OnInstanceEstablished) { & $OnInstanceEstablished ([pscustomobject]@{ recovery = $(if($controlPlaneRecovery){'control-plane-recovered-pending-instance-recovery'}else{'pending'}); launchTimedOut = $true; controlPlaneRecovery = $controlPlaneRecovery }) }
-
-    try {
-        # The instance is known to be newly established by this invocation, so
-        # one graceful exact stop/start is safe and does not touch any existing
-        # deployment or unrelated VM. Both calls inherit the owning deadline.
-        $remainingRecoverySeconds = [int][math]::Floor(($recoveryDeadlineUtc - [datetime]::UtcNow).TotalSeconds)
-        $startMinimumSeconds = $minimumOperationSeconds + $supervisorGraceSeconds
-        if ($remainingRecoverySeconds -lt $startMinimumSeconds) {
-            throw "Multipass launch timed out and bounded fresh-instance recovery has insufficient remaining time for stop/start. Original launch error: $launchError"
-        }
-        $stopTimeoutSeconds = [math]::Min(120, $remainingRecoverySeconds - $startMinimumSeconds)
-        Invoke-External -FilePath $mp -ArgumentList @('stop',$InstanceName) -TimeoutSeconds $stopTimeoutSeconds -DeadlineUtc $recoveryDeadlineUtc
-        $remainingAfterStopSeconds = [int][math]::Floor(($recoveryDeadlineUtc - [datetime]::UtcNow).TotalSeconds)
-        if ($remainingAfterStopSeconds -lt $startMinimumSeconds) {
-            throw "Multipass launch timed out and bounded fresh-instance recovery exhausted its stop budget. Original launch error: $launchError"
-        }
-        $startInnerSeconds = [math]::Min(150, $remainingAfterStopSeconds - $supervisorGraceSeconds)
-        $startSupervisorSeconds = $startInnerSeconds + $supervisorGraceSeconds
-        Invoke-External -FilePath $mp -ArgumentList @('start','--timeout',[string]$startInnerSeconds,$InstanceName) -TimeoutSeconds $startSupervisorSeconds -DeadlineUtc $recoveryDeadlineUtc
-    } catch {
-        if ($_.Exception.Message -match 'Original launch error:') { throw }
-        throw "Multipass launch timed out and bounded fresh-instance recovery failed for ${InstanceName}. Original launch error: $launchError. Recovery error: $($_.Exception.Message)"
-    }
-    Wait-MultipassReady -Name $InstanceName -TimeoutSeconds $ReadinessTimeoutSeconds -DeadlineUtc $DeadlineUtc
-    return [pscustomobject]@{ instanceName = $InstanceName; launchTimedOut = $true; recovery = $(if($controlPlaneRecovery){'multipass-service-and-instance-stop-start'}else{'multipass-stop-start'}); controlPlaneRecovery = $controlPlaneRecovery; ready = $true }
-}
-
-function Get-InstanceIPv4 {
-    param([string]$Name,[switch]$PreferTailscale)
-    $mp = Get-MultipassExe
-    if ($PreferTailscale) {
-        $ts = Invoke-External $mp @('exec',$Name,'--','bash','-lc','tailscale ip -4 2>/dev/null | head -n1') -Capture -IgnoreExitCode
-        $tsIp = @($ts -split "`r?`n") | Where-Object { $_ -match '^100\.' } | Select-Object -First 1
-        if ($tsIp) { return $tsIp.Trim() }
-    }
-    $raw = Invoke-External $mp @('info',$Name,'--format','json') -Capture
-    $obj = $raw | ConvertFrom-Json
-    $prop = $obj.info.PSObject.Properties[$Name]
-    if (-not $prop) { throw "Multipass info did not contain instance $Name." }
-    $ips = @($prop.Value.ipv4) | Where-Object { $_ }
-    $preferred = $ips | Where-Object { $_ -notmatch '^(127\.|169\.254\.)' -and $_ -notmatch '^172\.' } | Select-Object -First 1
-    if ($preferred) { return $preferred }
-    $ips | Where-Object { $_ -notmatch '^(127\.|169\.254\.)' } | Select-Object -First 1
-}
-
-function Test-PendingRebootState {
-    param(
-        [bool]$CbsPending,
-        [bool]$WindowsUpdatePending,
-        [AllowNull()][object[]]$PendingFileRenameOperations
-    )
-    if ($CbsPending -or $WindowsUpdatePending) { return $true }
-    $meaningful = @($PendingFileRenameOperations | Where-Object {
-        -not [string]::IsNullOrWhiteSpace([string]$_)
-    })
-    $meaningful.Count -gt 0
-}
-
-function Get-DevFleetPendingRebootSnapshot {
-    $cbsPending = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
-    $windowsUpdatePending = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
-    $session = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue
-    # An if-expression can unwrap a singleton array during assignment. Keep
-    # the pending-rename inventory explicitly array-shaped before reading
-    # Count so one pending pair remains a valid scalar-safe collection.
-    $raw = @()
-    if ($null -ne $session) { $raw = @($session.PendingFileRenameOperations) }
-    $pairs = [Collections.Generic.List[string]]::new()
-    for ($i = 0; $i -lt $raw.Count; $i += 2) {
-        $source = [string]$raw[$i]
-        $destination = if ($i + 1 -lt $raw.Count) { [string]$raw[$i + 1] } else { '' }
-        if ($source -or $destination) { [void]$pairs.Add("$source`n$destination") }
-    }
-    [pscustomobject]@{
-        CbsPending = [bool]$cbsPending
-        WindowsUpdatePending = [bool]$windowsUpdatePending
-        PendingPairs = [string[]]$pairs
-    }
-}
-
-function Set-DevFleetPendingRebootBaseline {
-    param([switch]$ResumedTransaction)
-    $global:DevFleetPendingRebootBaseline = if ($ResumedTransaction) { Get-DevFleetPendingRebootSnapshot } else { $null }
-    return $global:DevFleetPendingRebootBaseline
-}
-
-function Test-PendingReboot {
-    $current = Get-DevFleetPendingRebootSnapshot
-    $baselineVariable = Get-Variable -Name DevFleetPendingRebootBaseline -Scope Global -ErrorAction SilentlyContinue
-    $baseline = if ($baselineVariable) { $baselineVariable.Value } else { $null }
-    if ($baseline) {
-        if ([bool]$current.CbsPending -and -not [bool]$baseline.CbsPending) { return $true }
-        if ([bool]$current.WindowsUpdatePending -and -not [bool]$baseline.WindowsUpdatePending) { return $true }
-        return @($current.PendingPairs | Where-Object { @($baseline.PendingPairs) -notcontains $_ }).Count -gt 0
-    }
-    return Test-PendingRebootState -CbsPending:$current.CbsPending -WindowsUpdatePending:$current.WindowsUpdatePending -PendingFileRenameOperations $current.PendingPairs
-}
-
-function Install-WingetPackage {
-    param([Parameter(Mandatory)][string]$Id,[switch]$Upgrade)
-    $health = Get-WingetHealth
-    if ($health.Status -ne 'Healthy') { throw "WinGet is not healthy ($($health.Status)); use repair or official vendor fallback." }
-    $common = @('--id',$Id,'--exact','--source','winget','--accept-package-agreements','--accept-source-agreements','--silent','--disable-interactivity')
-    if ($Upgrade) {
-        Invoke-External -FilePath $health.Path -ArgumentList (@('upgrade') + $common) -TimeoutSeconds 600 -AllowedExitCodes @(0,-1978335189) | Out-Null
-    } else {
-        Invoke-External -FilePath $health.Path -ArgumentList (@('install') + $common) -TimeoutSeconds 600 -AllowedExitCodes @(0,-1978335189) | Out-Null
-    }
-}
-
-function Get-WingetHealth {
-    $candidates = @(Get-TrustedWingetPackageCandidates)
-    if($candidates.Count -eq 0){ return [pscustomobject]@{ Status='Missing'; Path=''; Version=''; Detail='No exact physical Microsoft.DesktopAppInstaller x64 package with winget.exe was found.' } }
-    if($candidates.Count -ne 1){ return [pscustomobject]@{ Status='Broken'; Path=''; Version=''; Detail='WinGet package identity was ambiguous; exactly one physical package is required.' } }
-    $wingetPath = [string]$candidates[0].Path
-    if(-not (Test-TrustedExecutableCandidate $wingetPath)){ return [pscustomobject]@{ Status='Missing'; Path=''; Version=''; Detail='The physical WinGet package failed trusted-root or ACL validation.' } }
-    try { $versionText = Invoke-External -FilePath $wingetPath -ArgumentList @('--version') -TimeoutSeconds 60 -Capture }
-    catch { return [pscustomobject]@{ Status='Broken'; Path=$wingetPath; Version=''; Detail="winget --version could not start: $($_.Exception.Message)" } }
-    $version = ([regex]::Match($versionText, '(?<!\d)(\d+\.\d+(?:\.\d+){0,2})')).Groups[1].Value
-    try { Invoke-External -FilePath $wingetPath -ArgumentList @('source','list','--disable-interactivity') -TimeoutSeconds 60 | Out-Null }
-    catch { return [pscustomobject]@{ Status='Broken'; Path=$wingetPath; Version=$version; Detail="winget source list could not start: $($_.Exception.Message)" } }
-    try { Invoke-External -FilePath $wingetPath -ArgumentList @('search','--id','Microsoft.PowerShell','--exact','--source','winget','--disable-interactivity') -TimeoutSeconds 60 | Out-Null }
-    catch { return [pscustomobject]@{ Status='Broken'; Path=$wingetPath; Version=$version; Detail="winget package search could not start: $($_.Exception.Message)" } }
-    return [pscustomobject]@{ Status='Healthy'; Path=$wingetPath; Version=$version; Detail='version, source list, and package search succeeded.' }
-}
-
-function Repair-Winget {
-    $repair = 'Install-PackageProvider -Name NuGet -Force | Out-Null; Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery | Out-Null; Repair-WinGetPackageManager -Force -Latest'
-    $powershell=Get-DevFleetPowerShell
-    Invoke-External -FilePath $powershell -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',$repair) -TimeoutSeconds 600 | Out-Null
-    $health = Get-WingetHealth
-    if ($health.Status -ne 'Healthy') { throw "WinGet remained unhealthy after repair: $($health.Status)" }
-    return $health
-}
-
-function Get-AuthenticityStrategy {
-    param([Parameter(Mandatory)]$Policy)
-    if ($Policy.PSObject.Properties.Name -contains 'strategy' -and $Policy.strategy) { return [string]$Policy.strategy }
-    return 'Authenticode'
-}
-
-function Test-FileSha256 {
-    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Expected)
-    if ($Expected -notmatch '^[0-9a-fA-F]{64}$') { throw "Expected vendor release digest is not a SHA-256 value for $([IO.Path]::GetFileName($Path))." }
-    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
-    if (-not $actual.Equals($Expected, [StringComparison]::OrdinalIgnoreCase)) { throw "Vendor release SHA-256 mismatch for $([IO.Path]::GetFileName($Path)): expected $Expected, got $actual." }
-    return $actual.ToLowerInvariant()
-}
-
-function Test-OfficialSigner {
-    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)]$Policy)
-    $signature = Get-AuthenticodeSignature -LiteralPath $Path
-    $strategy = Get-AuthenticityStrategy $Policy
-    if ($strategy -eq 'VendorReleaseSha256') { throw "VendorReleaseSha256 requires release metadata digest validation, not Authenticode, for $([IO.Path]::GetFileName($Path))." }
-    if ($signature.Status -ne 'Valid' -and $strategy -eq 'Authenticode') { throw "Authenticode verification failed for $([IO.Path]::GetFileName($Path)): $($signature.Status)" }
-    if ($signature.Status -ne 'Valid' -and $strategy -eq 'AuthenticodeOrVendorReleaseSha256') { throw "AuthenticodeOrVendorReleaseSha256 requires a valid fallback digest for $([IO.Path]::GetFileName($Path))." }
-    $exact=@($Policy.allowedSignerSubjectsExact)
-    if(@($exact).Count -gt 0 -and -not (Test-ExactSignerIdentity ([str
+        $launchBudgetRemaining = [math]::Min($launchBudgetRemaining, [int][math]::Floor(($DeadlineUtc.ToUniversalTim

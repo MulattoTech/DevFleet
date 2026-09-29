@@ -1,10 +1,118 @@
 # DevFleet source part 033
 
 Full-source UTF-8 byte interval [1488000, 1534500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 7d2fe956e56fc963f447954b62761a4b419f2db553968b61cc5cdceaa2c626c3
+Payload SHA-256: fa2024a678ebd7d1763a4f0ead1e251d7685fcc7d2eb21da4b7da73bda709354
 
 <!-- BEGIN SOURCE SLICE -->
-4 | Git mode: 100644
+e-real-uninstall';candidate=$result.candidate;guest=$result.guest;sentinels=$result.foreignSentinels;evidencePath=$result.evidencePath}
+}
+
+function Invoke-AiBundlePhase {
+    param([Parameter(Mandatory)][psobject]$Context)
+    $candidate = Assert-ExactCandidate $Context
+    $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+    $builder = Join-Path $workspace 'tools\Build-AIAuditBundle.ps1'
+    $archive = Join-Path $workspace ('outputs\DevFleet-v{0}-AI-Audit-LATEST.zip' -f $Context.candidate.releaseVersion)
+    if (-not (Test-Path -LiteralPath $builder -PathType Leaf)) { throw 'Canonical AI audit builder is missing.' }
+    $buildOutput = @(& (Get-Command pwsh.exe -ErrorAction Stop).Source -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $builder -Workspace $workspace 2>&1)
+    $buildExit = $LASTEXITCODE
+    $buildRawPath = Join-Path ([string]$Context.runDir) 'ai-bundle-build-output.txt'
+    $buildOutput | ForEach-Object { [string]$_ } | Set-Content -LiteralPath $buildRawPath -Encoding UTF8
+    if ($buildExit -ne 0 -or -not (Test-Path -LiteralPath $archive -PathType Leaf)) { throw "Canonical AI audit builder failed; evidence=$buildRawPath" }
+    $report = Join-Path ([string]$Context.runDir) 'ai-audit-bundle-self-test.json'
+    $builderReport = Join-Path $workspace 'audit\ai-audit-bundle-self-test.json'
+    if (-not (Test-Path -LiteralPath $builderReport -PathType Leaf)) { throw 'Canonical builder validator report is missing.' }
+    $validated = Get-Content -LiteralPath $builderReport -Raw | ConvertFrom-Json
+    $manifest = "$archive.manifest.json"
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { throw 'Canonical AI audit sidecar manifest is missing.' }
+    $bundleManifest = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+    if ([string]$bundleManifest.selfTest -ne 'PASS' -or [int]$bundleManifest.expectedSourceCount -ne [int]$bundleManifest.includedSourceCount) { throw 'Canonical AI audit source inventory is incomplete.' }
+    # The builder chooses its mode from truthful native state and has already
+    # clean-extracted this archive. Bind reuse to its exact completed bytes.
+    $archiveHash=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ([string]$bundleManifest.sha256 -cne $archiveHash -or [long]$bundleManifest.bytes -ne [long](Get-Item -LiteralPath $archive).Length -or [string]$bundleManifest.path -cne [IO.Path]::GetFullPath($archive) -or [string]$validated.archive -cne [IO.Path]::GetFullPath($archive)) { throw 'Canonical builder validation archive binding mismatch.' }
+    $validMode=([string]$validated.bundleMode -ceq 'diagnostic' -and [string]$validated.status -ceq 'PASS_WITH_BLOCKER' -and $validated.releaseEligible -eq $false) -or ([string]$validated.bundleMode -ceq 'release' -and [string]$validated.status -ceq 'COMPLETE_FOR_AI_AUDIT' -and $validated.releaseEligible -eq $true)
+    if (-not $validMode -or [string]$validated.secretScan -cne 'PASS' -or [string]$validated.modeVerification -cne 'PASS' -or [int]$validated.includedSourceCount -ne [int]$bundleManifest.includedSourceCount) { throw 'Canonical builder validation report is not a successful matching round-trip.' }
+    Copy-Item -LiteralPath $builderReport -Destination $report -Force
+    $tarList = @(& tar.exe -tzf ([string]$Context.candidate.tar.path) 2>&1)
+    if ($LASTEXITCODE -ne 0 -or @($tarList | Where-Object { $_ -match '(^|/)linux/bootstrap-compute\.sh$' }).Count -ne 1) { throw 'Standard TAR extraction cannot locate the exact Linux bootstrap entrypoint.' }
+    return [ordered]@{status='REAL E2E PASS';phase='AI-BUNDLE';contract='current-candidate-audit-builder-validator';candidate=$candidate;archive=[ordered]@{path=$archive;bytes=[int64](Get-Item $archive).Length;sha256=(Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant();sourceCount=[int]$bundleManifest.includedSourceCount;validatorReport=$report};buildOutput=$buildRawPath;standardTarListing='PASS' }
+}
+
+function Invoke-ReconcilePhase {
+    param([Parameter(Mandatory)][psobject]$Context)
+    $candidate = Assert-ExactCandidate $Context
+    $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+    $head = (& git -C $workspace rev-parse HEAD).Trim()
+    $manifest = Get-Content -LiteralPath (Join-Path $workspace 'outputs\final-artifact-hashes.json') -Raw | ConvertFrom-Json
+    $state = Get-Content -LiteralPath (Join-Path $workspace 'finalization-state.json') -Raw | ConvertFrom-Json
+    $release = Get-Content -LiteralPath (Join-Path $workspace 'outputs\release-fingerprint.json') -Raw | ConvertFrom-Json
+    $tooling = Get-Content -LiteralPath (Join-Path $workspace 'outputs\tooling-fingerprint-current.json') -Raw | ConvertFrom-Json
+    $currentShippingIdentity = [string]$state.shipping_input_identity
+    if (-not $currentShippingIdentity -or [string]$state.candidate_git_commit -ne [string]$Context.candidate.gitCommit) { throw 'RECONCILE is missing independent repository-head/candidate identity.' }
+    if ([string]$manifest.shippingInputIdentity -and [string]$manifest.shippingInputIdentity -ne $currentShippingIdentity) { throw 'RECONCILE shipping-input identity mismatch.' }
+    foreach($pair in @(@('releaseFingerprintId',$Context.candidate.releaseFingerprintId,$manifest.releaseFingerprintId,$release.releaseFingerprintId,$tooling.releaseFingerprintId),@('toolingFingerprintId',$Context.candidate.toolingFingerprintId,$manifest.toolingFingerprintId,$release.toolingFingerprint.toolingFingerprintId,$tooling.toolingFingerprintId))){ if(@($pair[1..4] | ForEach-Object {[string]$_} | Select-Object -Unique).Count -ne 1){throw "RECONCILE identity mismatch: $($pair[0])"} }
+    if (-not [bool]$state.candidate_is_current -or [bool]$state.source_changed_since_candidate -or [bool]$state.rebuild_required) { throw 'RECONCILE found a stale candidate state or rebuild requirement.' }
+    $rows = @()
+    $recordsPath = Join-Path ([string]$Context.runDir) 'fullrelease-phase-records.json'
+    if (Test-Path -LiteralPath $recordsPath) { $rows = @(Get-Content -LiteralPath $recordsPath -Raw | ConvertFrom-Json) }
+    $required = @('HOST-SAFETY','CANDIDATE-VERIFY','RESTORE-CLEAN','ESTABLISH-SESSION','DEPENDENCY-MATRIX','SECURITY-POISON','FRESH-INSTALL-WPF','PRIMARY','LINUX','HTTP-HOSTILE','MAINTENANCE-READY','WINDOWS-SENTINELS','REPAIR','CLEAN-REINSTALL','UNINSTALL','FACTORY-RESET','REBOOT-RESUME','PERMANENT-DELETE','DELETE-RESTORE','STOPPED-PROJECT','HOST-CONCURRENCY','OPERATION-RECOVERY','OWNERSHIP','VAULT','SURROGATE-DISPOSABLE','REAL-USE-ACCEPTANCE','TAILSCALE-DEFERRED','TAILSCALE-AUTH','AI-BUNDLE')
+    $missing=@($required | Where-Object { $row=$rows | Where-Object id -eq $_ | Select-Object -Last 1; -not $row -or [string]$row.status -ne 'PASS' })
+    if($missing.Count){throw "RECONCILE found mandatory phases missing or not PASS: $($missing -join ', ')"}
+    $realUseRecord = @($rows | Where-Object { [string]$_.id -ceq 'REAL-USE-ACCEPTANCE' }) | Select-Object -Last 1
+    Assert-RealUseAcceptancePhaseEvidence -PhaseResult $realUseRecord.evidence.executor -Context $Context | Out-Null
+    $maintenance=@('REPAIR','CLEAN-REINSTALL','UNINSTALL','FACTORY-RESET','REBOOT-RESUME') | ForEach-Object { $rows | Where-Object id -eq $_ | Select-Object -Last 1 }
+    if(@($maintenance).Count -ne 5){throw 'RECONCILE maintenance count is not 5/5.'}
+    return [ordered]@{status='REAL E2E PASS';phase='RECONCILE';contract='exact-candidate-final-state-reconciliation';candidate=$candidate;repositoryHead=$head;candidateCommit=[string]$state.candidate_git_commit;shippingInputIdentity=$currentShippingIdentity;identities=[ordered]@{releaseFingerprintId=$release.releaseFingerprintId;toolingFingerprintId=$tooling.toolingFingerprintId};candidateState=[ordered]@{candidateIsCurrent=$state.candidate_is_current;sourceChangedSinceCandidate=$state.source_changed_since_candidate;rebuildRequired=$state.rebuild_required};mandatoryPhaseCount=$required.Count;maintenance='5/5';recordsPath=$recordsPath }
+}
+
+function Invoke-RealProductPhase {
+    param([Parameter(Mandatory)][string]$ContextJson)
+    $context = Read-PhaseContext $ContextJson
+    # Generic Diagnostics is not a contract proof for named lifecycle phases; every such phase below dispatches scenario-specific evidence.
+    switch ([string]$context.phaseId) {
+        'DEPENDENCY-MATRIX' { return Invoke-DependencyMatrix $context }
+        'SECURITY-POISON' { return Invoke-ActualWpfAction $context 'Diagnostics' -AllowMutation }
+        'FRESH-INSTALL-WPF' {
+            $ui=Invoke-SupportedFreshInstallLifecycle -Context $context -Role 'Primary / Desktop' -CompleteLifecycle
+            if([string]$ui.status -ne 'REAL E2E PASS' -or -not [bool]$ui.completionVerified){throw "FRESH-INSTALL-WPF requires verified lifecycle completion; observed $([string]$ui.status)."}
+            return $ui
+        }
+        'PRIMARY' { throw 'PRIMARY must be dispatched by Invoke-PrimaryPhase.ps1, not the generic product driver.' }
+        'LINUX' { throw 'LINUX must be dispatched by Invoke-LinuxPhase.ps1, not the generic product driver.' }
+        'HTTP-HOSTILE' { throw 'HTTP-HOSTILE must be dispatched by Invoke-HttpHostilePhase.ps1, not the generic product driver.' }
+        'REPAIR' { return Invoke-ActualWpfAction $context 'Repair' -AllowMutation }
+        'CLEAN-REINSTALL' { return Invoke-ActualWpfAction $context 'CleanReinstall' -AllowMutation }
+        'UNINSTALL' { return Invoke-ActualWpfAction $context 'Uninstall' -AllowMutation }
+        'FACTORY-RESET' { return Invoke-ActualWpfAction $context 'FactoryReset' -AllowMutation }
+        'REBOOT-RESUME' { return Invoke-RebootResumePhase $context }
+        'MAINTENANCE-READY-PROVISION' { return Invoke-ProductLifecycleConsumer -Context $context }
+        'PERMANENT-DELETE' { return Invoke-NestedProductScenario $context 'permanent-delete' }
+        'DELETE-RESTORE' { return Invoke-NestedProductScenario $context 'delete-restore' }
+        'STOPPED-PROJECT' { return Invoke-NestedProductScenario $context 'stopped-project' }
+        'HOST-CONCURRENCY' { return Invoke-NestedProductScenario $context 'host-concurrency' }
+        'OPERATION-RECOVERY' { return Invoke-NestedProductScenario $context 'operation-recovery' }
+        'OWNERSHIP' { return Invoke-NestedProductScenario $context 'ownership' }
+        'WINDOWS-SENTINELS' { return Invoke-WindowsSentinelPhase $context }
+        'VAULT' { return Invoke-NestedProductScenario $context 'vault' }
+        'SURROGATE-DISPOSABLE' { return Invoke-SurrogateDisposablePhase $context }
+        'REAL-USE-ACCEPTANCE' { return Invoke-RealUseAcceptancePhase -Context $context }
+        'TAILSCALE-DEFERRED' { return Invoke-TailscalePolicyPhase $context }
+        'TAILSCALE-AUTH' { return Invoke-TailscalePolicyPhase $context }
+        'AI-BUNDLE' { return Invoke-AiBundlePhase $context }
+        'RECONCILE' { return Invoke-ReconcilePhase $context }
+        default { throw "No phase-specific product driver exists for $($context.phaseId)." }
+    }
+}
+
+Export-ModuleMember -Function Get-DevFleetNestedPrimaryReadinessScriptBlock,New-DevFleetExactProofBinding,Invoke-RealProductPhase,Invoke-PrimaryRolePhase,Invoke-LinuxBootstrapPhase,Invoke-SupportedFreshInstallLifecycle,Invoke-ProductFreshInstallLifecycle,Invoke-DisposableSyntheticRebootProbe,Invoke-RebootResumePhase,Invoke-ProductLifecycleConsumer,Get-ProductLifecycleConsumerMode,Get-ProductLifecycleObservation,Wait-DevFleetProductLifecycleTransition,Test-ProductMeaningfulProgress,Test-RebootBoundaryIdentity,Get-DurableProgressClassification,Get-PhaseAwareBudgetSeconds,Resolve-GuestProgressMarkerRead,Add-GuestProgressMarkerObservation
+
+```
+
+
+## FILE: automation/release-e2e/modules/executors/Invoke-RealUseAcceptance.py
+
+SHA256: 80d79b63d6f5eb5f69d7ebb5cdf4d00c8c30f33084d3b7cbc480019bed45e31a | Bytes: 63454 | Git mode: 100644
 
 ```
 #!/usr/bin/env python3
@@ -659,194 +767,4 @@ class AcceptanceRunner:
 
     def identity(self) -> dict[str, Any]:
         path = self.original()
-        meta = self.store.verify_identity(path, self.fixture, self.request["execution"])
-        self.store.verify_owner(path, self.fixture)
-        return meta
-
-    def observe_runtime(self, *, running: bool, healthy: bool = False) -> dict[str, Any]:
-        meta = self.identity()
-        containers = self.probe.containers(self.fixture["projectId"])
-        persistent: list[dict[str, Any]] = []
-        for item in containers:
-            labels = (item.get("Config") or {}).get("Labels") or {}
-            require(isinstance(labels, dict), "CONTAINER_LABELS_INVALID")
-            for key, label in LABELS.items():
-                require(labels.get(label) == str(meta.get(key, "")), "CONTAINER_OWNERSHIP_MISMATCH")
-            require(labels.get("com.docker.compose.project") == self.fixture["runtimeId"]
-                    and labels.get("com.docker.compose.service"), "COMPOSE_IDENTITY_MISMATCH")
-            require(SHA256.fullmatch(str(item.get("Id", ""))), "CONTAINER_ID_NOT_CANONICAL")
-            if str(labels.get("com.docker.compose.oneoff", "")).lower() == "true":
-                require(not (item.get("State") or {}).get("Running"), "TRANSIENT_WRITER_REMAINS")
-                continue
-            persistent.append(item)
-        active = [item for item in persistent if (item.get("State") or {}).get("Running") is True]
-        require(len(active) == (1 if running else 0), "PERSISTENT_WRITER_COUNT_MISMATCH")
-        ui_page = self.ui.page(f"/projects/{self.fixture['slug']}")
-        require(ui_page.project_states and ui_page.project_states == [("running" if running else "stopped")],
-                "UI_RUNTIME_STATE_DISAGREES")
-        require(meta.get("lifecycle_status") == ("running" if running else "stopped"), "BACKEND_RUNTIME_STATE_DISAGREES")
-        if healthy:
-            require(meta.get("health_status") == "healthy", "APPLICATION_NOT_HEALTHY")
-        ids = []
-        for item in active:
-            observed = self.ui.json("/containers/" + item["Id"] + "/inspect")
-            require(observed.get("Id") == item["Id"] and (observed.get("State") or {}).get("Running") is True,
-                    "UI_CONTAINER_INSPECT_DISAGREES")
-            if healthy:
-                require((item.get("State") or {}).get("Health", {}).get("Status") == "healthy", "CONTAINER_NOT_HEALTHY")
-            ids.append(item["Id"])
-        return {"persistentContainerIds": ids, "persistentWriters": len(active), "healthy": healthy}
-
-    def wait_healthy(self) -> dict[str, Any]:
-        # Docker healthcheck is independent of the successful user health job.
-        deadline = min(self.ui.deadline, self.ui.clock() + 180)
-        while True:
-            try:
-                return self.observe_runtime(running=True, healthy=True)
-            except AcceptanceError as exc:
-                if exc.code not in {"CONTAINER_NOT_HEALTHY"} or self.ui.clock() >= deadline:
-                    raise
-                self.ui.sleep(min(1.0, max(0.0, deadline - self.ui.clock())))
-
-    def assert_no_pending(self) -> None:
-        for entry in self.state["operations"]:
-            operation = self.ui.json("/ui/operations/" + entry["id"])
-            require(operation.get("state") == entry["expectedState"], "ACCEPTANCE_OPERATION_PENDING_OR_CHANGED")
-
-    def prepare(self, credentials: tuple[str, str]) -> None:
-        require(not self.state["prepared"] and not self.fixture, "PREPARE_ALREADY_ATTEMPTED")
-        self.state["preflight"] = self.probe.preflight(self.request)
-        self.begin("U01")
-        self.ui.login(*credentials)
-        slug = "df-accept-" + hashlib.sha256(self.request["runId"].encode()).hexdigest()[:12]
-        path = safe_child(self.store.workspaces, slug)
-        require(not path.exists(), "FIXTURE_ALREADY_EXISTS")
-        self.state["fixture"] = {"slug": slug, "originalPath": str(path), "recoveredPath": ""}
-        self.save()
-        self.operation("create", page="/?view=projects", route="/projects/create", project=slug,
-                       fields={"slug": slug, "display_name": slug, "template": "generic", "target": "local",
-                               "runtime_isolation": "container", "resource_profile": "small", "scale": "small",
-                               "intent": "prototype", "profile": "balanced", "testing_level": "standard",
-                               "git_url": "", "language": "", "framework": "", "pid_mode": "private", "pid_limit": "4096"})
-        meta = self.store.metadata(path)
-        require(PROJECT_ID.fullmatch(str(meta.get("project_id", ""))), "CREATED_PROJECT_ID_INVALID")
-        self.fixture.update(projectId=meta["project_id"], runtimeId=meta.get("runtime_id", ""))
-        self.store.verify_identity(path, self.fixture, self.request["execution"])
-        require(meta.get("template") == "generic", "CREATED_TEMPLATE_MISMATCH")
-        for asset in ("compose.yaml", ".devcontainer/devcontainer.json", ".devfleet/project.json",
-                      ".devfleet/smoke-test.sh", ".devfleet/health-check.sh"):
-            require((path / asset).is_file() and not (path / asset).is_symlink(), "TEMPLATE_ASSET_MISSING")
-        owner = {"schemaVersion": 1, "runId": self.request["runId"], "slug": slug,
-                 "projectId": meta["project_id"], "nonce": secrets.token_hex(24)}
-        self.fixture["owner"] = owner
-        sentinel = f"DevFleet real-use acceptance\nrun:{owner['runId']}\nnonce:{owner['nonce']}\n".encode()
-        for name, data in ((OWNER_FILE, canonical(owner)), (SENTINEL_FILE, sentinel)):
-            with (path / name).open("xb") as stream:
-                stream.write(data)
-        self.fixture["sentinelSha256"] = hashlib.sha256(sentinel).hexdigest()
-        self.state["ledger"].append({"kind": "project", "path": str(path)})
-        self.save()
-        self.complete("U01", {"template": "generic", "projectId": meta["project_id"]})
-        self.begin("U02")
-        self.operation("start")
-        self.operation("health")
-        test = self.operation("test")
-        require(SMOKE_TEXT in str(test.get("result", "")), "TEMPLATE_SMOKE_OUTPUT_MISSING")
-        runtime = self.wait_healthy()
-        self.complete("U02", runtime)
-        self.begin("U03")
-        self.operation("stop")
-        self.observe_runtime(running=False)
-        self.operation("start")
-        self.operation("health")
-        self.wait_healthy()
-        self.assert_no_pending()
-        self.state["serviceBeforeRestart"] = self.probe.service()
-        self.state["prepared"] = True
-        self.save()
-
-    def backup_evidence(self, path: Path) -> dict[str, Any]:
-        meta = self.store.verify_identity(path, self.fixture, self.request["execution"])
-        require(meta.get("backup_status") == "verified", "PRODUCT_BACKUP_NOT_VERIFIED")
-        evidence = self.store.verify_backup(meta, self.fixture)
-        if evidence["path"] not in {entry["path"] for entry in self.state["ledger"]}:
-            self.state["ledger"].append(evidence)
-            self.save()
-        return evidence
-
-    def u04(self) -> None:
-        self.begin("U04")
-        self.identity()
-        backup_root = self.store.runtime / "workspace-backups"
-        self.state["backupBaseline"] = sorted(path.name for path in backup_root.iterdir()) if backup_root.is_dir() else []
-        self.state["backupDiscoveryRequired"] = True
-        self.save()
-        result = self.operation("backup", page=f"/projects/{self.fixture['slug']}?tab=backups")
-        try:
-            receipt = json.loads(result["result"]) if isinstance(result.get("result"), str) else result["result"]
-        except (KeyError, json.JSONDecodeError):
-            raise AcceptanceError("BACKUP_RECEIPT_INVALID") from None
-        # Even an insufficient durability receipt can have created a valid local
-        # archive. Bind that fixture before rejecting Vault acceptance.
-        immediate = self.backup_evidence(self.original())
-        require(isinstance(receipt, dict) and receipt.get("ok") is True and receipt.get("backup_status") == "verified"
-                and receipt.get("vault_upload_status") == "verified" and receipt.get("durability_level") == "vault",
-                "VAULT_UPLOAD_NOT_VERIFIED")
-        require(receipt.get("backup_id") == immediate["backupId"] and receipt.get("backup_sha256") == immediate["archiveSha256"],
-                "BACKUP_RECEIPT_DISAGREES")
-        self.state["quarantineUnverified"] = True
-        self.save()
-        quarantined = self.operation("quarantine", page=f"/projects/{self.fixture['slug']}?tab=isolate",
-                                    fields={"confirm_quarantine": "true"})
-        path = exact_returned_child(self.store.quarantine, quarantined.get("result"), "QUARANTINE_PATH_INVALID")
-        require(re.fullmatch(r"[0-9]{8}-[0-9]{6}-" + re.escape(self.fixture["slug"]), path.name),
-                "QUARANTINE_NAME_INVALID")
-        self.store.verify_identity(path, self.fixture, self.request["execution"])
-        self.store.verify_owner(path, self.fixture)
-        require(not Path(self.fixture["originalPath"]).exists(), "QUARANTINE_ORIGINAL_REMAINS")
-        self.state["ledger"].append({"kind": "quarantine", "path": str(path)})
-        self.state["quarantineUnverified"] = False
-        self.save()
-        quarantine_backup = self.backup_evidence(path)
-        require(not any((item.get("State") or {}).get("Running") for item in self.probe.containers(self.fixture["projectId"])),
-                "QUARANTINED_RUNTIME_REMAINS")
-        collision = safe_child(self.store.workspaces, self.fixture["slug"])
-        collision.mkdir()
-        marker = canonical({"runId": self.request["runId"], "nonce": self.fixture["owner"]["nonce"], "collision": True})
-        with (collision / OWNER_FILE).open("xb") as stream:
-            stream.write(marker)
-        self.state["collisionSha256"] = hashlib.sha256(marker).hexdigest()
-        self.save()
-        try:
-            failed = self.operation("restore-quarantine", page="/?view=settings", route="/quarantine/restore",
-                                    fields={"name": path.name}, match_fields={"name": path.name},
-                                    project=path.name, expected="failed")
-            require("already exists" in str(failed.get("error", "")), "QUARANTINE_COLLISION_WRONG_FAILURE")
-            require(list(collision.iterdir()) == [collision / OWNER_FILE]
-                    and digest(collision / OWNER_FILE) == self.state["collisionSha256"], "COLLISION_WAS_MODIFIED")
-            self.store.verify_owner(path, self.fixture)
-        finally:
-            self.remove_collision()
-        self.operation("restore-quarantine", page="/?view=settings", route="/quarantine/restore",
-                       fields={"name": path.name}, match_fields={"name": path.name}, project=path.name)
-        require(not path.exists(), "QUARANTINE_RESTORE_SOURCE_REMAINS")
-        self.identity()
-        self.complete("U04", {"immediateBackup": immediate, "quarantineBackup": quarantine_backup,
-                              "quarantineName": path.name, "sentinelSha256": self.fixture["sentinelSha256"]})
-
-    def remove_collision(self) -> None:
-        if not self.state.get("collisionSha256"):
-            return
-        path = safe_child(self.store.workspaces, self.fixture["slug"], exists=True)
-        require(list(path.iterdir()) == [path / OWNER_FILE] and not (path / OWNER_FILE).is_symlink()
-                and digest(path / OWNER_FILE) == self.state["collisionSha256"], "COLLISION_CLEANUP_REFUSED")
-        (path / OWNER_FILE).unlink()
-        path.rmdir()
-        self.state.pop("collisionSha256")
-        self.save()
-
-    @contextlib.contextmanager
-    def fixture_edit(self, relative: str, replacement: bytes):
-        require(relative in {"compose.yaml", ".devfleet/ownership-lease.json"}, "FIXTURE_EDIT_NOT_ALLOWED")
-        path = self.original() / relative
-        require(path.is_file() and no
+        meta = self.store.verify_

@@ -1,10 +1,182 @@
 # DevFleet source part 092
 
 Full-source UTF-8 byte interval [4231500, 4278000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 44e5d3f48ae0acfe19c71b8fb4a12695722b7b06ce4139f5cb35e54d7f7ec49b
+Payload SHA-256: c872bf7796c7c0af1543469a28a82021ee6489977b38b8e795862b0340f1082c
 
 <!-- BEGIN SOURCE SLICE -->
-d$v.result.authenticated-and$v.up-eq0-and$v.opened-eq0}
+artNew()
+        try{$output=Invoke-MultipassWithStandardInput -FilePath 'fixture-multipass.exe' -InstanceName $name -CommandArgumentList @('bash','-c',$consumer,'--',(UnixPath $caseRoot)) -StandardInputText $dummy -TimeoutSeconds 45 -DeadlineUtc $deadline -Capture}catch{$errorText=$_.Exception.Message}
+        $timer.Stop()
+        $hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($dummy))).ToLowerInvariant()
+        $exists=Test-Path $state.localDirectory
+        $secretOnlyOnTransfer=@($state.calls|Where-Object{$_.hasInput-and$_.verb-cne'transfer'}).Count-eq0
+        $noSecretArgs=@($state.calls|Where-Object argumentContainsDummy).Count-eq0
+        $bounded=@($state.calls|Where-Object{$_.deadline-gt$deadline.AddSeconds(-5)}).Count-eq0
+        if($state.calls.Count-ge2){$bounded=$bounded-and($state.calls[0].deadline-le$deadline.AddSeconds(-15))-and($state.calls[1].deadline-le$deadline.AddSeconds(-15))}
+        $pass=switch($mode){
+            {$_-in@('success','unicode')} {$output.Trim()-ceq$hash-and-not$errorText-and-not$exists-and$state.calls.Count-eq4;break}
+            'transfer-failure' {$errorText-match'exit code 77'-and-not$exists-and$state.calls.Count-eq3;break}
+            'consumer-failure' {$errorText-match'exit code 23'-and-not$exists-and$state.calls.Count-eq4;break}
+            'bad-file-mode' {$errorText-match'exit code 1'-and-not$exists-and$state.calls.Count-eq4;break}
+            'prepare-collision' {$errorText-match'exit code 1'-and(Test-Path (Join-Path $state.localDirectory 'foreign-marker'))-and$state.calls.Count-eq1;break}
+            'prepare-partial-failure' {$errorText-match'exit code 42'-and-not$exists-and$state.calls.Count-eq1;break}
+            'cleanup-failure' {$errorText-match'cleanup unavailable'-and-not$exists-and$state.calls.Count-eq4;break}
+            'combined-failure' {$errorText-match'exit code 77'-and$errorText-match'Guest input cleanup failed'-and$errorText-match'cleanup unavailable'-and$exists-and$state.calls.Count-eq3;break}
+            default {$errorText-and$state.calls.Count-eq0-and-not$exists}
+        }
+        $checks.Add([pscustomobject]@{case=$mode;pass=[bool]($pass-and$secretOnlyOnTransfer-and$noSecretArgs-and$bounded-and(-not$dummy-or-not$errorText.Contains($dummy)));calls=$state.calls.Count;elapsedSeconds=[math]::Round($timer.Elapsed.TotalSeconds,3);stagingRemains=$exists;transferredBytes=$state.transferredBytes;expectedBytes=[Text.Encoding]::UTF8.GetByteCount($dummy);transferredHashMatches=($state.transferredSha256-ceq$hash);error=if($pass){''}else{$errorText}})
+    }
+} finally {
+    $global:DevFleetDeadlineContext=$priorContext
+    $resolved=[IO.Path]::GetFullPath($fixtureRoot);$tempPrefix=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'
+    if(-not$resolved.StartsWith($tempPrefix,[StringComparison]::OrdinalIgnoreCase)){throw 'Fixture cleanup escaped the temporary directory.'}
+    if(Test-Path $resolved){Remove-Item -LiteralPath $resolved -Recurse -Force}
+}
+[pscustomobject]@{status=if(@($checks|Where-Object{-not$_.pass}).Count){'FAIL'}else{'PASS'};passed=@($checks|Where-Object pass).Count;total=$checks.Count;checks=@($checks);vmOperations=0;realMultipassOperations=0;fixtureBoundary='Multipass external I/O, remote filesystem root/sudo and Linux mode observations are fixtures. Production orchestration, shell parsing, collision rejection, input helper, JSON parser, native stdin writer, file content/EOF and unlink execute locally. Linux ACL enforcement requires the actual guest gate.'}|ConvertTo-Json -Depth 5
+if(@($checks|Where-Object{-not$_.pass}).Count){exit 1}
+
+```
+
+
+## FILE: source/tests/Test-PendingReboot.ps1
+
+SHA256: 0dae89d672d2e5250c009b50f69f4b248e9315bd169cbb82a8828f72d7fff966 | Bytes: 1582 | Git mode: 100644
+
+```
+$ErrorActionPreference = 'Stop'
+$common = Join-Path (Split-Path -Parent $PSScriptRoot) 'windows\DevFleet.Common.psm1'
+Import-Module $common -Force
+$cases = @(
+    @{ name='clean absent'; cbs=$false; wu=$false; pfro=$null; expected=$false },
+    @{ name='empty value'; cbs=$false; wu=$false; pfro=@(); expected=$false },
+    @{ name='empty strings'; cbs=$false; wu=$false; pfro=@('','   '); expected=$false },
+    @{ name='real rename'; cbs=$false; wu=$false; pfro=@('C:\source.tmp','C:\destination.tmp'); expected=$true },
+    @{ name='real delete'; cbs=$false; wu=$false; pfro=@('C:\source.tmp',''); expected=$true },
+    @{ name='CBS with empty value'; cbs=$true; wu=$false; pfro=@(''); expected=$true },
+    @{ name='Windows Update with empty value'; cbs=$false; wu=$true; pfro=@(''); expected=$true },
+    @{ name='multiple operations'; cbs=$false; wu=$false; pfro=@('C:\one','C:\two','C:\three',''); expected=$true }
+)
+foreach ($case in $cases) {
+    $actual = Test-PendingRebootState -CbsPending:$case.cbs -WindowsUpdatePending:$case.wu -PendingFileRenameOperations $case.pfro
+    if ([bool]$actual -ne [bool]$case.expected) { throw "PFRO semantic case failed: $($case.name) expected=$($case.expected) actual=$actual" }
+}
+$source = Get-Content $common -Raw
+if ($source -match '(?m)\b(Remove|Set)-Item(Property)?\b[^\r\n]*PendingFileRenameOperations') { throw 'PFRO regression test detected registry mutation in shipping reboot detection.' }
+[ordered]@{ status='PASS'; cases=$cases.Count; cbsAndWindowsUpdatePreserved=$true; registryMutated=$false } | ConvertTo-Json -Compress
+
+```
+
+
+## FILE: source/tests/Test-ProcessOutputDrain.ps1
+
+SHA256: a553a80e8fbe8c2863faeacf3ccccf4261e7b7e636e819443a1f7410b44bbf1c | Bytes: 5755 | Git mode: 100644
+
+```
+$ErrorActionPreference='Stop'
+$root=Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $root 'windows\DevFleet.Common.psm1') -Force
+
+$shell=(Get-Command powershell.exe -ErrorAction Stop).Source
+$normal=Invoke-External -FilePath $shell -ArgumentList @('-NoProfile','-NonInteractive','-Command',"[Console]::Out.Write('complete-output')") -Capture
+if($normal -cne 'complete-output'){throw 'Invoke-External did not preserve ordinary complete output.'}
+
+$pidPath=Join-Path ([IO.Path]::GetTempPath()) ("devfleet-common-inherited-pipe-"+[guid]::NewGuid().ToString('N')+'.pid')
+$descendantPid=0
+try{
+    $escapedPidPath=$pidPath.Replace("'","''")
+    $parentCommand="`$childInfo=[Diagnostics.ProcessStartInfo]::new();`$childInfo.FileName=(Get-Command powershell.exe).Source;`$childInfo.UseShellExecute=`$false;`$childInfo.CreateNoWindow=`$true;`$childInfo.ArgumentList.Add('-NoProfile');`$childInfo.ArgumentList.Add('-NonInteractive');`$childInfo.ArgumentList.Add('-Command');`$childInfo.ArgumentList.Add('Start-Sleep -Seconds 30');`$child=[Diagnostics.Process]::Start(`$childInfo);[IO.File]::WriteAllText('$escapedPidPath',[string]`$child.Id);exit 0"
+    $timer=[Diagnostics.Stopwatch]::StartNew();$blocked=$false
+    try{Invoke-External -FilePath $shell -ArgumentList @('-NoProfile','-NonInteractive','-Command',$parentCommand) -Capture|Out-Null}catch{if($_.Exception.Message -match 'redirected output was incomplete after the bounded post-exit drain'){$blocked=$true}else{throw}}
+    $timer.Stop()
+    if(-not $blocked -or $timer.Elapsed -ge [TimeSpan]::FromSeconds(15)){throw 'Invoke-External did not fail closed within the bounded post-exit drain allowance.'}
+    if(-not(Test-Path -LiteralPath $pidPath) -or -not [int]::TryParse([IO.File]::ReadAllText($pidPath),[ref]$descendantPid)){throw 'Invoke-External inherited-handle fixture did not publish its descendant PID.'}
+    $descendant=Get-Process -Id $descendantPid -ErrorAction Stop
+    if($descendant.HasExited){throw 'Invoke-External killed a descendant merely to manufacture redirected-output EOF.'}
+}finally{
+    if($descendantPid -gt 0){Stop-Process -Id $descendantPid -Force -ErrorAction SilentlyContinue}
+    Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue
+}
+
+$tx='a'*32;$payload='b'*64
+$computeBoundary=New-DevFleetBootstrapBoundary -Kind compute -InstanceName 'devfleet-primary' -TransactionId $tx -PayloadSha256 $payload -BootstrapMaxSeconds 6600 -PackageVersion '1.2.13' -NodeRole 'primary'
+if($computeBoundary.multipassResolvedStageName -cne 'compute-devfleet-primary-multipass-resolved' -or $computeBoundary.isolationVerifiedStageName -cne 'compute-devfleet-primary-isolation-verified' -or $computeBoundary.instanceAbsentStageName -cne 'compute-devfleet-primary-instance-absent' -or $computeBoundary.instanceLaunchedStageName -cne 'compute-devfleet-primary-instance-launched' -or $computeBoundary.instanceReadyStageName -cne 'compute-devfleet-primary-instance-ready' -or $computeBoundary.payloadTransferredStageName -cne 'compute-devfleet-primary-payload-transferred' -or $computeBoundary.payloadExtractedStageName -cne 'compute-devfleet-primary-payload-extracted' -or $computeBoundary.completionStageName -cne 'compute-devfleet-primary'){throw 'Compute bootstrap boundary did not produce the allowlisted substep names.'}
+if($computeBoundary.extractionCommand -notmatch 'unzip.+devfleet-payload\.zip' -or $computeBoundary.extractionCommand -match 'sudo\s+bash|(?i)password|apitoken|secret='){throw 'Compute extraction did not remain a distinct non-secret production boundary.'}
+if($computeBoundary.bootstrapCommand -notmatch "bootstrap-compute\.sh.*--transaction-id '$tx'.*--payload-sha256 '$payload'.*--bootstrap-max-seconds '6600'.*--package-version '1\.2\.13'.*--node-role 'primary'" -or $computeBoundary.bootstrapCommand -match '(?i)password|apitoken|secret='){throw 'Compute bootstrap command did not preserve its non-secret identity contract.'}
+$vaultBoundary=New-DevFleetBootstrapBoundary -Kind vault -InstanceName 'devfleet-vault' -TransactionId $tx -PayloadSha256 $payload -BootstrapMaxSeconds 3900 -PackageVersion 'vault' -NodeRole 'vault'
+if($vaultBoundary.multipassResolvedStageName -cne 'vault-multipass-resolved' -or $vaultBoundary.isolationVerifiedStageName -cne 'vault-isolation-verified' -or $vaultBoundary.instancePresentStageName -cne 'vault-instance-present' -or $vaultBoundary.instanceStartedStageName -cne 'vault-instance-started' -or $vaultBoundary.instanceReadyStageName -cne 'vault-instance-ready' -or $vaultBoundary.payloadTransferredStageName -cne 'vault-payload-transferred' -or $vaultBoundary.payloadExtractedStageName -cne 'vault-payload-extracted' -or $vaultBoundary.completionStageName -cne 'vault'){throw 'Vault bootstrap boundary did not produce the allowlisted substep names.'}
+if($vaultBoundary.extractionCommand -notmatch 'unzip.+devfleet-vault-payload\.zip' -or $vaultBoundary.extractionCommand -match 'sudo\s+bash|(?i)password|resticpassword|secret='){throw 'Vault extraction did not remain a distinct non-secret production boundary.'}
+if($vaultBoundary.bootstrapCommand -notmatch "bootstrap-vault\.sh.*--transaction-id '$tx'.*--payload-sha256 '$payload'.*--bootstrap-max-seconds '3900'.*--package-version 'vault'.*--node-role 'vault'" -or $vaultBoundary.bootstrapCommand -match '(?i)password|resticpassword|secret='){throw 'Vault bootstrap command did not preserve its non-secret identity contract.'}
+
+[ordered]@{ok=$true;tests=8;ordinaryCompleteOutput=$true;inheritedPipeFailsClosedBoundedly=$true;computeExtractionSeparated=$true;vaultExtractionSeparated=$true;computeBoundaryIdentityBound=$true;vaultBoundaryIdentityBound=$true;substepNamesAllowlisted=$true;secretsExcludedFromArguments=$true}|ConvertTo-Json -Compress
+
+```
+
+
+## FILE: source/tests/Test-TailscaleBrowserPairing.ps1
+
+SHA256: 4cae989aa96639e30e27d4a444b2bf1ae1c6f922d1cb5203f522b5db7e52408e | Bytes: 5498 | Git mode: 100644
+
+```
+$ErrorActionPreference='Stop'
+$WarningPreference='SilentlyContinue'
+Import-Module (Join-Path $PSScriptRoot '../windows/DevFleet.Tailscale.psm1') -Force
+$module=Get-Module DevFleet.Tailscale
+$results=[Collections.Generic.List[object]]::new()
+function Check([string]$Name,[bool]$Pass){$results.Add([pscustomobject]@{case=$Name;pass=$Pass})}
+foreach($item in @(
+    @('https://login.tailscale.com/a/fixture123',$true),
+    @('http://login.tailscale.com/a/fixture123',$false),
+    @('https://login.tailscale.com.evil.example/a/fixture123',$false),
+    @('https://evil.example/?https://login.tailscale.com/a/fixture123',$false),
+    @('https://evil@login.tailscale.com/a/fixture123',$false),
+    @('https://login.tailscale.com:8443/a/fixture123',$false),
+    @('https://login.tailscale.com/a/fixture123?redirect=evil',$false),
+    @('https://login.tailscale.com/a/fixture123#evil',$false),
+    @('https://login.tailscale.com/a/one https://login.tailscale.com/a/two',$false),
+    @('https://login.tailscale.com/a/fixture123 https://login.tailscale.com/a/fixture123',$true)
+)){
+    $uri=&$module {param($s)Get-DevFleetTailscaleAuthenticationUri $s} $item[0]
+    Check ('official browser URL case '+$results.Count) ([bool]$uri-eq$item[1])
+}
+foreach($item in @(@('Running','100.64.1.2',$true),@('NeedsLogin','100.64.1.2',$false),@('Running','192.168.1.2',$false),@('Running','100.1.1.2',$false),@('Running','100.128.1.2',$false),@('Running','fd7a:115c:a1e0::1',$false))){
+    $ip=&$module {param($s,$ip)Get-DevFleetAuthenticatedTailscaleIPv4 (@{BackendState=$s;TailscaleIPs=@($ip)}|ConvertTo-Json -Compress)} $item[0] $item[1]
+    Check ('authenticated private IPv4 '+$item[0]+'/'+$item[1]) ([bool]$ip-eq$item[2])
+}
+&$module {
+    function script:Get-DevFleetDeadlineContext {return $script:PairingFixtureContext}
+    function script:Open-DevFleetTailscaleAuthenticationPage {param($Uri)$script:PairingFixtureOpened++;if($Uri.AbsoluteUri-cne'https://login.tailscale.com/a/fixture123'){throw 'Unexpected browser target.'}}
+    function script:Start-Sleep {param($Milliseconds)}
+    function script:Invoke-External {
+        param($FilePath,$ArgumentList,[switch]$Capture,[switch]$IgnoreExitCode,$TimeoutSeconds,$DeadlineUtc)
+        if(-not$Capture-or-not$IgnoreExitCode-or$TimeoutSeconds-gt35-or$DeadlineUtc-gt$script:PairingFixtureDeadline){throw 'Native command lost its bounded capture contract.'}
+        $script:PairingFixtureCalls.Add([pscustomobject]@{path=$FilePath;args=@($ArgumentList);timeout=$TimeoutSeconds})
+        if($ArgumentList-contains'up'){
+            $script:PairingFixtureUp++
+            if($ArgumentList-notcontains'--timeout=30s'-or$ArgumentList-notcontains'--accept-dns=false'-or$ArgumentList-contains'--auth-key'){throw 'Unexpected authentication authority.'}
+            if($script:PairingFixtureCase-eq'bad-url'){return 'https://evil.example/a/fake'}
+            return 'To authenticate, visit: https://login.tailscale.com/a/fixture123'
+        }
+        if($ArgumentList-notcontains'--json'){throw 'Status request arguments were lost.'}
+        if($script:PairingFixtureCase-eq'malformed'){return 'malformed status'}
+        $connected=$script:PairingFixtureCase-eq'already-connected'-or$script:PairingFixtureOpened-gt0
+        return (@{BackendState=if($connected){'Running'}else{'NeedsLogin'};TailscaleIPs=if($connected){@('100.64.1.2')}else{@()}}|ConvertTo-Json -Compress)
+    }
+}
+foreach($target in @('windows','guest')){
+    foreach($case in @('already-connected','browser-required','bad-url','deadline-exhausted','parent-deadline')){
+        $v=&$module {
+            param($Case,$Target)
+            $script:PairingFixtureCase=$Case;$script:PairingFixtureOpened=0;$script:PairingFixtureUp=0;$script:PairingFixtureCalls=[Collections.Generic.List[object]]::new();$script:PairingFixtureContext=$null
+            $script:PairingFixtureDeadline=[datetime]::UtcNow.AddSeconds($(if($Case-eq'deadline-exhausted'){3}else{60}))
+            if($Case-eq'parent-deadline'){$script:PairingFixtureContext=[pscustomobject]@{StageDeadlineUtc=[datetime]::UtcNow.AddSeconds(3)}}
+            $parameters=@{FilePath=if($Target-eq'guest'){'multipass-fixture.exe'}else{'tailscale-fixture.exe'};Hostname='devfleet-fixture';DeadlineUtc=$script:PairingFixtureDeadline}
+            if($Target-eq'guest'){$parameters.InstanceName='devfleet-vault'}
+            $result=$null;$failed=$false
+            try{$result=Invoke-DevFleetTailscaleBrowserPairing @parameters}catch{$failed=$true}
+            [pscustomobject]@{result=$result;failed=$failed;calls=@($script:PairingFixtureCalls);up=$script:PairingFixtureUp;opened=$script:PairingFixtureOpened}
+        } $case $target
+        $pass=switch($case){
+            'already-connected' {-not$v.failed-and$v.result.authenticated-and$v.up-eq0-and$v.opened-eq0}
             'browser-required' {-not$v.failed-and$v.result.authenticated-and$v.up-eq1-and$v.opened-eq1}
             'bad-url' {$v.failed-and$v.up-eq1-and$v.opened-eq0}
             default {$v.failed-and$v.calls.Count-eq0-and$v.opened-eq0}
@@ -519,334 +691,4 @@ def test_socket_and_privileged_blocked():
 
 def test_public_port_and_device_blocked():
     findings=analyze('''services:\n  dev:\n    image: ubuntu:24.04\n    ports: [\"3000:3000\"]\n    devices: [\"/dev/kvm:/dev/kvm\"]\n''')
-    assert {'docker.port-public','docker.devices'} <= {x['code'] for x in findings}
-
-
-def test_loopback_port_allowed():
-    findings=analyze('''services:\n  dev:\n    image: ubuntu:24.04\n    ports: [\"127.0.0.1:3000:3000\"]\n    security_opt: [\"no-new-privileges:true\"]\n    healthcheck: {test: [\"CMD\", \"true\"]}\n''')
-    assert not has_blockers(findings), findings
-
-def test_symlink_bind_source_outside_project_is_blocked(tmp_path: Path):
-    outside=tmp_path/'outside'
-    outside.mkdir()
-    project=tmp_path/'project'
-    project.mkdir()
-    try:
-        (project/'escape').symlink_to(outside, target_is_directory=True)
-    except OSError:
-        pytest.skip('Windows test host does not grant symbolic-link creation privilege')
-    (project/'compose.yaml').write_text('''services:\n  app:\n    image: alpine:3.20\n    security_opt: [no-new-privileges:true]\n    volumes:\n      - ./escape:/data\n    ports:\n      - 127.0.0.1:8080:80\n''')
-    findings=analyze_project(project)
-    assert has_blockers(findings)
-    assert any(x['code']=='docker.mount-resolution' for x in findings)
-
-
-def test_rebuild_context_symlink_outside_project_is_blocked(tmp_path: Path):
-    outside=tmp_path/'outside-build'
-    outside.mkdir()
-    project=tmp_path/'project'
-    project.mkdir()
-    try:
-        (project/'escape-build').symlink_to(outside, target_is_directory=True)
-    except OSError:
-        pytest.skip('Windows test host does not grant symbolic-link creation privilege')
-    (project/'compose.yaml').write_text('''services:\n  app:\n    build: ./escape-build\n    security_opt: [no-new-privileges:true]\n    ports:\n      - 127.0.0.1:8080:80\n''')
-    findings=analyze_project(project)
-    assert has_blockers(findings)
-    assert any(x['code']=='docker.build-context' for x in findings)
-
-```
-
-
-## FILE: source/tests/test_analyzer_v11.py
-
-SHA256: 11738fb7c631b7c0d2de4d70956ce3e458f5b0aed5d302702ff7bb60ee484ccb | Bytes: 4024 | Git mode: 100644
-
-```
-from pathlib import Path
-import pytest
-from devfleet.analyzer import analyze_project,has_blockers
-def project(tmp_path,text):
- p=tmp_path/'demo';p.mkdir();(p/'compose.yaml').write_text(text);return p
-def test_windows_mount_blocked(tmp_path):assert has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    volumes: ["C:\\\\Users:/host"]\n'),'balanced',True))
-def test_parent_mount_blocked(tmp_path):assert has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    volumes: ["../:/host"]\n'),'fast',True))
-def test_docker_socket_blocked_in_fast(tmp_path):assert has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    volumes: ["/var/run/docker.sock:/var/run/docker.sock"]\n'),'fast',True))
-def test_loopback_port_allowed_balanced(tmp_path):assert not has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    ports: ["127.0.0.1:3000:3000"]\n    healthcheck: {test: ["CMD","true"]}\n    security_opt: ["no-new-privileges:true"]\n'),'balanced',True))
-def test_tailnet_allowed_balanced(tmp_path):assert not has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    ports: ["100.64.1.2:3000:3000"]\n    healthcheck: {test: ["CMD","true"]}\n    security_opt: ["no-new-privileges:true"]\n'),'balanced',True))
-def test_public_port_blocked(tmp_path):assert has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    ports: ["3000:3000"]\n'),'fast',True))
-def test_symlink_escape_blocked(tmp_path):
- p=project(tmp_path,'services:\n  x:\n    image: x:1\n')
- try:(p/'escape').symlink_to(tmp_path)
- except OSError:pytest.skip('Windows test host does not grant symbolic-link creation privilege')
- assert has_blockers(analyze_project(p,'balanced',True))
-def test_cache_invalidates(tmp_path):
- p=project(tmp_path,'services:\n  x:\n    image: x:1\n    ports: ["127.0.0.1:3000:3000"]\n');a=analyze_project(p,'balanced');(p/'compose.yaml').write_text('services:\n  x:\n    image: x:1\n    ports: ["3000:3000"]\n');b=analyze_project(p,'balanced');assert a!=b and has_blockers(b)
-
-def test_balanced_hardening_items_are_warnings(tmp_path):
- p=project(tmp_path,'services:\n  x:\n    build: .\n    ports: ["127.0.0.1:3000:3000"]\n');(p/'Dockerfile').write_text('FROM alpine:3.20\nRUN true\n')
- findings=analyze_project(p,'balanced',True)
- by_code={x['code']:x['severity'] for x in findings}
- assert by_code['docker.healthcheck']=='warning'
- assert by_code['docker.no-new-privileges']=='warning'
- assert by_code['docker.non-root-user']=='warning'
- assert not has_blockers(findings)
-
-def test_strict_hardening_items_block(tmp_path):
- p=project(tmp_path,'services:\n  x:\n    build: .\n');(p/'Dockerfile').write_text('FROM alpine:3.20\n')
- assert has_blockers(analyze_project(p,'strict',True))
-
-def test_fast_device_requires_project_acknowledgement(tmp_path):
- p=project(tmp_path,'services:\n  x:\n    image: alpine:3.20\n    devices: ["/dev/kvm:/dev/kvm"]\n    ports: ["127.0.0.1:3000:3000"]\n    healthcheck: {test: ["CMD","true"]}\n    security_opt: ["no-new-privileges:true"]\n')
- (p/'.devfleet').mkdir();(p/'.devfleet/project.json').write_text('{"profile":"fast","allow_devices":false}')
- assert has_blockers(analyze_project(p,'fast',True))
- (p/'.devfleet/project.json').write_text('{"profile":"fast","allow_devices":true}')
- assert not has_blockers(analyze_project(p,'fast',True))
-
-def test_cache_invalidates_when_referenced_environment_file_changes(tmp_path):
- p=project(tmp_path,'services:\n  x:\n    image: alpine:3.20\n    env_file: config/runtime-settings\n    ports: ["127.0.0.1:3000:3000"]\n    healthcheck: {test: ["CMD","true"]}\n    security_opt: ["no-new-privileges:true"]\n')
- (p/'config').mkdir();env=p/'config/runtime-settings';env.write_text('MODE=one\n')
- analyze_project(p,'balanced');cache=p/'.devfleet/runtime/analyzer-cache.json';first=cache.read_text()
- env.write_text('MODE=two-with-different-size\n')
- analyze_project(p,'balanced');assert cache.read_text()!=first
-
-```
-
-
-## FILE: source/tests/test_audit5_destructive.py
-
-SHA256: 3ce81d650d6d41c7d18b76194d7eefe01feeb1231d80f772051ef845003f0ec1 | Bytes: 5863 | Git mode: 100644
-
-```
-from __future__ import annotations
-
-import hashlib
-import os
-import tarfile
-from pathlib import Path
-
-import pytest
-from types import SimpleNamespace
-
-from devfleet import projects
-from devfleet.workspace_archives import (
-    create_workspace_archive,
-    restore_workspace_archive,
-    write_backup_manifest,
-)
-
-
-def _hash_tree(root: Path) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for path in sorted(p for p in root.rglob("*") if p.is_file()):
-        result[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
-    return result
-
-
-def _metadata(source: Path) -> None:
-    metadata = source / ".devfleet" / "project.json"
-    metadata.parent.mkdir(parents=True, exist_ok=True)
-    metadata.write_text('{"schema_version":3,"managed_by":"devfleet","project_id":"12345678-1234-1234-1234-123456789012","slug":"demo","runtime_provider":"docker-compose","host_id":"test-node"}', encoding="utf-8")
-
-
-def test_destructive_backup_preserves_generated_looking_user_files(tmp_path: Path):
-    source = tmp_path / "source"
-    _metadata(source)
-    for relative, data in {
-        "build/irreplaceable.bin": b"build-user-data",
-        "dist/manual-output.dat": b"dist-user-data",
-        "node_modules/user-preserved-test.txt": b"node-user-data",
-        ".next/notes.txt": b"next-user-data",
-        "arbitrary/nested-generated-looking/file.txt": b"nested-user-data",
-    }.items():
-        path = source / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-
-    archive = tmp_path / "backup.tar.gz"
-    result = create_workspace_archive(source, "demo", archive, include_generated=True, consistency_level="quiesced")
-    assert result["omitted_paths"] == []
-    assert result["included_file_count"] == 6
-    restored = tmp_path / "restored"
-    restore_workspace_archive(archive, restored, "demo")
-    assert _hash_tree(source) == _hash_tree(restored)
-
-
-def test_routine_backup_keeps_documented_generated_directory_omission(tmp_path: Path):
-    source = tmp_path / "source"
-    _metadata(source)
-    (source / "build").mkdir(parents=True)
-    (source / "build" / "cache.bin").write_bytes(b"cache")
-    archive = tmp_path / "routine.tar.gz"
-    result = create_workspace_archive(source, "demo", archive)
-    assert "build" in result["omitted_paths"]
-    with tarfile.open(archive, "r:gz") as bundle:
-        assert "demo/build/cache.bin" not in bundle.getnames()
-
-
-@pytest.mark.skipif(os.name != "posix", reason="POSIX permission fidelity is unavailable on Windows")
-def test_restore_preserves_safe_modes_and_strips_special_bits(tmp_path: Path):
-    source = tmp_path / "source"
-    source.mkdir()
-    _metadata(source)
-    executable = source / "hook.sh"
-    private = source / "private.key"
-    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    private.write_text("secret", encoding="utf-8")
-    os.chmod(executable, 0o755)
-    os.chmod(private, 0o600)
-    archive = tmp_path / "modes.tar.gz"
-    create_workspace_archive(source, "demo", archive, include_generated=True)
-
-    # Make the archive metadata hostile.  Restore must mask privilege-bearing
-    # special bits while retaining ordinary permissions.
-    rewritten = tmp_path / "hostile.tar.gz"
-    with tarfile.open(archive, "r:gz") as original, tarfile.open(rewritten, "w:gz") as target:
-        for member in original.getmembers():
-            member.mode |= 0o6000
-            if member.name.endswith("hook.sh"):
-                member.mode = 0o6755
-            source_file = original.extractfile(member) if member.isfile() else None
-            target.addfile(member, source_file)
-            if source_file is not None:
-                source_file.close()
-
-    restored = tmp_path / "restored"
-    restore_workspace_archive(rewritten, restored, "demo")
-    assert (restored / "hook.sh").stat().st_mode & 0o777 == 0o755
-    assert (restored / "private.key").stat().st_mode & 0o777 == 0o600
-
-
-def test_restore_deleted_project_uses_tombstone_and_exact_identity(tmp_path: Path, monkeypatch):
-    workspaces = tmp_path / "workspaces"
-    runtime = tmp_path / "runtime"
-    settings = SimpleNamespace(workspaces=workspaces, runtime_root=runtime, host_id="test-node")
-    monkeypatch.setattr(projects, "SETTINGS", settings)
-    source = tmp_path / "source"
-    _metadata(source)
-    (source / "build").mkdir()
-    (source / "build" / "irreplaceable.bin").write_bytes(b"keep")
-    backup_dir = runtime / "workspace-backups" / "demo-backup"
-    archive = backup_dir / "demo.tar.gz"
-    result = create_workspace_archive(source, "demo", archive, include_generated=True, consistency_level="quiesced")
-    write_backup_manifest(
-        backup_dir,
-        slug="demo",
-        project_id="12345678-1234-1234-1234-123456789012",
-        runtime={"provider": "docker-compose", "runtime_id": ""},
-        archive=result,
-        consistency_level="quiesced",
-    )
-    tombstone = {
-        "project_id": "12345678-1234-1234-1234-123456789012",
-        "slug": "demo",
-        "runtime_provider": "docker-compose",
-        "backup_id": "demo-backup",
-        "backup_sha256": result["archive_sha256"],
-    }
-    tombstone_path = projects._recovery_tombstone_path("demo", tombstone["project_id"])
-    tombstone_path.parent.mkdir(parents=True, exist_ok=True)
-    tombstone_path.write_text(__import__("json").dumps(tombstone), encoding="utf-8")
-    recovered = projects.restore_deleted_project(
-        "demo", "demo-backup", project_id=tombstone["project_id"], confirm_restore=True
-    )
-    assert recovered["ok"] is True
-    assert (workspaces / "demo" / "build" / "irreplaceable.bin").read_bytes() == b"keep"
-    with pytest.raises(ValueError, match="absent destination"):
-        projects.restore_deleted_project(
-            "demo", "demo-backup", project_id=tombstone["project_id"], confirm_restore=True
-        )
-
-```
-
-
-## FILE: source/tests/test_audit_coherence.py
-
-SHA256: 58d8a589d22f1d4ff33419dbee2864b9a56fe5a9b4a6ffcf4fdc6d1079156e57 | Bytes: 36369 | Git mode: 100644
-
-```
-from __future__ import annotations
-
-import copy
-import hashlib
-import json
-import shutil
-import subprocess
-import sys
-import zipfile
-from pathlib import Path
-from types import SimpleNamespace
-
-import pytest
-import importlib.util
-
-_VALIDATOR_PATH = Path(__file__).parents[1] / "tools" / "validate_audit_coherence.py"
-_SPEC = importlib.util.spec_from_file_location("validate_audit_coherence", _VALIDATOR_PATH)
-assert _SPEC and _SPEC.loader
-_MODULE = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(_MODULE)
-validate_root = _MODULE.validate_root
-
-_AI_VALIDATOR_PATH = Path(__file__).parents[1] / "tools" / "validate_ai_audit_bundle.py"
-_AI_SPEC = importlib.util.spec_from_file_location("validate_ai_audit_bundle", _AI_VALIDATOR_PATH)
-assert _AI_SPEC and _AI_SPEC.loader
-_AI_MODULE = importlib.util.module_from_spec(_AI_SPEC)
-_AI_SPEC.loader.exec_module(_AI_MODULE)
-
-ROOT = Path(__file__).parents[2]
-
-_COMPUTE_SPEC = importlib.util.spec_from_file_location("compute_shipping_input_identity", ROOT / "tools/compute_shipping_input_identity.py")
-assert _COMPUTE_SPEC and _COMPUTE_SPEC.loader
-_COMPUTE_MODULE = importlib.util.module_from_spec(_COMPUTE_SPEC)
-_COMPUTE_SPEC.loader.exec_module(_COMPUTE_MODULE)
-
-_RELEASE_BUNDLE_SPEC = importlib.util.spec_from_file_location("validate_release_bundle", ROOT / "tools/validate_release_bundle.py")
-assert _RELEASE_BUNDLE_SPEC and _RELEASE_BUNDLE_SPEC.loader
-_RELEASE_BUNDLE_MODULE = importlib.util.module_from_spec(_RELEASE_BUNDLE_SPEC)
-_RELEASE_BUNDLE_SPEC.loader.exec_module(_RELEASE_BUNDLE_MODULE)
-
-def _fixture(tmp_path: Path) -> Path:
-    root = tmp_path / "bundle"
-    (root / "outputs").mkdir(parents=True)
-    (root / "audit").mkdir()
-    (root / "source" / "tools").mkdir(parents=True)
-    # The validator recomputes release identities from the canonical helper.
-    # Keep synthetic extracted fixtures self-contained just like the real
-    # bundle; omitting this authority turns valid fixtures into import errors.
-    shutil.copy2(ROOT / "source/tools/release_fingerprint.py", root / "source/tools/release_fingerprint.py")
-    shutil.copy2(ROOT / "source/tools/hook_modes.py", root / "source/tools/hook_modes.py")
-    (root / "installer-source").mkdir(parents=True)
-    (root / "source" / "VERSION").write_text("1.2.13", encoding="utf-8")
-    (root / "installer-source" / "INSTALLER_VERSION").write_text("1.4.1", encoding="utf-8")
-    mode = {"schemaVersion": 1, "defaultMode": "0644", "executableMode": "0755", "executableByContract": []}
-    rows = _fixture_shipping_rows(root)
-    rows.sort(key=lambda row: (row["root"], row["path"]))
-    shipping_identity = _MODULE._shipping_identity(
-        {(row["root"], row["path"]): row for row in rows}, mode, "1.2.13", "1.4.1"
-    )
-    artifacts = {
-        "exe": {"name": "exe", "path": "outputs/a.exe", "bytes": 1, "sha256": "a" * 64},
-        "tar": {"name": "tar", "path": "outputs/a.tar.gz", "bytes": 2, "sha256": "b" * 64},
-        "portable": {"name": "portable", "path": "outputs/a.zip", "bytes": 3, "sha256": "c" * 64},
-        "installerSource": {"name": "installerSource", "path": "outputs/a-source.zip", "bytes": 4, "sha256": "d" * 64},
-    }
-    state = {
-        "release_version": "1.2.13",
-        "installer_version": "1.4.1",
-        "git_commit": "1" * 40,
-        "candidate_git_commit": "1" * 40,
-        "releaseFingerprintId": "f" * 64,
-        "toolingFingerprintId": "e" * 64,
-        "shipping_input_identity": shipping_identity,
-        "candidate_shipping_input_identity": shipping_identity,
-        "source_changed_since_candidate": False,
-        "rebuild_required": False,
-        "candidate_is_current": True,
-        "candidate_build_current": True,
-        "validation_evidence_current": True,
-        "full_release_passed": False,
-        "physical_surrogate_certification_current": False,
-        "internal_promotion_allowed": False,
-        "public_promotion_allowed": False,
-        "production_safety": {"production_unchanged": True, "mulattotechsurface_touched": False},
-        "candidate": copy.deepcopy(artifacts),
-        "gates": {"dep
+    assert {'docker.port-p

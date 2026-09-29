@@ -1,10 +1,148 @@
 # DevFleet source part 051
 
 Full-source UTF-8 byte interval [2325000, 2371500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 3b48f94b0621011210c68a9e00c5d0a7c060b33057fec971889cc42bcbf68f3e
+Payload SHA-256: fe48303fa9bc0852081bb19b19cb9e7ffc09f6bb3cbde8ff716fc09f0f4c2835
 
 <!-- BEGIN SOURCE SLICE -->
- without durable identity and ownership transfer is rejected'
+tiveSessionId=$resume.expectedInteractiveSessionId;AllowMutation=$resume.allowMutation;AllowRebootRequired=$resume.allowRebootRequired;UseDurableCompletionFallback=$resume.useDurableCompletionFallback;ElevatedResume=$resume.elevatedResume;ContractProbe=$resume.contractProbe;ContractModulePath=''}
+    $wrongRunBinding=@{}+$actualBinding;$wrongRunBinding.RunId='wrong-run';$wrongRunRejected=$false;try{Assert-WpfDriverBinding -Specification $resume -Actual $wrongRunBinding|Out-Null}catch{$wrongRunRejected=$_.Exception.Message -match 'runId'}
+    Check $wrongRunRejected 'launch request with a wrong run identity is rejected before product start'
+    $wrongHashSpec=$resume|Select-Object *;$wrongHashSpec.candidateSha256='f'*64;$wrongHashRejected=$false;try{Assert-WpfDriverBinding -Specification $wrongHashSpec -Actual $actualBinding|Out-Null}catch{$wrongHashRejected=$_.Exception.Message -match 'candidate hash'}
+    Check $wrongHashRejected 'launch request with a wrong candidate hash is rejected before product start'
+
+    $handoffCommon = @{} + $common
+    $handoffCommon.LaunchId = ('d' * 32)
+    $handoffCommon.OutputPath = Join-Path $scratch 'handoff-final.json'
+    $handoffCommon.StartedPath = Join-Path $scratch 'handoff-started.json'
+    $handoffCommon.CheckpointPath = Join-Path $scratch 'handoff-checkpoint.json'
+    $handoffCommon.WorkerResultPath = Join-Path $scratch 'handoff-worker.json'
+    $handoffCommon.LaunchRequestPath = Join-Path $scratch 'handoff-request.json'
+    $handoffSpec = New-WpfLaunchSpecification @handoffCommon -LaunchMode resume -ElevatedResume -UseDurableCompletionFallback -ContractProbe
+    Write-WpfAtomicJson -Path $handoffSpec.launchRequestPath -Value $handoffSpec
+    $handoffProbe = Start-Process -FilePath $handoffSpec.taskExecutable -ArgumentList ([string]$handoffSpec.taskArguments) -PassThru -Wait
+    $handoffProbeReport = Get-Content -LiteralPath $handoffSpec.outputPath -Raw | ConvertFrom-Json
+    Check ($handoffProbe.ExitCode -eq 0 -and [string]$handoffProbeReport.status -eq 'CONTRACT_PROBE_PASS') 'resume product-observer handoff survives actual task argument construction and driver parsing'
+    $pageSeparator=[char]0x00B7
+    Check ((Get-WpfNavigationDisposition -LaunchMode initial -ElevatedResume $false -WindowOwnerMatches $true -PageKicker "STEP 1 OF 8 $pageSeparator WELCOME" -OperationStatus '' -NextEnabled $true -ExecutePresent $false -ExecuteEnabled $false) -eq 'NAVIGATE') 'initial launch navigates only when the exact owned window exposes Next'
+    Check ((Get-WpfNavigationDisposition -LaunchMode resume -ElevatedResume $true -WindowOwnerMatches $true -PageKicker "STEP 1 OF 8 $pageSeparator WELCOME" -OperationStatus '' -NextEnabled $true -ExecutePresent $false -ExecuteEnabled $false) -eq 'WAIT') 'elevated resume ignores a transient pre-auto-execution Next control'
+    Check ((Get-WpfNavigationDisposition -LaunchMode resume -ElevatedResume $true -WindowOwnerMatches $true -PageKicker "STEP 7 OF 8 $pageSeparator EXECUTE" -OperationStatus 'Invoking actual installer lifecycle' -NextEnabled $false -ExecutePresent $true -ExecuteEnabled $false) -eq 'OBSERVE_EXISTING') 'elevated resume observes the exact owned in-flight auto-execution page'
+    Check ((Get-WpfNavigationDisposition -LaunchMode resume -ElevatedResume $true -WindowOwnerMatches $true -PageKicker "STEP 7 OF 8 $pageSeparator EXECUTE" -OperationStatus 'Reboot required; checkpoint preserved' -NextEnabled $false -ExecutePresent $true -ExecuteEnabled $true) -eq 'OBSERVE_EXISTING') 'elevated resume observes terminal reboot state even after Execute is re-enabled'
+    Check ((Get-WpfNavigationDisposition -LaunchMode resume -ElevatedResume $true -WindowOwnerMatches $true -PageKicker "STEP 8 OF 8 $pageSeparator FINISH" -OperationStatus 'Completed and verified' -NextEnabled $false -ExecutePresent $false -ExecuteEnabled $false) -eq 'OBSERVE_EXISTING') 'elevated resume observes an already-completed Finish page'
+    Check ((Get-WpfNavigationDisposition -LaunchMode resume -ElevatedResume $true -WindowOwnerMatches $false -PageKicker "STEP 7 OF 8 $pageSeparator EXECUTE" -OperationStatus 'Completed and verified' -NextEnabled $false -ExecutePresent $true -ExecuteEnabled $true) -eq 'REJECT_OWNER_MISMATCH') 'post-launch window ownership divergence is rejected immediately'
+
+    $longOwnerCommon = @{} + $common
+    $longOwnerCommon.OwnerDeadlineUtc = $now.AddSeconds(2400)
+    $longOwnerCommon.LaunchId = ('c' * 32)
+    $longOwner = New-WpfLaunchSpecification @longOwnerCommon -LaunchMode resume -ElevatedResume -SemanticNoProgressSeconds 1800
+    Check ([datetime]$longOwner.driverDeadlineUtc -eq ([datetime]$longOwner.ownerDeadlineUtc).AddSeconds(-60) -and [int]$longOwner.semanticNoProgressSeconds -eq 1800) 'WPF launch inherits the owner deadline and configured semantic no-progress budget without a hidden clamp'
+
+    $bootstrapRoot = Join-Path $scratch 'bootstrap-failure'
+    New-Item -ItemType Directory -Path $bootstrapRoot -Force | Out-Null
+    $bootstrapDriver = Join-Path $bootstrapRoot 'Invoke-WpfUiAutomation.ps1'
+    Copy-Item -LiteralPath $driverPath -Destination $bootstrapDriver -Force
+    $bootstrapCommon = @{} + $common
+    $bootstrapCommon.DriverPath = $bootstrapDriver
+    $bootstrapCommon.OutputPath = Join-Path $bootstrapRoot 'terminal.json'
+    $bootstrapCommon.StartedPath = Join-Path $bootstrapRoot 'started.json'
+    $bootstrapCommon.CheckpointPath = Join-Path $bootstrapRoot 'checkpoint.json'
+    $bootstrapCommon.WorkerResultPath = Join-Path $bootstrapRoot 'worker.json'
+    $bootstrapCommon.LaunchRequestPath = Join-Path $bootstrapRoot 'request.json'
+    $bootstrapCommon.LaunchId = ('b' * 32)
+    $bootstrapSpec = New-WpfLaunchSpecification @bootstrapCommon -LaunchMode initial -ContractProbe
+    Write-WpfAtomicJson -Path $bootstrapSpec.launchRequestPath -Value $bootstrapSpec
+    $bootstrapProcess = Start-Process -FilePath $bootstrapSpec.taskExecutable -ArgumentList ([string]$bootstrapSpec.taskArguments) -PassThru -Wait
+    $bootstrapReport = Get-Content -LiteralPath $bootstrapSpec.outputPath -Raw | ConvertFrom-Json
+    Check ($bootstrapProcess.ExitCode -eq 2 -and [string]$bootstrapReport.status -eq 'OBSERVER_FAILURE' -and [string]$bootstrapReport.failureClass -eq 'DRIVER_BOOTSTRAP_FAILURE' -and [bool]$bootstrapReport.terminal -and -not [bool]$bootstrapReport.completionVerified -and [string]$bootstrapReport.runId -ceq $bootstrapSpec.runId -and [string]$bootstrapReport.launchId -ceq $bootstrapSpec.launchId -and [string]$bootstrapReport.payloadSha256 -ceq $bootstrapSpec.payloadSha256 -and [string]$bootstrapReport.candidateSha256 -ceq $bootstrapSpec.candidateSha256 -and $bootstrapReport.productStarted -eq $false -and -not [bool]$bootstrapReport.mutationInvoked -and -not (Test-Path -LiteralPath $bootstrapSpec.startedPath)) 'actual driver publishes an identity-bound terminal with productStarted=false before candidate launch when contract bootstrap fails'
+
+    $delayedRoot = Join-Path $scratch 'delayed-launch-request'
+    New-Item -ItemType Directory -Path $delayedRoot -Force | Out-Null
+    $delayedDriver = Join-Path $delayedRoot 'Invoke-WpfUiAutomation.ps1'
+    Copy-Item -LiteralPath $driverPath -Destination $delayedDriver -Force
+    Copy-Item -LiteralPath $modulePath -Destination (Join-Path $delayedRoot 'WpfLaunchContract.psm1') -Force
+    $delayedCommon = @{} + $common
+    $delayedCommon.DriverPath = $delayedDriver
+    $delayedCommon.OutputPath = Join-Path $delayedRoot 'terminal.json'
+    $delayedCommon.StartedPath = Join-Path $delayedRoot 'started.json'
+    $delayedCommon.CheckpointPath = Join-Path $delayedRoot 'checkpoint.json'
+    $delayedCommon.WorkerResultPath = Join-Path $delayedRoot 'worker.json'
+    $delayedCommon.LaunchRequestPath = Join-Path $delayedRoot 'request.json'
+    $delayedCommon.LaunchId = ('8' * 32)
+    $delayedCommon.ClockProvider = { (Get-Date).ToUniversalTime() }
+    $delayedCommon.OwnerDeadlineUtc = (Get-Date).ToUniversalTime().AddMinutes(5)
+    $delayedSpec = New-WpfLaunchSpecification @delayedCommon -LaunchMode initial -ContractProbe
+    $delayedProbe = Start-Process -FilePath $delayedSpec.taskExecutable -ArgumentList ([string]$delayedSpec.taskArguments) -PassThru
+    Start-Sleep -Milliseconds 500
+    Write-WpfAtomicJson -Path $delayedSpec.launchRequestPath -Value $delayedSpec
+    $delayedProbe.WaitForExit()
+    $delayedReport = Get-Content -LiteralPath $delayedSpec.outputPath -Raw | ConvertFrom-Json
+    Check ($delayedProbe.ExitCode -eq 0 -and [string]$delayedReport.status -eq 'CONTRACT_PROBE_PASS' -and [string]$delayedReport.candidateSha256 -ceq $delayedSpec.candidateSha256) 'driver waits for the exact launch request when task startup races remote file visibility'
+
+    $sidResolver = { param($account) if ($account -in @('DEVFLEET-E2E-01\E2EAdmin','E2EAdmin')) { 'S-1-5-21-100-200-300-1001' } else { 'S-1-5-21-100-200-300-9999' } }
+    $requestedPrincipal = [pscustomobject]@{UserId='DEVFLEET-E2E-01\E2EAdmin';LogonType=3;RunLevel=1}
+    $registered = [pscustomobject]@{Actions=@([pscustomobject]@{Execute=$resume.taskExecutable.ToUpperInvariant();Arguments=$resume.taskArguments});Principal=[pscustomobject]@{UserId='E2EAdmin';LogonType=3;RunLevel=1}}
+    $taskReason='';$taskEvidence=$null
+    Check ((Test-WpfRegisteredTaskBinding -Specification $resume -RegisteredTask $registered -RequestedPrincipal $requestedPrincipal -Reason ([ref]$taskReason) -Evidence ([ref]$taskEvidence) -SidResolver $sidResolver) -and $taskEvidence.verifiedBeforeStart -and $taskEvidence.principalSidSha256 -match '^[0-9a-f]{64}$') 'registered task accepts normalized account text only when the principal SID, enums, executable, and arguments are exact'
+    $wrongPrincipal = [pscustomobject]@{Actions=$registered.Actions;Principal=[pscustomobject]@{UserId='OtherUser';LogonType=3;RunLevel=1}}
+    $taskReason='';$taskEvidence=$null
+    Check (-not (Test-WpfRegisteredTaskBinding -Specification $resume -RegisteredTask $wrongPrincipal -RequestedPrincipal $requestedPrincipal -Reason ([ref]$taskReason) -Evidence ([ref]$taskEvidence) -SidResolver $sidResolver) -and $taskReason -eq 'registered task principal SID diverged') 'registered task rejects a different principal identity before start'
+    $wrongArguments = [pscustomobject]@{Actions=@([pscustomobject]@{Execute=$resume.taskExecutable;Arguments=($resume.taskArguments+' -ElevatedResume')});Principal=$registered.Principal}
+    $taskReason='';$taskEvidence=$null
+    Check (-not (Test-WpfRegisteredTaskBinding -Specification $resume -RegisteredTask $wrongArguments -RequestedPrincipal $requestedPrincipal -Reason ([ref]$taskReason) -Evidence ([ref]$taskEvidence) -SidResolver $sidResolver) -and $taskReason -eq 'registered task arguments diverged') 'registered task rejects post-registration argument divergence before start'
+    $realPhaseSource = Get-Content -LiteralPath (Join-Path $WorkspaceRoot 'automation\release-e2e\modules\executors\Invoke-RealProductPhase.psm1') -Raw
+    Check ($realPhaseSource -notmatch 'Import-Module \(\[string\]\$spec\.contractModulePath\)' -and $realPhaseSource -match 'Resolve-TaskSid' -and $realPhaseSource -match 'REGISTERED_TASK_BINDING_MISMATCH') 'restricted PowerShell Direct pre-start validation does not import a staged script module'
+
+    $initialCommon = @{} + $common
+    $initialCommon.LaunchId = ('4' * 32)
+    $initialCommon.OutputPath = Join-Path $scratch 'initial-final.json'
+    $initialCommon.StartedPath = Join-Path $scratch 'initial-started.json'
+    $initialCommon.CheckpointPath = Join-Path $scratch 'initial-checkpoint.json'
+    $initialCommon.WorkerResultPath = Join-Path $scratch 'initial-worker.json'
+    $initialCommon.LaunchRequestPath = Join-Path $scratch 'initial-request.json'
+    $initial = New-WpfLaunchSpecification @initialCommon -LaunchMode initial
+    Check ($initial.taskArguments -notmatch '(?:^| )-ElevatedResume(?: |$)' -and @($initial.candidateArguments) -notcontains '--elevated-resume') 'initial mode cannot silently inherit resume arguments'
+
+    $initialProbeSpec = Copy-WpfLaunchSpecification -Specification $initial -ContractProbe
+    Write-WpfAtomicJson -Path $initialProbeSpec.launchRequestPath -Value $initialProbeSpec
+    $initialProbe = Start-Process -FilePath $initialProbeSpec.taskExecutable -ArgumentList ([string]$initialProbeSpec.taskArguments) -PassThru -Wait
+    $initialProbeReport = Get-Content -LiteralPath $initialProbeSpec.outputPath -Raw | ConvertFrom-Json
+    Check ($initialProbe.ExitCode -eq 0 -and [string]$initialProbeReport.status -eq 'CONTRACT_PROBE_PASS') 'Windows PowerShell parser binds the exact generated initial task action'
+    Check ([string]$initialProbeReport.launchMode -eq 'initial' -and -not [bool]$initialProbeReport.elevatedResume -and (@($initialProbeReport.candidateArguments) -join [char]0) -ceq (@($initial.candidateArguments) -join [char]0) -and @($initialProbeReport.candidateArguments) -notcontains '--elevated-resume') 'driver parser acknowledgement keeps initial mode free of resume candidate arguments'
+
+    Write-WpfAtomicJson -Path $resume.launchRequestPath -Value $resume
+    $probeSpec = Copy-WpfLaunchSpecification -Specification $resume -ContractProbe
+    Write-WpfAtomicJson -Path $probeSpec.launchRequestPath -Value $probeSpec
+    $probe = Start-Process -FilePath $probeSpec.taskExecutable -ArgumentList ([string]$probeSpec.taskArguments) -PassThru -Wait
+    $probeReport = Get-Content -LiteralPath $probeSpec.outputPath -Raw | ConvertFrom-Json
+    Check ($probe.ExitCode -eq 0 -and [string]$probeReport.status -eq 'CONTRACT_PROBE_PASS') 'Windows PowerShell parser binds the exact generated resume task action'
+    Check ([string]$probeReport.launchMode -eq 'resume' -and [bool]$probeReport.elevatedResume -and @($probeReport.candidateArguments)[0] -eq '--elevated-resume') 'driver parser acknowledgement matches requested mode and candidate arguments'
+
+    $expected = [pscustomobject]$resume
+    $complete = [pscustomobject]@{schemaVersion=2;contract='devfleet-wpf-terminal-v2';status='PASS';terminal=$true;completionVerified=$true;runId=$resume.runId;launchId=$resume.launchId;transactionId=$resume.transactionId;payloadSha256=$resume.payloadSha256;candidateSha256=$resume.candidateSha256;sequence=8;cleanupDisposition='CLEANUP_EXACT_CANDIDATE';deadlineUtc=$resume.driverDeadlineUtc}
+    $reason = ''
+    Check (Test-WpfTerminalReport -Report $complete -Specification $expected -Reason ([ref]$reason)) 'completed report with exact launch identity is accepted'
+    $incomplete = $complete | Select-Object *
+    $incomplete.completionVerified = $false
+    $reason = ''
+    Check (-not (Test-WpfTerminalReport -Report $incomplete -Specification $expected -Reason ([ref]$reason))) 'completed-lifecycle PASS with completionVerified false is rejected'
+    $stale = $complete | Select-Object *
+    $stale.launchId = ('9' * 32)
+    $reason = ''
+    Check (-not (Test-WpfTerminalReport -Report $stale -Specification $expected -Reason ([ref]$reason))) 'stale or wrong-launch report is rejected'
+    $wrongPayload = $complete | Select-Object *
+    $wrongPayload.payloadSha256 = ('a' * 64)
+    $reason = ''
+    Check (-not (Test-WpfTerminalReport -Report $wrongPayload -Specification $expected -Reason ([ref]$reason))) 'wrong-payload report is rejected'
+    foreach($mismatchName in @('runId','transactionId','candidateSha256')){
+        $mismatched=$complete|Select-Object *;$mismatched.$mismatchName=if($mismatchName-eq'candidateSha256'){('b'*64)}elseif($mismatchName-eq'transactionId'){('c'*32)}else{'another-run'};$reason=''
+        Check (-not(Test-WpfTerminalReport -Report $mismatched -Specification $expected -Reason ([ref]$reason))) "wrong-$mismatchName report is rejected"
+    }
+    $reason=''
+    Check (-not(Test-WpfTerminalReport -Report $complete -Specification $expected -Reason ([ref]$reason) -MinimumSequenceExclusive 8)) 'duplicate or regressed terminal sequence is rejected against prior accepted evidence'
+    $unverifiedPending = $complete | Select-Object *
+    $unverifiedPending.status = 'DURABLE_PENDING'
+    $unverifiedPending.completionVerified = $false
+    $reason = ''
+    Check (-not (Test-WpfTerminalReport -Report $unverifiedPending -Specification $expected -Reason ([ref]$reason))) 'pending without durable identity and ownership transfer is rejected'
     $verifiedPending = $unverifiedPending | Select-Object *
     $verifiedPending | Add-Member -NotePropertyName durableCompletionPending -NotePropertyValue $true -Force
     $verifiedPending | Add-Member -NotePropertyName durableStateVerified -NotePropertyValue $true -Force
@@ -460,298 +598,4 @@ class FakeDaemon:
         if method == "GET" and parsed.path.startswith("/containers/"):
             identifier = parsed.path.split("/")[2]
             return self.response(copy.deepcopy(self.container_data[identifier]))
-        if method == "GET":
-            body = self.form("/logout")
-            if "operation" in query:
-                op_id = query["operation"][0]
-                state = self.operations[op_id]["state"]
-                css = "complete" if state == "completed" else "failed" if state == "failed" else ""
-                if self.fault == "rendered-disagreement":
-                    css = "failed" if css == "complete" else "complete"
-                body += f'<section class="operation-banner {css}" data-operation-id="{op_id}"></section>'
-            if query.get("view") == ["projects"]:
-                body += self.form("/projects/create")
-            if query.get("view") == ["settings"]:
-                for path in self.quarantine.iterdir():
-                    if path.is_dir():
-                        body += self.form("/quarantine/restore", {"name": path.name})
-            if parsed.path.startswith("/projects/"):
-                slug = parsed.path.split("/")[2]
-                if (self.root / slug).is_dir() and (self.root / slug / ".devfleet/project.json").exists():
-                    meta = self.metadata(slug)
-                    body += f'<section data-project-state="{meta["lifecycle_status"]}"></section>'
-                    for action in ("start", "stop", "restart", "health", "test", "backup", "quarantine", "restore-vault"):
-                        body += self.form(f"/projects/{slug}/{action}")
-            return self.response(body)
-        assert method == "POST" and fields["csrf_token"] == self.csrf
-        if parsed.path.startswith("/projects/"):
-            slug = parsed.path.split("/")[2]
-            if "-recovered-" in slug and parsed.path.endswith("/start"):
-                if self.fault == "copy-admitted":
-                    return self.admit("start", slug, "completed", "")
-                if self.fault == "copy-operation-created":
-                    self.admit("start", slug, "failed", "")
-                return self.response("recovery-only", 409)
-        if parsed.path == "/projects/create":
-            kind, slug = "create", fields["slug"]
-        elif parsed.path == "/quarantine/restore":
-            kind, slug = "restore-quarantine", fields["name"]
-        else:
-            slug, kind = parsed.path.split("/")[2:4]
-        try:
-            value = self.action(kind, slug, fields)
-            return self.admit(kind, slug, "completed", value)
-        except ValueError as exc:
-            return self.admit(kind, slug, "failed", "", str(exc))
-
-    def admit(self, kind, slug, state, result, error=""):
-        self.sequence += 1
-        op_id = f"op-{self.sequence:08d}"
-        value = {"id": op_id, "kind": kind, "project": slug, "state": state,
-                 "result": result, "error": error, "log": [{"message": "private arbitrary log " + self.password}]}
-        self.operations[op_id] = value
-        write_json(self.runtime / "operations" / (op_id + ".json"), value)
-        return self.response("", 303, {"location": "/?operation=" + op_id})
-
-    def action(self, kind, slug, fields):
-        path = self.root / slug
-        if kind == "create":
-            assert fields["template"] == "generic"
-            assert fields["runtime_isolation"] == "container" and fields["git_url"] == ""
-            assert fields["profile"] == "balanced" and fields.get("use_ollama", "") == ""
-            path.mkdir()
-            (path / ".devfleet").mkdir()
-            (path / ".devcontainer").mkdir()
-            (path / "compose.yaml").write_text("services:\n  dev:\n    image: harmless\n")
-            (path / ".devcontainer/devcontainer.json").write_text("{}")
-            for name in ("smoke-test", "health-check"):
-                (path / ".devfleet" / (name + ".sh")).write_text("#!/bin/sh\ntrue\n")
-            meta = {"schema_version": 3, "managed_by": "devfleet", "slug": slug,
-                    "project_id": str(uuid.uuid4()), "runtime_id": "df_" + slug.replace("-", "_"),
-                    "runtime_provider": "docker-compose", "deployment_id": self.request_data["execution"]["deploymentId"],
-                    "host_id": self.request_data["execution"]["nodeName"], "template": "generic",
-                    "lifecycle_status": "ready", "health_status": "unknown"}
-            self.save_metadata(slug, meta)
-            write_json(path / ".devfleet/ownership-lease.json", {"active": False, "active_node": meta["host_id"]})
-            return meta
-        if kind == "restore-quarantine":
-            quarantined = self.quarantine / slug
-            meta = json.loads((quarantined / ".devfleet/project.json").read_text())
-            target = self.root / meta["slug"]
-            if target.exists():
-                raise ValueError("Quarantine restore blocked: path already exists.")
-            quarantined.rename(target)
-            return str(target)
-        meta = self.metadata(slug)
-        if kind == "start":
-            lease = json.loads((path / ".devfleet/ownership-lease.json").read_text())
-            if lease.get("active") and lease.get("active_node") != meta["host_id"]:
-                raise ValueError("Ownership lease belongs to a foreign node.")
-            if "future_execution_field" in (path / "compose.yaml").read_text():
-                raise ValueError("Security analyzer found blocking boundary violations.")
-            meta["lifecycle_status"] = "running"
-            self.save_metadata(slug, meta)
-            identifier = hashlib.sha256((slug + str(self.sequence)).encode()).hexdigest()
-            self.container_data[identifier] = {
-                "Id": identifier, "State": {"Running": True, "Health": {"Status": "healthy"}},
-                "Config": {"Labels": {
-                    **{label: meta[key] for key, label in driver.LABELS.items()},
-                    "com.docker.compose.project": meta["runtime_id"], "com.docker.compose.service": "dev",
-                }},
-            }
-            return "started"
-        if kind == "stop":
-            self.container_data = {key: item for key, item in self.container_data.items()
-                                   if item["Config"]["Labels"]["io.devfleet.project-id"] != meta["project_id"]}
-            meta["lifecycle_status"] = "stopped"
-            self.save_metadata(slug, meta)
-            return "stopped"
-        if kind in {"health", "test"}:
-            if self.fault == "health-failure" and kind == "health":
-                raise ValueError("health failure with " + self.password)
-            if kind == "health":
-                meta["health_status"] = "healthy"
-                self.save_metadata(slug, meta)
-            return "Template smoke test passed."
-        if kind == "backup":
-            backup_id = slug + "-20260916-000000-" + f"{self.sequence:08x}"
-            backup_dir = self.runtime / "workspace-backups" / backup_id
-            backup_dir.mkdir(parents=True)
-            archive = backup_dir / (slug + ".tar.gz")
-            archive.write_bytes(b"fake archive " + (path / driver.SENTINEL_FILE).read_bytes())
-            archive_hash = driver.digest(archive)
-            manifest = {"schema_version": 1, "backup_id": backup_id, "project_id": meta["project_id"], "slug": slug,
-                        "verification": {"status": "verified", "integrity_verified": True},
-                        "workspace": {"archive_sha256": archive_hash}}
-            write_json(backup_dir / "manifest.json", manifest)
-            meta.update(backup_id=backup_id, backup_path=str(archive), backup_sha256=archive_hash, backup_status="verified")
-            self.save_metadata(slug, meta)
-            snapshot = self.runtime / "fake-remote-snapshots" / backup_id
-            shutil.copytree(path, snapshot)
-            self.snapshots[slug] = snapshot
-            if self.fault == "broker-failed-after-archive":
-                raise ValueError("Vault broker unavailable")
-            return json.dumps({"ok": True, "backup_id": backup_id, "backup_sha256": archive_hash,
-                               "backup_status": "verified", "vault_upload_status": "verified",
-                               "durability_level": "local" if self.fault == "local-only-backup" else "vault"})
-        if kind == "quarantine":
-            assert fields["confirm_quarantine"] == "true"
-            self.action("stop", slug, {})
-            self.action("backup", slug, {})
-            destination = self.quarantine / ("20260916-000000-" + slug)
-            path.rename(destination)
-            return str(destination)
-        if kind == "restore-vault":
-            destination = self.root / (slug + "-recovered-20260916-000000-1234abcd")
-            shutil.copytree(self.snapshots[slug], destination)
-            if self.fault == "copy-content":
-                (destination / driver.SENTINEL_FILE).write_text("changed")
-            return str(destination)
-        raise AssertionError(kind)
-
-
-class FakeProbe:
-    def __init__(self, daemon):
-        self.daemon = daemon
-        self.generation = "a"
-        self.boot = str(uuid.uuid4())
-
-    def service(self):
-        return {"invocationId": self.generation * 32, "pid": 123 if self.generation == "a" else 124,
-                "active": True, "user": "devfleet-control", "bootId": self.boot}
-
-    def preflight(self, request):
-        return {"service": self.service(), "brokerAccessible": True, "vaultTransport": "tailscale-rest"}
-
-    def containers(self, project_id):
-        return [copy.deepcopy(item) for item in self.daemon.container_data.values()
-                if item["Config"]["Labels"]["io.devfleet.project-id"] == project_id]
-
-
-def make_runner(request, tmp_path):
-    daemon = FakeDaemon(request)
-    probe = FakeProbe(daemon)
-    ui = driver.Dashboard(daemon, driver.instant(request["deadlineUtc"]))
-    runner = driver.AcceptanceRunner(request, tmp_path / "state.json", ui, probe)
-    return runner, daemon, probe
-
-
-def resume_runner(request, runner, daemon, probe):
-    ui = driver.Dashboard(daemon, driver.instant(request["deadlineUtc"]))
-    return driver.AcceptanceRunner(request, runner.state_path, ui, probe, state=driver.read_json(runner.state_path))
-
-
-def test_two_stage_real_route_contract(request_data, tmp_path):
-    runner, daemon, probe = make_runner(request_data, tmp_path)
-    prepared = runner.execute("prepare", ("unit-admin", daemon.password))
-    assert prepared["status"] == "PREPARED", prepared
-    assert [row["status"] for row in prepared["journeys"]] == ["PASS", "PASS", "IN_PROGRESS", "NOT_RUN", "NOT_RUN"]
-    assert prepared["cleanup"]["status"] == "NOT_RUN"
-    probe.generation = "b"
-    resumed = resume_runner(request_data, runner, daemon, probe)
-    report = resumed.execute("resume", ("unit-admin", daemon.password))
-    assert report["status"] == "PASS", report
-    assert [row["id"] for row in report["journeys"]] == ["U01", "U02", "U03", "U04", "U05"]
-    assert all(row["assertions"] == {key: True for key in driver.ASSERTIONS[row["id"]]} for row in report["journeys"])
-    copy_start = report["journeys"][4]["observations"]["copyStart"]
-    assert copy_start["httpStatus"] == 409 and copy_start["operationCreated"] is False
-    assert copy_start["beforeInventorySha256"] == copy_start["afterInventorySha256"]
-    assert report["journeys"][4]["observations"]["copyAdopted"] is False
-    assert report["cleanup"]["status"] == "PASS"
-    assert not list(Path(request_data["paths"]["workspaces"]).iterdir())
-    assert not list(Path(request_data["paths"]["quarantine"]).iterdir())
-    assert daemon.container_data == {}
-    serialized = json.dumps(report)
-    for secret in (daemon.password, daemon.csrf, daemon.cookie, "unit-admin"):
-        assert secret not in serialized
-    assert "private arbitrary log" not in serialized
-    assert report["execution"]["browserJavascriptExercised"] is False
-    assert not any("/api/" in route for _, route, _ in daemon.requests)
-
-
-@pytest.mark.parametrize("fault,code", [
-    ("health-failure", "OPERATION_UNEXPECTED_TERMINAL"),
-    ("rendered-disagreement", "RENDERED_OPERATION_DISAGREES"),
-])
-def test_prepare_failures_cleanup_without_laundering_primary(request_data, tmp_path, fault, code):
-    runner, daemon, _ = make_runner(request_data, tmp_path)
-    daemon.fault = fault
-    report = runner.execute("prepare", ("unit-admin", daemon.password))
-    assert report["status"] == "BLOCKED"
-    assert report["failure"]["code"] == code
-    assert daemon.password not in json.dumps(report)
-    assert any(row["state"] in {"failed", "completed"} for row in report["operations"])
-    assert not any(row["status"] == "PASS" for row in report["journeys"] if row["id"] in {"U02", "U03", "U04", "U05"})
-
-
-@pytest.mark.parametrize("fault,code", [
-    ("local-only-backup", "VAULT_UPLOAD_NOT_VERIFIED"),
-    ("copy-content", "FIXTURE_SENTINEL_MISMATCH"),
-    ("copy-admitted", "RECOVERED_COPY_START_NOT_REJECTED"),
-    ("copy-operation-created", "RECOVERED_COPY_OPERATION_WAS_CREATED"),
-])
-def test_resume_rejects_false_recovery_proofs(request_data, tmp_path, fault, code):
-    runner, daemon, probe = make_runner(request_data, tmp_path)
-    assert runner.execute("prepare", ("unit-admin", daemon.password))["status"] == "PREPARED"
-    probe.generation = "b"
-    daemon.fault = fault
-    report = resume_runner(request_data, runner, daemon, probe).execute("resume", ("unit-admin", daemon.password))
-    assert report["status"] == "BLOCKED"
-    assert report["failure"]["code"] == code, report
-    assert report["journeys"][4]["status"] != "PASS"
-    assert daemon.password not in json.dumps(report)
-    if fault == "copy-content":
-        assert report["cleanup"]["status"] == "BLOCKED"
-        assert report["cleanupFailure"]["code"] == "CLEANUP_UNVERIFIED_RECOVERY_REQUIRES_PARENT"
-
-
-def test_failed_broker_archive_is_discovered_and_cleaned(request_data, tmp_path):
-    runner, daemon, probe = make_runner(request_data, tmp_path)
-    runner.execute("prepare", ("unit-admin", daemon.password))
-    probe.generation = "b"
-    daemon.fault = "broker-failed-after-archive"
-    report = resume_runner(request_data, runner, daemon, probe).execute("resume", ("unit-admin", daemon.password))
-    assert report["status"] == "BLOCKED"
-    assert report["failure"]["code"] == "OPERATION_UNEXPECTED_TERMINAL"
-    assert report["cleanup"]["status"] == "PASS", report
-    assert not list((Path(request_data["paths"]["runtimeRoot"]) / "workspace-backups").iterdir())
-    assert any(row["kind"] == "backup" and row["status"] == "REMOVED" for row in report["cleanup"]["resources"])
-
-
-@pytest.mark.parametrize("restart,reboot,code", [
-    (False, False, "SERVICE_RESTART_NOT_OBSERVED"),
-    (True, True, "UNEXPECTED_GUEST_REBOOT"),
-])
-def test_resume_requires_service_only_restart(request_data, tmp_path, restart, reboot, code):
-    runner, daemon, probe = make_runner(request_data, tmp_path)
-    runner.execute("prepare", ("unit-admin", daemon.password))
-    if restart:
-        probe.generation = "b"
-    if reboot:
-        probe.boot = str(uuid.uuid4())
-    report = resume_runner(request_data, runner, daemon, probe).execute("resume", ("unit-admin", daemon.password))
-    assert report["status"] == "BLOCKED"
-    assert report["failure"]["code"] == code
-
-
-def test_cleanup_failure_does_not_replace_primary(request_data, tmp_path, monkeypatch):
-    runner, daemon, _ = make_runner(request_data, tmp_path)
-    daemon.fault = "health-failure"
-    def bad_cleanup():
-        raise RuntimeError("cleanup leaked " + daemon.password)
-    monkeypatch.setattr(runner, "cleanup", bad_cleanup)
-    report = runner.execute("prepare", ("unit-admin", daemon.password))
-    assert report["failure"]["code"] == "OPERATION_UNEXPECTED_TERMINAL"
-    assert report["cleanupFailure"]["code"] == "UNEXPECTED_DRIVER_FAILURE"
-    assert report["cleanup"]["status"] == "BLOCKED"
-    assert daemon.password not in json.dumps(report)
-    assert "cleanup leaked" not in json.dumps(report)
-
-
-def test_owner_mismatch_refuses_cleanup(request_data, tmp_path):
-    runner, daemon, _ = make_runner(request_data, tmp_path)
-    runner.execute("prepare", ("unit-admin", daemon.password))
-    path = Path(runner.fixture["originalPath"])
-    write_json(path / driver.OWNER_FILE, {"runId": "someone-else"})
-    with pytest.raises(driver.AcceptanceError, match="FIXTURE_OWNER_MISMATCH"):
-        runner.cleanup
+        if m

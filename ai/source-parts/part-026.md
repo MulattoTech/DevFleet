@@ -1,10 +1,110 @@
 # DevFleet source part 026
 
 Full-source UTF-8 byte interval [1162500, 1209000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: d4ac6d05e2d484319537d48c075c9c94a6cce8a5a5fe7dffb26d22f5ee0c2b10
+Payload SHA-256: 46e659c7e34113148d76d98a1228860956d0e2dcfc73ff197b23a075feea5ef1
 
 <!-- BEGIN SOURCE SLICE -->
-,'ownershipledger','installstate','ownership','receipt')){continue}
+false;$detail=[string](Get-LifecycleProperty $existing 'error' ([ref]$errorFound));$rejected.Add([pscustomobject][ordered]@{name=if($nameFound){$name}else{''};error=if($errorFound -and $detail){$detail}else{'stage marker was rejected by the collector'}})}
+    $start=[datetime]::MinValue;if(-not [datetime]::TryParse($InvocationStartUtc,[ref]$start)){throw 'TERMINAL_FAILURE: lifecycle invocation start is malformed.'};$start=$start.ToUniversalTime()
+    foreach($marker in $markers){
+        $nameFound=$false;$name=[string](Get-LifecycleProperty $marker 'name' ([ref]$nameFound));$reason=''
+        if(-not $nameFound -or $name -notmatch $AllowedPattern){$reason='stage marker name is not allowlisted'}
+        $values=[ordered]@{};foreach($field in @('transactionId','payloadSha256','action','role','stage','completedUtc')){$found=$false;$values[$field]=Get-LifecycleProperty $marker $field ([ref]$found);if(-not $found -and -not $reason){$reason='stage marker is malformed'}}
+        $completed=[datetime]::MinValue;if(-not $reason -and (-not [datetime]::TryParse([string]$values.completedUtc,[ref]$completed) -or $completed.ToUniversalTime() -lt $start)){$reason='stage marker is stale, malformed, or not bound to the current lifecycle'}
+        if(-not $reason -and (([string]$values.transactionId) -notmatch '^[0-9a-fA-F]{32}$' -or ([string]$values.payloadSha256) -cne $PayloadSha256 -or ([string]$values.action) -cne $Action -or ([string]$values.role) -cne $ExpectedStageRole -or ($TransactionId -and ([string]$values.transactionId) -cne $TransactionId) -or (([string]$values.stage)+'.complete') -cne $name)){$reason='stage marker is stale, malformed, or not bound to the current lifecycle'}
+        if($reason){$rejected.Add([pscustomobject][ordered]@{name=$name;error=$reason});continue}
+        $pathFound=$false;$path=[string](Get-LifecycleProperty $marker 'path' ([ref]$pathFound));$shaFound=$false;$sha=[string](Get-LifecycleProperty $marker 'sha256' ([ref]$shaFound));$lastWriteFound=$false;$lastWrite=[string](Get-LifecycleProperty $marker 'lastWriteUtc' ([ref]$lastWriteFound))
+        $accepted.Add([pscustomobject][ordered]@{name=$name;path=if($pathFound){$path}else{''};transactionId=[string]$values.transactionId;payloadSha256=[string]$values.payloadSha256;action=[string]$values.action;role=[string]$values.role;stage=[string]$values.stage;completedUtc=$completed.ToUniversalTime().ToString('o');lastWriteUtc=if($lastWriteFound){$lastWrite}else{''};sha256=if($shaFound){$sha}else{''}})
+    }
+    $set={param($target,$name,$value)if($target -is [System.Collections.IDictionary]){$target[$name]=$value}else{$target|Add-Member -NotePropertyName $name -NotePropertyValue $value -Force}}
+    &$set $Observation 'stageMarkers' @($accepted);&$set $Observation 'stageMarkerErrors' @($rejected)
+    return $Observation
+}
+
+function Get-WpfFailureDescriptor {
+    param([Parameter(Mandatory)][object]$Report)
+    $errorFound=$false;$errorValue=Get-LifecycleProperty $Report 'error' ([ref]$errorFound)
+    $classFound=$false;$classValue=Get-LifecycleProperty $Report 'failureClass' ([ref]$classFound)
+    [pscustomobject]@{
+        failureClass=if($classFound -and [string]$classValue){[string]$classValue}else{'UNCLASSIFIED_PRODUCT_FAILURE'}
+        error=if($errorFound -and [string]$errorValue){[string]$errorValue}else{'WPF boundary returned no primary error.'}
+    }
+}
+
+function Test-RebootBoundaryIdentity {
+    param(
+        [Parameter(Mandatory)][psobject]$PriorCheckpoint,
+        [AllowNull()][psobject]$CurrentCheckpoint,
+        [int]$MaxGeneration = 3
+    )
+    if (-not $CurrentCheckpoint) { return $false }
+    foreach($required in @('checkpointGeneration','transactionId','action','role','payloadSha256','state')){if(-not (Test-LifecycleProperty -Value $CurrentCheckpoint -Name $required)){return $false}}
+    # Exactly one product generation is allowed to authorize one reboot.  A
+    # jump (for example 1 -> 3) is an ambiguous/foreign lifecycle and must
+    # never be treated as a valid boundary.
+    $found=$false;$currentGeneration=Get-LifecycleProperty $CurrentCheckpoint 'checkpointGeneration' ([ref]$found);if(-not $found){return $false};$found=$false;$priorGenerationValue=Get-LifecycleProperty $PriorCheckpoint 'checkpointGeneration' ([ref]$found);if(-not $found){return $false};$generation=0;$priorGeneration=0;if(-not [int]::TryParse([string]$currentGeneration,[ref]$generation)-or-not [int]::TryParse([string]$priorGenerationValue,[ref]$priorGeneration)){return $false}
+    # checkpointGeneration -ne PriorCheckpoint.checkpointGeneration + 1 is
+    # the fail-closed rule (expressed with parsed numeric values below).
+    if ($generation -ne ($priorGeneration + 1)) { return $false }
+    if ($generation -gt $MaxGeneration) { return $false }
+    foreach ($name in @('transactionId','action','role','payloadSha256')) {
+        $currentFound=$false;$currentValue=Get-LifecycleProperty $CurrentCheckpoint $name ([ref]$currentFound);$priorFound=$false;$priorValue=Get-LifecycleProperty $PriorCheckpoint $name ([ref]$priorFound);if(-not $currentFound -or -not $priorFound -or [string]$currentValue -cne [string]$priorValue) { return $false }
+    }
+    $found=$false;$state=Get-LifecycleProperty $CurrentCheckpoint 'state' ([ref]$found);return ($found -and [string]$state -eq 'waiting-for-reboot')
+}
+
+function ConvertTo-CanonicalLifecycleCheckpoint {
+    param([AllowNull()][object]$Checkpoint)
+    if(-not $Checkpoint){return $null}
+    $hasCheckpointGeneration=Test-LifecycleProperty -Value $Checkpoint -Name 'checkpointGeneration'
+    $hasGeneration=Test-LifecycleProperty -Value $Checkpoint -Name 'generation'
+    if(-not $hasCheckpointGeneration -and -not $hasGeneration){return $null}
+    $checkpointGeneration=0;$generation=0
+    $found=$false;$checkpointGenerationValue=Get-LifecycleProperty $Checkpoint 'checkpointGeneration' ([ref]$found);if($hasCheckpointGeneration -and -not [int]::TryParse([string]$checkpointGenerationValue,[ref]$checkpointGeneration)){return $null}
+    $found=$false;$generationValue=Get-LifecycleProperty $Checkpoint 'generation' ([ref]$found);if($hasGeneration -and -not [int]::TryParse([string]$generationValue,[ref]$generation)){return $null}
+    if(-not $hasCheckpointGeneration){$checkpointGeneration=$generation}
+    if(-not $hasGeneration){$generation=$checkpointGeneration}
+    if($generation -ne $checkpointGeneration){return $null}
+    $copy=[ordered]@{}
+    if($Checkpoint -is [System.Collections.IDictionary]){foreach($key in $Checkpoint.Keys){$copy[[string]$key]=$Checkpoint[$key]}}else{foreach($property in $Checkpoint.PSObject.Properties){$copy[$property.Name]=$property.Value}}
+    $copy.generation=$generation
+    $copy.checkpointGeneration=$checkpointGeneration
+    return [pscustomobject]$copy
+}
+
+function Test-NoActiveProductCheckpoint {
+    param([AllowNull()][object]$Value,[int]$Depth=0,[System.Collections.Generic.HashSet[int]]$Seen,[string]$Path='root')
+    if($null -eq $Value -or $Value -is [string] -or $Value.GetType().IsPrimitive -or $Value -is [datetime] -or $Value -is [guid]){return $true}
+    if($Depth -gt 12){return $false}
+    if(-not $Seen){$Seen=[System.Collections.Generic.HashSet[int]]::new()};$identity=[Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($Value);if(-not $Seen.Add($identity)){return $false}
+    # IDictionary (including [ordered] test/projection payloads) is enumerable,
+    # but its entries are lifecycle fields rather than a signal-free list. Walk
+    # entries by key so generation/checkpoint fields cannot be hidden, while
+    # avoiding the false cycle reports caused by enumerating dictionary views.
+    if($Value -is [System.Collections.IDictionary]){
+        foreach($entry in $Value.GetEnumerator()){
+            $lower=([string]$entry.Key).ToLowerInvariant();$item=$entry.Value;$childPath=if($Path -eq 'root'){([string]$entry.Key)}else{"$Path.$([string]$entry.Key)"}
+            if($lower -eq 'rawactivelifecyclesignals' -and $item -and @($item).Count -gt 0){foreach($signal in @($item)){$kindFound=$false;$kind=Get-LifecycleProperty $signal 'kind' ([ref]$kindFound);$pathFound=$false;$signalPath=Get-LifecycleProperty $signal 'path' ([ref]$pathFound);$valueFound=$false;$signalValue=Get-LifecycleProperty $signal 'value' ([ref]$valueFound);$zero=0;$benign=($kindFound -and [string]$kind -ieq 'checkpointgeneration' -and $pathFound -and [string]$signalPath -eq 'progress.checkpointGeneration' -and [int]::TryParse([string]$signalValue,[ref]$zero) -and $zero -eq 0 -and [string]$signalValue -match '^0$');if(-not $benign){return $false}}}
+            if($lower -eq 'checkpoint' -and $null -ne $item){return $false}
+            if($lower -eq 'checkpointpresent' -and [bool]$item){return $false}
+            if($lower -in @('checkpointgeneration','generation')){$zeroValue=0;$zeroAllowed=($lower -eq 'checkpointgeneration' -and ($Path -eq 'progress' -or $Path -match '\.progress$') -and [int]::TryParse([string]$item,[ref]$zeroValue) -and $zeroValue -eq 0 -and [string]$item -match '^0$');if(-not $zeroAllowed){return $false}}
+            if($lower -eq 'state' -and [string]$item -ieq 'waiting-for-reboot'){return $false}
+            if($lower -in @('installledger','ownershipledger','installstate','ownership','receipt')){continue}
+            $childSeen=[System.Collections.Generic.HashSet[int]]::new($Seen);if(-not (Test-NoActiveProductCheckpoint -Value $item -Depth ($Depth+1) -Seen $childSeen -Path $childPath)){return $false}
+        }
+        return $true
+    }
+    if($Value -is [System.Collections.IEnumerable]){foreach($item in $Value){$childSeen=[System.Collections.Generic.HashSet[int]]::new($Seen);if(-not (Test-NoActiveProductCheckpoint -Value $item -Depth ($Depth+1) -Seen $childSeen -Path ($Path+'[]'))){return $false}};return $true}
+    foreach($property in @($Value.PSObject.Properties)){
+        $name=[string]$property.Name;$item=$property.Value;$lower=$name.ToLowerInvariant()
+        if($lower -eq 'rawactivelifecyclesignals' -and $item -and @($item).Count -gt 0){foreach($signal in @($item)){$kindFound=$false;$kind=Get-LifecycleProperty $signal 'kind' ([ref]$kindFound);$pathFound=$false;$signalPath=Get-LifecycleProperty $signal 'path' ([ref]$pathFound);$valueFound=$false;$signalValue=Get-LifecycleProperty $signal 'value' ([ref]$valueFound);$zero=0;$benign=($kindFound -and [string]$kind -ieq 'checkpointgeneration' -and $pathFound -and [string]$signalPath -eq 'progress.checkpointGeneration' -and [int]::TryParse([string]$signalValue,[ref]$zero) -and $zero -eq 0 -and [string]$signalValue -match '^0$');if(-not $benign){return $false}}}
+        if($lower -eq 'checkpoint' -and $null -ne $item){return $false}
+        if($lower -eq 'checkpointpresent' -and [bool]$item){return $false}
+        if($lower -in @('checkpointgeneration','generation')){
+            $zeroValue=0;$zeroAllowed=($lower -eq 'checkpointgeneration' -and ($Path -eq 'progress' -or $Path -match '\.progress$') -and [int]::TryParse([string]$item,[ref]$zeroValue) -and $zeroValue -eq 0 -and [string]$item -match '^0$');if(-not $zeroAllowed){return $false}
+        }
+        if($lower -eq 'state' -and [string]$item -ieq 'waiting-for-reboot'){return $false}
+        if($lower -in @('installledger','ownershipledger','installstate','ownership','receipt')){continue}
         $childPath=if($Path -eq 'root'){$name}else{"$Path.$name"};$childSeen=[System.Collections.Generic.HashSet[int]]::new($Seen);if(-not (Test-NoActiveProductCheckpoint -Value $item -Depth ($Depth+1) -Seen $childSeen -Path $childPath)){return $false}
     }
     return $true
@@ -273,142 +373,4 @@ function Get-ProductAuthenticatedHealthScript {
         $ErrorActionPreference='Stop'
         $result=[ordered]@{ok=$false;reasonCode='AUTHENTICATED_HEALTH_UNAVAILABLE';runtimeVersion=$PSVersionTable.PSVersion.ToString();protocolSha256='';requestAttempted=$false;responseAuthenticated=$false}
         try {
-            if($PSVersionTable.PSEdition-ne'Core'-or$PSVersionTable.PSVersion.Major-lt7){throw 'Unsupported health client runtime.'}
-            $root=Join-Path $env:ProgramData 'DevFleetHostAgent'
-            $protocol=Join-Path $root 'DevFleet-HostAgentProtocol.psm1';$tokenPath=Join-Path $root 'token.txt'
-            foreach($path in @($env:ProgramData,$root,$protocol,$tokenPath)){
-                if((Get-Item -LiteralPath $path -Force -ErrorAction Stop).Attributes-band[IO.FileAttributes]::ReparsePoint){throw 'Health client input is a reparse point.'}
-            }
-            $result.protocolSha256=(Get-FileHash -LiteralPath $protocol -Algorithm SHA256).Hash.ToLowerInvariant()
-            if($result.protocolSha256-cne$ProtocolSha256){throw 'Installed health client protocol differs from the exact shipping input.'}
-            Import-Module $protocol -Force
-            $key=(Get-Content -LiteralPath $tokenPath -Raw).Trim()
-            if(-not$key){throw 'Health client token is empty.'}
-            $result.requestAttempted=$true
-            $health=Invoke-HostAgentAuthenticatedJson -Uri 'http://127.0.0.1:8790/healthz' -Method GET -Key $key -ExpectedHost $env:COMPUTERNAME
-            $result.responseAuthenticated=$true
-            if($health.ok -isnot [bool] -or -not $health.ok){throw 'Authenticated health response is not healthy.'}
-            $result.ok=$true;$result.reasonCode='AUTHENTICATED_HEALTH_OK'
-        } catch {
-            # Return only error identifiers, never key material, headers or bodies.
-            $result.reasonCode='AUTHENTICATED_HEALTH_UNAVAILABLE'
-            $result.failureType=$_.Exception.GetType().FullName
-            $result.failureId=([string]$_.FullyQualifiedErrorId -replace '[^A-Za-z0-9_. ,:-]','').Substring(0,[math]::Min(160,([string]$_.FullyQualifiedErrorId -replace '[^A-Za-z0-9_. ,:-]','').Length))
-        } finally {$key=$null}
-        $result|ConvertTo-Json -Compress
-    }
-}
-
-function Invoke-ProductAuthenticatedHealthProbe {
-    param([object]$Session,[string]$ProtocolSha256,[datetime]$OwnerDeadlineUtc,[scriptblock]$ProcessProvider)
-    $result=[ordered]@{ok=$false;reasonCode='AUTHENTICATED_HEALTH_UNAVAILABLE';runtimeVersion='';protocolSha256=$ProtocolSha256;requestAttempted=$false;responseAuthenticated=$false}
-    try {
-        if($ProtocolSha256-notmatch'^[0-9a-f]{64}$'){throw 'Health protocol identity is invalid.'}
-        if($OwnerDeadlineUtc-le[datetime]::UtcNow){throw 'Health observation deadline is already exhausted.'}
-        $body=(Get-ProductAuthenticatedHealthScript).ToString()
-        $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(('& {'+$body+"} '"+$ProtocolSha256+"'")))
-        $request=[pscustomobject]@{filePath='C:\Program Files\PowerShell\7\pwsh.exe';arguments=@('-NoProfile','-NonInteractive','-EncodedCommand',$encoded);ownerDeadlineUtc=$OwnerDeadlineUtc}
-        $process=if($ProcessProvider){&$ProcessProvider $request}else{Invoke-DevFleetBoundedGuestProcess -Session $Session -FilePath $request.filePath -ArgumentList $request.arguments -OwnerDeadlineUtc $OwnerDeadlineUtc}
-        if([datetime]::UtcNow-gt$OwnerDeadlineUtc){throw 'Health result arrived after its owner deadline.'}
-        if([string]$process.outcome-cne'PASS'-or$process.outputComplete -isnot [bool]-or-not$process.outputComplete){throw 'Bounded health client did not produce a complete successful result.'}
-        $value=[string]$process.stdout|ConvertFrom-Json -ErrorAction Stop
-        foreach($field in @('ok','requestAttempted','responseAuthenticated')){if($value.$field -isnot [bool]){throw 'Health result contains a malformed boolean.'}}
-        # A pre-request filesystem failure has no measured protocol identity.
-        # Preserve only its bounded error identifiers, never health credit or
-        # an unverified child hash. Success still requires all checks below.
-        if(-not$value.ok-and-not$value.requestAttempted-and-not$value.responseAuthenticated-and[string]$value.reasonCode-ceq'AUTHENTICATED_HEALTH_UNAVAILABLE'){
-            foreach($field in @('failureType','failureId')){
-                if($value.PSObject.Properties[$field]){
-                    $safe=([string]$value.$field-replace'[^A-Za-z0-9_. ,:-]','')
-                    $result[$field]=$safe.Substring(0,[math]::Min(160,$safe.Length))
-                }
-            }
-            if($result.Contains('failureId')-and$result.failureId){return [pscustomobject]$result}
-        }
-        if($value.protocolSha256-cne$ProtocolSha256){throw 'Health result protocol identity mismatch.'}
-        $version=$null
-        if(-not[version]::TryParse([string]$value.runtimeVersion,[ref]$version)-or$version.Major-lt7){throw 'Health result lacks the supported runtime identity.'}
-        if([bool]$value.ok-and(-not[bool]$value.requestAttempted-or-not[bool]$value.responseAuthenticated-or[string]$value.reasonCode-cne'AUTHENTICATED_HEALTH_OK')){throw 'Health success lacks authenticated request/response evidence.'}
-        foreach($field in @('ok','reasonCode','runtimeVersion','protocolSha256','requestAttempted','responseAuthenticated')){$result[$field]=$value.$field}
-        foreach($field in @('failureType','failureId')){if($value.PSObject.Properties[$field]){$result[$field]=[string]$value.$field}}
-        return [pscustomobject]$result
-    } catch {$result.failureType=$_.Exception.GetType().FullName;$result.failureId=([string]$_.FullyQualifiedErrorId -replace '[^A-Za-z0-9_. ,:-]','').Substring(0,[math]::Min(160,([string]$_.FullyQualifiedErrorId -replace '[^A-Za-z0-9_. ,:-]','').Length))}
-    return [pscustomobject]$result
-}
-
-
-function Add-ProductAuthenticatedHealthObservation {
-    param([object]$Observation,[object]$Session,[int]$RemainingSeconds)
-    $get={param($name)$found=$false;Get-LifecycleProperty $Observation $name ([ref]$found)}
-    $set={param($value,$name,$data)if($value-is[System.Collections.IDictionary]){$value[$name]=$data}else{$value|Add-Member -NotePropertyName $name -NotePropertyValue $data -Force}}
-    # Ledger/receipt/role evidence must be current before this private client
-    # reads the installed key. The health response never substitutes for it.
-    if(-not $Observation -or [bool](&$get 'terminalFailure') -or [bool](&$get 'checkpointPresent')){return $Observation}
-    foreach($field in @('installStateValid','canonicalOwnershipValid','matchingConsumedReceipt','productRoleIdentityValid')){
-        $value=&$get $field
-        if($value -isnot [bool] -or -not $value){return $Observation}
-    }
-    $health=[pscustomobject]@{ok=$false;reasonCode='AUTHENTICATED_HEALTH_DEADLINE_UNAVAILABLE';runtimeVersion='';protocolSha256='';requestAttempted=$false;responseAuthenticated=$false}
-    # The existing bounded guest adapter owns process termination and stream
-    # drain. Reserve its ten-second remoting/drain margin inside this sample.
-    $clientSeconds=[math]::Min(8,$RemainingSeconds-10)
-    if($clientSeconds-gt0){
-        try {
-            $protocol=Join-Path $PSScriptRoot '../../../../source/windows/DevFleet-HostAgentProtocol.psm1'
-            $sha=(Get-FileHash -LiteralPath $protocol -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
-            $health=Invoke-ProductAuthenticatedHealthProbe -Session $Session -ProtocolSha256 $sha -OwnerDeadlineUtc ([datetime]::UtcNow.AddSeconds($clientSeconds))
-        } catch {$health.reasonCode='AUTHENTICATED_HEALTH_CLIENT_UNAVAILABLE'}
-    }
-    &$set $Observation 'authenticatedHealthEvidence' $health
-    &$set $Observation 'authenticatedHealthOk' ([bool]$health.ok)
-    &$set $Observation 'authenticatedHealthError' $(if($health.ok){''}else{[string]$health.reasonCode})
-    $progress=&$get 'progress'
-    if($progress){&$set $progress 'health' ([bool]$health.ok);&$set $Observation 'progressMarker' ($progress|ConvertTo-Json -Compress -Depth 20)}
-    return $Observation
-}
-
-function Get-ProductLifecycleObservation {
-    <#
-      Reads one guest observation.  ObservationProvider is deliberately a
-      seam is exposed by Wait-DevFleetProductLifecycleTransition; direct
-      observation calls remain authenticated PSSession-only.
-    #>
-    param(
-        [Parameter(Mandatory)][object]$Session,
-        [Parameter(Mandatory)][AllowEmptyString()][string]$TransactionId,
-        [Parameter(Mandatory)][string]$PayloadSha256,
-        [Parameter(Mandatory)][string]$Role,
-        [string]$Action='FreshInstall',
-        [int]$PriorGeneration=0,
-        [int]$MaxGeneration=3,
-        [int]$CandidateProcessId=0,
-        [scriptblock]$ObservationProvider,
-        [string]$ExpectedDevFleetVersion,
-        [string]$ExpectedInstallerVersion,
-        [int]$ObservationTimeoutSeconds=0,
-        [string]$InvocationStartUtc,
-        [string]$ExpectedComputeInstanceName,
-        [string]$ExpectedVaultInstanceName,
-        [string]$ExpectedNestedLinuxName,
-        [scriptblock]$RemoteObservationProvider,
-        [scriptblock]$GuestMarkerReadProvider,
-        [object]$ObservationAdapterContext
-    )
-    if([string]::IsNullOrWhiteSpace($ExpectedDevFleetVersion)-or$ExpectedDevFleetVersion -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$'){throw 'TERMINAL_FAILURE: expected DevFleet version is missing or malformed.'}
-    if([string]::IsNullOrWhiteSpace($ExpectedInstallerVersion)-or$ExpectedInstallerVersion -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$'){throw 'TERMINAL_FAILURE: expected installer version is missing or malformed.'}
-    if($ObservationProvider){throw 'TERMINAL_FAILURE: ObservationProvider is only permitted through the bounded lifecycle wait seam.'}
-    $observationDeadlineUtc=if($ObservationTimeoutSeconds -gt 0){[datetime]::UtcNow.AddSeconds($ObservationTimeoutSeconds)}else{[datetime]::MinValue}
-    $remainingObservationSeconds={
-        if($observationDeadlineUtc -le [datetime]::MinValue){return 20}
-        return [int][math]::Floor(($observationDeadlineUtc-[datetime]::UtcNow).TotalSeconds)
-    }
-    $roleKind=Get-DevFleetLifecycleRoleKind -Role $Role
-    if($ExpectedComputeInstanceName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$'){throw 'TERMINAL_FAILURE: expected product compute instance identity is missing or malformed.'}
-    if($roleKind -ceq 'Desktop' -and $ExpectedVaultInstanceName){throw 'TERMINAL_FAILURE: Desktop product observation cannot authorize a Vault target.'}
-    if($roleKind -ceq 'Laptop' -and $ExpectedVaultInstanceName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$'){throw 'TERMINAL_FAILURE: Laptop product observation requires the exact Vault identity.'}
-    $targets=@([pscustomobject][ordered]@{instanceName=$ExpectedComputeInstanceName;nodeRole=if($roleKind -ceq 'Desktop'){'primary'}else{'surrogate'};kind='compute'})
-    if($ExpectedVaultInstanceName){$targets+=,[pscustomobject][ordered]@{instanceName=$ExpectedVaultInstanceName;nodeRole='vault';kind='vault'}}
-    if($ExpectedNestedLinuxName -and $ExpectedNestedLinuxName -in @($targets.instanceName)){throw 'TERMINAL_FAILURE: product observation target overlaps the harness cleanup identity.'}
-    $stageMarkerPattern=Get-DevFleetLifecycleStageMarkerPattern -ExpectedComputeInstanceName $ExpectedComputeInstanceName -ExpectedVaultInstanceName $ExpectedVaultInstanceName
-    $remoteScript = {
-        param($tx,$payload,$expectedAction,$expectedRole,$prior,$max,$candidatePid,$expectedVersion,$expecte
+            if($PSVersionTable.PSEdition-ne'Core'-or$PSVersionTable.PSVer

@@ -1,10 +1,326 @@
 # DevFleet source part 121
 
 Full-source UTF-8 byte interval [5580000, 5626500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 380a238f0b0f444deab16aa35499bee8927359f494a08b13e0d9dd4ee18112d9
+Payload SHA-256: 6d0f3cc75f9741b00807386016a1cc03e9ee86819f9b786a672ff6e4e3b5db75
 
 <!-- BEGIN SOURCE SLICE -->
-ifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/wpf-3a88fb11a18443999cefa863af421905-checkpoint.json",
+36c6d858ce167b82da71fd566349ae315ff4918d8ec3e",
+      "bytes": 203417,
+      "kind": "explicit-observer-causal-context"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/lifecycle-CAMPAIGN-E-M4-368b5500c1b44c7e89799b74a31e225b/initial-FreshInstall-wpf-evidence.json",
+      "destination": "e2e-astra-m4-20260907t043140z/lifecycle-CAMPAIGN-E-M4-368b5500c1b44c7e89799b74a31e225b/initial-FreshInstall-wpf-evidence.json",
+      "sha256": "897284f9dbec04690e8fb92a3085e6e0012ab11fbae4e4814e5036a25d8bf3bc",
+      "bytes": 8597,
+      "kind": "explicit-observer-causal-context"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/snapshot-0015-before-cleanup.json",
+      "destination": "e2e-astra-m4-20260907t043140z/snapshot-0015-before-cleanup.json",
+      "sha256": "9af93ee48432a6a81e5806d9e8b65f979f7bc861ade981331cabfebe177c5dfb",
+      "bytes": 444,
+      "kind": "controller-bound-observation"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/snapshot-0014-during-product.json",
+      "destination": "e2e-astra-m4-20260907t043140z/snapshot-0014-during-product.json",
+      "sha256": "e103ef533b469138ac1d127ca528450aa1215c0f9c47ca74c3e514dc3d222034",
+      "bytes": 444,
+      "kind": "controller-bound-observation"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/process-drain-regression.log",
+      "destination": "astra-m6-local-20260907/process-drain-regression.log",
+      "sha256": "4695ebce0a70666277990801a2316453acf79b23ad8dd1b596562f010bcb11e7",
+      "bytes": 595,
+      "kind": "local-causal-qualification-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/snapshot-0013-during-product.json",
+      "destination": "e2e-astra-m4-20260907t043140z/snapshot-0013-during-product.json",
+      "sha256": "d0fce063d4a19ac156054c45e2c7ebf8ed86f9eaa6046bc2f4671380d710353b",
+      "bytes": 5342,
+      "kind": "controller-bound-observation"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/snapshot-0011-during-product.json",
+      "destination": "e2e-astra-m4-20260907t043140z/snapshot-0011-during-product.json",
+      "sha256": "0bd951dec86ea967f2bf7e8dcacbd25c7e9910e11456643cb659c25a99398bee",
+      "bytes": 5184,
+      "kind": "controller-bound-observation"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/snapshot-0010-during-product.json",
+      "destination": "e2e-astra-m4-20260907t043140z/snapshot-0010-during-product.json",
+      "sha256": "9cff811a7532729cb439d64f9a505f264522ef9aca1b60c71e6a1fa5b19e9a2c",
+      "bytes": 4213,
+      "kind": "controller-bound-observation"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/snapshot-0009-during-product.json",
+      "destination": "e2e-astra-m4-20260907t043140z/snapshot-0009-during-product.json",
+      "sha256": "274f6edf91ce6338191ba2853880e81d333734dd8fcbc78cde403b03f1197684",
+      "bytes": 4369,
+      "kind": "controller-bound-observation"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/snapshot-0008-during-product.json",
+      "destination": "e2e-astra-m4-20260907t043140z/snapshot-0008-during-product.json",
+      "sha256": "b992866269606cf3038c59b4738944872c4b4a4f532bc33a7b1e98d6916cc8bc",
+      "bytes": 2770,
+      "kind": "controller-bound-observation"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/snapshot-0007-during-product.json",
+      "destination": "e2e-astra-m4-20260907t043140z/snapshot-0007-during-product.json",
+      "sha256": "c89bdfcc2a75f3b3807ab0078c0031124258bc63803ace3341fcb3c3993ca876",
+      "bytes": 2770,
+      "kind": "controller-bound-observation"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/snapshot-0006-during-product.json",
+      "destination": "e2e-astra-m4-20260907t043140z/snapshot-0006-during-product.json",
+      "sha256": "47cf5c5ef703cc70af672255b9441d23faf5b5ba6ee35e0fea22644ca55ac075",
+      "bytes": 3295,
+      "kind": "controller-bound-observation"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/snapshot-0005-during-product.json",
+      "destination": "e2e-astra-m4-20260907t043140z/snapshot-0005-during-product.json",
+      "sha256": "54069ec45efdcdf68ebda84029cf0178f4a241799bcbfb98f6c36d06d9ec0430",
+      "bytes": 2770,
+      "kind": "controller-bound-observation"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/snapshot-0004-during-product.json",
+      "destination": "e2e-astra-m4-20260907t043140z/snapshot-0004-during-product.json",
+      "sha256": "c0a31be755a26e488bb5ad3cf6b73a84c9c99a23fa9e4a15b32189e3d4b61e08",
+      "bytes": 2770,
+      "kind": "controller-bound-observation"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/snapshot-0003-during-product.json",
+      "destination": "e2e-astra-m4-20260907t043140z/snapshot-0003-during-product.json",
+      "sha256": "9f342da7c6d2089ab7cd46f6665a910764e1cb1636ca1b02e34579b366c67cb1",
+      "bytes": 2771,
+      "kind": "controller-bound-observation"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/snapshot-0002-during-product.json",
+      "destination": "e2e-astra-m4-20260907t043140z/snapshot-0002-during-product.json",
+      "sha256": "d2a0837f2fffd3db1025c741e7d424635d535875bcaefc6271da1d703d625dee",
+      "bytes": 2448,
+      "kind": "controller-bound-observation"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/snapshot-0001-before-product.json",
+      "destination": "e2e-astra-m4-20260907t043140z/snapshot-0001-before-product.json",
+      "sha256": "f23bcc6018762cf0fd76278397eed8000119dc4273cadc5fb8443916690a9b30",
+      "bytes": 2448,
+      "kind": "controller-bound-observation"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/astra-result-analysis.json",
+      "destination": "e2e-astra-m4-20260907t043140z/astra-result-analysis.json",
+      "sha256": "d8d3f6485848ff07699b1012dade0b16c6f190564ba8992396c78c1694b582c3",
+      "bytes": 4622,
+      "kind": "analysis-no-proof-credit"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/parent-hyperv-events-after-failure.json",
+      "destination": "e2e-astra-m4-20260907t043140z/parent-hyperv-events-after-failure.json",
+      "sha256": "d20dd2482edff9743ed94305f1e3ebc92dbe74b1544391b1421de4941fc96f17",
+      "bytes": 7975,
+      "kind": "original"
+    },
+    {
+      "source": "audit/automation-harness/runs/e2e-astra-m4-20260907t043140z/snapshot-0012-during-product.json",
+      "destination": "e2e-astra-m4-20260907t043140z/snapshot-0012-during-product.json",
+      "sha256": "750e421eb2868b5bfa87a42a2c80774e938b367eff14b18d900e3f79b00af054",
+      "bytes": 5343,
+      "kind": "controller-bound-observation"
+    },
+    {
+      "source": "audit/automation-harness/astra-m6-local-20260907/python-input-regressions.log",
+      "destination": "astra-m6-local-20260907/python-input-regressions.log",
+      "sha256": "09b1f11cc252b997a78d1f7e05809603cee869a69975e53eff80afd713b1c28f",
+      "bytes": 101,
+      "kind": "local-causal-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 287,
+      "sha256": "9c400acb732e1d9f479488907176f1cccc02eccf0c6aa90f63c39a0d8ce6703c",
+      "source": "audit/automation-harness/astra-m6-local-20260907/bootstrap-cleanup-terminal-before-fix.log",
+      "destination": "astra-m6-local-20260907/bootstrap-cleanup-terminal-before-fix.log",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 284,
+      "sha256": "d7c253e407b43f0d5b4e29ecf254dd053a349a9b95e6ac6496e2a2ffb98c70f5",
+      "source": "audit/automation-harness/astra-m6-local-20260907/bootstrap-input-after-terminal-fix.log",
+      "destination": "astra-m6-local-20260907/bootstrap-input-after-terminal-fix.log",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 62,
+      "sha256": "c0837a545de65021a99c07990006cc4c96141dbc204251d7e6275c8cfff896e3",
+      "source": "audit/automation-harness/astra-m6-local-20260907/bootstrap-terminal-after-fix.log",
+      "destination": "astra-m6-local-20260907/bootstrap-terminal-after-fix.log",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 259,
+      "sha256": "09b2cfa6032bd42621b0a3c967d3891fc87140ed3eabe8fdcb00cdf367dcae5c",
+      "source": "audit/automation-harness/astra-m6-local-20260907/bootstrap-terminal-before-fix.log",
+      "destination": "astra-m6-local-20260907/bootstrap-terminal-before-fix.log",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 62,
+      "sha256": "4505bff5060f34f4d5911d8f5fcdfb2184c8e961cff0d45fc47a90edc26c8f1a",
+      "source": "audit/automation-harness/astra-m6-local-20260907/bootstrap-terminal-qualified.log",
+      "destination": "astra-m6-local-20260907/bootstrap-terminal-qualified.log",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 101,
+      "sha256": "3becae7df20a2be92e3e43e5ab1463baf96bc30d91aa23d8c39fd057b8216b6d",
+      "source": "audit/automation-harness/astra-m6-local-20260907/default-mode-after-fix.log",
+      "destination": "astra-m6-local-20260907/default-mode-after-fix.log",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 884,
+      "sha256": "86c9781c5205995f8d0252560a7af40533f5b16639b4b398db6e192bf6ba197d",
+      "source": "audit/automation-harness/astra-m6-local-20260907/default-mode-before-fix.log",
+      "destination": "astra-m6-local-20260907/default-mode-before-fix.log",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 1247,
+      "sha256": "8aa05f0b585a662e62a8002dd8a9897414c3f8ca592b4384d7fadfec8020bc25",
+      "source": "audit/automation-harness/astra-m6-local-20260907/exact-proof-binding-local.log",
+      "destination": "astra-m6-local-20260907/exact-proof-binding-local.log",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 1000,
+      "sha256": "a420f5daa620ff2aac1d5208be30e455322a894c9f3af8cc3343e7056af82d64",
+      "source": "audit/automation-harness/astra-m6-local-20260907/harness-after-proof1-fixes.log",
+      "destination": "astra-m6-local-20260907/harness-after-proof1-fixes.log",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 101,
+      "sha256": "a7c441ba9ea5a2417600d069b39e2011aedc211c1d2b4e7e2b54d23d85944c90",
+      "source": "audit/automation-harness/astra-m6-local-20260907/native-proof-validator-qualified.log",
+      "destination": "astra-m6-local-20260907/native-proof-validator-qualified.log",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 3026,
+      "sha256": "814d49eeff9f9b2ec3f24dd8e0fc0e03a282db94549c36bcb4692cd06e5ff397",
+      "source": "audit/automation-harness/astra-m6-local-20260907/observer-role-envelope.log",
+      "destination": "astra-m6-local-20260907/observer-role-envelope.log",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 3256,
+      "sha256": "4d7bc2d198828d4c493ac868db029632265cdd902fa7843e964291ced4a48fed",
+      "source": "audit/automation-harness/astra-m6-local-20260907/observer-static-marker-before-fix.log",
+      "destination": "astra-m6-local-20260907/observer-static-marker-before-fix.log",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 3026,
+      "sha256": "814d49eeff9f9b2ec3f24dd8e0fc0e03a282db94549c36bcb4692cd06e5ff397",
+      "source": "audit/automation-harness/astra-m6-local-20260907/observer-static-marker-qualified4.log",
+      "destination": "astra-m6-local-20260907/observer-static-marker-qualified4.log",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 361,
+      "sha256": "019cd73ddd122430f8ed93d446715fa41db20da8b27540f87140811541d99b97",
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof1-candidate-preservation.json",
+      "destination": "astra-m6-local-20260907/proof1-candidate-preservation.json",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 608,
+      "sha256": "be096876cd1d0f493a2ad6f3aaec5d05676ac8166383c1daf7b2ec2d36a5f24b",
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof1-false-semantic-after-fix.json",
+      "destination": "astra-m6-local-20260907/proof1-false-semantic-after-fix.json",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 832,
+      "sha256": "bf08ac6ec2883b8e95dfb56db3b4e3293a35d5e1e8bbd9a4226fc9b0bf54becf",
+      "source": "audit/automation-harness/astra-m6-local-20260907/proof1-false-semantic-before-fix.json",
+      "destination": "astra-m6-local-20260907/proof1-false-semantic-before-fix.json",
+      "kind": "local-corrective-qualification-no-proof-credit"
+    },
+    {
+      "bytes": 10240,
+      "sha256": "da01506b9d126f417046302157a4c4615ca9307fe50063fe5350417a0dd9967e",
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r1-20260907t072905z/astra-result-analysis.json",
+      "destination": "e2e-exact-candidate-proof-astra-r1-20260907t072905z/astra-result-analysis.json",
+      "kind": "corrective-proof1-original-or-derived-no-proof-credit"
+    },
+    {
+      "bytes": 1480,
+      "sha256": "ba89bf6fea2ec685e5459c4dd8439b4f5f99bc8c2315e14dd09890d88949b0d7",
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r1-20260907t072905z/cleanup-state.json",
+      "destination": "e2e-exact-candidate-proof-astra-r1-20260907t072905z/cleanup-state.json",
+      "kind": "corrective-proof1-original-or-derived-no-proof-credit"
+    },
+    {
+      "bytes": 8865,
+      "sha256": "3e0e71ac2411d0cf8c7e70b2294de3620e8e77e63777b89188a18278a0be05c4",
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r1-20260907t072905z/lifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/initial-FreshInstall-wpf-evidence.json",
+      "destination": "e2e-exact-candidate-proof-astra-r1-20260907t072905z/lifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/initial-FreshInstall-wpf-evidence.json",
+      "kind": "corrective-proof1-original-or-derived-no-proof-credit"
+    },
+    {
+      "bytes": 312262,
+      "sha256": "7baeac00805c2f71b47d045fd6d6fb8ff1a66aef660c1a15a573be8eb61872a6",
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r1-20260907t072905z/lifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/product-lifecycle-generation-1.json",
+      "destination": "e2e-exact-candidate-proof-astra-r1-20260907t072905z/lifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/product-lifecycle-generation-1.json",
+      "kind": "corrective-proof1-original-or-derived-no-proof-credit"
+    },
+    {
+      "bytes": 284570,
+      "sha256": "8f679cbcc025021219890ff38ea6ea509681599d74dfbc7d0cbc38e0f5217f43",
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r1-20260907t072905z/lifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/product-lifecycle-observer-generation-0.json",
+      "destination": "e2e-exact-candidate-proof-astra-r1-20260907t072905z/lifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/product-lifecycle-observer-generation-0.json",
+      "kind": "corrective-proof1-original-or-derived-no-proof-credit"
+    },
+    {
+      "bytes": 25517,
+      "sha256": "149ce6b0c98412d16fa25dce7afeb89c7776f506cb8ac778594da48aee57e6d9",
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r1-20260907t072905z/lifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/product-lifecycle-progress-current.json",
+      "destination": "e2e-exact-candidate-proof-astra-r1-20260907t072905z/lifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/product-lifecycle-progress-current.json",
+      "kind": "corrective-proof1-original-or-derived-no-proof-credit"
+    },
+    {
+      "bytes": 1826513,
+      "sha256": "7b941db283dd0049973b0157b0ffab16e694bdbc8e1aa8b883f03faa2c5c4ab2",
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r1-20260907t072905z/lifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/product-lifecycle-progress.jsonl",
+      "destination": "e2e-exact-candidate-proof-astra-r1-20260907t072905z/lifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/product-lifecycle-progress.jsonl",
+      "kind": "corrective-proof1-original-or-derived-no-proof-credit"
+    },
+    {
+      "bytes": 7674,
+      "sha256": "a91d438a64fcdd29bd5717aa1fb97bbfee6d4ead040c2e0bc22e6438c56505b5",
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r1-20260907t072905z/lifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/resume-generation-1-wpf-evidence.json",
+      "destination": "e2e-exact-candidate-proof-astra-r1-20260907t072905z/lifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/resume-generation-1-wpf-evidence.json",
+      "kind": "corrective-proof1-original-or-derived-no-proof-credit"
+    },
+    {
+      "bytes": 889,
+      "sha256": "3fe769e7e64ba1f005f118b08b3c4566a212050668a89bcfad7ace5c9a155006",
+      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r1-20260907t072905z/lifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/wpf-3a88fb11a18443999cefa863af421905-checkpoint.json",
+      "destination": "e2e-exact-candidate-proof-astra-r1-20260907t072905z/lifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/wpf-3a88fb11a18443999cefa863af421905-checkpoint.json",
       "kind": "corrective-proof1-original-or-derived-no-proof-credit"
     },
     {
@@ -429,283 +745,4 @@ ifecycle-REBOOT-RESUME-18d8f2aea8a24f1a81235fb68d54dd93/wpf-3a88fb11a18443999cef
     },
     {
       "source": "audit/automation-harness/astra-m6-local-20260907/proof2-failure-log-final-qualified.log",
-      "destination": "astra-m6-local-20260907/proof2-failure-log-final-qualified.log",
-      "sha256": "be799414fd23a928c769cdd6af448dfff46c6cb02266abecf98b4549447b7d57",
-      "bytes": 2691,
-      "kind": "local-causal-qualification-no-proof-credit"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/proof2-observer-final-qualified.log",
-      "destination": "astra-m6-local-20260907/proof2-observer-final-qualified.log",
-      "sha256": "814d49eeff9f9b2ec3f24dd8e0fc0e03a282db94549c36bcb4692cd06e5ff397",
-      "bytes": 3026,
-      "kind": "local-causal-qualification-no-proof-credit"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/proof2-harness-regression.log",
-      "destination": "astra-m6-local-20260907/proof2-harness-regression.log",
-      "sha256": "a420f5daa620ff2aac1d5208be30e455322a894c9f3af8cc3343e7056af82d64",
-      "bytes": 1000,
-      "kind": "local-causal-qualification-no-proof-credit"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/proof2-binding-regression.log",
-      "destination": "astra-m6-local-20260907/proof2-binding-regression.log",
-      "sha256": "8aa05f0b585a662e62a8002dd8a9897414c3f8ca592b4384d7fadfec8020bc25",
-      "bytes": 1247,
-      "kind": "local-causal-qualification-no-proof-credit"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/proof2-parse-diff-qualified.log",
-      "destination": "astra-m6-local-20260907/proof2-parse-diff-qualified.log",
-      "sha256": "dcacf4a26897e8fa5dfeb30e7564ba1d671f9be79e5c68d40bbb8501aac4389b",
-      "bytes": 45,
-      "kind": "local-causal-qualification-no-proof-credit"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/proof2-native-prepare-qualified.log",
-      "destination": "astra-m6-local-20260907/proof2-native-prepare-qualified.log",
-      "sha256": "82dfb656f958cd3eaa76584e082cf28b2ef6c67056bf821008e8eaca5700701f",
-      "bytes": 452,
-      "kind": "local-causal-qualification-no-proof-credit"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/proof2-corrections-qualification.json",
-      "destination": "astra-m6-local-20260907/proof2-corrections-qualification.json",
-      "sha256": "bb4cd9fcaade1c071802247a2055d9407b654adfaae2dfd9d39aa49dd0465fcb",
-      "bytes": 6200,
-      "kind": "local-causal-qualification-no-proof-credit"
-    },
-    {
-      "bytes": 1000,
-      "kind": "final-local-regression-no-proof-credit",
-      "source": "audit/automation-harness/astra-m6-local-20260907/proof2-harness-final-qualified.log",
-      "destination": "astra-m6-local-20260907/proof2-harness-final-qualified.log",
-      "sha256": "a420f5daa620ff2aac1d5208be30e455322a894c9f3af8cc3343e7056af82d64"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/check-host-protocol-runtime.ps1",
-      "destination": "astra-m6-local-20260907/check-host-protocol-runtime.ps1",
-      "sha256": "5a8b4e618911109ca4b62a73be653ac01cc2f0b364de3ef9cc88b3f8642e516a",
-      "bytes": 1322,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/health-fixture-server.py",
-      "destination": "astra-m6-local-20260907/health-fixture-server.py",
-      "sha256": "6321d20f221d2b6b2020c169ba993f4a6a0f23df93becbf2ac029dc7d68c1046",
-      "bytes": 1954,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/health-runtime-proposal.ps1",
-      "destination": "astra-m6-local-20260907/health-runtime-proposal.ps1",
-      "sha256": "c6bc44114cc81fb29c4aa249d89401742ab4550b2a479c7405d872f3b1ecbeac",
-      "bytes": 4442,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-health-proposal-ps51.json",
-      "destination": "astra-m6-local-20260907/proof3-health-proposal-ps51.json",
-      "sha256": "92a0c821918ac122b68918180a9f751ee2abbdd8256e8945658a6a7d4ee6f60b",
-      "bytes": 3355,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-health-proposal-ps7.json",
-      "destination": "astra-m6-local-20260907/proof3-health-proposal-ps7.json",
-      "sha256": "b1db9d2b3d1271c84a7cdf809b87531a0629c9b5158b3a50896aa800019aa422",
-      "bytes": 2091,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-health-ps51-local.json",
-      "destination": "astra-m6-local-20260907/proof3-health-ps51-local.json",
-      "sha256": "bd0371cc0893a73f805fd651f4b1b006d9473fa40db7115964788c31f0c6f240",
-      "bytes": 361,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/proof3-health-ps7-local.json",
-      "destination": "astra-m6-local-20260907/proof3-health-ps7-local.json",
-      "sha256": "5d65e0a2a25e0db3916be20b7a5c9c68461866a7829b9aede7f0d2f09e5f7953",
-      "bytes": 219,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/read-proof3-health-runtime.ps1",
-      "destination": "astra-m6-local-20260907/read-proof3-health-runtime.ps1",
-      "sha256": "f3e2704ebe52beec976ea96900a2f5481d42f1afd6f1a1f9054c51ae9a7d9f88",
-      "bytes": 3187,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/run-health-runtime-proposal-tests.ps1",
-      "destination": "astra-m6-local-20260907/run-health-runtime-proposal-tests.ps1",
-      "sha256": "a0ac53ec2c1a5a91360599e77207f18eed5b56dadae1225160ed91abd9a594a2",
-      "bytes": 2821,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/astra-m6-local-20260907/test-health-runtime-proposal.ps1",
-      "destination": "astra-m6-local-20260907/test-health-runtime-proposal.ps1",
-      "sha256": "eef41d38f46f6c89067c81708d913a14a18bffc9a53d6af7dcadce481796afb7",
-      "bytes": 3875,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/cleanup-state.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/cleanup-state.json",
-      "sha256": "f2cb64fb4557b6e4f4de29fe3783521b78f6bfc052ad57ba91aeeeebe4f9aeff",
-      "bytes": 1480,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/initial-FreshInstall-wpf-evidence.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/initial-FreshInstall-wpf-evidence.json",
-      "sha256": "9dedd5c6dc5a69175356e9659f405f2c6e3feca27bc37b9609e747c62b7e554f",
-      "bytes": 8865,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/product-lifecycle-generation-1.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/product-lifecycle-generation-1.json",
-      "sha256": "54706ad9d061e46b3cc1f7ac956b7986e53714c370b7b5e6552e4d10c4852b14",
-      "bytes": 338735,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/product-lifecycle-observer-generation-0.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/product-lifecycle-observer-generation-0.json",
-      "sha256": "e99dc094f5040519aed676a588e4edd7522bd9a4d47fdf12c7c83b72ee78adb1",
-      "bytes": 310093,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/product-lifecycle-progress-current.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/product-lifecycle-progress-current.json",
-      "sha256": "6be0fe64bd1ca2ffafdfb5e1fcceb50cbdc534f2f626698ee5cbdf4506871caf",
-      "bytes": 110092,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/product-lifecycle-progress.jsonl",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/product-lifecycle-progress.jsonl",
-      "sha256": "6cd03c4ab78851cb43523110e7d073ba519a94404a3abc3d481e3399a144ff62",
-      "bytes": 14310444,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/resume-generation-1-wpf-evidence.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/resume-generation-1-wpf-evidence.json",
-      "sha256": "7d9132a32ba283430387e5f2d2288625ddc67934a7d9797e8d31425dc22882a6",
-      "bytes": 7674,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-4874b4fe6a5140fa986554690dd52fe8-checkpoint.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-4874b4fe6a5140fa986554690dd52fe8-checkpoint.json",
-      "sha256": "8d58e5ed4109114f6f742e9b7107fe113720ae1138cad3892aafdd6fcbe20f9a",
-      "bytes": 728,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-4874b4fe6a5140fa986554690dd52fe8-driver-bound.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-4874b4fe6a5140fa986554690dd52fe8-driver-bound.json",
-      "sha256": "d6f66fd95561ef4493ffa04c1b1f9683f4495e955d931cd2a7c79ec40fdbc5d4",
-      "bytes": 802,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-4874b4fe6a5140fa986554690dd52fe8-launch-request.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-4874b4fe6a5140fa986554690dd52fe8-launch-request.json",
-      "sha256": "1257bb7987eb873c7b24d336ad78cebbde650847d5f9d2ea91ba490783cc40a6",
-      "bytes": 8712,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-4874b4fe6a5140fa986554690dd52fe8-terminal.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-4874b4fe6a5140fa986554690dd52fe8-terminal.json",
-      "sha256": "51de6c36b24e25c0b95cbf6f0be8b2da59cc6a66cbe851d7d4929720bc657bf0",
-      "bytes": 9090,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-4874b4fe6a5140fa986554690dd52fe8-worker-terminal.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-4874b4fe6a5140fa986554690dd52fe8-worker-terminal.json",
-      "sha256": "b51fd052f082e0d21f9eb6ca34c189bccbf6ee998061eb8e08467e9495214490",
-      "bytes": 5681,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-f5f046d39c05477c959c665cbf721100-checkpoint.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-f5f046d39c05477c959c665cbf721100-checkpoint.json",
-      "sha256": "f05fa4aa8517a4e85f6c0c7069005c302387689152e353a3d71fe2828f384bc6",
-      "bytes": 889,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-f5f046d39c05477c959c665cbf721100-driver-bound.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-f5f046d39c05477c959c665cbf721100-driver-bound.json",
-      "sha256": "0843ca1189c25ddfed497992df7445a8358b76765827ec1f0b1d78a07db35933",
-      "bytes": 832,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-f5f046d39c05477c959c665cbf721100-launch-request.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-f5f046d39c05477c959c665cbf721100-launch-request.json",
-      "sha256": "d3b3a5899f936d84d70f245a7901c5a8bee9c596828257aa12f68749a9b5add3",
-      "bytes": 8922,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-f5f046d39c05477c959c665cbf721100-terminal.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-f5f046d39c05477c959c665cbf721100-terminal.json",
-      "sha256": "4ac2545f32f6c540e0f543d5a4b16739b0c5bfa5c3bc2fbd23e0a9ddb50479ec",
-      "bytes": 6853,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-f5f046d39c05477c959c665cbf721100-worker-terminal.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/lifecycle-REBOOT-RESUME-b439c914f4ba4905961c52f45fdf938c/wpf-f5f046d39c05477c959c665cbf721100-worker-terminal.json",
-      "sha256": "5e8dcaa68899a1ac521d173506ea6acdbb752b9c43718de97f5f98e9d761e49a",
-      "bytes": 3339,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/operator-stop-request.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/operator-stop-request.json",
-      "sha256": "190f33249b9a9c34cb54ed708f679ce6dd64139fd7940bb5d789ee9828ff68b3",
-      "bytes": 852,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/pre-operator-stop-progress.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/pre-operator-stop-progress.json",
-      "sha256": "6be0fe64bd1ca2ffafdfb5e1fcceb50cbdc534f2f626698ee5cbdf4506871caf",
-      "bytes": 110092,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/proof-error.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/proof-error.json",
-      "sha256": "3bf49641770b0d4c10aa5e31e4c24895430e6e849789be2a2c1c6eee39037e3e",
-      "bytes": 357,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/proof-start.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/proof-start.json",
-      "sha256": "d303486d2635d0f0fa03556e1c621d661d49c810321ea07c54f96fc5340b13f9",
-      "bytes": 10164,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/read-only-health-runtime.json",
-      "destination": "e2e-exact-candidate-proof-astra-r3-20260907t094301z/read-only-health-runtime.json",
-      "sha256": "83bf377d3a16d4deb2f2d6134b2397ad7ac40c00d7a0d348d6959c6cb8bc4e3f",
-      "bytes": 1030,
-      "kind": "corrective-proof3-causal-original-no-credit"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-exact-candidate-proof-astra-r3-20260907t094301z/synthetic-reboot-probe.j
+      "destination": "astra-m6-local-20260907/proof2-failure-log-final-qu

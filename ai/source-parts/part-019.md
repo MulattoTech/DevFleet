@@ -1,10 +1,106 @@
 # DevFleet source part 019
 
 Full-source UTF-8 byte interval [837000, 883500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 241f404d97012e3d42eb72c0cf1ffd7b96ff3bf3182002338f40d93e2d078f21
+Payload SHA-256: daa696ad79875c305e3a4f4000d8f3b92c3ab4945db21165cdf00260ffae20f4
 
 <!-- BEGIN SOURCE SLICE -->
-   $finished=&$now;if($finished-lt$downloadFinished-or$finished-gt$owner){throw 'Campaign E official PowerShell authenticity observation completed outside the immutable owner timeline.'}
+n.operation-ceq'winget-version'-and[string]$raw.stdout-notmatch'(?<!\d)\d+\.\d+(?:\.\d+){0,2}'){throw 'Campaign E PowerShell acquisition could not parse the bounded WinGet version response.'}
+        if([bool]$specification.requirePackageId-and[string]$raw.stdout-notmatch[regex]::Escape([string]$Dependency.wingetPackageId)){throw 'Campaign E PowerShell acquisition search did not identify the exact manifest-approved package.'}
+        [void]$observations.Add([pscustomobject][ordered]@{operation=[string]$raw.operation;outcome=[string]$raw.outcome;exitCode=$raw.exitCode;startedAtUtc=[string]$raw.startedAtUtc;finishedAtUtc=[string]$raw.finishedAtUtc;deadlineUtc=[string]$raw.deadlineUtc;outputComplete=[bool]$raw.outputComplete;packageIdentityObserved=if([bool]$specification.requirePackageId){$true}else{$null}})
+        $lastFinished=$rawFinished
+    }
+    $final=&$PowerShellCompatibilityProvider $Dependency $owner
+    if(-not(&$validateCompatibility $final)){throw 'Campaign E PowerShell acquisition completed without a candidate-compatible PowerShell executable.'}
+    $finished=&$now
+    if($finished-gt$owner){throw 'Campaign E PowerShell acquisition completed after its immutable owner deadline.'}
+    return [pscustomobject][ordered]@{
+        schemaVersion=1;kind='DEVFLEET_CAMPAIGN_E_POWERSHELL_ACQUISITION';status='PASS';method='WINGET_MANIFEST_APPROVED_DIAGNOSTIC'
+        packageId=[string]$Dependency.wingetPackageId;startedAtUtc=$started.ToString('o');finishedAtUtc=$finished.ToString('o');ownerDeadlineUtc=$owner.ToString('o')
+        wingetPathSha256=$wingetHash;operations=@($observations);powershell=[pscustomobject]@{status='Compatible';version=[string]$final.version;pathSha256=[string]$final.pathSha256}
+        productLifecycleStarted=$false;stageMarkerWritten=$false
+    }
+}
+
+function Test-DevFleetCampaignEExactSignerSubject {
+    param([Parameter(Mandatory)][string]$Actual,[Parameter(Mandatory)][string[]]$Expected)
+    $normalize={param([string]$Value)try{(([Security.Cryptography.X509Certificates.X500DistinguishedName]::new($Value)).Format($false)-replace'\s','').ToUpperInvariant()}catch{($Value-replace'\s','').ToUpperInvariant()}}
+    $actualNormalized=&$normalize $Actual
+    return @($Expected|Where-Object{(&$normalize ([string]$_))-ceq$actualNormalized}).Count-eq1
+}
+
+function Save-DevFleetCampaignEAllowlistedHttpsDownload {
+    param(
+        [Parameter(Mandatory)][uri]$Uri,
+        [Parameter(Mandatory)][string[]]$AllowedHosts,
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][datetime]$OwnerDeadlineUtc,
+        [ValidateRange(60,1200)][int]$MaximumSeconds=900
+    )
+    $started=[datetime]::UtcNow;$owner=$OwnerDeadlineUtc.ToUniversalTime();$deadline=$started.AddSeconds($MaximumSeconds);if($deadline-gt$owner){$deadline=$owner}
+    if($deadline-le$started){throw 'Campaign E official download owner deadline expired before transfer.'}
+    if(Test-Path -LiteralPath $Path){throw 'Campaign E official download destination already exists.'}
+    $temporary="$Path.$([guid]::NewGuid().ToString('N')).tmp";$current=$Uri;$redirectHosts=[Collections.Generic.List[string]]::new()
+    Add-Type -AssemblyName System.Net.Http -ErrorAction Stop
+    $handler=[Net.Http.HttpClientHandler]::new();$handler.AllowAutoRedirect=$false;$client=[Net.Http.HttpClient]::new($handler);$client.Timeout=[Threading.Timeout]::InfiniteTimeSpan
+    try {
+        for($hop=0;$hop-le5;$hop++){
+            if($current.Scheme-cne'https'-or$current.UserInfo-or@($AllowedHosts)-cnotcontains$current.Host){throw 'Campaign E official download left the allowlisted HTTPS boundary.'}
+            [void]$redirectHosts.Add($current.Host)
+            $remaining=($deadline-[datetime]::UtcNow)
+            if($remaining.TotalMilliseconds-le0){throw 'Campaign E official download exceeded its inherited finite deadline.'}
+            $cts=[Threading.CancellationTokenSource]::new($remaining);$response=$null;$input=$null;$output=$null
+            try {
+                $response=$client.GetAsync($current,[Net.Http.HttpCompletionOption]::ResponseHeadersRead,$cts.Token).GetAwaiter().GetResult()
+                if([int]$response.StatusCode-ge300-and[int]$response.StatusCode-le399){$location=$response.Headers.Location;if(-not$location){throw 'Campaign E official download redirect omitted Location.'};$current=[uri]::new($current,$location);continue}
+                if(-not$response.IsSuccessStatusCode){throw "Campaign E official download failed with HTTP $([int]$response.StatusCode)."}
+                $input=$response.Content.ReadAsStreamAsync().GetAwaiter().GetResult();$output=[IO.File]::Open($temporary,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+                [void]$input.CopyToAsync($output,81920,$cts.Token).GetAwaiter().GetResult();$output.Flush($true);$output.Dispose();$output=$null
+                [IO.File]::Move($temporary,$Path)
+                $finished=[datetime]::UtcNow
+                return [pscustomobject][ordered]@{outcome='PASS';startedAtUtc=$started.ToString('o');finishedAtUtc=$finished.ToString('o');deadlineUtc=$deadline.ToString('o');finalHost=$current.Host;redirectHosts=@($redirectHosts);bytes=(Get-Item -LiteralPath $Path).Length;sha256=(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()}
+            } finally {if($output){$output.Dispose()};if($input){$input.Dispose()};if($response){$response.Dispose()};$cts.Dispose()}
+        }
+        throw 'Campaign E official download exceeded the redirect limit.'
+    } finally {$client.Dispose();$handler.Dispose();Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue}
+}
+
+function Get-DevFleetCampaignEOfficialPowerShellPayload {
+    param(
+        [Parameter(Mandatory)][psobject]$Dependency,
+        [Parameter(Mandatory)][string]$DestinationDirectory,
+        [Parameter(Mandatory)][datetime]$OwnerDeadlineUtc,
+        [scriptblock]$MetadataProvider,
+        [scriptblock]$DownloadProvider,
+        [scriptblock]$AuthenticityProvider,
+        [scriptblock]$ClockProvider
+    )
+    $now={if($ClockProvider){([datetime](& $ClockProvider)).ToUniversalTime()}else{[datetime]::UtcNow}};$started=&$now;$owner=$OwnerDeadlineUtc.ToUniversalTime()
+    if($owner-le$started){throw 'Campaign E official PowerShell acquisition owner deadline expired before metadata.'}
+    if([string]$Dependency.id-cne'powershell7'-or[string]$Dependency.wingetPackageId-cne'Microsoft.PowerShell'-or[string]$Dependency.directOfficialVendorResolver.type-cne'github-release'){throw 'Campaign E official PowerShell dependency identity/resolver is unsupported.'}
+    $resolver=$Dependency.directOfficialVendorResolver;$metadataUri=[uri][string]$resolver.metadataUri
+    if($metadataUri.Scheme-cne'https'-or$metadataUri.UserInfo-or$metadataUri.AbsolutePath-cne'/repos/PowerShell/PowerShell/releases/latest'-or@($resolver.allowedHosts)-cnotcontains$metadataUri.Host){throw 'Campaign E official PowerShell metadata identity is invalid.'}
+    $remaining=[int][math]::Floor(($owner-(&$now)).TotalSeconds);if($remaining-le0){throw 'Campaign E official PowerShell acquisition owner deadline expired before metadata request.'}
+    $metadata=if($MetadataProvider){&$MetadataProvider $metadataUri ([math]::Min(60,$remaining)) $owner}else{Invoke-RestMethod -UseBasicParsing -TimeoutSec ([math]::Min(60,$remaining)) -Uri $metadataUri -Headers @{'User-Agent'='DevFleet-Campaign-E/1.2.13'}}
+    $metadataFinished=&$now
+    if($metadataFinished-gt$owner){throw 'Campaign E official PowerShell metadata arrived after the immutable owner deadline.'}
+    if(-not$metadata-or[bool]$metadata.prerelease-or[bool]$metadata.draft-or[string]$metadata.tag_name-notmatch'^v7\.\d+\.\d+$'){throw 'Campaign E official PowerShell release metadata is unusable.'}
+    $releasePage=[uri][string]$metadata.html_url
+    if($releasePage.Scheme-cne'https'-or$releasePage.Host-cne'github.com'-or-not$releasePage.AbsolutePath.StartsWith('/PowerShell/PowerShell/releases/tag/',[StringComparison]::Ordinal)){throw 'Campaign E official PowerShell release repository identity mismatch.'}
+    $assets=@($metadata.assets|Where-Object{[string]$_.name-match[string]$resolver.assetRegex})
+    if($assets.Count-ne1){throw 'Campaign E official PowerShell release did not contain one canonical x64 MSI.'}
+    $asset=$assets[0];$assetName=[string]$asset.name;$assetUri=[uri][string]$asset.browser_download_url
+    $expectedPathPrefix="/PowerShell/PowerShell/releases/download/$([string]$metadata.tag_name)/"
+    if($assetUri.Scheme-cne'https'-or$assetUri.UserInfo-or@($resolver.allowedHosts)-cnotcontains$assetUri.Host-or-not$assetUri.AbsolutePath.StartsWith($expectedPathPrefix,[StringComparison]::Ordinal)-or[IO.Path]::GetFileName($assetUri.AbsolutePath)-cne$assetName-or[IO.Path]::GetExtension($assetName)-cne'.msi'){throw 'Campaign E official PowerShell asset identity is invalid.'}
+    $destinationRoot=[IO.Path]::GetFullPath($DestinationDirectory).TrimEnd('\');if(-not(Test-Path -LiteralPath $destinationRoot -PathType Container)){throw 'Campaign E official PowerShell destination root is absent.'}
+    $DestinationPath=Join-Path $destinationRoot $assetName
+    if(Test-Path -LiteralPath $DestinationPath){throw 'Campaign E official PowerShell destination already exists and will not be overwritten.'}
+    $download=if($DownloadProvider){&$DownloadProvider $assetUri @($resolver.allowedHosts) $DestinationPath $owner}else{Save-DevFleetCampaignEAllowlistedHttpsDownload -Uri $assetUri -AllowedHosts @($resolver.allowedHosts) -Path $DestinationPath -OwnerDeadlineUtc $owner}
+    if($null-eq$download-or[string]$download.outcome-cne'PASS'-or-not(Test-Path -LiteralPath $DestinationPath -PathType Leaf)-or[int64]$download.bytes-lt1-or[string]$download.sha256-notmatch'^[0-9a-f]{64}$'-or(Get-FileHash -LiteralPath $DestinationPath -Algorithm SHA256).Hash.ToLowerInvariant()-cne[string]$download.sha256){throw 'Campaign E official PowerShell download evidence is invalid.'}
+    $downloadStarted=([datetime]$download.startedAtUtc).ToUniversalTime();$downloadFinished=([datetime]$download.finishedAtUtc).ToUniversalTime();$downloadDeadline=([datetime]$download.deadlineUtc).ToUniversalTime();$redirectHosts=@($download.redirectHosts)
+    if($downloadStarted-lt$metadataFinished-or$downloadFinished-lt$downloadStarted-or$downloadFinished-gt$owner-or$downloadDeadline-gt$owner-or$redirectHosts.Count-lt1-or@($redirectHosts|Where-Object{@($resolver.allowedHosts)-cnotcontains[string]$_}).Count){throw 'Campaign E official PowerShell download deadline/redirect evidence is invalid.'}
+    $authenticity=if($AuthenticityProvider){&$AuthenticityProvider $DestinationPath $Dependency.installerAuthenticityPolicy}else{$signature=Get-AuthenticodeSignature -LiteralPath $DestinationPath;[pscustomobject]@{status=$signature.Status.ToString();signerSubject=if($signature.SignerCertificate){$signature.SignerCertificate.Subject}else{''}}}
+    if([string]$authenticity.status-cne'Valid'-or-not(Test-DevFleetCampaignEExactSignerSubject -Actual ([string]$authenticity.signerSubject) -Expected @($Dependency.installerAuthenticityPolicy.allowedSignerSubjectsExact))){throw 'Campaign E official PowerShell payload signer identity is invalid.'}
+    $finished=&$now;if($finished-lt$downloadFinished-or$finished-gt$owner){throw 'Campaign E official PowerShell authenticity observation completed outside the immutable owner timeline.'}
     [pscustomobject][ordered]@{schemaVersion=1;kind='DEVFLEET_CAMPAIGN_E_OFFICIAL_POWERSHELL_PAYLOAD';status='PASS';method='STAGED_OFFICIAL_GITHUB_DIAGNOSTIC';packageId='Microsoft.PowerShell';releaseTag=[string]$metadata.tag_name;assetName=$assetName;metadataHost=$metadataUri.Host;assetHost=$assetUri.Host;redirectHosts=$redirectHosts;sha256=[string]$download.sha256;bytes=[int64]$download.bytes;signerSubject=[string]$authenticity.signerSubject;startedAtUtc=$started.ToString('o');finishedAtUtc=$finished.ToString('o');ownerDeadlineUtc=$owner.ToString('o');localPath=$DestinationPath;productLifecycleStarted=$false;stageMarkerWritten=$false}
 }
 
@@ -311,80 +407,4 @@ function Invoke-DevFleetCampaignEMultipassM1Sequence {
         [void]$observations.Add($summary)
         if($rawStarted-lt$state.previous-or$rawFinished-lt$rawStarted-or$rawFinished-gt$owner-or$rawDeadline-gt$owner){$state.primaryError="M1 $Operation violated its immutable owner timeline.";return $null}
         $state.previous=$rawFinished
-        if([string]$raw.outcome-cne'PASS'){$state.primaryError="M1 $Operation returned $([string]$raw.outcome).";return $null}
-        if(-not[bool]$raw.outputComplete){$state.primaryError="M1 $Operation returned incomplete output.";return $null}
-        return $raw
-    }.GetNewClosure()
-    $launchArguments=@('launch',$UbuntuImage,'--name',$InstanceName,'--cpus',[string]$Resources.cpus,'--memory',[string]$Resources.memory,'--disk',[string]$Resources.disk)
-    if($CloudInitPath){$launchArguments+=@('--cloud-init',$CloudInitPath)}
-    $launch=&$invoke 'launch' $launchArguments 900
-    if($launch){$progress.launchAccepted=$true}
-    $info=$null
-    if($launch){$info=&$invoke 'info-running' @('info',$InstanceName,'--format','json') 60}
-    if($info){
-        try{$parsed=[string]$info.stdout|ConvertFrom-Json -ErrorAction Stop;$properties=@($parsed.info.PSObject.Properties|Where-Object{[string]$_.Name-ceq$InstanceName});if($properties.Count-ne1){throw 'exact instance key missing'};$row=$properties[0].Value;if([string]$row.state-cne'Running'){throw 'instance not Running'};$addresses=@($row.ipv4|Where-Object{[string]$_-match'^\d{1,3}(?:\.\d{1,3}){3}$'});if($addresses.Count-lt1){throw 'IPv4 absent'};$progress.instanceRunning=$true;$progress.ipObserved=$true}catch{$state.primaryError="M1 info-running response was malformed: $(ConvertTo-DevFleetDiagnosticSafeText $_.Exception.Message)"}
-    }
-    $ssh=$null;if($progress.instanceRunning){$ssh=&$invoke 'ssh-ready' @('exec',$InstanceName,'--','true') 120;if($ssh){$progress.sshReady=$true}}
-    $cloud=$null;if($progress.sshReady){$cloud=&$invoke 'cloud-init' @('exec',$InstanceName,'--','cloud-init','status','--wait') 300;if($cloud){if([string]$cloud.stdout-notmatch'(?im)^status:\s*done\s*$'){$state.primaryError='M1 cloud-init did not report done.'}else{$progress.cloudInitDone=$true}}}
-    $finalInfo=$null;if($progress.cloudInitDone){$finalInfo=&$invoke 'info-final' @('info',$InstanceName,'--format','json') 60;if($finalInfo){try{$parsed=[string]$finalInfo.stdout|ConvertFrom-Json -ErrorAction Stop;$properties=@($parsed.info.PSObject.Properties|Where-Object{[string]$_.Name-ceq$InstanceName});if($properties.Count-ne1-or[string]$properties[0].Value.state-cne'Running'){throw 'final exact Running state missing'}}catch{$state.primaryError="M1 final info response was malformed: $(ConvertTo-DevFleetDiagnosticSafeText $_.Exception.Message)"}}}
-    $finished=&$now
-    [pscustomobject][ordered]@{schemaVersion=1;kind='DEVFLEET_CAMPAIGN_E_M1_SEQUENCE';status=if($progress.launchAccepted-and$progress.instanceRunning-and$progress.ipObserved-and$progress.sshReady-and$progress.cloudInitDone-and$finalInfo-and-not$state.primaryError){'PASS'}else{'BLOCKED'};runId=$RunId;instanceName=$InstanceName;ubuntuImage=$UbuntuImage;resources=[ordered]@{cpus=[int]$Resources.cpus;memory=[string]$Resources.memory;disk=[string]$Resources.disk;diagnosticDeviation=$true};startedAtUtc=$started.ToString('o');producedAtUtc=$finished.ToString('o');ownerDeadlineUtc=$owner.ToString('o');progress=$progress;observations=@($observations);primaryError=[string]$state.primaryError;productLifecycleStarted=$false;productProgressClaimed=$false}
-}
-
-function New-DevFleetCampaignEM1CleanupState {
-    param([Parameter(Mandatory)][ValidatePattern('^DevFleet-E2E-E-M1-[A-Za-z0-9._-]+$')][string]$InstanceName)
-    [ordered]@{status='UNVERIFIED';instanceName=$InstanceName;delete=$null;inventory=$null;finalInventoryCount=-1}
-}
-
-function Assert-DevFleetCampaignEM1Result {
-    param([Parameter(Mandatory)][psobject]$Result,[Parameter(Mandatory)][string]$ExpectedRunId,[Parameter(Mandatory)][guid]$ExpectedVmId,[Parameter(Mandatory)][string]$ExpectedInstanceName,[Parameter(Mandatory)][string]$ExpectedPayloadSha256,[hashtable]$ExpectedResources=@{cpus=2;memory='2G';disk='10G'})
-    if([int]$Result.schemaVersion-ne1-or[string]$Result.kind-cne'DEVFLEET_CAMPAIGN_E_M1_RESULT'-or[string]$Result.status-cnotin@('PASS_DIAGNOSTIC','BLOCKED')){throw 'Campaign E M1 result schema/status is invalid.'}
-    if([string]$Result.runId-cne$ExpectedRunId-or[guid][string]$Result.vmId-ne$ExpectedVmId-or[string]$Result.instanceName-cne$ExpectedInstanceName-or[string]$Result.payloadSha256-cne$ExpectedPayloadSha256){throw 'Campaign E M1 result identity mismatch.'}
-    $deadline=([datetime]$Result.ownerDeadlineUtc).ToUniversalTime();$produced=([datetime]$Result.producedAtUtc).ToUniversalTime();if($produced-gt$deadline){throw 'Campaign E M1 result was produced after cutoff.'}
-    if([string]$Result.multipassSha256-notmatch'^[0-9a-f]{64}$'-or[bool]$Result.productLifecycleStarted-or[bool]$Result.productProgressClaimed-or[bool]$Result.boundaryBefore.activeTransactionPresent-or[int]$Result.boundaryBefore.stageMarkerCount-ne0-or[bool]$Result.boundaryAfter.activeTransactionPresent-or[int]$Result.boundaryAfter.stageMarkerCount-ne0){throw 'Campaign E M1 fabricated or crossed the product boundary.'}
-    if([string]$Result.cleanup.status-cne'ABSENT_VERIFIED'-or[string]$Result.cleanup.instanceName-cne$ExpectedInstanceName-or[int]$Result.cleanup.finalInventoryCount-ne0){throw 'Campaign E M1 cleanup did not prove exact empty inventory.'}
-    if([string]$Result.status-ceq'PASS_DIAGNOSTIC'){
-        $sequence=$Result.sequence;$sequenceDeadline=([datetime]$sequence.ownerDeadlineUtc).ToUniversalTime();$sequenceStarted=([datetime]$sequence.startedAtUtc).ToUniversalTime();$sequenceProduced=([datetime]$sequence.producedAtUtc).ToUniversalTime()
-        if([string]$sequence.status-cne'PASS'-or[string]$sequence.runId-cne$ExpectedRunId-or[string]$sequence.instanceName-cne$ExpectedInstanceName-or$sequenceStarted-gt$sequenceDeadline-or$sequenceProduced-lt$sequenceStarted-or$sequenceProduced-gt$sequenceDeadline-or$sequenceDeadline-gt$deadline-or[bool]$sequence.productLifecycleStarted-or[bool]$sequence.productProgressClaimed-or-not[bool]$sequence.resources.diagnosticDeviation-or[int]$sequence.resources.cpus-ne[int]$ExpectedResources.cpus-or[string]$sequence.resources.memory-cne[string]$ExpectedResources.memory-or[string]$sequence.resources.disk-cne[string]$ExpectedResources.disk-or-not[bool]$sequence.progress.launchAccepted-or-not[bool]$sequence.progress.instanceRunning-or-not[bool]$sequence.progress.ipObserved-or-not[bool]$sequence.progress.sshReady-or-not[bool]$sequence.progress.cloudInitDone){throw 'Campaign E M1 PASS lacks required identity/deadline/readiness evidence.'}
-        $expected=@('launch','info-running','ssh-ready','cloud-init','info-final');$ops=@($sequence.observations);if($ops.Count-ne$expected.Count){throw 'Campaign E M1 PASS operation count is invalid.'};$previous=$sequenceStarted;for($i=0;$i-lt$expected.Count;$i++){$opStarted=([datetime]$ops[$i].startedAtUtc).ToUniversalTime();$opFinished=([datetime]$ops[$i].finishedAtUtc).ToUniversalTime();$opDeadline=([datetime]$ops[$i].deadlineUtc).ToUniversalTime();if([string]$ops[$i].operation-cne$expected[$i]-or[string]$ops[$i].outcome-cne'PASS'-or-not[bool]$ops[$i].outputComplete-or$opStarted-lt$previous-or$opFinished-lt$opStarted-or$opFinished-gt$sequenceProduced-or$opDeadline-gt$sequenceDeadline){throw 'Campaign E M1 PASS operation evidence is invalid.'};$previous=$opFinished}
-    }
-    $serialized=$Result|ConvertTo-Json -Depth 24 -Compress;if($serialized-match'(?i)\b(password|secret|token|authorization|hmac)\b\s*[:=]\s*(?!<redacted>|\\u003credacted\\u003e)[^,}\"]+'){throw 'Campaign E M1 result contains unredacted secret-shaped evidence.'}
-    return $true
-}
-
-function Get-DevFleetCampaignEDeadlinePartition {
-    param(
-        [Parameter(Mandatory)][datetime]$OwnerDeadlineUtc,
-        [ValidateRange(60,900)][int]$ReservedTerminalizationSeconds=300,
-        [scriptblock]$ClockProvider
-    )
-    $now=if($ClockProvider){([datetime](& $ClockProvider)).ToUniversalTime()}else{[datetime]::UtcNow}
-    $owner=$OwnerDeadlineUtc.ToUniversalTime()
-    $child=$owner.AddSeconds(-$ReservedTerminalizationSeconds)
-    if($child-le$now){throw 'Campaign E owner deadline cannot provide the required terminalization reserve.'}
-    [pscustomobject][ordered]@{observedAtUtc=$now.ToString('o');childDeadlineUtc=$child.ToString('o');ownerDeadlineUtc=$owner.ToString('o');terminalizationDeadlineUtc=$owner.AddSeconds($ReservedTerminalizationSeconds).ToString('o');reservedTerminalizationSeconds=$ReservedTerminalizationSeconds;childRemainingSeconds=[int][math]::Floor(($child-$now).TotalSeconds);ownerRemainingSeconds=[int][math]::Floor(($owner-$now).TotalSeconds)}
-}
-
-function Assert-DevFleetCampaignEPrerequisiteResult {
-    param(
-        [Parameter(Mandatory)][psobject]$Result,
-        [Parameter(Mandatory)][string]$ExpectedRunId,
-        [Parameter(Mandatory)][guid]$ExpectedVmId,
-        [Parameter(Mandatory)][string]$ExpectedPayloadSha256,
-        [Parameter(Mandatory)][psobject]$ExpectedPlan
-    )
-    if([int]$Result.schemaVersion-ne1-or[string]$Result.kind-cne'DEVFLEET_CAMPAIGN_E_PREREQUISITE_READY'){throw 'Prerequisite result schema identity is invalid.'}
-    if([string]$Result.runId-cne$ExpectedRunId-or[guid][string]$Result.vmId-ne$ExpectedVmId){throw 'Prerequisite result run/VM identity mismatch.'}
-    if([string]$Result.payloadSha256-cne$ExpectedPayloadSha256){throw 'Prerequisite result payload identity mismatch.'}
-    if([string]$Result.status-cne'PASS'){throw "Prerequisite result is not PASS: $([string]$Result.status)"}
-    $deadline=([datetime]$Result.ownerDeadlineUtc).ToUniversalTime();$started=([datetime]$Result.startedAtUtc).ToUniversalTime();$produced=([datetime]$Result.producedAtUtc).ToUniversalTime()
-    if($started-gt$deadline-or$produced-gt$deadline-or$produced-lt$started){throw 'Prerequisite result violates its immutable owner deadline.'}
-    if([string]$Result.role-cne[string]$ExpectedPlan.role-or[string]$Result.packageVersion-cne[string]$ExpectedPlan.packageVersion){throw 'Prerequisite result candidate role/version mismatch.'}
-    foreach($name in @('version','dependencies','config','bootstrap','install','common')){if([string]$Result.inputHashes.$name-cne[string]$ExpectedPlan.inputHashes.$name){throw "Prerequisite result candidate input hash mismatch: $name"}}
-    if([bool]$Result.systemPolicyChanged-or[bool]$Result.productLifecycleStarted-or[bool]$Result.activeTransactionPresent-or[int]$Result.stageMarkerCount-ne0-or[int]$Result.activeInstallProcessCount-ne0){throw 'Prerequisite result crossed a forbidden product/security boundary.'}
-    if([bool]$Result.pendingReboot){throw 'Prerequisite state requires a reboot and is not checkpoint-ready.'}
-    $powerShellVersion=[Version][string]$Result.powershell.version
-    if([string]$Result.powershell.status-cne'Compatible'-or$powerShellVersion-lt[Version][string]$ExpectedPlan.dependencies.powershell7.minimumSupportedVersion-or$powerShellVersion.Major-gt[int]$ExpectedPlan.dependencies.powershell7.maximumMajor-or[string]$Result.powershell.pathSha256-notmatch'^[0-9a-f]{64}$'){throw 'PowerShell did not reach the candidate compatibility policy.'}
-    $acquisition=$Result.powershellAcquisition
-    if($null-eq$acquisition-or[int]$acquisition.schemaVersion-ne1-or[string]$acquisition.kind-cne'DEVFLEET_CAMPAIGN_E_POWERSHELL_ACQUISITION'-or[string]$acquisition.status-cne'PASS'){throw 'PowerShell acquisition evidence is missing or malformed.'}
-    if([str
+        if([string]$raw.outcome-cne'

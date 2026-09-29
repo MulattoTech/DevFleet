@@ -1,10 +1,430 @@
 # DevFleet source part 099
 
 Full-source UTF-8 byte interval [4557000, 4603500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: e95368288e05584e6d1f0245f0c44b0697d9992d2461356c02a3cd4bb1f9b4ca
+Payload SHA-256: a8e016ee46686b79d44355e9e23f9674612507e9dbc1593bc02c8aa88614791e
 
 <!-- BEGIN SOURCE SLICE -->
+ "Invoke-MultipassConfigurationProbe $mp @('get','local.privileged-mounts')"
+    assert driver_probe in prereqs
+    assert mount_probe in prereqs
+    assert "if($selectedDriver -ne $desiredDriver)" in prereqs
+    assert "if($selectedPrivilegedMounts -ne 'false')" in prereqs
+    driver_write = 'Invoke-External $mp @(' + "'set',\"local.driver=$desiredDriver\"" + ')'
+    mount_write = "Invoke-External $mp @('set','local.privileged-mounts=false')"
+    assert prereqs.index("if($selectedDriver -ne $desiredDriver)") < prereqs.index(driver_write)
+    assert prereqs.index("if($selectedPrivilegedMounts -ne 'false')") < prereqs.index(mount_write)
+
+
+def test_connected_dependency_probes_and_official_downloads_have_network_deadlines():
+    common = (ROOT / "windows" / "DevFleet.Common.psm1").read_text(encoding="utf-8")
+    assert "ArgumentList @('--version') -TimeoutSeconds 60" in common
+    assert "ArgumentList @('source','list','--disable-interactivity') -TimeoutSeconds 60" in common
+    assert "ArgumentList @('search','--id','Microsoft.PowerShell','--exact','--source','winget','--disable-interactivity') -TimeoutSeconds 60" in common
+    assert "Invoke-RestMethod -UseBasicParsing -TimeoutSec 60" in common
+    assert "Invoke-WebRequest -UseBasicParsing -TimeoutSec 60" in common
+    assert "$client.Timeout=[TimeSpan]::FromSeconds(60)" in common
+
+
+def test_install_defers_node_identity_until_after_reboot_gate():
+    install = (ROOT / "Install-DevFleet.ps1").read_text(encoding="utf-8")
+    identity = "$nodeIdentity = Get-OrCreateNodeIdentity -Role $Role"
+    secrets = "Get-OrCreateSecrets | Out-Null"
+    assert install.count(identity) == 1
+    assert install.count(secrets) == 1
+    assert install.index(secrets) < install.index(identity)
+    assert install.index("if (Test-PendingReboot)") < install.index(identity)
+
+
+def test_install_rechecks_new_pending_reboot_after_windows_tailscale_stage():
+    install = (ROOT / "Install-DevFleet.ps1").read_text(encoding="utf-8")
+    marker = "Write-StageMarker 'windows-tailscale'"
+    next_stage = "if(-not (Test-StageMarker 'host-agent'))"
+    marker_end = install.index(marker) + len(marker)
+    stage_boundary = install[marker_end:install.index(next_stage, marker_end)]
+    assert "Test-PendingReboot" in stage_boundary
+    assert "after the Windows Tailscale stage" in stage_boundary
+    assert "exit 3010" in stage_boundary
+
+```
+
+
+## FILE: source/tests/test_v1211_stopped_capabilities.py
+
+SHA256: 1ceffa011ec0d19a052a4d3551879ee1dfd089d9ee07f21be3b05cd7cb40ab84 | Bytes: 5347 | Git mode: 100644
+
+```
+from __future__ import annotations
+
+import json
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from devfleet import main, projects
+
+
+def _project(root: Path, slug: str, state: str, *, isolation: str = "vm") -> Path:
+    project = root / slug
+    (project / ".devfleet").mkdir(parents=True)
+    metadata = {
+        "schema_version": 3,
+        "managed_by": "devfleet",
+        "project_id": "12345678-1234-1234-1234-123456789abc",
+        "slug": slug,
+        "identity": slug,
+        "display_name": "Stopped Project",
+        "runtime_isolation": isolation,
+        "runtime_type": isolation,
+        "runtime_provider": "multipass-host-agent" if isolation == "vm" else "docker-compose",
+        "lifecycle_status": state,
+        "runtime_status": state,
+        "runtime_id": f"devfleet-project-{slug}",
+        "host_id": "test-node",
+        "runtime_address": "172.30.1.20" if state == "running" else "",
+        "ssh_alias": f"devfleet-project-{slug}",
+        "ssh_host_key_pinned": state == "running",
+        "ssh_authenticated": state == "running",
+        "ssh_validation_passed": state == "running",
+        "workspace_provisioned": True,
+        "resource_profile": "large",
+        "resource_limits": {"cpus": 4, "memory": "8G", "memory_gb": 8, "disk_gb": 80},
+    }
+    (project / ".devfleet" / "project.json").write_text(json.dumps(metadata), encoding="utf-8")
+    return project
+
+
+@pytest.mark.parametrize(
+    ("state", "can_start", "can_stop", "live", "transitioning"),
+    [
+        ("stopped", True, False, False, False),
+        ("starting", False, True, False, True),
+        ("running", False, True, True, False),
+        ("stopping", False, False, False, True),
+        ("unreachable", True, False, False, False),
+    ],
 )
+def test_vm_capability_state_matrix(tmp_path, monkeypatch, state, can_start, can_stop, live, transitioning):
+    monkeypatch.setattr(projects, "SETTINGS", replace(projects.SETTINGS, workspaces=tmp_path))
+    _project(tmp_path, state, state)
+    caps = projects.project_capabilities(state)
+    assert caps["can_start"] is can_start
+    assert caps["can_stop"] is can_stop
+    assert caps["runtime_transitioning"] is transitioning
+    assert caps["can_query_live_metrics"] is live
+    assert caps["can_query_application_health"] is live
+    assert caps["can_query_logs"] is live
+
+
+def test_stopped_runtime_endpoint_makes_zero_live_calls(tmp_path, monkeypatch):
+    settings = replace(projects.SETTINGS, workspaces=tmp_path)
+    monkeypatch.setattr(projects, "SETTINGS", settings)
+    monkeypatch.setattr(main, "SETTINGS", settings)
+    _project(tmp_path, "demo", "stopped")
+    monkeypatch.setattr(main, "inspect_runtime", lambda *_: pytest.fail("inspect must not run"))
+    monkeypatch.setattr(main, "runtime_health", lambda *_: pytest.fail("health must not run"))
+    result = main.api_project_runtime("demo")
+    assert result["runtime"]["live_metrics"] == "unavailable"
+    assert result["health"]["status"] == "not-checked"
+
+
+def test_stopped_logs_endpoints_make_zero_guest_calls(tmp_path, monkeypatch):
+    settings = replace(projects.SETTINGS, workspaces=tmp_path)
+    monkeypatch.setattr(projects, "SETTINGS", settings)
+    monkeypatch.setattr(main, "SETTINGS", settings)
+    _project(tmp_path, "demo", "stopped")
+    monkeypatch.setattr(main, "project_logs", lambda *_args, **_kwargs: pytest.fail("logs must not run"))
+    monkeypatch.setattr(main, "ui", lambda *_args, **_kwargs: None)
+    request = type("Request", (), {})()
+    response = main.ui_project_logs(request, "demo")
+    assert response.status_code == 409
+    with pytest.raises(Exception) as exc:
+        main.api_project_logs("demo")
+    assert getattr(exc.value, "status_code", None) == 409
+
+
+def test_stopped_project_html_is_terminal_and_keeps_resources(tmp_path, monkeypatch):
+    settings = replace(projects.SETTINGS, workspaces=tmp_path)
+    monkeypatch.setattr(projects, "SETTINGS", settings)
+    monkeypatch.setattr(main, "SETTINGS", settings)
+    _project(tmp_path, "demo", "stopped")
+    catalog = projects.list_project_catalog()
+    assert catalog[0]["resource_limits"] == {"cpus": 4, "memory": "8G", "memory_gb": 8, "disk_gb": 80}
+    template = (Path(__file__).parents[1] / "app" / "templates" / "index.html").read_text(encoding="utf-8")
+    js = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "Project is stopped" in template
+    assert "Start the project to view live logs" in template
+    assert "caps.can_query_logs" in template
+    assert "fetchWithTimeout" in js and "AbortController" in js
+
+
+def test_container_workspace_nonregression_when_application_stopped(tmp_path, monkeypatch):
+    monkeypatch.setattr(projects, "SETTINGS", replace(projects.SETTINGS, workspaces=tmp_path))
+    _project(tmp_path, "container-demo", "stopped", isolation="container")
+    meta = projects.load_meta(tmp_path / "container-demo")
+    meta.update({"workspace_host": "devfleet-primary", "ssh_alias": "devfleet-primary", "workspace_accessible": True})
+    ready = projects.workspace_readiness("container-demo", meta)
+    caps = projects.project_capabilities("container-demo", meta)
+    assert ready["ready"] is True
+    assert caps["can_open_workspace"] is True
+    assert caps["can_query_logs"] is False
+
+```
+
+
+## FILE: source/tests/test_v121_auth_performance.py
+
+SHA256: a88a21055e555d85b2ebfa0ba63a18372c49dbb16a2f0c517efd71b3485fff98 | Bytes: 5903 | Git mode: 100644
+
+```
+"""Regression coverage for the v1.2.1 session and dashboard contracts.
+
+These tests intentionally exercise the ASGI app in-process.  They never start a
+service and the performance test uses a mocked five-second peer instead of a
+real network endpoint.
+"""
+
+import re
+import time
+
+import pytest
+
+
+try:
+    from fastapi.testclient import TestClient
+    from devfleet import main
+    from devfleet import status as status_module
+except Exception as exc:  # pragma: no cover - depends on the host test image
+    pytest.skip(
+        f"FastAPI application tests unavailable in this environment: {exc}",
+        allow_module_level=True,
+    )
+
+
+def _no_redirect(client, method, url, **kwargs):
+    """Support both Starlette/TestClient keyword spellings across versions."""
+    try:
+        return getattr(client, method)(url, follow_redirects=False, **kwargs)
+    except TypeError:
+        return getattr(client, method)(url, allow_redirects=False, **kwargs)
+
+
+def _client():
+    try:
+        return TestClient(main.app)
+    except Exception as exc:  # pragma: no cover - dependency-version specific
+        pytest.skip(f"TestClient unavailable in this environment: {exc}")
+
+
+def _csrf(html):
+    match = re.search(r'name="csrf_token" value="([^"]+)"', html)
+    assert match, "expected a rendered CSRF form token"
+    return match.group(1)
+
+
+def _signed_in_client():
+    client = _client()
+    login_page = client.get("/login")
+    assert login_page.status_code == 200
+    token = _csrf(login_page.text)
+    response = _no_redirect(
+        client,
+        "post",
+        "/login",
+        data={
+            "username": "test",
+            "password": "test-password",
+            "next": "/",
+            "csrf_token": token,
+        },
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+    assert "devfleet_session" in client.cookies
+    return client
+
+
+def test_session_login_logout_and_csrf_contract():
+    client = _client()
+
+    login_page = client.get("/login")
+    assert login_page.status_code == 200
+    login_csrf = _csrf(login_page.text)
+    assert "devfleet_login_csrf" in client.cookies
+
+    rejected = _no_redirect(
+        client,
+        "post",
+        "/login",
+        data={
+            "username": "test",
+            "password": "test-password",
+            "next": "/",
+            "csrf_token": "wrong-token",
+        },
+    )
+    assert rejected.status_code == 401
+    assert "devfleet_session" not in client.cookies
+
+    signed_in = _no_redirect(
+        client,
+        "post",
+        "/login",
+        data={
+            "username": "test",
+            "password": "test-password",
+            "next": "/",
+            "csrf_token": login_csrf,
+        },
+    )
+    assert signed_in.status_code == 303
+    assert signed_in.headers["location"] == "/"
+    assert client.cookies.get("devfleet_session")
+
+    index = client.get("/")
+    assert index.status_code == 200
+    session_csrf = _csrf(index.text)
+
+    missing_csrf = _no_redirect(client, "post", "/logout", data={})
+    assert missing_csrf.status_code == 403
+    assert client.get("/").status_code == 200
+
+    logged_out = _no_redirect(
+        client, "post", "/logout", headers={"Sec-Fetch-Site": "same-origin"}, data={"csrf_token": session_csrf}
+    )
+    assert logged_out.status_code == 303
+    assert logged_out.headers["location"].startswith("/login")
+    assert _no_redirect(client, "get", "/").status_code == 303
+
+
+def test_api_token_contract():
+    client = _client()
+
+    assert client.get("/api/status").status_code == 401
+    assert client.get("/api/status", headers={"X-DevFleet-Token": "wrong"}).status_code == 401
+
+    response = client.get("/api/status", headers={"X-DevFleet-Token": "test-token"})
+    assert response.status_code == 200
+    assert response.json()["node"] == "test-node"
+
+
+def test_index_uses_catalog_and_snapshots_without_waiting_for_a_slow_peer(monkeypatch):
+    client = _signed_in_client()
+    catalog_calls = []
+    snapshot_calls = []
+    slow_peer_calls = []
+
+    def catalog():
+        catalog_calls.append(True)
+        return [{"slug": "catalog-only", "display_name": "Catalog project"}]
+
+    def live_projects_must_not_run():
+        raise AssertionError("normal index rendering used live project inspection")
+
+    def slow_peer():
+        slow_peer_calls.append(True)
+        time.sleep(5.0)
+        return {"configured": True, "ok": True}
+
+    def snapshot():
+        snapshot_calls.append(True)
+        return {
+            "updated_at": "2026-08-10T00:00:00Z",
+            "nodes": [],
+            "containers": [],
+            "snapshot": {"stale": False, "refreshing": False},
+        }
+
+    monkeypatch.setattr(status_module, "list_project_catalog", catalog)
+    monkeypatch.setattr(status_module, "list_projects", live_projects_must_not_run)
+    monkeypatch.setattr(status_module, "runtime_snapshot", lambda: status_module._cheap_runtime())
+    monkeypatch.setattr(status_module, "peer_node_status", slow_peer)
+    monkeypatch.setattr(main, "cluster_snapshot", snapshot)
+    monkeypatch.setattr(main, "peer_call", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("peer_call used")))
+    monkeypatch.setattr(main, "get_host_capacity", lambda: (_ for _ in ()).throw(AssertionError("host probe used")))
+    monkeypatch.setattr(main, "get_provider_status", lambda: (_ for _ in ()).throw(AssertionError("provider probe used")))
+    monkeypatch.setattr(main, "analyze_project", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("analyzer used")))
+
+    started = time.perf_counter()
+    response = client.get("/")
+    elapsed = time.perf_counter() - started
+
+    assert response.status_code == 200
+    assert "catalog-only" in response.text
+    assert catalog_calls == [True]
+    assert snapshot_calls == [True]
+    assert slow_peer_calls == []
+    assert elapsed < 2.0, f"index rendering took {elapsed:.2f}s"
+
+```
+
+
+## FILE: source/tests/test_v122_auth_snapshot_package.py
+
+SHA256: e8537161bda817b8cd7539ce4c40a078b8cef1d0a88477c3e8cf33910056f285 | Bytes: 3617 | Git mode: 100644
+
+```
+import os
+import stat
+import tarfile
+from pathlib import Path
+
+import pytest
+
+from devfleet import auth, status
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_v122_ttls_and_nonempty_secret_guards():
+    assert auth.SESSION_TTL == 12 * 60 * 60
+    assert auth.REMEMBERED_TTL == 7 * 24 * 60 * 60
+    assert not auth.valid_credentials("", "anything")
+    assert not auth.valid_credentials("test", "")
+    assert auth.session_cookie_options()["samesite"] == "strict"
+
+
+def test_session_csrf_and_credential_generation_invalidation(tmp_path, monkeypatch):
+    monkeypatch.setattr(auth, "_session_path", lambda: tmp_path / "sessions.json")
+    token, ttl, csrf = auth.issue_session("test")
+    assert ttl == auth.SESSION_TTL
+    assert auth.validate_session(token) == "test"
+    record = auth._load_sessions()[token]
+    assert auth.validate_session_csrf(_request_with_cookie(token), csrf)
+    original_password = auth.SETTINGS.admin_password
+    try:
+        object.__setattr__(auth.SETTINGS, "admin_password", "rotated-password")
+        assert auth.validate_session(token) is None
+        assert record["credential_generation"] != auth._credential_generation()
+    finally:
+        object.__setattr__(auth.SETTINGS, "admin_password", original_password)
+
+
+class _Request:
+    def __init__(self, token):
+        self.cookies = {auth.SESSION_COOKIE: token}
+
+
+def _request_with_cookie(token):
+    return _Request(token)
+
+
+def test_login_backoff_is_bounded_and_source_scoped(monkeypatch):
+    auth._LOGIN_FAILURES.clear()
+    for _ in range(20):
+        auth._record_login_failure("bad-user", "source-a", now=100.0)
+    delay = auth.login_backoff_seconds("bad-user", "source-a", now=100.0)
+    assert 0 < delay <= auth._BACKOFF_MAX
+    assert auth.login_backoff_seconds("bad-user", "source-b", now=100.0) == 0
+
+
+def test_snapshot_schedule_reserves_before_submit(monkeypatch):
+    status._SNAPSHOTS["runtime"].update({"refreshing": False, "value": None, "updated_at": 0.0})
+    submitted = []
+    class Executor:
+        def submit(self, fn, name):
+            submitted.append((fn, name))
     monkeypatch.setattr(status, "_SNAPSHOT_EXECUTOR", Executor())
     status._schedule_snapshot("runtime")
     status._schedule_snapshot("runtime")
@@ -743,449 +1163,4 @@ def test_bootstrap_installs_and_enables_only_the_bounded_broker_surface():
     bootstrap = read("linux/bootstrap-compute.sh")
 
     assert "devfleet-user-repair devfleet-docker-mode-report devfleet-vault-request" in bootstrap
-    assert 'install -o root -g devfleet-backup -m 0750 "$PAYLOAD/linux/devfleet-vault-broker"' in bootstrap
-    assert "devfleet-vault-broker.socket" in bootstrap
-    assert "devfleet-vault-broker@.service" in bootstrap
-    assert "enable --now devfleet.service devfleet-backup.timer devfleet-vault-broker.socket" in bootstrap
-    assert "usermod --append --groups devfleet-backup devfleet-control" not in bootstrap
-    assert "NOPASSWD:ALL" not in bootstrap
-
-
-def test_rebootstrap_preserves_backup_only_restic_credentials():
-    bootstrap = read("linux/bootstrap-compute.sh")
-    update = read("windows/Update-DevFleet.ps1")
-    provision = read("windows/02-Provision-ComputeNode.ps1")
-
-    assert "02-Provision-ComputeNode.ps1" in update
-    assert "updating the DevFleet payload in place" in provision
-    assert "bootstrapBoundary.bootstrapCommand" in provision
-    assert "chown root:devfleet-control /etc/devfleet/*" not in bootstrap
-    assert "chmod 0640 /etc/devfleet/*" not in bootstrap
-    assert '[[ "$config_file" == "/etc/devfleet/restic.env" ]] && continue' in bootstrap
-    assert "chown root:devfleet-backup /etc/devfleet/restic.env" in bootstrap
-    assert "chmod 0640 /etc/devfleet/restic.env" in bootstrap
-    assert "setfacl -m u:devfleet-backup:--x /etc/devfleet" in bootstrap
-    assert "setfacl -m u:devfleet-backup:rwx /home/devrunner/.devfleet" not in bootstrap
-    assert "setfacl -x u:devfleet-backup /home/devrunner/.devfleet" in bootstrap
-    assert "setfacl -x d:u:devfleet-backup /home/devrunner/.devfleet" in bootstrap
-
-
-def test_vault_credentials_remain_readable_only_by_the_backup_identity():
-    configure = read("linux/devfleet-configure-backup")
-
-    assert "chown root:devfleet-backup /etc/devfleet/restic.env" in configure
-    assert "chmod 0640 /etc/devfleet/restic.env" in configure
-    assert "install -d -o devfleet-backup -g devfleet-backup -m 0700" in configure
-    assert "u:devfleet-control" not in configure
-
-
-def test_backup_and_restore_share_a_truthful_nonblocking_operation_lock():
-    backup = read("linux/devfleet-backup")
-    restore = read("linux/devfleet-restore-project")
-
-    lock = "/run/lock/devfleet-vault-operation.lock"
-    assert lock in backup
-    assert lock in restore
-    assert "exit 75" in backup
-    assert "exit 75" in restore
-
-
-def test_restore_copy_fails_closed_on_preexisting_or_racing_target():
-    restore = read("linux/devfleet-restore-project")
-
-    assert '[[ ! -e "$target" && ! -L "$target" ]]' in restore
-    assert 'mv -T --no-clobber -- "$source_dir" "$target"' in restore
-    assert '[[ ! -e "$source_dir" && -d "$target" && ! -L "$target" ]]' in restore
-
-
-def test_dashboard_exposes_only_restore_copy_from_vault():
-    template = read("app/templates/index.html")
-
-    assert "project_action(p.slug,'restore-vault','Restore copy from vault','ghost')" in template
-    assert "preserves the original workspace" in template
-
-
-def test_broker_success_is_bound_to_the_fixed_child_exit_not_mutable_telemetry(monkeypatch):
-    broker = load_broker_module(monkeypatch)
-    monkeypatch.setattr(broker.os, "access", lambda *_args: True)
-    monkeypatch.setattr(
-        broker,
-        "_run_child",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess(
-            ["/usr/local/bin/devfleet-backup"], 0, "", ""
-        ),
-    )
-
-    assert broker._run_fixed_operation("backup", "", "") == {
-        "ok": True,
-        "action": "backup",
-        "local_backup_status": "verified",
-        "vault_upload_status": "verified",
-        "durability_level": "vault",
-    }
-
-
-def test_broker_restore_uses_only_identity_bound_fixed_argv(monkeypatch, tmp_path):
-    broker = load_broker_module(monkeypatch)
-    project = "vault-source"
-    project_id = "12345678-1234-1234-1234-123456789abc"
-    target = tmp_path / "vault-source-recovered-20260916-123456-deadbeef"
-    (target / ".devfleet").mkdir(parents=True)
-    (target / ".devfleet/project.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 5,
-                "managed_by": "devfleet",
-                "slug": project,
-                "project_id": project_id,
-            }
-        ),
-        encoding="utf-8",
-    )
-    calls = []
-    monkeypatch.setattr(broker, "WORKSPACES", tmp_path)
-    monkeypatch.setattr(broker.os, "access", lambda *_args: True)
-
-    returned_target = [target]
-
-    def run_child(command, timeout):
-        calls.append((command, timeout))
-        return subprocess.CompletedProcess(command, 0, str(returned_target[0]) + "\n", "")
-
-    monkeypatch.setattr(broker, "_run_child", run_child)
-    monkeypatch.setattr(broker, "_restored_identity_matches", lambda *_args: True)
-    receipt = broker._run_fixed_operation("restore-copy", project, project_id)
-
-    assert calls == [
-        (
-            ["/usr/local/bin/devfleet-restore-project", project, project_id],
-            3600,
-        )
-    ]
-    assert receipt == {
-        "ok": True,
-        "action": "restore-copy",
-        "project": project,
-        "project_id": project_id,
-        "target": str(target),
-    }
-
-    with pytest.raises(broker.ProtocolError):
-        broker._parse_request({"action": "restore-canonical", "project": project, "project_id": project_id})
-
-
-@pytest.mark.parametrize("action", ["restore-copy"])
-def test_broker_rejects_restored_metadata_parent_symlink(
-    monkeypatch, tmp_path, action
-):
-    broker = load_broker_module(monkeypatch)
-    project = "vault-source"
-    project_id = "12345678-1234-1234-1234-123456789abc"
-    target = tmp_path / "vault-source-recovered-20260916-123456-deadbeef"
-    target.mkdir()
-    external = tmp_path / f"external-{action}"
-    external.mkdir()
-    (external / "project.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 5,
-                "managed_by": "devfleet",
-                "slug": project,
-                "identity": project,
-                "project_id": project_id,
-            }
-        ),
-        encoding="utf-8",
-    )
-    try:
-        (target / ".devfleet").symlink_to(external, target_is_directory=True)
-    except OSError as exc:
-        pytest.skip(f"symlink creation unavailable: {exc}")
-    monkeypatch.setattr(broker, "WORKSPACES", tmp_path)
-    monkeypatch.setattr(broker.os, "access", lambda *_args: True)
-    monkeypatch.setattr(
-        broker,
-        "_run_child",
-        lambda command, timeout: subprocess.CompletedProcess(
-            command, 0, str(target) + "\n", ""
-        ),
-    )
-
-    receipt = broker._run_fixed_operation(action, project, project_id)
-
-    assert receipt == {
-        "ok": False,
-        "error": "Vault restore target is invalid.",
-        "exit_code": 5,
-    }
-
-
-def test_broker_rejects_extra_fields_and_wrong_project_id(monkeypatch):
-    broker = load_broker_module(monkeypatch)
-    with pytest.raises(broker.ProtocolError, match="not allowed"):
-        broker._parse_request(
-            {
-                "action": "restore-copy",
-                "project": "vault-source",
-                "project_id": "12345678-1234-1234-1234-123456789abc",
-                "path": "/attacker-controlled",
-            }
-        )
-    with pytest.raises(broker.ProtocolError, match="Project ID"):
-        broker._parse_request(
-            {
-                "action": "restore-copy",
-                "project": "vault-source",
-                "project_id": "wrong-id",
-            }
-        )
-
-
-def test_broker_rejects_oversized_and_second_frames(monkeypatch):
-    broker = load_broker_module(monkeypatch)
-    left, right = socket.socketpair()
-    try:
-        right.sendall(struct.pack("!I", broker.MAX_REQUEST_BYTES + 1))
-        right.shutdown(socket.SHUT_WR)
-        with pytest.raises(broker.ProtocolError, match="length"):
-            broker._receive_frame(left)
-    finally:
-        left.close()
-        right.close()
-
-    left, right = socket.socketpair()
-    try:
-        body = b'{"action":"backup"}'
-        right.sendall(struct.pack("!I", len(body)) + body + b"x")
-        right.shutdown(socket.SHUT_WR)
-        with pytest.raises(broker.ProtocolError, match="one request"):
-            broker._receive_frame(left)
-    finally:
-        left.close()
-        right.close()
-
-
-def test_broker_rejects_non_control_peer_before_parsing(monkeypatch):
-    broker = load_broker_module(monkeypatch)
-    monkeypatch.setattr(broker.socket, "SO_PEERCRED", 17, raising=False)
-
-    class ForeignPeer:
-        def getsockopt(self, *_args):
-            return struct.pack("3i", 99, 4321, 4321)
-
-    with pytest.raises(broker.ProtocolError, match="not authorized"):
-        broker._assert_peer(ForeignPeer())
-
-
-def test_broker_timeout_terminates_and_waits_for_the_owned_process_group(monkeypatch):
-    broker = load_broker_module(monkeypatch)
-    kills = []
-
-    class FakeProcess:
-        pid = 4242
-        returncode = None
-
-        def __init__(self):
-            self.calls = 0
-
-        def communicate(self, timeout=None):
-            self.calls += 1
-            if self.calls == 1:
-                raise subprocess.TimeoutExpired(["fixed-child"], timeout)
-            self.returncode = -signal.SIGTERM
-            return "", ""
-
-    process = FakeProcess()
-    monkeypatch.setattr(broker.subprocess, "Popen", lambda *_args, **_kwargs: process)
-    monkeypatch.setattr(
-        broker.os,
-        "killpg",
-        lambda pid, requested_signal: kills.append((pid, requested_signal)),
-        raising=False,
-    )
-
-    completed = broker._run_child(["fixed-child"], 1)
-
-    assert completed.returncode == 124
-    assert process.calls == 2
-    assert kills == [(4242, signal.SIGTERM)]
-
-
-def test_timeout_ownership_deadlines_are_strictly_nested():
-    service = read("app/systemd/devfleet-vault-broker@.service")
-    client = read("linux/devfleet-vault-request")
-    projects_source = read("app/devfleet/projects.py")
-    assert "timeout = 3600" in read("linux/devfleet-vault-broker")
-    assert "RuntimeMaxSec=3660" in service
-    assert "TimeoutStopSec=10" in service
-    assert "connection.settimeout(3690)" in client
-    assert "timeout=3720" in projects_source
-    assert 3600 < 3660 < 3660 + 10 < 3690 < 3720
-
-
-def test_broker_exposes_only_safe_failure_classes(monkeypatch):
-    broker = load_broker_module(monkeypatch)
-    monkeypatch.setattr(broker.os, "access", lambda *_args: True)
-    monkeypatch.setattr(
-        broker,
-        "_run_child",
-        lambda command, timeout: subprocess.CompletedProcess(
-            command, 75, "sensitive child stdout", "sensitive child stderr"
-        ),
-    )
-
-    receipt = broker._run_fixed_operation("backup", "", "")
-
-    assert receipt == {
-        "ok": False,
-        "error": "Another Vault operation is already in progress.",
-        "error_code": "vault-operation-busy",
-        "exit_code": 75,
-    }
-
-
-def test_restore_copy_preserves_source_identity_and_is_not_implicitly_adopted(monkeypatch, tmp_path):
-    settings = replace(
-        projects.SETTINGS,
-        workspaces=tmp_path,
-        node_name="test-node",
-        deployment_id="deployment-123",
-    )
-    monkeypatch.setattr(projects, "SETTINGS", settings)
-    source_slug = "vault-source"
-    recovered_slug = "vault-source-recovered-20260916-123456-deadbeef"
-    source = tmp_path / source_slug
-    recovered = tmp_path / recovered_slug
-    source_meta = {
-        "schema_version": 5,
-        "managed_by": "devfleet",
-        "project_id": "12345678-1234-1234-1234-123456789abc",
-        "slug": source_slug,
-        "identity": source_slug,
-        "display_name": "Vault source",
-        "runtime_provider": "docker-compose",
-        "runtime_isolation": "container",
-        "runtime_type": "container",
-        "runtime_id": projects.compose_name(source_slug),
-        "runtime_address": "stale-address",
-        "host_id": "test-node",
-        "deployment_id": "deployment-123",
-        "workspace_location": str(source),
-        "workspace_path": f"/home/devrunner/workspaces/{source_slug}",
-        "lifecycle_status": "running",
-        "runtime_status": "running",
-        "provisioning_status": "ready",
-        "health_status": "healthy",
-        "backup_status": "verified",
-        "backup_id": "source-backup",
-        "backup_sha256": "a" * 64,
-        "destructive_backup_binding": {"project_id": "stale"},
-    }
-    for project in (source, recovered):
-        (project / ".devfleet").mkdir(parents=True)
-        (project / ".devfleet/project.json").write_text(
-            json.dumps(source_meta), encoding="utf-8"
-        )
-        (project / "compose.yaml").write_text(
-            "services:\n  app:\n    image: ubuntu:24.04\n", encoding="utf-8"
-        )
-        (project / "fixture.txt").write_text("vault-fixture\n", encoding="utf-8")
-    (recovered / ".devfleet/ownership-lease.json").write_text(
-        json.dumps({"project_identity": source_slug, "active": True, "active_node": "test-node"}),
-        encoding="utf-8",
-    )
-    (recovered / ".devfleet/runtime-ownership.yaml").write_text(
-        f"services:\n  app:\n    labels:\n      io.devfleet.project-slug: {source_slug}\n",
-        encoding="utf-8",
-    )
-    original_metadata = (source / ".devfleet/project.json").read_bytes()
-    monkeypatch.setattr(
-        projects,
-        "_vault_request",
-        lambda action, slug, project_id, timeout: {
-            "ok": True,
-            "action": action,
-            "project": slug,
-            "project_id": project_id,
-            "target": str(recovered),
-        },
-    )
-
-    result = projects.restore_from_vault(source_slug)
-
-    assert result == str(recovered)
-    saved = json.loads((recovered / ".devfleet/project.json").read_text())
-    assert saved["slug"] == source_slug
-    assert saved["project_id"] == source_meta["project_id"]
-    with pytest.raises(ValueError, match="slug does not bind"):
-        projects.load_authoritative_project_identity_for_mutation(recovered)
-    assert (source / ".devfleet/project.json").read_bytes() == original_metadata
-    assert (source / "fixture.txt").read_text(encoding="utf-8") == "vault-fixture\n"
-
-
-@pytest.mark.parametrize(
-    "action", ["start", "stop", "rebuild", "bootstrap", "health", "test", "codexpro"]
-)
-def test_recovered_copy_mutations_are_rejected_before_operation_submission(
-    monkeypatch, tmp_path, action
-):
-    settings = replace(
-        projects.SETTINGS,
-        workspaces=tmp_path,
-        node_name="test-node",
-        deployment_id="deployment-123",
-    )
-    monkeypatch.setattr(projects, "SETTINGS", settings)
-    monkeypatch.setattr(main, "SETTINGS", settings)
-    source_slug = "vault-source"
-    recovered_slug = "vault-source-recovered-20260916-123456-deadbeef"
-    recovered = tmp_path / recovered_slug
-    (recovered / ".devfleet").mkdir(parents=True)
-    (recovered / ".devfleet/project.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 5,
-                "managed_by": "devfleet",
-                "project_id": "12345678-1234-1234-1234-123456789abc",
-                "slug": source_slug,
-                "identity": source_slug,
-                "runtime_provider": "docker-compose",
-                "runtime_id": projects.compose_name(source_slug),
-                "host_id": "test-node",
-                "deployment_id": "deployment-123",
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        main,
-        "submit_operation",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("recovered copy reached operation submission")
-        ),
-    )
-
-    with TestClient(main.app) as client:
-        response = client.post(
-            f"/api/projects/{recovered_slug}/{action}",
-            headers={"X-DevFleet-Token": "test-token"},
-            json={},
-        )
-
-    assert response.status_code == 409
-    assert "slug does not bind" in response.json()["detail"]
-
-
-def _recovered_vm_copy(monkeypatch, tmp_path):
-    settings = replace(
-        projects.SETTINGS,
-        workspaces=tmp_path,
-        node_name="test-node",
-        deployment_id="deployment-123",
-    )
-    monkeypatch.setattr(projects, "SETTINGS", settings)
-    monkeypatch.setattr(main, "SETTINGS", settings)
-    recovered_slug = "vault-source-recovered-20260916-123456-deadbeef"
-    recovered = tmp_path / recovered_slug
-    (recovered / ".devfleet").mkdir(parents=True)
-    (recovered / ".devfleet/
+    assert 'install -o root -g devfleet-backup -m 0750 "$PAYLOAD/linux/devfleet-vau

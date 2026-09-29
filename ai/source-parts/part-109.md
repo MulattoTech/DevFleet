@@ -1,10 +1,172 @@
 # DevFleet source part 109
 
 Full-source UTF-8 byte interval [5022000, 5068500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: ad62c7188052e3389d146aeaf5cc75cc5a50dfe3a13bf91993a57222d1481aaf
+Payload SHA-256: 2eb442f7c2167f48f438651e3214f13918671879f850280da33034f1d9e69141
 
 <!-- BEGIN SOURCE SLICE -->
-st.project_id;runtime_id=$latest.runtime_id;vm_name=$latest.vm_name;address=$address;state='ready';registry_address=$address;ssh_alias=$sync.ssh_alias;host_key_pinned=[bool]$sync.host_key_pinned;authenticated_connection=[bool]$sync.authenticated_connection;validated=[bool]$sync.validated;workspace_provisioned=$true;vscode_remote_platform=$sync.vscode_remote_platform;info=$info}
+script:Root "imports\$([guid]::NewGuid().ToString('N')).tar.gz"
+    $sourceArchive="/tmp/devfleet-export-source-$([guid]::NewGuid().ToString('N')).tar.gz"
+    $stage="/home/devrunner/workspaces/.devfleet-export-$Slug-$([guid]::NewGuid().ToString('N'))"
+    $workspace="/home/devrunner/workspaces/$Slug"
+    $oldPath="/home/devrunner/workspaces/$Slug-before-vm-export-$([guid]::NewGuid().ToString('N'))"
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $localArchive)|Out-Null
+        $archiveInspection=New-VerifiedRemoteWorkspaceArchive $Record.vm_name $remoteArchive $Slug
+        $sourceArchiveHash=[string]$archiveInspection.archive_sha256
+        Invoke-Multipass @('transfer',"$($Record.vm_name):$remoteArchive",$localArchive) 1200|Out-Null
+        $hash=(Get-FileHash -LiteralPath $localArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+        if($hash -ne $sourceArchiveHash){throw 'Workspace export archive SHA-256 differs between the project VM and host.'}
+        Invoke-Multipass @('transfer',$localArchive,"${SourceVm}:$sourceArchive") 1200|Out-Null
+        Invoke-Multipass @('exec',$SourceVm,'--','sudo','mkdir','-p',$stage) 30|Out-Null
+        Invoke-Multipass @('exec',$SourceVm,'--','sudo','tar','-xzf',$sourceArchive,'-C',$stage,'--no-same-owner','--no-same-permissions') 600|Out-Null
+        $sourceVmArchiveHash=((Invoke-Multipass @('exec',$SourceVm,'--','sha256sum',$sourceArchive) 60).Text -split '\s+')[0].ToLowerInvariant()
+        if($sourceVmArchiveHash -ne $hash){throw 'Workspace export archive SHA-256 differs between the host and source VM.'}
+        Invoke-Multipass @('exec',$SourceVm,'--','sudo','test','-f',"$stage/$Slug/.devfleet/project.json") 30|Out-Null
+        if($ReplaceSource){
+            $sourceState=(Invoke-Multipass @('exec',$SourceVm,'--','sudo','bash','-lc',"if [ -d '$workspace' ]; then printf exists; else printf absent; fi") 30).Text.Trim()
+            $hasExisting=$sourceState -eq 'exists'
+            if($hasExisting){Invoke-Multipass @('exec',$SourceVm,'--','sudo','mv',$workspace,$oldPath) 60|Out-Null}
+            Invoke-Multipass @('exec',$SourceVm,'--','sudo','mv',"$stage/$Slug",$workspace) 60|Out-Null
+            Invoke-Multipass @('exec',$SourceVm,'--','sudo','chown','-R','devrunner:devrunner',$workspace) 120|Out-Null
+            Write-AgentLog 'export-to-source' $Record.project_id $Record.runtime_id 'verified' "VM workspace exported to $SourceVm with equal source, host, and source-VM SHA-256."
+            return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$Record.runtime_id;project_id=$Record.project_id;source_vm=$SourceVm;archive_sha256=$hash;source_archive_sha256=$sourceArchiveHash;host_archive_sha256=$hash;source_vm_archive_sha256=$sourceVmArchiveHash;workspace_path=$workspace;previous_workspace_path=if($hasExisting){$oldPath}else{''};state='verified';message='Dedicated VM workspace exported and promoted to the source VM after archive equality verification.'}
+        }
+        return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$Record.runtime_id;project_id=$Record.project_id;source_vm=$SourceVm;archive_sha256=$hash;source_archive_sha256=$sourceArchiveHash;host_archive_sha256=$hash;source_vm_archive_sha256=$sourceVmArchiveHash;staging_path="$stage/$Slug";state='staged';message='Dedicated VM workspace exported to a verified staging directory after archive equality verification.'}
+    } finally {
+        Remove-Item -LiteralPath $localArchive -Force -ErrorAction SilentlyContinue
+        try{Invoke-Multipass @('exec',$Record.vm_name,'--','sudo','rm','-f',$remoteArchive) 30|Out-Null}catch{}
+        try{Invoke-Multipass @('exec',$SourceVm,'--','sudo','rm','-f',$sourceArchive) 30|Out-Null}catch{}
+        if(-not $ReplaceSource){try{Invoke-Multipass @('exec',$SourceVm,'--','sudo','rm','-rf',$stage) 30|Out-Null}catch{}}
+    }
+}
+
+function Remove-ImportFailedProjectVm {
+    param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)]$Record,[Parameter(Mandatory)]$Payload)
+    $Slug=Assert-Slug $Slug
+    if([string]$Record.state -notin @('creating','booting','ready','stopped')){throw 'Cleanup-only VM removal is limited to a newly provisioned project VM.'}
+    if(-not [bool]$Payload.backup_verified -or [string]::IsNullOrWhiteSpace([string]$Payload.backup_id)){throw 'Cleanup-only removal requires a verified provider-aware recovery backup.'}
+    foreach($name in 'backup_sha256','local_archive_sha256'){if([string]$Payload.$name -notmatch '^[0-9a-fA-F]{64}$'){throw "Cleanup-only removal requires a valid $name value."}}
+    $stage=[string]$Payload.cleanup_stage;if($stage -notin @('pre-import','post-import')){throw 'Cleanup-only removal requires an explicit pre-import or post-import stage.'}
+    $vmName=[string]$Record.vm_name
+    if($vmName -ne (Get-ProjectVmName $Slug) -or [string]$Record.runtime_id -ne $vmName -or [string]$Record.managed_by -ne 'devfleet' -or [string]$Record.host_id -ne [string]$script:Config.HostId){throw 'Cleanup-only removal failed the ownership registry identity check.'}
+    $inventory=@(Get-MultipassVms|Where-Object{$_.name -eq $vmName});if($inventory.Count -ne 1){throw 'Cleanup-only removal requires exactly one deterministic project VM.'}
+    $runtimeText=(Invoke-Multipass @('exec',$vmName,'--','sudo','cat','/etc/devfleet/project-runtime.json') 30).Text
+    try{$runtimeMeta=$runtimeText|ConvertFrom-Json -AsHashtable}catch{throw 'The project VM runtime identity document is invalid.'}
+    if([string]$runtimeMeta.managed_by -ne 'devfleet' -or [string]$runtimeMeta.slug -ne $Slug -or [string]$runtimeMeta.project_id -ne [string]$Record.project_id){throw 'The project VM runtime identity does not match the ownership registry.'}
+    $workspace="/home/devrunner/workspaces/$Slug";$projectMetaPath="$workspace/.devfleet/project.json"
+    if($stage -eq 'pre-import'){
+        Invoke-Multipass @('exec',$vmName,'--','sudo','bash','-lc',"test ! -e '$projectMetaPath'") 30|Out-Null
+    } else {
+        $projectText=(Invoke-Multipass @('exec',$vmName,'--','sudo','cat',$projectMetaPath) 30).Text
+        try{$projectMeta=$projectText|ConvertFrom-Json -AsHashtable}catch{throw 'The imported project metadata is invalid.'}
+        if([string]$projectMeta.slug -ne $Slug -or ([string]$projectMeta.identity -and [string]$projectMeta.identity -ne $Slug)){throw 'The imported workspace identity does not match the cleanup request.'}
+        if([string]$projectMeta.project_id -and [string]$projectMeta.project_id -ne [string]$Record.project_id){throw 'The imported workspace project identifier does not match the ownership registry.'}
+        $payloadImport=[string]$Payload.import_archive_sha256;$recordImport=[string]$Record.import_archive_sha256
+        if($payloadImport -and $payloadImport -notmatch '^[0-9a-fA-F]{64}$'){throw 'Cleanup-only removal received an invalid import archive SHA-256.'}
+        if($recordImport -and (!$payloadImport -or $recordImport -ne $payloadImport)){throw 'The cleanup import archive does not match the persisted import evidence.'}
+    }
+    $lock=New-ProvisioningLock
+    try {
+        $info=Get-ProjectVmInfo $vmName;if([string]$info.state -eq 'RUNNING'){Invoke-Multipass @('stop',$vmName) 120|Out-Null}
+        Invoke-Multipass @('delete',$vmName,'--purge') 600|Out-Null
+        if(@(Get-MultipassVms|Where-Object{$_.name -eq $vmName}).Count -ne 0){throw 'Multipass still reports the cleanup VM after deletion.'}
+        Remove-ProjectVmSshAlias $Record.runtime_id $Record.project_id
+        $Record.state='destroyed';$Record.cleanup_stage=$stage;$Record.destroyed_at=(Get-Date).ToUniversalTime().ToString('o');$Record.updated_at=$Record.destroyed_at;Update-ProjectRecord $Slug $Record|Out-Null
+        Write-AgentLog 'import-cleanup' $Record.project_id $Record.runtime_id 'destroyed' "Removed the verified $stage failed-migration VM and released its allocation."
+        return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$Record.runtime_id;vm_name=$vmName;project_id=$Record.project_id;state='destroyed';cleanup_only=$true;cleanup_stage=$stage;allocation_released=$true;runtime_identity_verified=$true;workspace_identity_verified=($stage -eq 'post-import');message='Failed-migration project VM reconciled after deterministic identity and recovery-evidence checks.'}
+    } finally {try{$lock.ReleaseMutex()}catch{};$lock.Dispose()}
+}
+
+# The project-VM section is intentionally independent from the ordinary
+# DevFleet aliases created by Configure-SSH.ps1.  It is the only section this
+# service changes, preserving all user configuration and the primary aliases.
+function Get-ProjectVmSshMarkers { param([Parameter(Mandatory)][string]$RuntimeId)
+    $safe=[regex]::Escape($RuntimeId)
+    return @{Begin="# BEGIN DEVFLEET PROJECT VM $RuntimeId";End="# END DEVFLEET PROJECT VM $RuntimeId";Pattern="(?ms)^# BEGIN DEVFLEET PROJECT VM $safe\r?\n.*?^# END DEVFLEET PROJECT VM $safe\r?\n?"}
+}
+
+function Get-ProjectVmKnownHostMarkers { param([Parameter(Mandatory)][string]$RuntimeId)
+    $safe=[regex]::Escape($RuntimeId)
+    return @{Begin="# BEGIN DEVFLEET PROJECT VM HOST KEY $RuntimeId";End="# END DEVFLEET PROJECT VM HOST KEY $RuntimeId";Pattern="(?ms)^# BEGIN DEVFLEET PROJECT VM HOST KEY $safe\r?\n.*?^# END DEVFLEET PROJECT VM HOST KEY $safe\r?\n?"}
+}
+
+function Set-DevFleetManagedTextBlock {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Pattern,[string]$Block='')
+    $directory=Split-Path -Parent $Path;if($directory){New-Item -ItemType Directory -Force -Path $directory|Out-Null}
+    $existing=if(Test-Path -LiteralPath $Path){[IO.File]::ReadAllText($Path)}else{''}
+    $updated=[regex]::Replace($existing,$Pattern,'').TrimEnd()
+    if($Block){if($updated){$updated+="`r`n`r`n"};$updated+=$Block.Trim()+"`r`n"}elseif($updated){$updated+="`r`n"}
+    if($updated -ne $existing){$temp="$Path.$([guid]::NewGuid().ToString('N')).tmp";[IO.File]::WriteAllText($temp,$updated,(New-Object Text.UTF8Encoding($false)));Move-Item -LiteralPath $temp -Destination $Path -Force}
+    return $updated
+}
+
+function Sync-ProjectVmSshAlias {
+    param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)]$Record,[object]$VmInfo=$null,[string]$Address='')
+    $slug=Assert-Slug $Slug;$runtimeId=[string]$Record.runtime_id
+    if($runtimeId -ne (Get-ProjectVmName $slug)){throw 'Project VM SSH alias does not match the deterministic owned runtime identity.'}
+    $configPath=[string]$script:Config.SshConfigPath;$keyPath=[string]$script:Config.SshPrivateKeyPath;$knownHostsPath=[string]$script:Config.SshKnownHostsPath
+    if([string]::IsNullOrWhiteSpace($configPath) -or [string]::IsNullOrWhiteSpace($keyPath) -or [string]::IsNullOrWhiteSpace($knownHostsPath)){throw 'Host-agent SSH alias and known-host paths are not configured.'}
+    if(-not(Test-Path -LiteralPath $keyPath)){throw 'Configured DevFleet SSH private key is not available for project aliases.'}
+    $info=if($VmInfo){$VmInfo}else{Get-ProjectVmInfo ([string]$Record.vm_name)}
+    $address=if($Address){$Address}else{Get-PrimaryProjectVmIpv4 $info}
+    if([string]::IsNullOrWhiteSpace($address)){throw 'Project VM has no address available for its SSH alias.'}
+    $hostKey=(Invoke-Multipass @('exec',$record.vm_name,'--','sudo','cat','/etc/ssh/ssh_host_ed25519_key.pub') 30).Text.Trim();$hostKeyParts=$hostKey -split '\s+'
+    if($hostKeyParts.Count -lt 2 -or $hostKeyParts[0] -ne 'ssh-ed25519' -or $hostKeyParts[1] -notmatch '^[A-Za-z0-9+/]+={0,3}$'){throw 'Project VM did not provide a valid Ed25519 SSH host key.'}
+    $knownMarkers=Get-ProjectVmKnownHostMarkers $runtimeId;$knownBlock="$($knownMarkers.Begin)`r`n$runtimeId ssh-ed25519 $($hostKeyParts[1])`r`n$($knownMarkers.End)"
+    Set-DevFleetManagedTextBlock $knownHostsPath $knownMarkers.Pattern $knownBlock|Out-Null
+    $markers=Get-ProjectVmSshMarkers $runtimeId
+    $identity=$keyPath.Replace('\','/');$knownHosts=$knownHostsPath.Replace('\','/')
+    $block=@"
+$($markers.Begin)
+Host $runtimeId
+    HostName $address
+    User devrunner
+    IdentityFile $identity
+    IdentitiesOnly yes
+    ForwardAgent no
+    HostKeyAlias $runtimeId
+    UserKnownHostsFile $knownHosts
+    StrictHostKeyChecking yes
+$($markers.End)
+"@
+    Set-DevFleetManagedTextBlock $configPath $markers.Pattern $block|Out-Null
+    $ssh=Resolve-TrustedHostExecutable @((Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'),(Join-Path $env:ProgramFiles 'OpenSSH\ssh.exe'))
+    $resolved=& $ssh -F $configPath -G $runtimeId 2>$null
+    if($LASTEXITCODE -ne 0){throw 'OpenSSH could not resolve the managed project VM alias.'}
+    $text=$resolved -join "`n"
+    if($text -notmatch "(?m)^hostname\s+$([regex]::Escape($address))$" -or $text -notmatch '(?m)^user\s+devrunner$' -or $text -notmatch '(?m)^identitiesonly\s+yes$' -or $text -notmatch '(?m)^forwardagent\s+no$' -or $text -notmatch '(?m)^stricthostkeychecking\s+(yes|true)$' -or $text -notmatch "(?m)^hostkeyalias\s+$([regex]::Escape($runtimeId))$"){throw 'Managed project VM SSH alias did not pass pinned configuration validation.'}
+    # The service runs as SYSTEM while the managed alias must remain usable by
+    # the installing developer. OpenSSH correctly rejects that developer-owned
+    # private key when SYSTEM evaluates its ACL, so validate with a short-lived
+    # SYSTEM-only copy of the same key and never expose its contents.
+    $validationKey=Join-Path $script:Root "ssh-validation-$([guid]::NewGuid().ToString('N'))"
+    try {
+        Copy-Item -LiteralPath $keyPath -Destination $validationKey -Force
+        $keyAcl=New-Object System.Security.AccessControl.FileSecurity;$keyAcl.SetAccessRuleProtection($true,$false)
+        $keyAcl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('SYSTEM','FullControl','Allow')))
+        $keyAcl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('Administrators','FullControl','Allow')))
+        Set-Acl -LiteralPath $validationKey -AclObject $keyAcl
+        $sshOutput=& $ssh -F $configPath -i $validationKey -o BatchMode=yes -o ConnectTimeout=15 $runtimeId 'id -un' 2>&1
+        if($LASTEXITCODE -ne 0 -or (($sshOutput -join "`n").Trim() -ne 'devrunner')){throw 'Managed project VM SSH alias did not pass an authenticated pinned host-key connection test.'}
+    } finally {Remove-Item -LiteralPath $validationKey -Force -ErrorAction SilentlyContinue}
+    $vsCode=if(Get-Command Sync-DevFleetVsCodeRemotePlatform -ErrorAction SilentlyContinue){Sync-DevFleetVsCodeRemotePlatform $runtimeId}else{[ordered]@{ok=$true;status='skipped';reason='VS Code helper is not installed.';alias=$runtimeId;platform='linux'}}
+    $Record.address=$address;$Record.ssh_alias=$runtimeId;$Record.updated_at=(Get-Date).ToUniversalTime().ToString('o');Update-ProjectRecord $slug $Record|Out-Null
+    Write-AgentLog 'sync-ssh-alias' $Record.project_id $runtimeId 'ready' 'Dedicated project VM SSH alias and managed Ed25519 host key passed configuration and authenticated connection checks.'
+    return [ordered]@{ok=$true;host_name=$script:Config.HostName;project_id=$Record.project_id;runtime_id=$runtimeId;ssh_alias=$runtimeId;address=$address;host_key_algorithm='ssh-ed25519';host_key_pinned=$true;authenticated_connection=$true;validated=$true;vscode_remote_platform=$vsCode}
+}
+
+function Refresh-ProjectVmConnectionState {
+    param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)]$Record)
+    $slug=Assert-Slug $Slug
+    $owned=Assert-OwnedProjectVm $slug ([string]$Record.runtime_id)
+    if([string]$owned.project_id -ne [string]$Record.project_id){throw 'Project identifier does not match the ownership registry.'}
+    $info=Get-ProjectVmInfo ([string]$owned.vm_name)
+    $address=Get-PrimaryProjectVmIpv4 $info
+    $sync=Sync-ProjectVmSshAlias $slug $owned -VmInfo $info -Address $address
+    $latest=Get-ProjectRecord $slug
+    $latest.state='ready';$latest.address=$address;$latest.updated_at=(Get-Date).ToUniversalTime().ToString('o');Update-ProjectRecord $slug $latest|Out-Null
+    Write-AgentLog 'refresh-connection-state' $latest.project_id $latest.runtime_id 'ready' "Reconciled owned project VM address $address and managed SSH alias."
+    return [ordered]@{ok=$true;host_name=$script:Config.HostName;project_id=$latest.project_id;runtime_id=$latest.runtime_id;vm_name=$latest.vm_name;address=$address;state='ready';registry_address=$address;ssh_alias=$sync.ssh_alias;host_key_pinned=[bool]$sync.host_key_pinned;authenticated_connection=[bool]$sync.authenticated_connection;validated=[bool]$sync.validated;workspace_provisioned=$true;vscode_remote_platform=$sync.vscode_remote_platform;info=$info}
 }
 
 function Remove-ProjectVmSshAlias {
@@ -250,324 +412,4 @@ Export-ModuleMember -Function New-HostAgentRequestAuthentication,Test-HostAgentR
 
 ## FILE: source/windows/DevFleet-VSCode.ps1
 
-SHA256: 6e7ab0758d482f69112085ce84d153b9d5a7ab645d70da1a92963d24e38f7248 | Bytes: 5596 | Git mode: 100644
-
-```
-function ConvertFrom-DevFleetJsonc {
-    param([Parameter(Mandatory)][string]$Text)
-    $out = New-Object Text.StringBuilder
-    $inString = $false; $escape = $false; $lineComment = $false; $blockComment = $false
-    for ($i = 0; $i -lt $Text.Length; $i++) {
-        $c = $Text[$i]; $next = if ($i + 1 -lt $Text.Length) { $Text[$i + 1] } else { [char]0 }
-        if ($lineComment) { if ($c -eq "`r" -or $c -eq "`n") { $lineComment = $false; [void]$out.Append($c) }; continue }
-        if ($blockComment) { if ($c -eq '*' -and $next -eq '/') { $blockComment = $false; $i++ }; continue }
-        if ($inString) {
-            [void]$out.Append($c)
-            if ($escape) { $escape = $false } elseif ($c -eq '\') { $escape = $true } elseif ($c -eq '"') { $inString = $false }
-            continue
-        }
-        if ($c -eq '"') { $inString = $true; [void]$out.Append($c); continue }
-        if ($c -eq '/' -and $next -eq '/') { $lineComment = $true; $i++; continue }
-        if ($c -eq '/' -and $next -eq '*') { $blockComment = $true; $i++; continue }
-        [void]$out.Append($c)
-    }
-    return [regex]::Replace($out.ToString(), ',\s*([}\]])', '$1')
-}
-
-function Read-DevFleetVsCodeSettings {
-    param([Parameter(Mandatory)][string]$Path)
-    $raw = [IO.File]::ReadAllText($Path)
-    try { return [pscustomobject]@{Raw=$raw;Data=(ConvertFrom-DevFleetJsonc $raw | ConvertFrom-Json -AsHashtable)} }
-    catch {
-        # Preserve the evidence before reporting malformed user settings. No
-        # replacement is written when parsing fails.
-        $backup = "$Path.devfleet-backup-$([guid]::NewGuid().ToString('N')).jsonc"
-        [IO.File]::Copy($Path, $backup, $false)
-        throw "VS Code settings are not valid JSONC; preserved backup $backup"
-    }
-}
-
-function Write-DevFleetVsCodeSettings {
-    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)]$Data)
-    $json = $Data | ConvertTo-Json -Depth 50
-    $backup = "$Path.devfleet-backup-$([guid]::NewGuid().ToString('N')).jsonc"
-    [IO.File]::Copy($Path, $backup, $false)
-    $tmp = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
-    try { [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false))); Move-Item -LiteralPath $tmp -Destination $Path -Force }
-    finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
-    return $backup
-}
-
-function Set-DevFleetVsCodeRemotePlatform {
-    param([Parameter(Mandatory)][string[]]$Paths,[Parameter(Mandatory)][string]$Alias)
-    $updated = @(); $skipped = @()
-    foreach ($path in $Paths) {
-        if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { $skipped += $path; continue }
-        $settings = Read-DevFleetVsCodeSettings $path
-        $data = $settings.Data
-        if ($null -eq $data) { $data = @{} }
-        if (-not ($data -is [hashtable])) { throw "VS Code settings root must be an object: $path" }
-        $mapping = if ($data.ContainsKey('remote.SSH.remotePlatform') -and $data['remote.SSH.remotePlatform'] -is [hashtable]) { $data['remote.SSH.remotePlatform'] } else { @{} }
-        if ([string]$mapping[$Alias] -eq 'linux') { $skipped += $path; continue }
-        $mapping[$Alias] = 'linux'; $data['remote.SSH.remotePlatform'] = $mapping
-        $backup = Write-DevFleetVsCodeSettings $path $data
-        $updated += [ordered]@{path=$path;backup=$backup;alias=$Alias;platform='linux'}
-    }
-    return [ordered]@{ok=$true;status='updated';updated_paths=@($updated);skipped_paths=@($skipped);alias=$Alias;platform='linux'}
-}
-
-function Remove-DevFleetVsCodeRemotePlatform {
-    param([Parameter(Mandatory)][string[]]$Paths,[Parameter(Mandatory)][string]$Alias)
-    $removed = @(); $skipped = @()
-    foreach ($path in $Paths) {
-        if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { $skipped += $path; continue }
-        $settings = Read-DevFleetVsCodeSettings $path; $data = $settings.Data
-        if ($null -eq $data -or -not ($data -is [hashtable])) { throw "VS Code settings root must be an object: $path" }
-        $mapping = $data['remote.SSH.remotePlatform']
-        if ($mapping -isnot [hashtable] -or -not $mapping.ContainsKey($Alias)) { $skipped += $path; continue }
-        $mapping.Remove($Alias)
-        if ($mapping.Count -eq 0) { $data.Remove('remote.SSH.remotePlatform') }
-        $backup = Write-DevFleetVsCodeSettings $path $data
-        $removed += [ordered]@{path=$path;backup=$backup;alias=$Alias}
-    }
-    return [ordered]@{ok=$true;status='updated';removed_paths=@($removed);skipped_paths=@($skipped);alias=$Alias}
-}
-
-function Get-DevFleetVsCodeSettingsPaths {
-    $values = @($script:Config.VsCodeSettingsPaths)
-    return @($values | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
-}
-
-function Sync-DevFleetVsCodeRemotePlatform {
-    param([Parameter(Mandatory)][string]$Alias)
-    $paths = @(Get-DevFleetVsCodeSettingsPaths)
-    $knownExecutables = @(
-        (Join-Path ${env:ProgramFiles} 'Microsoft VS Code\Code.exe'),
-        (Join-Path ${env:LOCALAPPDATA} 'Programs\Microsoft VS Code\Code.exe'),
-        (Join-Path ${env:ProgramFiles} 'Microsoft VS Code Insiders\Code - Insiders.exe'),
-        (Join-Path ${env:LOCALAPPDATA} 'Programs\Microsoft VS Code Insiders\Code - Insiders.exe')
-    )
-    if (-not ($knownExecutables | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })) { return [ordered]@{ok=$true;status='skipped';reason='VS Code is not installed.';updated_paths=@();alias=$Alias;platform='linux'} }
-    return Set-DevFleetVsCodeRemotePlatform $paths $Alias
-}
-
-```
-
-
-## FILE: source/windows/DevFleet-WindowsIntegrationOwnership.psm1
-
-SHA256: a05f3e85b4033d59e61d4ccdaa06bc8051befb711ae2b6fb26880f1ae89f1b0e | Bytes: 16444 | Git mode: 100644
-
-```
-Set-StrictMode -Version Latest
-
-function ConvertTo-DevFleetCanonicalPath {
-    param([Parameter(Mandatory)][string]$Path)
-    if ([string]::IsNullOrWhiteSpace($Path)) { throw 'Windows integration executable path is empty.' }
-    return [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($Path)).TrimEnd('\')
-}
-
-function ConvertTo-DevFleetCanonicalFirewallRemoteAddress {
-    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
-    $text = $Value.Trim()
-    if ([string]::IsNullOrWhiteSpace($text)) { return $text }
-    $parts = $text -split '/', 2
-    if ($parts.Count -ne 2) { return $text }
-
-    $address = $null
-    if (-not [Net.IPAddress]::TryParse($parts[0].Trim(), [ref]$address) -or
-        $address.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { return $text }
-
-    $maskText = $parts[1].Trim()
-    $prefix = -1
-    if (-not [int]::TryParse($maskText, [ref]$prefix)) {
-        $maskAddress = $null
-        if (-not [Net.IPAddress]::TryParse($maskText, [ref]$maskAddress) -or
-            $maskAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { return $text }
-        $maskBytes = $maskAddress.GetAddressBytes()
-        $zeroSeen = $false
-        $prefix = 0
-        foreach ($maskByte in $maskBytes) {
-            for ($bit = 7; $bit -ge 0; $bit--) {
-                $set = (($maskByte -band (1 -shl $bit)) -ne 0)
-                if ($set) {
-                    if ($zeroSeen) { return $text }
-                    $prefix++
-                } else {
-                    $zeroSeen = $true
-                }
-            }
-        }
-    }
-    if ($prefix -lt 0 -or $prefix -gt 32) { return $text }
-
-    $addressBytes = $address.GetAddressBytes()
-    $canonicalMaskBytes = New-Object byte[] 4
-    $remaining = $prefix
-    for ($index = 0; $index -lt 4; $index++) {
-        if ($remaining -ge 8) {
-            $canonicalMaskBytes[$index] = 255
-            $remaining -= 8
-        } elseif ($remaining -le 0) {
-            $canonicalMaskBytes[$index] = 0
-        } else {
-            $canonicalMaskBytes[$index] = [byte](256 - (1 -shl (8 - $remaining)))
-            $remaining = 0
-        }
-    }
-
-    $networkBytes = New-Object byte[] 4
-    for ($index = 0; $index -lt 4; $index++) {
-        $networkBytes[$index] = [byte]($addressBytes[$index] -band $canonicalMaskBytes[$index])
-    }
-    $network = ([Net.IPAddress]::new($networkBytes)).ToString()
-    $canonicalMask = ([Net.IPAddress]::new($canonicalMaskBytes)).ToString()
-    return "$network/$canonicalMask"
-}
-
-function Assert-DevFleetExactFields {
-    param(
-        [Parameter(Mandatory)][string]$Kind,
-        [Parameter(Mandatory)][hashtable]$Expected,
-        [Parameter(Mandatory)][hashtable]$Actual,
-        [Parameter(Mandatory)][string[]]$Fields
-    )
-    foreach ($field in $Fields) {
-        $expectedValue = [string]$Expected[$field]
-        $actualValue = [string]$Actual[$field]
-        if ($field -eq 'RemoteAddress') {
-            $expectedValue = ConvertTo-DevFleetCanonicalFirewallRemoteAddress $expectedValue
-            $actualValue = ConvertTo-DevFleetCanonicalFirewallRemoteAddress $actualValue
-        }
-        $comparison = if ($field -in @('Arguments','Description')) { [StringComparison]::Ordinal } else { [StringComparison]::OrdinalIgnoreCase }
-        if (-not [string]::Equals($expectedValue,$actualValue,$comparison)) {
-            throw "WINDOWS INTEGRATION OWNERSHIP CONFLICT: $Kind field '$field' does not match the installation ownership ledger. Foreign resource preserved."
-        }
-    }
-    return $true
-}
-
-function Assert-DevFleetTaskBinding {
-    param([Parameter(Mandatory)][hashtable]$Expected,[Parameter(Mandatory)][hashtable]$Actual)
-    $Expected.Executable = ConvertTo-DevFleetCanonicalPath ([string]$Expected.Executable)
-    $Actual.Executable = ConvertTo-DevFleetCanonicalPath ([string]$Actual.Executable)
-    Assert-DevFleetExactFields 'scheduled task' $Expected $Actual @('Name','Executable','Arguments','Principal','LogonType','RunLevel','Description','Generation')
-}
-
-function Assert-DevFleetFirewallBinding {
-    param([Parameter(Mandatory)][hashtable]$Expected,[Parameter(Mandatory)][hashtable]$Actual)
-    Assert-DevFleetExactFields 'firewall rule' $Expected $Actual @('Name','DisplayName','Group','Description','Direction','Action','Protocol','LocalPort','InterfaceAlias','RemoteAddress','Profile','Generation')
-}
-
-function Assert-DevFleetFirewallRefreshIdentity {
-    param([Parameter(Mandatory)][hashtable]$Expected,[Parameter(Mandatory)][hashtable]$Actual)
-    # InterfaceAlias and RemoteAddress are provider-backed network state. They
-    # can legitimately change when a virtual adapter is recreated or its
-    # subnet is renumbered. Every other rule field remains an immutable
-    # ownership proof before a refresh is permitted.
-    Assert-DevFleetExactFields 'firewall refresh' $Expected $Actual @('Name','DisplayName','Group','Description','Direction','Action','Protocol','LocalPort','Profile','Generation')
-}
-
-function Get-DevFleetLiveFirewallBinding {
-    param([Parameter(Mandatory)]$Rule,[Parameter(Mandatory)][string]$Generation)
-    $portFilters = @($Rule | Get-NetFirewallPortFilter -ErrorAction Stop)
-    $addressFilters = @($Rule | Get-NetFirewallAddressFilter -ErrorAction Stop)
-    $interfaceFilters = @($Rule | Get-NetFirewallInterfaceFilter -ErrorAction Stop)
-    if ($portFilters.Count -ne 1 -or $addressFilters.Count -ne 1 -or $interfaceFilters.Count -ne 1) {
-        throw 'WINDOWS INTEGRATION OWNERSHIP CONFLICT: firewall rule filter identity is ambiguous. Foreign resource preserved.'
-    }
-    $port = $portFilters[0]
-    $address = $addressFilters[0]
-    $interface = $interfaceFilters[0]
-    return @{
-        Name = [string]$Rule.Name
-        DisplayName = [string]$Rule.DisplayName
-        Group = [string]$Rule.Group
-        Description = [string]$Rule.Description
-        Direction = [string]$Rule.Direction
-        Action = [string]$Rule.Action
-        Protocol = [string]$port.Protocol
-        LocalPort = [string]$port.LocalPort
-        InterfaceAlias = [string]$interface.InterfaceAlias
-        RemoteAddress = [string]$address.RemoteAddress
-        Profile = [string]$Rule.Profile
-        Generation = $Generation
-    }
-}
-
-function Invoke-DevFleetOwnedFirewallRefresh {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [ValidateRange(0,120)][int]$WaitSeconds = 0
-    )
-    $ledger = Read-DevFleetIntegrationOwnership -Path $Path -AllowMissing
-    if (-not $ledger) {
-        return [pscustomobject]@{ status = 'NO_LEDGER'; changed = 0; skipped = 0 }
-    }
-
-    $deadline = (Get-Date).AddSeconds($WaitSeconds)
-    $newBindings = @()
-    $changed = 0
-    $skipped = 0
-    foreach ($binding in @($ledger.FirewallRules)) {
-        $bindingName = [string]$binding.Name
-        $scope = if ($bindingName -match '-Multipass$') { 'Multipass' } elseif ($bindingName -match '-Tailscale$') { 'Tailscale' } else { $null }
-        if (-not $scope) {
-            throw "WINDOWS INTEGRATION OWNERSHIP CONFLICT: firewall binding '$bindingName' has no supported DevFleet interface scope. Foreign resource preserved."
-        }
-
-        $adapterName = if ($scope -eq 'Multipass') { 'vEthernet (Default Switch)' } else { 'Tailscale' }
-        $adapter = $null
-        $multipassAddress = $null
-        do {
-            $adapter = @(Get-NetAdapter -Name $adapterName -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $adapterName -and [string]$_.Status -eq 'Up' } | Select-Object -First 1)
-            if ($adapter.Count -eq 0) { $adapter = $null }
-            if ($adapter -and $scope -eq 'Multipass') {
-                $multipassAddress = @(Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1)
-                if ($multipassAddress.Count -eq 0) { $multipassAddress = $null }
-            }
-            if ($adapter -and ($scope -eq 'Tailscale' -or $multipassAddress)) { break }
-            if ((Get-Date) -ge $deadline) { break }
-            Start-Sleep -Seconds 1
-        } while ($true)
-
-        if (-not $adapter -or ($scope -eq 'Multipass' -and -not $multipassAddress)) {
-            # A deferred Tailscale installation legitimately has no Tailscale
-            # adapter yet. Preserve the ledger and rule until a later startup
-            # or explicit host-agent restart can reconcile it.
-            $skipped++
-            $newBindings += @{} + $binding
-            continue
-        }
-
-        $desired = @{}
-        foreach ($key in $binding.Keys) { $desired[$key] = $binding[$key] }
-        $desired.InterfaceAlias = [string]$adapter.Name
-        $desired.RemoteAddress = if ($scope -eq 'Multipass') {
-            ConvertTo-DevFleetCanonicalFirewallRemoteAddress "$($multipassAddress.IPAddress)/$($multipassAddress.PrefixLength)"
-        } else {
-            ConvertTo-DevFleetCanonicalFirewallRemoteAddress '100.64.0.0/10'
-        }
-
-        $liveRules = @(Get-NetFirewallRule -Name $bindingName -ErrorAction SilentlyContinue)
-        if ($liveRules.Count -eq 0) {
-            $newBindings += $desired
-            continue
-        }
-        if ($liveRules.Count -ne 1) {
-            throw "WINDOWS INTEGRATION OWNERSHIP CONFLICT: firewall identity '$bindingName' is ambiguous. Foreign resources preserved."
-        }
-
-        $live = $liveRules[0]
-        $actual = Get-DevFleetLiveFirewallBinding -Rule $live -Generation ([string]$binding.Generation)
-        Assert-DevFleetFirewallRefreshIdentity -Expected $binding -Actual $actual | Out-Null
-
-        $actualRemote = ConvertTo-DevFleetCanonicalFirewallRemoteAddress ([string]$actual.RemoteAddress)
-        $desiredRemote = ConvertTo-DevFleetCanonicalFirewallRemoteAddress ([string]$desired.RemoteAddress)
-        $interfaceChanged = -not [string]::Equals([string]$actual.InterfaceAlias,[string]$desired.InterfaceAlias,[StringComparison]::OrdinalIgnoreCase)
-        $addressChanged = -not [string]::Equals($actualRemote,$desiredRemote,[StringComparison]::OrdinalIgnoreCase)
-        if ($interfaceChanged) {
-            $interfaceFilter = @($live | Get-NetFirewallInterfaceFilter -ErrorAction Stop)
-            if ($interfaceFilter.Count -ne 1) { throw "WINDOWS INTEGRATION OWNERSHIP CONFLICT: firewall interface filter '$bindingName' is ambiguous. Foreign resource preserved." }
-            $i
+SHA256: 6e7ab0758d482f69112085ce84d153b9d5a7ab645d70da1a92963d24e38f7248 

@@ -1,10 +1,106 @@
 # DevFleet source part 041
 
 Full-source UTF-8 byte interval [1860000, 1906500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 900fcd205624dc582ccfa5e080b02682482cd71ee7ea44efd2c181c49d9d4a93
+Payload SHA-256: dc6e342fbf72da6e97ad42ba93fc8645a8046136bcd79657476118b4ee90a5e6
 
 <!-- BEGIN SOURCE SLICE -->
-c-4085-aa29-4b0adc316de2') -ExpectedPayloadSha256 ('a'*64) -ExpectedPlan $plan} "$($case.name) was accepted"
+er fabricated product state or lost the empty backend contract'
+} finally {
+    $env:ProgramData=$oldProgramData;$env:DEVFLEET_E_FIXTURE_EXE=$oldFixtureExe
+    $workerFixtureParent=Split-Path -Parent $workerFixtureRoot
+    if(Test-Path -LiteralPath $workerFixtureParent){Remove-Item -LiteralPath $workerFixtureParent -Recurse -Force}
+}
+
+$fixtureId='campaign-e-prereq-'+[guid]::NewGuid().ToString('N')
+$fixtureRoot=Join-Path 'C:\Users\Public\DevFleet-E2E' $fixtureId
+$fixturePrereq=Join-Path $fixtureRoot 'Prerequisite'
+try {
+    New-Item -ItemType Directory -Path $fixturePrereq -Force|Out-Null
+    $stubPath=Join-Path $fixturePrereq 'Install-DevFleet.ps1'
+    Get-DevFleetCampaignEBootstrapStubContent|Set-Content -LiteralPath $stubPath -Encoding UTF8
+    $ack=Join-Path $fixturePrereq 'bootstrap-ack.json'
+    $oldAck=$env:DEVFLEET_E_BOOTSTRAP_ACK;$oldRun=$env:DEVFLEET_E_RUN_ID
+    $env:DEVFLEET_E_BOOTSTRAP_ACK=$ack;$env:DEVFLEET_E_RUN_ID='unit-prereq'
+    try {& $stubPath -Role Desktop -InstallationMode Connected -PackageRoot 'C:\candidate' -NonInteractive -SkipWindowsUpdates -DeferNetworkPairing -AcknowledgeRootfulDocker -TransactionDeadlineUtc ([datetime]::UtcNow.AddMinutes(1).ToString('o'))} finally {$env:DEVFLEET_E_BOOTSTRAP_ACK=$oldAck;$env:DEVFLEET_E_RUN_ID=$oldRun}
+    $ackValue=Get-Content -LiteralPath $ack -Raw|ConvertFrom-Json
+    Check ([string]$ackValue.kind-ceq'CAMPAIGN_E_POWERSHELL_BOOTSTRAP_ONLY'-and-not[bool]$ackValue.productLifecycleStarted-and-not[bool]$ackValue.stageMarkerWritten) 'bootstrap-only acknowledgement fabricated product lifecycle state'
+    $env:DEVFLEET_E_BOOTSTRAP_ACK=$ack;$env:DEVFLEET_E_RUN_ID='unit-prereq'
+    $transactionRejected=$false
+    try {& $stubPath -Role Desktop -InstallationMode Connected -PackageRoot 'C:\candidate' -TransactionId ('a'*32)} catch {$transactionRejected=$_.Exception.Message-match'transactionless'} finally {$env:DEVFLEET_E_BOOTSTRAP_ACK=$oldAck;$env:DEVFLEET_E_RUN_ID=$oldRun}
+    Check $transactionRejected 'bootstrap-only shim accepted a product transaction or rejected it for the wrong boundary'
+} finally {
+    if(Test-Path -LiteralPath $fixtureRoot){Remove-Item -LiteralPath $fixtureRoot -Recurse -Force}
+}
+
+$base=[datetime]'2026-09-06T20:00:00Z'
+$valid=[pscustomobject][ordered]@{
+    schemaVersion=1;kind='DEVFLEET_CAMPAIGN_E_PREREQUISITE_READY';status='PASS';runId='unit-prereq';vmId='84b7d8b8-ee6c-4085-aa29-4b0adc316de2';payloadSha256=('a'*64)
+    role='Desktop';packageVersion='1.2.13';ownerDeadlineUtc=$base.AddMinutes(10).ToString('o');startedAtUtc=$base.ToString('o');producedAtUtc=$base.AddMinutes(5).ToString('o');inputHashes=$plan.inputHashes
+    systemPolicyChanged=$false;productLifecycleStarted=$false;activeTransactionPresent=$false;stageMarkerCount=0;activeInstallProcessCount=0;pendingReboot=$false
+    powershell=[ordered]@{status='Compatible';version='7.4.0';pathSha256=('b'*64)};multipass=[ordered]@{status='Compatible';version='1.15.1';pathSha256=('c'*64);preexisting=$false}
+    powershellAcquisition=[ordered]@{schemaVersion=1;kind='DEVFLEET_CAMPAIGN_E_POWERSHELL_ACQUISITION';status='PASS';method='PRESERVED_CANDIDATE_COMPATIBLE';packageId='Microsoft.PowerShell';startedAtUtc=$base.ToString('o');finishedAtUtc=$base.AddMinutes(1).ToString('o');ownerDeadlineUtc=$base.AddMinutes(10).ToString('o');wingetPathSha256='';operations=@();powershell=[ordered]@{status='Compatible';version='7.4.0';pathSha256=('b'*64)};productLifecycleStarted=$false;stageMarkerWritten=$false}
+    backend=[ordered]@{driver='hyperv';privilegedMounts=$false;inventoryCount=0};l2Status='ABSENT'
+}
+Check (Assert-DevFleetCampaignEPrerequisiteResult -Result $valid -ExpectedRunId 'unit-prereq' -ExpectedVmId ([guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2') -ExpectedPayloadSha256 ('a'*64) -ExpectedPlan $plan) 'valid prerequisite result was rejected'
+$stagedValid=Clone $valid
+$stagedValid.powershellAcquisition=[pscustomobject][ordered]@{schemaVersion=1;kind='DEVFLEET_CAMPAIGN_E_POWERSHELL_ACQUISITION';status='PASS';method='STAGED_OFFICIAL_GITHUB_DIAGNOSTIC';packageId='Microsoft.PowerShell';startedAtUtc=$base.AddSeconds(5).ToString('o');finishedAtUtc=$base.AddMinutes(1).ToString('o');ownerDeadlineUtc=$base.AddMinutes(10).ToString('o');wingetPathSha256='';officialPayload=[ordered]@{releaseTag='v7.4.2';assetName='PowerShell-7.4.2-win-x64.msi';sha256=('e'*64);bytes=42;signerSubject='CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US'};operations=@([ordered]@{operation='official-powershell-msi-install';outcome='PASS';exitCode=0;startedAtUtc=$base.AddSeconds(10).ToString('o');finishedAtUtc=$base.AddSeconds(20).ToString('o');deadlineUtc=$base.AddMinutes(10).ToString('o');outputComplete=$true;packageIdentityObserved=$true});powershell=[ordered]@{status='Compatible';version='7.4.0';pathSha256=('b'*64)};productLifecycleStarted=$false;stageMarkerWritten=$false}
+Check (Assert-DevFleetCampaignEPrerequisiteResult -Result $stagedValid -ExpectedRunId 'unit-prereq' -ExpectedVmId ([guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2') -ExpectedPayloadSha256 ('a'*64) -ExpectedPlan $plan) 'valid staged-official prerequisite result was rejected'
+$stagedWrongSigner=Clone $stagedValid;$stagedWrongSigner.powershellAcquisition.officialPayload.signerSubject='CN=Untrusted Fixture'
+Rejected {Assert-DevFleetCampaignEPrerequisiteResult -Result $stagedWrongSigner -ExpectedRunId 'unit-prereq' -ExpectedVmId ([guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2') -ExpectedPayloadSha256 ('a'*64) -ExpectedPlan $plan} 'staged-official result validator accepted the wrong signer'
+$stagedWrongOperation=Clone $stagedValid;$stagedWrongOperation.powershellAcquisition.operations[0].operation='arbitrary-install'
+Rejected {Assert-DevFleetCampaignEPrerequisiteResult -Result $stagedWrongOperation -ExpectedRunId 'unit-prereq' -ExpectedVmId ([guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2') -ExpectedPayloadSha256 ('a'*64) -ExpectedPlan $plan} 'staged-official result validator accepted the wrong operation identity'
+
+$failureOperations=[Collections.Generic.List[object]]::new()
+for($index=0;$index-lt4;$index++){
+    $operationName=@('winget-version','winget-source-list','winget-source-update','winget-powershell-search')[$index]
+    [void]$failureOperations.Add([pscustomobject][ordered]@{operation=$operationName;outcome=if($index-eq3){'NONZERO'}else{'PASS'};exitCode=if($index-eq3){-1978335217}else{0};pid=100+$index;startedAtUtc=$base.AddSeconds($index*10).ToString('o');finishedAtUtc=$base.AddSeconds(($index+1)*10).ToString('o');deadlineUtc=$base.AddMinutes(2).ToString('o');outputComplete=$true})
+}
+$validFailure=[pscustomobject][ordered]@{schemaVersion=1;kind='DEVFLEET_CAMPAIGN_E_PREREQUISITE_FAILURE';status='BLOCKED';runId='unit-prereq';vmId='84b7d8b8-ee6c-4085-aa29-4b0adc316de2';payloadSha256=('a'*64);producedAtUtc=$base.AddMinutes(1).ToString('o');ownerDeadlineUtc=$base.AddMinutes(10).ToString('o');primaryError='WinGet source data missing.';powershellAcquisition=[ordered]@{status='BLOCKED';identity=[ordered]@{method='WINGET_MANIFEST_APPROVED_DIAGNOSTIC';packageId='Microsoft.PowerShell';wingetPathSha256=('d'*64);ownerDeadlineUtc=$base.AddMinutes(10).ToString('o')};operations=@($failureOperations);productLifecycleStarted=$false;stageMarkerWritten=$false}}
+Check (Assert-DevFleetCampaignEPrerequisiteFailure -Failure $validFailure -ExpectedRunId 'unit-prereq' -ExpectedVmId ([guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2') -ExpectedPayloadSha256 ('a'*64)) 'valid run-bound prerequisite failure was rejected'
+$stagedFailure=Clone $validFailure
+$stagedFailure.primaryError='Official PowerShell MSI failed.'
+$stagedFailure.powershellAcquisition.identity=[pscustomobject][ordered]@{method='STAGED_OFFICIAL_GITHUB_DIAGNOSTIC';packageId='Microsoft.PowerShell';payloadSha256=('e'*64);assetName='PowerShell-7.4.2-win-x64.msi';ownerDeadlineUtc=$base.AddMinutes(10).ToString('o')}
+$stagedFailure.powershellAcquisition.operations=@([pscustomobject][ordered]@{operation='official-powershell-msi-install';outcome='NONZERO';exitCode=1603;pid=200;startedAtUtc=$base.AddSeconds(10).ToString('o');finishedAtUtc=$base.AddSeconds(20).ToString('o');deadlineUtc=$base.AddMinutes(2).ToString('o');outputComplete=$true})
+Check (Assert-DevFleetCampaignEPrerequisiteFailure -Failure $stagedFailure -ExpectedRunId 'unit-prereq' -ExpectedVmId ([guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2') -ExpectedPayloadSha256 ('a'*64)) 'valid staged-official failure evidence was rejected'
+$stagedFailureWrongAsset=Clone $stagedFailure;$stagedFailureWrongAsset.powershellAcquisition.identity.assetName='arbitrary.msi'
+Rejected {Assert-DevFleetCampaignEPrerequisiteFailure -Failure $stagedFailureWrongAsset -ExpectedRunId 'unit-prereq' -ExpectedVmId ([guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2') -ExpectedPayloadSha256 ('a'*64)} 'staged-official failure validator accepted an arbitrary payload identity'
+foreach($case in @(
+    @{name='failure wrong run';edit={param($v)$v.runId='wrong'}},
+    @{name='failure late publication';edit={param($v)$v.producedAtUtc=$base.AddMinutes(11).ToString('o')}},
+    @{name='failure product progress';edit={param($v)$v.powershellAcquisition.productLifecycleStarted=$true}},
+    @{name='failure wrong operation sequence';edit={param($v)$v.powershellAcquisition.operations[2].operation='winget-powershell-search'}},
+    @{name='failure wrong package identity';edit={param($v)$v.powershellAcquisition.identity.packageId='Arbitrary.PowerShell'}},
+    @{name='failure missing executable hash';edit={param($v)$v.powershellAcquisition.identity.wingetPathSha256=''}}
+)){
+    $badFailure=Clone $validFailure;&$case.edit $badFailure
+    Rejected {Assert-DevFleetCampaignEPrerequisiteFailure -Failure $badFailure -ExpectedRunId 'unit-prereq' -ExpectedVmId ([guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2') -ExpectedPayloadSha256 ('a'*64)} "$($case.name) was accepted"
+}
+
+foreach($case in @(
+    @{name='late result';edit={param($v)$v.producedAtUtc=$base.AddMinutes(11).ToString('o')}},
+    @{name='wrong run';edit={param($v)$v.runId='wrong'}},
+    @{name='wrong VM';edit={param($v)$v.vmId=[guid]::NewGuid().ToString()}},
+    @{name='wrong payload';edit={param($v)$v.payloadSha256=('d'*64)}},
+    @{name='wrong candidate hash';edit={param($v)$v.inputHashes.config=('e'*64)}},
+    @{name='system policy mutation';edit={param($v)$v.systemPolicyChanged=$true}},
+    @{name='product lifecycle start';edit={param($v)$v.productLifecycleStarted=$true}},
+    @{name='active transaction';edit={param($v)$v.activeTransactionPresent=$true}},
+    @{name='stage marker';edit={param($v)$v.stageMarkerCount=1}},
+    @{name='active installer';edit={param($v)$v.activeInstallProcessCount=1}},
+    @{name='pending reboot';edit={param($v)$v.pendingReboot=$true}},
+    @{name='incompatible PowerShell';edit={param($v)$v.powershell.status='Outdated'}},
+    @{name='missing PowerShell acquisition';edit={param($v)$v.powershellAcquisition=$null}},
+    @{name='mismatched PowerShell acquisition';edit={param($v)$v.powershellAcquisition.powershell.pathSha256=('d'*64)}},
+    @{name='late PowerShell acquisition';edit={param($v)$v.powershellAcquisition.finishedAtUtc=$base.AddMinutes(11).ToString('o')}},
+    @{name='unsupported PowerShell acquisition';edit={param($v)$v.powershellAcquisition.method='DIRECT_UNVERIFIED'}},
+    @{name='incompatible Multipass';edit={param($v)$v.multipass.version='1.12.9'}},
+    @{name='wrong backend';edit={param($v)$v.backend.driver='virtualbox'}},
+    @{name='privileged mounts';edit={param($v)$v.backend.privilegedMounts=$true}},
+    @{name='nonempty inventory';edit={param($v)$v.backend.inventoryCount=1}},
+    @{name='unverified L2';edit={param($v)$v.l2Status='UNVERIFIED'}}
+)){
+    $bad=Clone $valid;&$case.edit $bad
+    Rejected {Assert-DevFleetCampaignEPrerequisiteResult -Result $bad -ExpectedRunId 'unit-prereq' -ExpectedVmId ([guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2') -ExpectedPayloadSha256 ('a'*64) -ExpectedPlan $plan} "$($case.name) was accepted"
 }
 
 $shell=(Get-Process -Id $PID).Path
@@ -399,153 +495,4 @@ try{
     Write-FixtureJson $nestedPath $nestedFixture;$nestedHash=Get-FixtureHash $nestedPath
     $l2Fixture.sourceEvidenceSha256=$nestedHash;Write-FixtureJson $l2Path $l2Fixture
     Write-FixtureJson $cleanupPath $cleanupFixture;Write-FixtureJson $statePath $stateFixture
-    $postFixture.cleanupEvidenceHash=Get-FixtureHash $cleanupPath;$postFixture.terminalL1Hash=Get-FixtureHash $l1Path;$postFixture.terminalL2Hash=Get-FixtureHash $l2Path;$postFixture.nestedL2ObservationSha256=$nestedHash
-    Write-FixtureJson $postPath $postFixture
-    $incompleteTupleRejected=$false;$incompleteTupleError=''
-    try{Invoke-FixtureNestedValidation -Root $fixtureRoot -RunId $fixtureRunId|Out-Null}catch{$incompleteTupleRejected=$true;$incompleteTupleError=$_.Exception.Message}
-    $rows.Add([ordered]@{case='incomplete-candidate-tuple-rejected';status=if($incompleteTupleRejected){'BLOCKED'}else{'PASS'};l2State='UNVERIFIED';safeWithoutNestedEvidence=($incompleteTupleRejected -and $incompleteTupleError -match 'candidate tuple is malformed or incomplete')})
-
-    $nestedFixture.candidate=$tuple;$l2Fixture.candidate=$tuple;$cleanupFixture.candidate=$tuple;$postFixture.candidate=$tuple;$stateFixture.candidateHashes=$tuple
-    Write-FixtureJson $nestedPath $nestedFixture;$nestedHash=Get-FixtureHash $nestedPath
-    $l2Fixture.sourceEvidenceSha256=$nestedHash;Write-FixtureJson $l2Path $l2Fixture
-    Write-FixtureJson $cleanupPath $cleanupFixture;Write-FixtureJson $statePath $stateFixture
-    $postFixture.cleanupEvidenceHash=Get-FixtureHash $cleanupPath;$postFixture.terminalL1Hash=Get-FixtureHash $l1Path;$postFixture.terminalL2Hash=Get-FixtureHash $l2Path;$postFixture.nestedL2ObservationSha256=$nestedHash
-    Write-FixtureJson $postPath $postFixture
-    $backendVerification='Multipass CLI absent; complete read-only inventories from every supported in-L1 virtualization backend'
-    $nestedFixture.verification=$backendVerification;$nestedFixture.inventoryCount=2
-    $nestedFixture.backendInventories=@([ordered]@{provider='Hyper-V';status='PASS';names=@('foreign-instance','foreign-instance');verification='bounded Hyper-V inventory'},[ordered]@{provider='VirtualBox';status='PASS';names=@();verification='bounded VirtualBox inventory'})
-    $l2Fixture.verificationMethod=$backendVerification;$l2Fixture.backendInventories=$nestedFixture.backendInventories
-    Write-FixtureJson $nestedPath $nestedFixture;$nestedHash=Get-FixtureHash $nestedPath
-    $l2Fixture.sourceEvidenceSha256=$nestedHash;Write-FixtureJson $l2Path $l2Fixture
-    $postFixture.terminalL2Hash=Get-FixtureHash $l2Path;$postFixture.nestedL2ObservationSha256=$nestedHash
-    Write-FixtureJson $postPath $postFixture
-    $malformedBackendRejected=$false;$malformedBackendError=''
-    try{Invoke-FixtureNestedValidation -Root $fixtureRoot -RunId $fixtureRunId|Out-Null}catch{$malformedBackendRejected=$true;$malformedBackendError=$_.Exception.Message}
-    $rows.Add([ordered]@{case='duplicate-backend-instance-name-rejected';status=if($malformedBackendRejected){'BLOCKED'}else{'PASS'};l2State='UNVERIFIED';safeWithoutNestedEvidence=($malformedBackendRejected -and $malformedBackendError -match 'duplicate instance name')})
-
-    $nestedFixture.verification='Bounded Multipass JSON inventory inside exact L1';$nestedFixture.inventoryCount=0;$nestedFixture.backendInventories=@()
-    $l2Fixture.verificationMethod=$nestedFixture.verification;$l2Fixture.backendInventories=@()
-    Write-FixtureJson $nestedPath $nestedFixture;$nestedHash=Get-FixtureHash $nestedPath
-    $l2Fixture.sourceEvidenceSha256=$nestedHash;Write-FixtureJson $l2Path $l2Fixture
-    $postFixture.terminalL2Hash=Get-FixtureHash $l2Path;$postFixture.nestedL2ObservationSha256=$nestedHash
-    Write-FixtureJson $postPath $postFixture
-    [IO.File]::AppendAllText($nestedPath,"`n",[Text.UTF8Encoding]::new($false))
-    $hashRejected=$false;$hashError=''
-    try{Invoke-FixtureNestedValidation -Root $fixtureRoot -RunId $fixtureRunId|Out-Null}catch{$hashRejected=$true;$hashError=$_.Exception.Message}
-    $rows.Add([ordered]@{case='changed-source-bytes-rejected-after-binding';status=if($hashRejected){'BLOCKED'}else{'PASS'};l2State='UNVERIFIED';safeWithoutNestedEvidence=($hashRejected -and $hashError -match 'hash bindings do not match')})
-}finally{if(Test-Path -LiteralPath $fixtureRoot){Remove-Item -LiteralPath $fixtureRoot -Recurse -Force}}
-
-$hostCases=@('empty-host-inventory','denied-host-query','present-host-name','native-host-name-absence')
-$failed = @($rows | Where-Object { -not [bool]$_.safeWithoutNestedEvidence -or ($_.case -in $hostCases -and (-not [bool]$_.hostAbsenceDidNotClaimNestedAbsent -or -not [bool]$_.nativeHostAbsenceClassified)) })
-$result = [ordered]@{
-    scope='VM_FREE_PRODUCTION_FUNCTION_REGRESSION'
-    productionSource='tools/Invoke-DevFleetFinalConvergence.ps1::Invoke-ExactTerminalCleanup'
-    productionSourceSha256=(Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
-    certificationCredit=$false
-    vmOperations=0
-    passed=($rows.Count - $failed.Count)
-    total=$rows.Count
-    cases=@($rows)
-    status=if ($failed.Count) { 'FAIL' } else { 'PASS' }
-    failures=@($failed | ForEach-Object { $_.case })
-}
-$result | ConvertTo-Json -Depth 8
-if ($failed.Count) { exit 1 }
-
-```
-
-
-## FILE: automation/release-e2e/tests/Test-FinalizerProcessExitBoundary.ps1
-
-SHA256: 74f494d7d0b41f3bd657a9ac110302014229ca36b0119776f8f83a862d488207 | Bytes: 2539 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([string]$WorkspaceRoot)
-
-$ErrorActionPreference='Stop'
-if(-not $WorkspaceRoot){$WorkspaceRoot=(Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path}
-$entry=Join-Path $WorkspaceRoot 'automation\release-e2e\Invoke-DevFleetReleaseE2E.ps1'
-$tokens=$null;$errors=$null
-$ast=[Management.Automation.Language.Parser]::ParseFile($entry,[ref]$tokens,[ref]$errors)
-if(@($errors).Count){throw 'Release entrypoint failed PowerShell parser validation.'}
-$function=@($ast.FindAll({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Invoke-RequiredReleaseFinalizer'},$true))
-if($function.Count -ne 1){throw 'Expected one production finalizer process-boundary function.'}
-$functionText=$function[0].Extent.Text
-. ([scriptblock]::Create($functionText))
-$pwsh=(Get-Command pwsh.exe -CommandType Application -ErrorAction Stop|Select-Object -First 1).Source
-$temp=Join-Path ([IO.Path]::GetTempPath()) ('DevFleet-finalizer-exit-'+[guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $temp|Out-Null
-$checks=[Collections.Generic.List[object]]::new()
-try{
-    $success=Join-Path $temp 'success.ps1';$failure=Join-Path $temp 'failure.ps1'
-    [IO.File]::WriteAllText($success,"Write-Output 'safe completion'`nexit 0`n",[Text.UTF8Encoding]::new($false))
-    [IO.File]::WriteAllText($failure,"Write-Output 'bounded child output'`nexit 17`n",[Text.UTF8Encoding]::new($false))
-    $successOutput=@(Invoke-RequiredReleaseFinalizer -PowerShellPath $pwsh -FinalizerPath $success)
-    $checks.Add([pscustomobject]@{name='successful finalizer child remains successful';pass=($LASTEXITCODE -eq 0 -and ($successOutput -join "`n") -match 'safe completion');detail="childOutput=$($successOutput -join ' ')"})
-    $failed=$false;$failureMessage=''
-    try{Invoke-RequiredReleaseFinalizer -PowerShellPath $pwsh -FinalizerPath $failure|Out-Null}catch{$failed=$true;$failureMessage=$_.Exception.Message}
-    $checks.Add([pscustomobject]@{name='nonzero finalizer child blocks the release caller';pass=($failed -and $failureMessage -match 'code 17');detail="blocked=$failed message=$failureMessage"})
-}finally{if(Test-Path -LiteralPath $temp){Remove-Item -LiteralPath $temp -Recurse -Force}}
-$bad=@($checks|Where-Object{-not $_.pass})
-[ordered]@{scope='VM_FREE_PRODUCTION_FINALIZER_PROCESS_EXIT_REGRESSION';certificationCredit=$false;status=if($bad.Count){'FAIL'}else{'PASS'};passed=$checks.Count-$bad.Count;total=$checks.Count;checks=@($checks)}|ConvertTo-Json -Depth 8
-if($bad.Count){exit 1}
-
-```
-
-
-## FILE: automation/release-e2e/tests/Test-FullReleaseFailureCleanup.ps1
-
-SHA256: f37f4d49ab794c36eb7298442b7dacb3c53a4e8bef0ae5a0c7b0822bc4f3f7a5 | Bytes: 5999 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([Parameter(Mandatory)][string]$WorkspaceRoot)
-$ErrorActionPreference='Stop'
-$checks=[Collections.Generic.List[object]]::new()
-function Check([string]$Name,[bool]$Pass){$checks.Add([pscustomobject]@{name=$Name;pass=$Pass})}
-$entry=Join-Path $WorkspaceRoot 'automation/release-e2e/Invoke-DevFleetReleaseE2E.ps1'
-$text=Get-Content -LiteralPath $entry -Raw
-$proofText=Get-Content -LiteralPath (Join-Path $WorkspaceRoot 'audit/run-exact-candidate-proof.ps1') -Raw
-Check 'exact proof cleanup records its RunId for native terminal-summary validation' ($proofText.Contains('$cleanup=[ordered]@{runId=$RunId;status='))
-$tokens=$null;$errors=$null
-$ast=[Management.Automation.Language.Parser]::ParseFile($entry,[ref]$tokens,[ref]$errors)
-if($errors.Count){throw 'Production entrypoint does not parse'}
-$importStart=$text.IndexOf('foreach($m in @(')
-$importEnd=$text.IndexOf('$script:DevFleetFinalConvergencePrimaryBlocker')
-if($importStart -lt 0 -or $importEnd -le $importStart){throw 'Cannot locate native import sequence'}
-$pipeline=[powershell]::Create()
-try {
-    $code="param(`$scriptRoot) "+$text.Substring($importStart,$importEnd-$importStart)+"`n[bool](Get-Command Clear-DevFleetE2EInteractiveLogonState -ErrorAction SilentlyContinue)"
-    $null=$pipeline.AddScript($code).AddArgument((Join-Path $WorkspaceRoot 'automation/release-e2e'))
-    $visibility=@($pipeline.Invoke())
-    Check 'cleanup API visible after actual entrypoint imports' (-not $pipeline.HadErrors -and $visibility.Count -gt 0 -and [bool]$visibility[-1])
-} finally {$pipeline.Dispose()}
-$catches=@($ast.FindAll({param($node)$node -is [Management.Automation.Language.CatchClauseAst] -and $node.Body.Extent.Text.Contains('$failureCleanup=New-CleanupManifest')},$true))
-if($catches.Count -ne 1){throw 'Native failure handler selection is ambiguous'}
-$body=$catches[0].Body.Extent.Text
-$handler=[scriptblock]::Create("try { throw 'PRIMARY_FIXTURE_FAILURE' } catch "+$body)
-$root=Join-Path ([IO.Path]::GetTempPath()) ('DevFleet-cleanup-handler-'+[guid]::NewGuid().ToString('N'))
-$global:DevFleetCleanupFixture=@{case='';logonCalls=0;stopCalls=0;terminalCalls=0;shown=''}
-try {
-    New-Item -ItemType Directory -Path (Join-Path $root 'tools') -Force|Out-Null
-    Set-Content (Join-Path $root 'tools/Update-CurrentReleaseAuthority.ps1') 'param($Workspace,$FullReleaseRunId)' -Encoding utf8
-    Import-Module (Join-Path $WorkspaceRoot 'automation/release-e2e/modules/Evidence.psm1') -Force
-    function New-CleanupManifest {param($Vm,$RunId) [pscustomobject]@{runId=$RunId}}
-    function Get-AssertedDisposableVm {param($ExpectedVm) $ExpectedVm}
-    function Clear-DevFleetE2EInteractiveLogonState {
-        param([guid]$VmId)
-        $global:DevFleetCleanupFixture.logonCalls++
-        if($global:DevFleetCleanupFixture.case -eq 'logon-throws'){throw 'PRIVATE_FIXTURE_SECRET_SHOULD_NOT_BE_PERSISTED'}
-        [pscustomobject]@{status='PASS';registryCleanupPersisted=($global:DevFleetCleanupFixture.case -ne 'not-durable');temporaryDefaultPasswordRemovalPersisted=$true;ordinaryDefaultPasswordPresent=$false}
-    }
-    function Stop-ManifestVm {param($Manifest) $global:DevFleetCleanupFixture.stopCalls++}
-    function Write-TerminalVmEvidence {param($Vm,$RunDir,$L2Name) $global:DevFleetCleanupFixture.terminalCalls++}
-    function Show-Result {param($label,$status,$detail) $global:DevFleetCleanupFixture.shown=$detail}
-    foreach($case in @('running-durable','off','not-durable','logon-throws','keep-lab','no-target')){
-        $global:DevFleetCleanupFixture.case=$case
-        $global:DevFleetCleanupFixture.logonCalls=0;$global:DevFleetCleanupFixture.stopCalls=0;$global:DevFleetCleanupFixture.terminalCalls=0;$global:DevFleetCleanupFixture.shown=''
-        $runId='failure-handler-fixture-'+$case
-        $runDir=Join-Path $root $case
-        New-Item -ItemType Directory -Path $runDir|Out-Null
-        $vm=if($case -eq 'no-target'){$null}else{[pscustomobject]@{Name='DevFleet-E2E-fixture';Id=[guid]
+    $postFixture.cleanupEvidenceHash=Get-FixtureHash $cleanupPath;$postF

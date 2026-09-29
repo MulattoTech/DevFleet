@@ -1,10 +1,96 @@
 # DevFleet source part 022
 
 Full-source UTF-8 byte interval [976500, 1023000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 7119f367b4fbcc0eefbed6bc918ea39b930d32280b0a0e6b2656b6cbf8ac1630
+Payload SHA-256: 5ff13c4684899b5ddf920523111af3d960853b0da39fbf87a842c6dec5484eab
 
 <!-- BEGIN SOURCE SLICE -->
-'path','status') -Label 'REAL-USE-ACCEPTANCE cleanup resource' | Out-Null
+lue = Get-RealUseAcceptanceProperty $Expected $field ([ref]$expectedFound)
+        if (-not $actualFound -or -not $expectedFound -or -not (Test-RealUseAcceptanceSameValue $expectedValue $actualValue)) { throw "$Label binding mismatch: $field." }
+    }
+    if ([string]$Actual.role -cne 'Laptop / Surrogate' -or [string]$Actual.vmName -notlike 'DevFleet-E2E-*') { throw "$Label is not bound to the installed Laptop/Surrogate disposable." }
+    if ([string]$Actual.vmId -cnotmatch '^[0-9a-fA-F-]{36}$' -or [string]$Actual.deploymentId -cnotmatch '^[0-9a-fA-F-]{36}$' -or [string]$Actual.nodeId -cnotmatch '^[0-9a-fA-F-]{36}$') { throw "$Label has a malformed VM or product identity." }
+    if ([string]$Actual.computeInstanceName -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$' -or [string]$Actual.vaultInstanceName -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$' -or [string]$Actual.nodeName -cne [string]$Actual.computeInstanceName) { throw "$Label has a malformed or divergent installed node identity." }
+    if ([string]$Actual.transactionId -cnotmatch '^[0-9a-f]{32}$' -or [string]$Actual.invocationId -cnotmatch '^[0-9a-f]{32}$' -or [string]$Actual.surrogateEvidenceSha256 -cnotmatch '^[0-9a-f]{64}$') { throw "$Label has a malformed lifecycle identity." }
+    return $true
+}
+
+function Assert-RealUseAcceptanceInput {
+    param([Parameter(Mandatory)][Alias('Input')][object]$AcceptanceInput, [Parameter(Mandatory)][object]$Request)
+    $fields = @('schemaVersion','runId','deadlineUtc','runnerSha256','candidate','execution','paths','baseUrl')
+    Assert-RealUseAcceptanceKeys -Value $AcceptanceInput -Allowed $fields -Required $fields -Label 'REAL-USE-ACCEPTANCE input' | Out-Null
+    if ([int]$AcceptanceInput.schemaVersion -ne 1 -or [string]$AcceptanceInput.runId -cne [string]$Request.runId -or -not (Test-RealUseAcceptanceSameInstant $Request.deadlineUtc $AcceptanceInput.deadlineUtc) -or [string]$AcceptanceInput.runnerSha256 -cne [string]$Request.runnerSha256) { throw 'REAL-USE-ACCEPTANCE input identity is not exact.' }
+    Assert-RealUseAcceptanceRunId -RunId ([string]$AcceptanceInput.runId) | Out-Null
+    Assert-RealUseAcceptanceCandidate -Actual $AcceptanceInput.candidate -Expected $Request.candidate -Label 'REAL-USE-ACCEPTANCE input candidate' | Out-Null
+    $expectedExecution = [ordered]@{
+        role = 'Laptop / Surrogate'; vmName = [string]$Request.vmName; vmId = [string]$Request.vmId
+        computeInstanceName = [string]$Request.computeInstanceName; vaultInstanceName = [string]$Request.vaultInstanceName
+        deploymentId = [string]$Request.deploymentId; nodeId = [string]$Request.nodeId; nodeName = [string]$Request.computeInstanceName
+        transactionId = [string]$Request.transactionId; invocationId = [string]$Request.invocationId
+        surrogateEvidenceSha256 = [string]$Request.surrogateEvidenceSha256
+    }
+    Assert-RealUseAcceptanceExecution -Actual $AcceptanceInput.execution -Expected $expectedExecution -Label 'REAL-USE-ACCEPTANCE input execution' | Out-Null
+    $pathFields = @('workspaces','quarantine','runtimeRoot')
+    Assert-RealUseAcceptanceKeys -Value $AcceptanceInput.paths -Allowed $pathFields -Required $pathFields -Label 'REAL-USE-ACCEPTANCE installed paths' | Out-Null
+    if ([string]$AcceptanceInput.paths.workspaces -cne '/home/devrunner/workspaces' -or [string]$AcceptanceInput.paths.quarantine -cne '/home/devrunner/.devfleet-quarantine' -or [string]$AcceptanceInput.paths.runtimeRoot -cne '/var/lib/devfleet/runtime') { throw 'REAL-USE-ACCEPTANCE installed mutable paths are outside the supported product contract.' }
+    if ([string]$AcceptanceInput.baseUrl -cnotmatch '^http://127\.0\.0\.1:(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$') { throw 'REAL-USE-ACCEPTANCE input base URL is not exact loopback HTTP.' }
+    Assert-RealUseAcceptanceSanitizedValue -Value $AcceptanceInput -Path 'input' | Out-Null
+    return $true
+}
+
+function Assert-RealUseAcceptanceReport {
+    param(
+        [Parameter(Mandatory)][object]$Report,
+        [Parameter(Mandatory)][Alias('Input')][object]$AcceptanceInput,
+        [Parameter(Mandatory)][ValidateSet('prepare','resume','cleanup')][string]$ExpectedStage,
+        [Parameter(Mandatory)][string[]]$AllowedStatus,
+        [switch]$RequirePass
+    )
+    $topFields = @('schemaVersion','contract','status','stage','runId','phaseId','candidate','execution','runnerSha256','startedAtUtc','finishedAtUtc','deadlineUtc','journeys','operations','fixture','cleanup','failure','cleanupFailure')
+    Assert-RealUseAcceptanceKeys -Value $Report -Allowed $topFields -Required $topFields -Label 'REAL-USE-ACCEPTANCE report' | Out-Null
+    Assert-RealUseAcceptanceSanitizedValue -Value $Report | Out-Null
+    if ([int]$Report.schemaVersion -ne 1 -or [string]$Report.contract -cne $script:RealUseAcceptanceContract -or [string]$Report.stage -cne $ExpectedStage -or [string]$Report.phaseId -cne $script:RealUseAcceptancePhase) { throw 'REAL-USE-ACCEPTANCE report contract or stage is invalid.' }
+    if ([string]$Report.status -notin $AllowedStatus -or [string]$Report.runId -cne [string]$AcceptanceInput.runId -or [string]$Report.runnerSha256 -cne [string]$AcceptanceInput.runnerSha256 -or -not (Test-RealUseAcceptanceSameInstant $AcceptanceInput.deadlineUtc $Report.deadlineUtc)) { throw 'REAL-USE-ACCEPTANCE report status or immutable identity is invalid.' }
+    Assert-RealUseAcceptanceCandidate -Actual $Report.candidate -Expected $AcceptanceInput.candidate -Label 'REAL-USE-ACCEPTANCE report candidate' | Out-Null
+    $executionFields = @('role','vmName','vmId','computeInstanceName','vaultInstanceName','deploymentId','nodeId','nodeName','transactionId','invocationId','surrogateEvidenceSha256','uiTransport','browserJavascriptExercised')
+    Assert-RealUseAcceptanceKeys -Value $Report.execution -Allowed $executionFields -Required $executionFields -Label 'REAL-USE-ACCEPTANCE report execution' | Out-Null
+    $executionProjection = [ordered]@{}
+    foreach ($field in @('role','vmName','vmId','computeInstanceName','vaultInstanceName','deploymentId','nodeId','nodeName','transactionId','invocationId','surrogateEvidenceSha256')) { $executionProjection[$field] = $Report.execution.$field }
+    Assert-RealUseAcceptanceExecution -Actual $executionProjection -Expected $AcceptanceInput.execution -Label 'REAL-USE-ACCEPTANCE report execution' | Out-Null
+    if ([string]$Report.execution.uiTransport -cne 'authenticated-http-form' -or $Report.execution.browserJavascriptExercised -isnot [bool] -or [bool]$Report.execution.browserJavascriptExercised) { throw 'REAL-USE-ACCEPTANCE report execution channel is invalid.' }
+    $started = [datetime]::MinValue; $finished = [datetime]::MinValue; $deadline = [datetime]::MinValue
+    if (-not [datetime]::TryParse([string]$Report.startedAtUtc, [ref]$started) -or -not [datetime]::TryParse([string]$Report.finishedAtUtc, [ref]$finished) -or -not [datetime]::TryParse([string]$Report.deadlineUtc, [ref]$deadline) -or $finished.ToUniversalTime() -lt $started.ToUniversalTime() -or $finished.ToUniversalTime() -gt $deadline.ToUniversalTime()) { throw 'REAL-USE-ACCEPTANCE report timestamps are invalid or outside the owning deadline.' }
+    $journeys = @($Report.journeys)
+    if ($journeys.Count -ne 5 -or @($journeys.id | Select-Object -Unique).Count -ne 5 -or @('U01','U02','U03','U04','U05' | Where-Object { $_ -notin @($journeys.id) }).Count) { throw 'REAL-USE-ACCEPTANCE report does not contain exactly U01-U05.' }
+    foreach ($journey in $journeys) {
+        Assert-RealUseAcceptanceKeys -Value $journey -Allowed @('id','status','assertions','observations') -Required @('id','status','assertions','observations') -Label 'REAL-USE-ACCEPTANCE journey' | Out-Null
+        $journeyId = [string]$journey.id
+        if ($journeyId -cnotin @($script:RealUseAcceptanceAssertions.Keys)) { throw 'REAL-USE-ACCEPTANCE journey identifier is invalid.' }
+        if ([string]$journey.status -notin @('PASS','IN_PROGRESS','NOT_RUN','BLOCKED')) { throw 'REAL-USE-ACCEPTANCE journey has an invalid status.' }
+        if ([string]$journey.status -eq 'PASS') {
+            $assertionNames = @(Get-RealUseAcceptancePropertyNames $journey.assertions)
+            $expectedAssertionNames = @($script:RealUseAcceptanceAssertions[$journeyId])
+            if ($assertionNames.Count -ne $expectedAssertionNames.Count -or @($assertionNames | Where-Object { $_ -cnotin $expectedAssertionNames }).Count -or @($expectedAssertionNames | Where-Object { $_ -cnotin $assertionNames }).Count) { throw 'REAL-USE-ACCEPTANCE PASS journey does not contain its exact fixed assertion set.' }
+            foreach ($name in $assertionNames) { $found = $false; $value = Get-RealUseAcceptanceProperty $journey.assertions $name ([ref]$found); if (-not $found -or $value -isnot [bool] -or -not [bool]$value) { throw 'REAL-USE-ACCEPTANCE PASS journey contains an unproven assertion.' } }
+        }
+    }
+    foreach ($operation in @($Report.operations)) {
+        $operationFields = @('id','kind','project','state','expectedState','route','httpStatus','renderedState','smokeOutputObserved')
+        Assert-RealUseAcceptanceKeys -Value $operation -Allowed $operationFields -Required $operationFields -Label 'REAL-USE-ACCEPTANCE operation' | Out-Null
+        if ([string]$operation.id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' -or [int]$operation.httpStatus -lt 100 -or [int]$operation.httpStatus -gt 599 -or $operation.smokeOutputObserved -isnot [bool]) { throw 'REAL-USE-ACCEPTANCE operation evidence is malformed.' }
+    }
+    $fixtureFields = @('slug','projectId','sentinelSha256','originalPath','recoveredPath')
+    [string[]]$requiredFixtureFields = @()
+    if ($RequirePass -or [string]$Report.status -in @('PASS','PREPARED')) { $requiredFixtureFields = @('slug','projectId','sentinelSha256','originalPath','recoveredPath') }
+    Assert-RealUseAcceptanceKeys -Value $Report.fixture -Allowed $fixtureFields -Required $requiredFixtureFields -Label 'REAL-USE-ACCEPTANCE fixture' | Out-Null
+    $fixtureNames = @(Get-RealUseAcceptancePropertyNames $Report.fixture)
+    if ('slug' -in $fixtureNames -and [string]$Report.fixture.slug -notmatch '^[a-z0-9][a-z0-9._-]{1,62}$') { throw 'REAL-USE-ACCEPTANCE fixture slug is malformed.' }
+    if ('projectId' -in $fixtureNames -and [string]$Report.fixture.projectId -notmatch '^[0-9a-fA-F-]{36}$') { throw 'REAL-USE-ACCEPTANCE fixture project identity is malformed.' }
+    if ('sentinelSha256' -in $fixtureNames -and [string]$Report.fixture.sentinelSha256 -notmatch '^[0-9a-f]{64}$') { throw 'REAL-USE-ACCEPTANCE fixture sentinel identity is malformed.' }
+    $cleanupFields = @('status','ownedOnly','resources','errors','vaultSnapshots')
+    Assert-RealUseAcceptanceKeys -Value $Report.cleanup -Allowed $cleanupFields -Required $cleanupFields -Label 'REAL-USE-ACCEPTANCE cleanup' | Out-Null
+    if ([string]$Report.cleanup.status -notin @('NOT_RUN','PASS','BLOCKED') -or $Report.cleanup.ownedOnly -isnot [bool]) { throw 'REAL-USE-ACCEPTANCE cleanup status is malformed.' }
+    foreach ($resource in @($Report.cleanup.resources)) {
+        Assert-RealUseAcceptanceKeys -Value $resource -Allowed @('kind','path','status') -Required @('kind','path','status') -Label 'REAL-USE-ACCEPTANCE cleanup resource' | Out-Null
         if ([string]::IsNullOrWhiteSpace([string]$resource.kind) -or [string]::IsNullOrWhiteSpace([string]$resource.path) -or [string]::IsNullOrWhiteSpace([string]$resource.status)) { throw 'REAL-USE-ACCEPTANCE cleanup resource is incomplete.' }
     }
     if ($RequirePass) {
@@ -275,52 +361,4 @@ function Invoke-RealUseAcceptanceTransport {
             $driverUnits=[Collections.Generic.List[string]]::new()
             $driverWrapper='set -Eeuo pipefail; . /etc/devfleet/secrets.env; : "${DEVFLEET_ADMIN_USER:?}" "${DEVFLEET_ADMIN_PASSWORD:?}"; export DEVFLEET_ADMIN_USER DEVFLEET_ADMIN_PASSWORD; exec /opt/devfleet/venv/bin/python "$@"'
             function Get-DriverUnitState([string]$Unit){
-                if($Unit-cnotmatch'\Adevfleet-real-use-[0-9a-f]{12}-(?:prepare|resume|cleanup)\z'){throw 'REAL_USE_DRIVER_UNIT_NAME_INVALID'}
-                $probe=Invoke-RealUseMultipass -Arguments @('exec',$compute,'--','systemctl','show',$Unit,'--property=LoadState','--property=ActiveState','--property=MainPID') -TimeoutSeconds 30
-                if($probe.exitCode-ne 0){throw 'REAL_USE_DRIVER_UNIT_OBSERVATION_FAILED'}
-                $fields=@{};foreach($line in @($probe.stdout)){if([string]$line-cnotmatch'\A(LoadState|ActiveState|MainPID)=(.*)\z'-or$fields.ContainsKey($matches[1])){throw 'REAL_USE_DRIVER_UNIT_STATE_INVALID'};$fields[$matches[1]]=$matches[2]}
-                if($fields.Count-ne 3-or-not$fields.ContainsKey('LoadState')-or-not$fields.ContainsKey('ActiveState')-or-not$fields.ContainsKey('MainPID')-or[string]$fields.MainPID-cnotmatch'\A[0-9]+\z'){throw 'REAL_USE_DRIVER_UNIT_STATE_INVALID'}
-                $load=[string]$fields.LoadState;$active=[string]$fields.ActiveState;$mainPid=[int64]$fields.MainPID
-                if($load-ceq'not-found'){if($active-cne'inactive'-or$mainPid-ne 0){throw 'REAL_USE_DRIVER_UNIT_STATE_INVALID'};return [pscustomobject]@{loadState=$load;activeState=$active;mainPid=$mainPid;exists=$false}}
-                if($load-cne'loaded'-or$active-notin@('active','activating','reloading','deactivating','inactive','failed','dead')){throw 'REAL_USE_DRIVER_UNIT_STATE_INVALID'}
-                return [pscustomobject]@{loadState=$load;activeState=$active;mainPid=$mainPid;exists=$true}
-            }
-            function Confirm-DriverUnitQuiescent([string]$Unit,[switch]$StopIfRunning){$observation=Get-DriverUnitState $Unit;if($observation.activeState-in@('active','activating','reloading','deactivating')-or$observation.mainPid-ne 0){if(-not$StopIfRunning){throw 'REAL_USE_DRIVER_UNIT_STILL_ACTIVE'};$stop=Invoke-RealUseMultipass -Arguments @('exec',$compute,'--','sudo','systemctl','stop',$Unit) -TimeoutSeconds 120;if($stop.exitCode-ne 0){throw 'REAL_USE_DRIVER_UNIT_STOP_FAILED'}};$deadline=[datetime]::UtcNow.AddSeconds(60);do{$observation=Get-DriverUnitState $Unit;if((-not$observation.exists-or$observation.activeState-in@('inactive','failed','dead'))-and$observation.mainPid-eq 0){return $true};Start-Sleep -Seconds 2}while([datetime]::UtcNow-lt$deadline);throw 'REAL_USE_DRIVER_UNIT_QUIESCENCE_UNPROVEN'}
-            function Invoke-DriverStage([string]$Stage,[string]$Output,[int]$Timeout){$unit="devfleet-real-use-$unitHash-$Stage";$driverUnits.Add($unit)|Out-Null;$runtime=[Math]::Max(1,$Timeout-60);try{$call=Invoke-RealUseMultipass -Arguments @('exec',$compute,'--','sudo','systemd-run','--wait','--pipe','--collect','--quiet',"--unit=$unit",'-p','Type=exec','-p','User=devfleet-control','-p','Group=devfleet-control','-p','SupplementaryGroups=devrunner','-p',"RuntimeMaxSec=${runtime}s",'-p','TimeoutStopSec=30s','-p','KillMode=control-group','/usr/bin/env','-i','PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','LANG=C.UTF-8','/bin/bash','-c',$driverWrapper,'devfleet-real-use-driver',$l2Runner,'--stage',$Stage,'--input',$inputPath,'--state',$statePath,'--output',$Output) -TimeoutSeconds $Timeout;Confirm-DriverUnitQuiescent $unit|Out-Null;return $call}catch{$stageError=$_.Exception;try{Confirm-DriverUnitQuiescent $unit -StopIfRunning|Out-Null}catch{throw 'REAL_USE_DRIVER_UNIT_QUIESCENCE_FAILED'};throw $stageError}}
-            function Read-Report([string]$Path,[string]$Code){$value=Invoke-RequiredMultipass @('exec',$compute,'--','sudo','cat',$Path) 60 $Code;try{return (($value.stdout-join"`n")|ConvertFrom-Json -ErrorAction Stop)}catch{throw $Code}}
-            function Test-DriverCleanupProven([AllowNull()][object]$Report){
-                if(-not$Report-or[int]$Report.schemaVersion-ne 1-or[string]$Report.contract-cne'devfleet-real-use-acceptance-v1'-or[string]$Report.runId-cne[string]$request.runId-or[string]$Report.phaseId-cne'REAL-USE-ACCEPTANCE'-or[string]$Report.runnerSha256-cne[string]$expectedRunnerHash){return $false}
-                if([string]$Report.stage-notin@('prepare','resume','cleanup')-or[string]$Report.cleanup.status-cne'PASS'-or$Report.cleanup.ownedOnly-isnot[bool]-or-not[bool]$Report.cleanup.ownedOnly-or@($Report.cleanup.errors).Count-ne 0-or$null-ne$Report.cleanupFailure){return $false}
-                if(([string]$Report.stage-ceq'resume'-and[string]$Report.status-cne'PASS')-or([string]$Report.stage-ceq'cleanup'-and[string]$Report.status-cne'BLOCKED')-or([string]$Report.stage-ceq'prepare'-and[string]$Report.status-cne'BLOCKED')){return $false}
-                foreach($resource in @($Report.cleanup.resources)){if([string]::IsNullOrWhiteSpace([string]$resource.kind)-or[string]::IsNullOrWhiteSpace([string]$resource.path)-or[string]$resource.status-notin@('ABSENT','REMOVED')){return $false}}
-                return $true
-            }
-            try{
-                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','install','-d','-o','root','-g','root','-m','0755','/var/lib/devfleet/e2e-real-use') 60 'REAL_USE_PARENT_ROOT_CREATE_FAILED')
-                $parentStat=Read-MultipassLine @('exec',$compute,'--','sudo','stat','-c','%U:%G:%a:%F','/var/lib/devfleet/e2e-real-use') 'REAL_USE_PARENT_ROOT_POLICY_INVALID';if($parentStat-cne'root:root:755:directory'){throw 'REAL_USE_PARENT_ROOT_POLICY_INVALID'}
-                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','mkdir','--',$l2Root) 60 'REAL_USE_L2_ROOT_COLLISION_OR_CREATE_FAILED');$l2RootOwned=$true
-                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','chown','root:devfleet-control','--',$l2Root) 60 'REAL_USE_OWNED_ROOT_OWNER_FAILED')
-                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','chmod','0750','--',$l2Root) 60 'REAL_USE_OWNED_ROOT_MODE_FAILED')
-                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','mkdir','--',$incoming) 60 'REAL_USE_INCOMING_COLLISION_OR_CREATE_FAILED');$incomingOwned=$true
-                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','chown','ubuntu:ubuntu','--',$incoming) 60 'REAL_USE_INCOMING_OWNER_FAILED')
-                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','chmod','0700','--',$incoming) 60 'REAL_USE_INCOMING_MODE_FAILED')
-                [void](Invoke-RequiredMultipass @('transfer',$runner,"$compute`:$incomingRunner") 300 'REAL_USE_RUNNER_TRANSFER_FAILED')
-                $incomingHash=(Read-MultipassLine @('exec',$compute,'--','sha256sum',$incomingRunner) 'REAL_USE_INCOMING_RUNNER_HASH_MISSING').Split(' ',[StringSplitOptions]::RemoveEmptyEntries)[0].ToLowerInvariant();if($incomingHash-cne$expectedRunnerHash){throw 'REAL_USE_INCOMING_RUNNER_HASH_MISMATCH'}
-                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','chown','-R','root:root','--',$incoming) 60 'REAL_USE_INCOMING_LOCK_FAILED')
-                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','install','-T','-o','root','-g','root','-m','0555',$incomingRunner,$l2Runner) 60 'REAL_USE_RUNNER_PROMOTION_FAILED')
-                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','rm','-rf','--',$incoming) 60 'REAL_USE_INCOMING_CLEANUP_FAILED');$incomingOwned=$false
-                $l2RunnerHash=(Read-MultipassLine @('exec',$compute,'--','sudo','sha256sum',$l2Runner) 'REAL_USE_L2_RUNNER_HASH_MISSING').Split(' ',[StringSplitOptions]::RemoveEmptyEntries)[0].ToLowerInvariant();if($l2RunnerHash-cne$expectedRunnerHash){throw 'REAL_USE_L2_RUNNER_HASH_MISMATCH'}
-                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','install','-d','-o','devfleet-control','-g','devfleet-control','-m','0700',$stateDir) 60 'REAL_USE_STATE_DIRECTORY_INVALID')
-                $input=[ordered]@{schemaVersion=1;runId=[string]$request.runId;deadlineUtc=[string]$request.deadlineUtc;runnerSha256=$expectedRunnerHash;candidate=$request.candidate;execution=[ordered]@{role='Laptop / Surrogate';vmName=[string]$request.vmName;vmId=[string]$request.vmId;computeInstanceName=$compute;vaultInstanceName=$vault;deploymentId=[string]$computeIdentity.deployment_id;nodeId=[string]$computeIdentity.node_id;nodeName=[string]$computeIdentity.node_name;transactionId=[string]$request.transactionId;invocationId=[string]$request.invocationId;surrogateEvidenceSha256=[string]$request.surrogateEvidenceSha256};paths=[ordered]@{workspaces=[string]$computeConfig.workspaces;quarantine=[string]$computeConfig.quarantine;runtimeRoot=[string]$computeConfig.runtime_root};baseUrl=('http://127.0.0.1:{0}'-f[int]$computeConfig.portal_port)}
-                $inputJson=$input|ConvertTo-Json -Depth 12 -Compress;$inputBytes=[Text.Encoding]::UTF8.GetBytes($inputJson);$inputBase64=[Convert]::ToBase64String($inputBytes);$sha=[Security.Cryptography.SHA256]::Create();try{$inputHash=($sha.ComputeHash($inputBytes)|ForEach-Object{$_.ToString('x2')})-join''}finally{$sha.Dispose()}
-                $writeScript='set -Eeuo pipefail; umask 027; printf %s "$1" | base64 -d > "$2"; chown root:devfleet-control "$2"; chmod 0640 "$2"'
-                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','bash','-c',$writeScript,'devfleet-real-use-input',$inputBase64,$inputPath) 60 'REAL_USE_INPUT_WRITE_FAILED')
-                $remoteInputHash=(Read-MultipassLine @('exec',$compute,'--','sudo','sha256sum',$inputPath) 'REAL_USE_INPUT_HASH_MISSING').Split(' ',[StringSplitOptions]::RemoveEmptyEntries)[0].ToLowerInvariant();if($remoteInputHash-cne$inputHash){throw 'REAL_USE_INPUT_HASH_MISMATCH'}
-                $preflight=[ordered]@{laptopInstalled=$true;failoverReady=$true;vaultReady=$true;brokerReady=$true;tailscaleReady=$true;secretFilePolicy=$true;credentialBoundary=$true}
-                $stageEvidence=[ordered]@{l1Sha256=$expectedRunnerHash;l2Sha256=$l2RunnerHash;inputSha256=$inputHash;onlyRunnerStaged=$true}
-                $remaining=[int][Math]::Floor(([datetime]$request.deadlineUtc-[datetime]::UtcNow).TotalSeconds)-[int]$request.cleanupReserveSeconds;if($remaining-lt 1){throw 'REAL_USE_OWNER_DEADLINE_EXHAUSTED'};$prepareBudget=[Math]::Min([int]$request.prepareTimeoutSeconds,$remaining);$prepareCall=Invoke-DriverStage 'prepare' $preparePath $prepareBudget;$prepareExit=$prepareCall.exitCode;$prepareReport=Read-Report $preparePath 'REAL_USE_PREPARE_REPORT_INVALID'
-                if($prepareCall.exitCode-ne 0-or[string]$prepareReport.status-cne'PREPARED'){
-                    $cleanupRemaining=[Math]::Max(1,[Math]::Min([int]$request.cleanupReserveSeconds,[int][Math]::Floor(([datetime]$request.deadlineUtc-[datetime]::UtcNow).TotalSeconds)));$cleanupCall=Invoke-DriverStage 'cleanup' $cleanupPath $cleanupRemaining;$cleanupExit=$cleanupCall.exitCode;try{$cleanupReport=Read-Report $cleanupPath 'REAL_USE_CLEANUP_REPORT_INVALID'}catch{}
-                    $transportResult=[pscustomobject][ordered]@{input=$input;preflight=$preflight;stage=$stageEvidence;prepareReport=$prepareReport;prepareExitCode=$prepareExit;restart=$null;resumeReport=$null;resumeExitCode=$null;cleanupReport=$cleanupReport;cleanupExitCode=$cleanupExit;ownedRootRemoved=$false}
-                }else{
-                    $before=Read-MultipassLine @('exec',$compute,'--','systemctl','show','devfleet.service','--prope
+                if($Unit-cnotmatch'\Adevfleet-real-use-[0-9a-f]{12}-(?:pr

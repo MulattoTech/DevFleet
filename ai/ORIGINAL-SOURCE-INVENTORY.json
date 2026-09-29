@@ -146,11 +146,11 @@
   {
     "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py",
     "gitMode": "100644",
-    "gitBlob": "64daef29a82d116a7a0ce4ab979f7ff75bfbc99e",
-    "bytes": 33508,
-    "sha256": "ff071a21d1c16ec3edd272eb8dd4ed163c3a32b021f5d9459c12923f0842cc08",
+    "gitBlob": "b8e1d1236bcd324b8b1b3eb5174fb1b99449535f",
+    "bytes": 37284,
+    "sha256": "76c5735d847a268bffd0587926ad214ed7385acb65df48eb6b3fde57687ef05a",
     "destination": "github-repository/.agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py",
-    "lfSha256": "ff071a21d1c16ec3edd272eb8dd4ed163c3a32b021f5d9459c12923f0842cc08"
+    "lfSha256": "76c5735d847a268bffd0587926ad214ed7385acb65df48eb6b3fde57687ef05a"
   },
   {
     "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/guest_auth_diagnosis.py",
@@ -225,6 +225,15 @@
     "lfSha256": "90c8d331205d7756b0d52d59df02c30767c813c897dd95422f1cce4c9191a2be"
   },
   {
+    "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair5_successor.py",
+    "gitMode": "100644",
+    "gitBlob": "ce1db3d70e0588309a51e4c529c871d8f2d74d8e",
+    "bytes": 4734,
+    "sha256": "a37284a6cac41353a88de659b7c6f0f61bda3b0f1c2f2413a4c5c066e313df58",
+    "destination": "github-repository/.agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair5_successor.py",
+    "lfSha256": "a37284a6cac41353a88de659b7c6f0f61bda3b0f1c2f2413a4c5c066e313df58"
+  },
+  {
     "path": ".agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair_successor.py",
     "gitMode": "100644",
     "gitBlob": "42592bd75956762dbbb5d52324c44d6ef15aaebb",
@@ -272,11 +281,11 @@
   {
     "path": ".agents/skills/devfleet-e2e-fastlane/SKILL.md",
     "gitMode": "100644",
-    "gitBlob": "bbf7a36d1f2ba7b946ddc1d4a8675fcab72ee339",
-    "bytes": 3417,
-    "sha256": "9d8a7a8abdca00013101e565c3e9f37b530b5b7db292992935f5019a6fa64318",
+    "gitBlob": "b1c7eaba5fac15e3424c95abc1a6a455fe6c1986",
+    "bytes": 4062,
+    "sha256": "f4c76aa1c783df6c9944ce48a2588425ee51ac4771e272c844d185254bd92372",
     "destination": "github-repository/.agents/skills/devfleet-e2e-fastlane/SKILL.md",
-    "lfSha256": "9d8a7a8abdca00013101e565c3e9f37b530b5b7db292992935f5019a6fa64318"
+    "lfSha256": "f4c76aa1c783df6c9944ce48a2588425ee51ac4771e272c844d185254bd92372"
   },
   {
     "path": ".agents/skills/devfleet-e2e-fastlane/agents/openai.yaml",
@@ -290,11 +299,11 @@
   {
     "path": ".agents/skills/devfleet-e2e-fastlane/references/acceleration.md",
     "gitMode": "100644",
-    "gitBlob": "b67c0203a1d12ac08c184a0bb0349eade0e8d819",
-    "bytes": 6634,
-    "sha256": "ca083695b17e83eb41dc6d7db0fac3c1be5c28c2c1da6bc19ad3bee453f0d177",
+    "gitBlob": "eb026f5f5bb5c202a13ded1ae2f2b9aee4bde843",
+    "bytes": 8484,
+    "sha256": "5163ce839f4b0038ffedf4060094a649878391b56f93c1d6426c2ff4d7ccd1f8",
     "destination": "github-repository/.agents/skills/devfleet-e2e-fastlane/references/acceleration.md",
-    "lfSha256": "ca083695b17e83eb41dc6d7db0fac3c1be5c28c2c1da6bc19ad3bee453f0d177"
+    "lfSha256": "5163ce839f4b0038ffedf4060094a649878391b56f93c1d6426c2ff4d7ccd1f8"
   },
   {
     "path": ".agents/skills/devfleet-e2e-fastlane/scripts/Test-VirtualClock.ps1",
@@ -596,11 +605,11 @@
   {
     "path": "automation/release-e2e/modules/BaselineLineage.psm1",
     "gitMode": "100644",
-    "gitBlob": "915e9834c38ffbf8dbfddba7318cf51ca15114f9",
-    "bytes": 9065,
-    "sha256": "d29e14c6be17a8a8e8604cbcbfcd15d7501d81cd00cb788175d535748b20af75",
+    "gitBlob": "73d64856ca90710669b3bf8509a2d8e6a2730981",
+    "bytes": 9067,
+    "sha256": "624dacfae365be77fb7dbce76924b1628994eedbdc6576ef400e4bc8a6e74e96",
     "destination": "github-repository/automation/release-e2e/modules/BaselineLineage.psm1",
-    "lfSha256": "d29e14c6be17a8a8e8604cbcbfcd15d7501d81cd00cb788175d535748b20af75"
+    "lfSha256": "624dacfae365be77fb7dbce76924b1628994eedbdc6576ef400e4bc8a6e74e96"
   },
   {
     "path": "automation/release-e2e/modules/Candidate.psm1",
@@ -803,11 +812,11 @@
   {
     "path": "automation/release-e2e/modules/executors/Invoke-RealProductPhase.psm1",
     "gitMode": "100644",
-    "gitBlob": "2be74c2567902b0aa12f47ee68b502dbfb9fdfc5",
-    "bytes": 347094,
-    "sha256": "cbfcbfcdd2322fb4dc92f49d61a49c58a98608648a213360d130b5cb4451e3ef",
+    "gitBlob": "236691630c0aa93510969c30e06f521f18af89d6",
+    "bytes": 347707,
+    "sha256": "ca0085ca9ecaee5342b5c1af71c4c853287aaafd6adc39a9e2935288645c3a34",
     "destination": "github-repository/automation/release-e2e/modules/executors/Invoke-RealProductPhase.psm1",
-    "lfSha256": "cbfcbfcdd2322fb4dc92f49d61a49c58a98608648a213360d130b5cb4451e3ef"
+    "lfSha256": "ca0085ca9ecaee5342b5c1af71c4c853287aaafd6adc39a9e2935288645c3a34"
   },
   {
     "path": "automation/release-e2e/modules/executors/Invoke-RealUseAcceptance.py",
@@ -1222,6 +1231,15 @@
     "sha256": "167cd8a464fee826bfdfb77507f54ac008d84cd964094966001a43703986f142",
     "destination": "github-repository/automation/release-e2e/tests/Test-NestedPrimaryReadiness.ps1",
     "lfSha256": "167cd8a464fee826bfdfb77507f54ac008d84cd964094966001a43703986f142"
+  },
+  {
+    "path": "automation/release-e2e/tests/Test-NestedPrimaryReadinessFreshness.ps1",
+    "gitMode": "100644",
+    "gitBlob": "b78c7f64471337c390ed4fe4ed94cba05284403b",
+    "bytes": 4202,
+    "sha256": "0412bd5863b8cafdedd17735f3b9f0db6cd55e2609b99b6678c5390fcde03d93",
+    "destination": "github-repository/automation/release-e2e/tests/Test-NestedPrimaryReadinessFreshness.ps1",
+    "lfSha256": "0412bd5863b8cafdedd17735f3b9f0db6cd55e2609b99b6678c5390fcde03d93"
   },
   {
     "path": "automation/release-e2e/tests/Test-NestedProductScenarioArgumentBinding.ps1",
@@ -8525,11 +8543,11 @@
   {
     "path": "tools/Build-AIAuditBundle.ps1",
     "gitMode": "100644",
-    "gitBlob": "bc437c90c77068100a6d3256ddf0db0b98a881dd",
-    "bytes": 98855,
-    "sha256": "b629ddf29c295f25cd7e4072b6d06d8a43e78270686b44309ab43d3a984c744f",
+    "gitBlob": "0dd036c2bbfc414bee8bed3c2d7adc9c677dab06",
+    "bytes": 100487,
+    "sha256": "98011014a59a1194a40dcbdc4c9af9365a8d80a19262ad510851d26df16085de",
     "destination": "github-repository/tools/Build-AIAuditBundle.ps1",
-    "lfSha256": "b629ddf29c295f25cd7e4072b6d06d8a43e78270686b44309ab43d3a984c744f"
+    "lfSha256": "98011014a59a1194a40dcbdc4c9af9365a8d80a19262ad510851d26df16085de"
   },
   {
     "path": "tools/Build-ChatGPT-AuditBundle.ps1",
@@ -8624,11 +8642,11 @@
   {
     "path": "tools/baseline_lineage.py",
     "gitMode": "100644",
-    "gitBlob": "e8f3294c4b8e5dbc3ef7761b5ee7342d340e6416",
-    "bytes": 60663,
-    "sha256": "52613d825b166702fa1ea1e2a61df01e5233a9ba7be36ca128a7d2adb5bbd5a7",
+    "gitBlob": "75dcc6e712df424750007895d544969a617629b8",
+    "bytes": 75315,
+    "sha256": "b936559c05356ebc51e0cb797d697e015043b0aed169a6c3a8e4565482a4b0bc",
     "destination": "github-repository/tools/baseline_lineage.py",
-    "lfSha256": "52613d825b166702fa1ea1e2a61df01e5233a9ba7be36ca128a7d2adb5bbd5a7"
+    "lfSha256": "b936559c05356ebc51e0cb797d697e015043b0aed169a6c3a8e4565482a4b0bc"
   },
   {
     "path": "tools/compute_shipping_input_identity.py",
@@ -8683,6 +8701,24 @@
     "sha256": "5fda914ef2dc9fd8978149fe13b2d24d05fbe322a67e6563347908314aa4e72c",
     "destination": "github-repository/tools/test_baseline_generation4.py",
     "lfSha256": "5fda914ef2dc9fd8978149fe13b2d24d05fbe322a67e6563347908314aa4e72c"
+  },
+  {
+    "path": "tools/test_baseline_generation5.py",
+    "gitMode": "100644",
+    "gitBlob": "19e08ec21a8da5b08c6ff03ab4d9938784db1ed9",
+    "bytes": 8957,
+    "sha256": "597d502646fbbf71f3973c5733683208728e3a915b3bdbdbad48928cb741be5d",
+    "destination": "github-repository/tools/test_baseline_generation5.py",
+    "lfSha256": "597d502646fbbf71f3973c5733683208728e3a915b3bdbdbad48928cb741be5d"
+  },
+  {
+    "path": "tools/test_baseline_generation5_input_integrity.py",
+    "gitMode": "100644",
+    "gitBlob": "894b13e2b2368913bd501859db15bf14f17497f8",
+    "bytes": 2514,
+    "sha256": "a028089bcc8a2dacc5d8f32ff04be217789c15a7336120cdd78c7994681fc012",
+    "destination": "github-repository/tools/test_baseline_generation5_input_integrity.py",
+    "lfSha256": "a028089bcc8a2dacc5d8f32ff04be217789c15a7336120cdd78c7994681fc012"
   },
   {
     "path": "tools/test_baseline_lineage.py",
@@ -8766,6 +8802,15 @@
     "lfSha256": "7b51a6dc41a6487f4174f38a71155db86c04790e6475cf97e2447608f9acfd23"
   },
   {
+    "path": "tools/test_validate_release_bundle_generation5.py",
+    "gitMode": "100644",
+    "gitBlob": "c990e10074fa8c2d8e817d036543c6150a31154b",
+    "bytes": 6130,
+    "sha256": "b3cc6cd0a57807586655b7dc13de0ae9a0d98d72a433a96352634461f1fb9471",
+    "destination": "github-repository/tools/test_validate_release_bundle_generation5.py",
+    "lfSha256": "b3cc6cd0a57807586655b7dc13de0ae9a0d98d72a433a96352634461f1fb9471"
+  },
+  {
     "path": "tools/validate_audit_coherence.py",
     "gitMode": "100644",
     "gitBlob": "cd1d9f870bfe29a6a54f198163326c9867a68f6a",
@@ -8777,10 +8822,10 @@
   {
     "path": "tools/validate_release_bundle.py",
     "gitMode": "100644",
-    "gitBlob": "0ac32a6c4ce580af54eb5c52777f2cbc2f0295b1",
-    "bytes": 128592,
-    "sha256": "2fd84920a5fc7a6ee730c3e5629e5c56ed9c10f1e60766220b727f85939885da",
+    "gitBlob": "e022ea14ddd823cdde69f1b8cdb9d7a7696f7a40",
+    "bytes": 136303,
+    "sha256": "1228d4de2428f2c9adbaadabed05ac581c14f5b7f48ec99613f16fe8dafdca8a",
     "destination": "github-repository/tools/validate_release_bundle.py",
-    "lfSha256": "2fd84920a5fc7a6ee730c3e5629e5c56ed9c10f1e60766220b727f85939885da"
+    "lfSha256": "1228d4de2428f2c9adbaadabed05ac581c14f5b7f48ec99613f16fe8dafdca8a"
   }
 ]

@@ -1,10 +1,293 @@
 # DevFleet source part 084
 
 Full-source UTF-8 byte interval [3859500, 3906000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 9a9ab96d3168433b6857a3fd0e7e79c53a78e84ffb55531405c62bb3a2721229
+Payload SHA-256: 8f7be314498f872090dedc42f2f3d1a52df9fae08b6d49cd59bcc6223d73b88e
 
 <!-- BEGIN SOURCE SLICE -->
-ce/linux/devfleet-purge-quarantine
+    fh.write('RESTIC_PASSWORD=' + systemd_quote(os.environ['DEVFLEET_RESTIC_PASSWORD']) + '\n')
+PY
+chmod 0600 /etc/rest-server/vault-admin.env
+cat >/etc/systemd/system/rest-server.service <<EOF
+[Unit]
+Description=DevFleet append-only restic REST server
+After=network-online.target tailscaled.service
+Wants=network-online.target
+[Service]
+User=resticvault
+Group=resticvault
+ExecStart=/usr/local/bin/rest-server --path /srv/restic --listen $TAILSCALE_IP:$PORT --append-only --private-repos --htpasswd-file /etc/rest-server/htpasswd
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/srv/restic
+ProtectHome=true
+[Install]
+WantedBy=multi-user.target
+EOF
+install -m 0755 "$PAYLOAD/linux/devfleet-vault-health" /usr/local/sbin/devfleet-vault-health
+install -m 0755 "$PAYLOAD/linux/devfleet-vault-maintenance" /usr/local/sbin/devfleet-vault-maintenance
+systemctl daemon-reload
+systemctl enable --now rest-server
+complete_component
+begin_component firewallFinalization 300
+ip link show tailscale0 >/dev/null 2>&1 || { echo 'Tailscale interface is unavailable; refusing broad Vault firewall rules.' >&2; exit 4; }
+# Add only exact DevFleet-owned rules. Preserve unrelated administrator policy
+# and do not enable or reset the host firewall here.
+ufw allow in on tailscale0 to any port 22 proto tcp comment 'DevFleet-owned tailscale SSH'
+ufw allow in on tailscale0 to any port "$PORT" proto tcp comment 'DevFleet-owned tailscale Vault'
+cat >/usr/local/sbin/devfleet-vault-firewall-refresh <<'FIREWALL_REFRESH'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+ip link show tailscale0 >/dev/null 2>&1 || exit 4
+ufw allow in on tailscale0 to any port 22 proto tcp comment 'DevFleet-owned tailscale SSH'
+ufw allow in on tailscale0 to any port __VAULT_PORT__ proto tcp comment 'DevFleet-owned tailscale Vault'
+FIREWALL_REFRESH
+sed -i "s/__VAULT_PORT__/$PORT/g" /usr/local/sbin/devfleet-vault-firewall-refresh
+chmod 0755 /usr/local/sbin/devfleet-vault-firewall-refresh
+cat >/etc/systemd/system/devfleet-vault-firewall-refresh.service <<'FIREWALL_UNIT'
+[Unit]
+Description=Refresh DevFleet Vault private-network firewall rules
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/devfleet-vault-firewall-refresh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+FIREWALL_UNIT
+systemctl daemon-reload
+systemctl enable --now devfleet-vault-firewall-refresh.service
+jq -n --arg cluster "$CLUSTER" --arg user "$REST_USER" --argjson port "$PORT" '{cluster:$cluster,port:$port,user:$user}' > /etc/devfleet-vault-public.json
+jq -n --arg deployment "$DEPLOYMENT_ID" --arg id "$NODE_ID" --arg node "$NODE_NAME" '{schema_version:1,deployment_id:$deployment,node_id:$id,node_name:$node,node_role:"vault"}' > /etc/devfleet-vault-identity.json
+chmod 0600 /etc/devfleet-vault-public.json
+chmod 0600 /etc/devfleet-vault-identity.json
+complete_component
+write_progress bootstrap COMPLETED
+echo 'DevFleet vault bootstrap complete.'
+
+```
+
+
+## FILE: source/linux/dependency-advisory-allowlist.json
+
+SHA256: 81a515050e5d312ac4a453fa1bdaa999cfc11ad6a652659776bf5747c6b69168 | Bytes: 46 | Git mode: 100644
+
+```
+{
+  "schema_version": 1,
+  "exceptions": []
+}
+
+```
+
+
+## FILE: source/linux/dependency-policy.json
+
+SHA256: 9754d4c72b9a3c608f1ed1efda0d1ff7ae12f8d6be555ccd618466b8125c9269 | Bytes: 936 | Git mode: 100644
+
+```
+{
+  "schemaVersion": 1,
+  "tailscale": {
+    "repository": "https://pkgs.tailscale.com/stable/ubuntu",
+    "signingKeySha256Fingerprint": "2596A99EAAB33821893C0A79458CA832957F5868"
+  },
+  "docker": {
+    "repository": "https://download.docker.com/linux/ubuntu",
+    "signingKeySha256Fingerprint": "9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
+  },
+  "node": {
+    "source": "Ubuntu signed apt repository",
+    "minimumMajor": 18,
+    "devcontainersCliVersion": "0.80.1",
+    "devcontainersCliIntegrity": "sha512-FD6wq8ka2fVqybWooW++0UVTqo46TzxHblwTi9y58TqP3Qdx6iwMt/hzgjfcs865BtR36+wEg+qRPcKwxjzjBA=="
+  },
+  "restServer": {
+    "owner": "restic",
+    "repository": "rest-server",
+    "tag": "v0.14.0",
+    "asset": "rest-server_0.14.0_linux_amd64.tar.gz",
+    "sha256": "4c9c95bc079a0334e81fad379b19dc5c3353c71c2c88d652cafce2081c2b1c66",
+    "metadataSource": "https://api.github.com/repos/restic/rest-server/releases/tags/v0.14.0"
+  }
+}
+
+```
+
+
+## FILE: source/linux/devfleet-backup
+
+SHA256: c1334694748167d8781713b3a74fe184b8a549dfde457a500233a97999e8f644 | Bytes: 1629 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+[[ -r /etc/devfleet/restic.env ]] || exit 0
+set -a; source /etc/devfleet/restic.env; set +a
+[[ -d /var/lib/devfleet/backup-status && -w /var/lib/devfleet/backup-status ]] || { echo 'Backup status directory is missing or not writable.' >&2; exit 3; }
+[[ -d "${RESTIC_CACHE_DIR:-}" && -w "${RESTIC_CACHE_DIR:-}" ]] || { echo 'Restic cache directory is missing or not writable.' >&2; exit 3; }
+exec 9>/run/lock/devfleet-vault-operation.lock
+flock -n 9 || { echo 'Another Vault operation is already in progress.' >&2; exit 75; }
+exclude=$(mktemp)
+trap 'rm -f -- "$exclude"' EXIT
+cat >"$exclude" <<'EOF'
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.next
+**/dist
+**/build
+**/.cache
+# The transaction journal is control-owned (0700) and is not workspace data.
+# Keep the backup account from traversing this protected internal subtree.
+/home/devrunner/workspaces/.devfleet-transactions
+EOF
+if restic backup /home/devrunner/workspaces /home/devrunner/.devfleet-quarantine --host "$(hostname)" --tag devfleet --exclude-file "$exclude" --exclude-caches; then
+  printf '{"local_backup_status":"verified","vault_upload_status":"verified","durability_level":"vault"}\n' > /var/lib/devfleet/backup-status/latest.json
+else
+  backup_exit=$?
+  # Preserve the fixed child cause (for example unreadable source data), never
+  # accept a partial snapshot or expose private restic output through the broker.
+  printf '{"local_backup_status":"failed","vault_upload_status":"failed","durability_level":"none"}\n' > /var/lib/devfleet/backup-status/latest.json
+  exit "$backup_exit"
+fi
+
+```
+
+
+## FILE: source/linux/devfleet-configure-backup
+
+SHA256: f12c94fa0f12ba9482cbf8b10de3dfc5211d46f01863498af2a1a5d14849479e | Bytes: 2389 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+src=${1:?vault json required}
+cleanup(){ if [[ "$src" == /tmp/* ]]; then rm -f -- "$src"; fi; }
+trap cleanup EXIT
+jq -e '.Repository and .RestUser and .RestPassword and .ResticPassword' "$src" >/dev/null
+repo=$(jq -r .Repository "$src")
+pairing_mode=$(jq -r '.PairingMode // "tailscale"' "$src")
+[[ "$pairing_mode" == 'tailscale' ]] || { echo 'Authenticated Vault transport requires Tailscale; plaintext deferred-local transport is disabled.' >&2; exit 2; }
+[[ "$repo" =~ ^rest:http://100\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/ ]] || { echo 'Repository must use a Tailscale IPv4 address.' >&2; exit 2; }
+cat >/etc/devfleet/restic.env <<EOF
+RESTIC_REPOSITORY=$repo
+RESTIC_REST_USERNAME=$(jq -r .RestUser "$src")
+RESTIC_REST_PASSWORD=$(jq -r .RestPassword "$src")
+RESTIC_PASSWORD=$(jq -r .ResticPassword "$src")
+RESTIC_CACHE_DIR=/var/lib/devfleet/backup-status/restic-cache
+EOF
+chown root:devfleet-backup /etc/devfleet/restic.env
+chmod 0640 /etc/devfleet/restic.env
+# Keep /etc/devfleet private while allowing only the backup service account to
+# traverse it to the restic environment file whose group owns read access.
+setfacl -m u:devfleet-backup:--x /etc/devfleet
+# Keep the runtime state root private while allowing the backup service account
+# to reach its separately permissioned status directory.
+setfacl -m u:devfleet-backup:--x /var/lib/devfleet
+# The backup source directories are deliberately private to devrunner and are
+# granted only the traversal needed by the backup service account. Their child
+# ACLs remain the authority for the actual files and directories read.
+setfacl -m u:devfleet-backup:--x /home/devrunner
+install -d -o devfleet-control -g devfleet-control -m 0750 /var/lib/devfleet/backup-status
+setfacl -m u:devfleet-backup:rwx /var/lib/devfleet/backup-status
+install -d -o devfleet-backup -g devfleet-backup -m 0700 /var/lib/devfleet/backup-status/restic-cache
+jq -n --arg repository "$repo" '{repository:$repository}' >/var/lib/devfleet/backup-status/config.json
+chown devfleet-control:devfleet-control /var/lib/devfleet/backup-status/config.json
+chmod 0640 /var/lib/devfleet/backup-status/config.json
+sudo -u devfleet-backup bash -lc 'set -a; source /etc/devfleet/restic.env; set +a; restic snapshots >/dev/null 2>&1 || restic init'
+systemctl restart devfleet-backup.timer
+sudo -u devfleet-backup /usr/local/bin/devfleet-backup
+
+```
+
+
+## FILE: source/linux/devfleet-docker-mode-report
+
+SHA256: ad369c63d0363aa359ce1e34d37deeeb2947fc7d90f8a137cc4c14756b3e0017 | Bytes: 589 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+uid=$(id -u devrunner);echo "Selected mode: $(jq -r '.docker_mode // "rootless"' /etc/devfleet/config.json)";echo 'Rootless store:';sudo -u devrunner env DOCKER_HOST="unix:///run/user/$uid/docker.sock" docker info --format 'root={{.DockerRootDir}} containers={{.Containers}} images={{.Images}}' 2>/dev/null || echo unavailable;echo 'Rootful store:';docker info --format 'root={{.DockerRootDir}} containers={{.Containers}} images={{.Images}}' 2>/dev/null || echo unavailable;echo 'Stores are separate. DevFleet never silently copies or deletes them.'
+
+```
+
+
+## FILE: source/linux/devfleet-health
+
+SHA256: 11e17775c3f5a9dc5a59e79d70aeb2adcb0f25a0a1a6b4ecaafb1feefd1fd78a | Bytes: 1352 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -u
+docker_mode=$(jq -r '.docker_mode // "rootless"' /etc/devfleet/config.json 2>/dev/null || echo rootless)
+if [[ $docker_mode == rootless ]]; then export DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"; export DOCKER_CONTEXT=rootless; else unset DOCKER_HOST; export DOCKER_CONTEXT=default; fi
+fail=0
+printf 'Node: '; hostname
+printf 'Tailscale: '; tailscale status --json --peers=false 2>/dev/null | jq -r '.BackendState // "not-connected"' || echo unavailable
+if [[ $docker_mode == rootless ]]; then
+  printf 'Rootless Docker: '
+  if docker info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q rootless; then echo OK; else echo FAIL; fail=1; fi
+else
+  printf 'Rootful Docker: '
+  if docker info >/dev/null 2>&1; then echo OK; else echo FAIL; fail=1; fi
+fi
+printf 'DevFleet service: '; systemctl is-active devfleet || fail=1
+printf 'Disk: '; df -h /home/devrunner | tail -n1
+printf 'Workspaces: '; find /home/devrunner/workspaces -mindepth 1 -maxdepth 1 -type d | wc -l
+printf 'Backup timer: '; systemctl is-active devfleet-backup.timer || true
+if [[ -f /var/lib/devfleet/backup-status/latest.json ]]; then
+  printf 'Backup status: '; jq -r '.durability_level // .local_backup_status // "unknown"' /var/lib/devfleet/backup-status/latest.json
+else echo 'Backup: not configured or not yet verified'; fi
+exit $fail
+
+```
+
+
+## FILE: source/linux/devfleet-join-deployment
+
+SHA256: 9a542f43851dfe31cc37928d650463e5724e6f0156fbe484b95a101645ec16cf | Bytes: 5139 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+src=${1:?primary invitation required}; identity=/etc/devfleet/node-identity.json; config=/etc/devfleet/config.json; registry=/var/lib/devfleet/runtime/node-registry.json
+[[ -f "$src" && -f "$identity" && -f "$config" ]] || { echo 'Joined-surrogate inputs are incomplete.' >&2; exit 3; }
+uuid='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+jq -e --arg r "$uuid" '.node_role=="primary" and .protocol_version==1 and (.deployment_id|type=="string" and test($r)) and (.node_id|type=="string" and test($r))' "$src" >/dev/null || { echo 'Primary invitation identity or protocol is invalid.' >&2; exit 3; }
+jq -e --arg r "$uuid" '.node_role=="surrogate" and (.deployment_id=="" or .deployment_id==null) and .protocol_version==1 and (.node_id|type=="string" and test($r)) and (.node_name|type=="string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$"))' "$identity" >/dev/null || { echo 'Existing node is not a valid unjoined Surrogate.' >&2; exit 3; }
+node_id=$(jq -er '.node_id' "$identity"); node_name=$(jq -er '.node_name' "$identity")
+jq -e --arg id "$node_id" --arg name "$node_name" '.node_role=="surrogate" and .node_id==$id and .node_name==$name and (.deployment_id=="" or .deployment_id==null) and .protocol_version==1' "$config" >/dev/null || { echo 'Surrogate configuration identity is missing or already joined.' >&2; exit 3; }
+deployment=$(jq -er '.deployment_id' "$src"); primary=$(jq -er '.node_id' "$src"); protocol=$(jq -er '.protocol_version' "$src")
+install -d -o devfleet-control -g devfleet-control -m 0750 /var/lib/devfleet/runtime
+if [[ -f "$registry" ]]; then jq -e --arg d "$deployment" '.deployment_id==$d' "$registry" >/dev/null || { echo 'Local registry deployment mismatch.' >&2; exit 3; }; fi
+tmpdir=$(mktemp -d /etc/devfleet/.join-deployment.XXXXXX); backupdir=$(mktemp -d /etc/devfleet/.join-deployment-backup.XXXXXX); restarted=0
+cleanup(){ rm -rf -- "$tmpdir" "$backupdir"; }; trap cleanup EXIT
+backup(){ local p=$1 n=$2; if [[ -e "$p" || -L "$p" ]]; then [[ -f "$p" && ! -L "$p" ]] || return 1; cp -p -- "$p" "$backupdir/$n"; stat -c '%u:%g:%a' "$p" >"$backupdir/$n.stat"; else : >"$backupdir/$n.absent"; fi; }
+restore(){ local p=$1 n=$2; if [[ -f "$backupdir/$n.absent" ]]; then rm -f -- "$p"; return; fi; install -m 0600 "$backupdir/$n" "$p"; IFS=: read -r u g m <"$backupdir/$n.stat"; chown "$u:$g" "$p" && chmod "$m" "$p"; }
+rollback(){ local rc=0; restore "$identity" identity || rc=1; restore "$config" config || rc=1; restore "$registry" registry || rc=1; if [[ $rc -eq 0 && $restarted -eq 1 ]]; then systemctl restart devfleet.service || rc=1; fi; [[ $rc -eq 0 ]] || { echo 'ROLLBACK_FAILED: joined-surrogate state could not be restored.' >&2; return 1; }; }
+fail(){ echo "$1" >&2; rollback || exit 70; exit 1; }
+backup "$identity" identity || exit 3; backup "$config" config || exit 3; backup "$registry" registry || exit 3
+jq --arg d "$deployment" --arg c "$primary" --argjson p "$protocol" '.deployment_id=$d|.coordinator_node_id=$c|.registration_state="joined"|.protocol_version=$p' "$identity" >"$tmpdir/identity"
+jq --arg d "$deployment" --arg c "$primary" --argjson p "$protocol" '.deployment_id=$d|.coordinator_node_id=$c|.registration_state="joined"|.protocol_version=$p' "$config" >"$tmpdir/config"
+if [[ -f "$registry" ]]; then jq --arg d "$deployment" --arg id "$node_id" --arg n "$node_name" --arg c "$primary" --argjson p "$protocol" '.deployment_id=$d|.nodes=(.nodes//[])|if any(.nodes[];.node_id==$id) then .nodes |= map(if .node_id==$id then .deployment_id=$d|.node_name=$n|.node_role="surrogate"|.coordinator_node_id=$c|.protocol_version=$p|.registration_state="joined"|.connectivity="online" else . end) else .nodes += [{deployment_id:$d,node_id:$id,node_name:$n,node_role:"surrogate",capabilities:["compute"],coordinator_node_id:$c,protocol_version:$p,registration_state:"joined",connectivity:"online"}] end' "$registry" >"$tmpdir/registry"; else jq -n --arg d "$deployment" --arg id "$node_id" --arg n "$node_name" --arg c "$primary" --argjson p "$protocol" '{schema_version:1,deployment_id:$d,nodes:[{deployment_id:$d,node_id:$id,node_name:$n,node_role:"surrogate",capabilities:["compute"],coordinator_node_id:$c,protocol_version:$p,registration_state:"joined",connectivity:"online"}]}' >"$tmpdir/registry"; fi
+install -o root -g devrunner -m 0640 "$tmpdir/identity" "$tmpdir/identity.ready" || fail 'Failed to stage joined node identity.'
+install -o root -g devfleet-control -m 0640 "$tmpdir/config" "$tmpdir/config.ready" || fail 'Failed to stage joined config.'
+install -o devfleet-control -g devfleet-control -m 0640 "$tmpdir/registry" "$tmpdir/registry.ready" || fail 'Failed to stage joined node registry.'
+mv -f -- "$tmpdir/identity.ready" "$identity" || fail 'Failed to commit joined node identity.'; mv -f -- "$tmpdir/config.ready" "$config" || fail 'Failed to commit joined config.'; mv -f -- "$tmpdir/registry.ready" "$registry" || fail 'Failed to commit joined node registry.'
+restarted=1; systemctl restart devfleet.service || fail 'Joined identity committed but daemon restart failed.'; restarted=0
+
+```
+
+
+## FILE: source/linux/devfleet-purge-quarantine
 
 SHA256: cf80700961b1878e3de64867c67b293c44832cb0b70e59510081cbe7bfc487a1 | Bytes: 426 | Git mode: 100644
 
@@ -680,433 +963,4 @@ def _run_fixed_operation(
         timeout = 1800
     else:
         command = ["/usr/local/bin/devfleet-restore-project", project, project_id]
-        if action == "restore-transfer":
-            command.extend(["transfer-copy", deployment_id, source_host_id])
-        timeout = 3600
-    completed = _run_child(command, timeout)
-    if completed.returncode:
-        if completed.returncode == 124:
-            error, error_code = "Vault operation timed out.", "vault-operation-timeout"
-        elif completed.returncode == 75:
-            error, error_code = "Another Vault operation is already in progress.", "vault-operation-busy"
-        elif completed.returncode == 5 and action.startswith("restore-"):
-            error, error_code = "Vault restore failed its safety checks.", "restore-safety-conflict"
-        else:
-            error, error_code = "Vault operation failed.", "vault-operation-failed"
-        return {
-            "ok": False,
-            "error": error,
-            "error_code": error_code,
-            "exit_code": int(completed.returncode),
-        }
-    if action == "backup":
-        # The root-owned fixed child is authoritative: it exits nonzero whenever
-        # restic fails.  latest.json remains dashboard telemetry and is deliberately
-        # not an authorization receipt because devfleet-control can write it.
-        return {
-            "ok": True,
-            "action": action,
-            "local_backup_status": "verified",
-            "vault_upload_status": "verified",
-            "durability_level": "vault",
-        }
-    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
-    if len(lines) != 1:
-        return {"ok": False, "error": "Vault restore receipt is invalid.", "exit_code": 5}
-    target = Path(lines[0])
-    if action in {"restore-copy", "restore-transfer"}:
-        expected_name = re.fullmatch(
-            re.escape(_recovered_prefix(project)) + r"[0-9]{8}-[0-9]{6}-[0-9a-f]{8}",
-            target.name,
-        )
-        valid_target = target.parent == WORKSPACES and expected_name is not None
-    else:
-        return {"ok": False, "error": "Vault restore action is unsupported.", "exit_code": 2}
-    if (
-        not valid_target
-        or not target.is_dir()
-        or target.is_symlink()
-        or not _restored_identity_matches(target, project, project_id, deployment_id, source_host_id)
-    ):
-        if action in {"restore-copy", "restore-transfer"}:
-            _quarantine_invalid_copy(target, project)
-        return {"ok": False, "error": "Vault restore target is invalid.", "exit_code": 5}
-    receipt = {
-        "ok": True,
-        "action": action,
-        "project": project,
-        "project_id": project_id,
-        "target": str(target),
-    }
-    if action == "restore-transfer":
-        receipt["deployment_id"] = deployment_id
-        receipt["source_host_id"] = source_host_id
-    return receipt
-
-
-def main() -> int:
-    connection = socket.socket(fileno=os.dup(0))
-    try:
-        try:
-            _assert_peer(connection)
-            request = _receive_frame(connection)
-            action, project, project_id, deployment_id, source_host_id = _parse_request(request)
-            response = _run_fixed_operation(
-                action, project, project_id, deployment_id, source_host_id
-            )
-        except (ProtocolError, OSError, KeyError) as exc:
-            response = {"ok": False, "error": str(exc), "exit_code": 2}
-        _send_frame(connection, response)
-        return 0
-    finally:
-        connection.close()
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-```
-
-
-## FILE: source/linux/devfleet-vault-health
-
-SHA256: aef4f5a6daa89f7a2e669a1e773e32e358801c242458b4a36da0e02769114763 | Bytes: 349 | Git mode: 100644
-
-```
-#!/usr/bin/env bash
-set -u
-printf 'Vault: '; hostname
-printf 'Tailscale: '; tailscale status --json --peers=false 2>/dev/null | jq -r '.BackendState // "not-connected"' || true
-printf 'rest-server: '; systemctl is-active rest-server
-printf 'Disk: '; df -h /srv/restic | tail -n1
-printf 'Repository bytes: '; du -sh /srv/restic 2>/dev/null | cut -f1
-
-```
-
-
-## FILE: source/linux/devfleet-vault-maintenance
-
-SHA256: bd9c01d8bf3ae54bbeba5f37b23d7dedc7e0a4a0778559d9c388f1b085e0c073 | Bytes: 408 | Git mode: 100644
-
-```
-#!/usr/bin/env bash
-set -Eeuo pipefail
-keep=${1:-90d}
-[[ "$keep" =~ ^[0-9]+[dmy]$ ]] || { echo invalid retention >&2; exit 2; }
-set -a; source /etc/rest-server/vault-admin.env; set +a
-systemctl stop rest-server
-trap 'systemctl start rest-server' EXIT
-if [[ -d "$RESTIC_REPOSITORY" ]]; then
-  restic forget --keep-within "$keep" --prune
-  restic check
-else
-  echo 'No repository has been initialized yet.'
-fi
-
-```
-
-
-## FILE: source/linux/devfleet-vault-request
-
-SHA256: 245458f58ef1a87ffd19abe2d6e3112e812d9b4ca6151158658be5f32b563fbb | Bytes: 4720 | Git mode: 100644
-
-```
-#!/usr/bin/env python3
-"""Bounded client for the DevFleet Vault broker."""
-
-from __future__ import annotations
-
-import json
-import re
-import socket
-import struct
-import sys
-
-
-SOCKET_PATH = "/run/devfleet-vault-broker.sock"
-MAX_REQUEST_BYTES = 4096
-MAX_RESPONSE_BYTES = 16384
-PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,62}$")
-PROJECT_ID_RE = re.compile(
-    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-)
-HOST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
-SAFE_FAILURE_CODES = frozenset(
-    {
-        "restore-safety-conflict",
-        "vault-operation-busy",
-        "vault-operation-failed",
-        "vault-operation-timeout",
-    }
-)
-
-
-def _request_from_argv(argv: list[str]) -> dict[str, str]:
-    if argv == ["backup"]:
-        return {"action": "backup"}
-    if len(argv) == 3 and argv[0] == "restore-copy":
-        if not PROJECT_RE.fullmatch(argv[1]):
-            raise ValueError("Project identity is invalid.")
-        if not PROJECT_ID_RE.fullmatch(argv[2]):
-            raise ValueError("Project ID is invalid.")
-        return {"action": argv[0], "project": argv[1], "project_id": argv[2]}
-    if len(argv) == 5 and argv[0] == "restore-transfer":
-        if not PROJECT_RE.fullmatch(argv[1]):
-            raise ValueError("Project identity is invalid.")
-        if not PROJECT_ID_RE.fullmatch(argv[2]):
-            raise ValueError("Project ID is invalid.")
-        if not PROJECT_ID_RE.fullmatch(argv[3]):
-            raise ValueError("Deployment ID is invalid.")
-        if not HOST_ID_RE.fullmatch(argv[4]):
-            raise ValueError("Source host identity is invalid.")
-        return {
-            "action": "restore-transfer",
-            "project": argv[1],
-            "project_id": argv[2],
-            "deployment_id": argv[3],
-            "source_host_id": argv[4],
-        }
-    raise ValueError(
-        "Usage: devfleet-vault-request backup | restore-copy PROJECT PROJECT_ID | restore-transfer PROJECT PROJECT_ID "
-        "DEPLOYMENT_ID SOURCE_HOST_ID"
-    )
-
-
-def _receive_exact(connection: socket.socket, count: int) -> bytes:
-    value = b""
-    while len(value) < count:
-        chunk = connection.recv(count - len(value))
-        if not chunk:
-            raise RuntimeError("Vault broker response ended early.")
-        value += chunk
-    return value
-
-
-def main(argv: list[str]) -> int:
-    try:
-        request = _request_from_argv(argv)
-        encoded = json.dumps(request, separators=(",", ":"), sort_keys=True).encode("utf-8")
-        if len(encoded) > MAX_REQUEST_BYTES:
-            raise ValueError("Vault broker request exceeded its bound.")
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-            connection.settimeout(5)
-            connection.connect(SOCKET_PATH)
-            # The fixed child owns at most 3600 seconds, then the broker and its
-            # service get bounded cleanup time before this client can time out.
-            connection.settimeout(3690)
-            connection.sendall(struct.pack("!I", len(encoded)) + encoded)
-            connection.shutdown(socket.SHUT_WR)
-            (length,) = struct.unpack("!I", _receive_exact(connection, 4))
-            if length < 2 or length > MAX_RESPONSE_BYTES:
-                raise RuntimeError("Vault broker response length is invalid.")
-            response_bytes = _receive_exact(connection, length)
-            if connection.recv(1):
-                raise RuntimeError("Vault broker sent more than one response frame.")
-        response = json.loads(response_bytes.decode("utf-8"))
-        if not isinstance(response, dict) or response.get("ok") is not True:
-            detail = response.get("error") if isinstance(response, dict) else "Invalid broker response."
-            error_code = response.get("error_code") if isinstance(response, dict) else None
-            exit_code = response.get("exit_code") if isinstance(response, dict) else None
-            if (
-                error_code in SAFE_FAILURE_CODES
-                and isinstance(exit_code, int)
-                and not isinstance(exit_code, bool)
-                and -255 <= exit_code <= 255
-                and exit_code != 0
-            ):
-                detail = f"{detail} [error_code={error_code}; exit_code={exit_code}]"
-            print(str(detail or "Vault broker rejected the operation."), file=sys.stderr)
-            return 1
-        print(json.dumps(response, separators=(",", ":"), sort_keys=True))
-        return 0
-    except (OSError, RuntimeError, ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
-
-```
-
-
-## FILE: source/linux/upgrade-compute.sh
-
-SHA256: f754f18cf80416026dea3f0a0b37772b419751aaec0198fd914c1ab87d8b5aec | Bytes: 97 | Git mode: 100644
-
-```
-#!/usr/bin/env bash
-set -Eeuo pipefail
-sudo bash "${1:?payload}/linux/bootstrap-compute.sh" "$1"
-
-```
-
-
-## FILE: source/pytest.ini
-
-SHA256: 6a96ba0e2d5a8296fb90f474da9d2f0173d3e41eba18965513f711104155f913 | Bytes: 41 | Git mode: 100644
-
-```
-[pytest]
-testpaths = tests
-addopts = -ra
-
-```
-
-
-## FILE: source/templates/cpp-cmake/.ai-bridge/chatgpt-memory.md
-
-SHA256: ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f | Bytes: 143 | Git mode: 100644
-
-```
-# Project continuity
-
-Keep this concise: current architecture, active branch, important decisions, and next safe action. Do not store secrets.
-
-```
-
-
-## FILE: source/templates/cpp-cmake/.ai-bridge/codexpro-project-instructions.md
-
-SHA256: 95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd | Bytes: 641 | Git mode: 100644
-
-```
-Use CodexPro. Call server_config first. Run codexpro_self_test only for a fresh, broken, or reconfigured session. Open the current workspace with include_tree=false, include_skills=true, and include_global_skills=true. Load codex_context with include_diff=false. Read .ai-bridge/codexpro-project-instructions.md, .ai-bridge/chatgpt-memory.md, AGENTS.md, and relevant handoffs. Use targeted search/read and diff-oriented review; exclude dependencies, generated assets, caches, models, binaries, and .ai-bridge/local-agent. Continue routine implementation without repeated approval and update a concise handoff before context becomes crowded.
-
-```
-
-
-## FILE: source/templates/cpp-cmake/.ai-bridge/current-plan.template.md
-
-SHA256: 7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb | Bytes: 69 | Git mode: 100644
-
-```
-# Current plan
-
-Goal:
-Changed files:
-Verification:
-Next safe action:
-
-```
-
-
-## FILE: source/templates/cpp-cmake/.ai-bridge/prompts/broken-session-recovery.md
-
-SHA256: d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135 | Bytes: 166 | Git mode: 100644
-
-```
-Call server_config, then codexpro_self_test. Reopen the current workspace without a full tree, inspect status and handoffs, and report the precise failed capability.
-
-```
-
-
-## FILE: source/templates/cpp-cmake/.ai-bridge/prompts/handoff-template.md
-
-SHA256: a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02 | Bytes: 78 | Git mode: 100644
-
-```
-Goal:
-Decisions:
-Changed files:
-Checks run/results:
-Open risks:
-Next action:
-
-
-```
-
-
-## FILE: source/templates/cpp-cmake/.ai-bridge/prompts/reconnect.md
-
-SHA256: 5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab | Bytes: 105 | Git mode: 100644
-
-```
-Verify server_config and open_current_workspace, then load the latest concise handoff before continuing.
-
-```
-
-
-## FILE: source/templates/cpp-cmake/.ai-bridge/prompts/session-bootstrap.md
-
-SHA256: 95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd | Bytes: 641 | Git mode: 100644
-
-```
-Use CodexPro. Call server_config first. Run codexpro_self_test only for a fresh, broken, or reconfigured session. Open the current workspace with include_tree=false, include_skills=true, and include_global_skills=true. Load codex_context with include_diff=false. Read .ai-bridge/codexpro-project-instructions.md, .ai-bridge/chatgpt-memory.md, AGENTS.md, and relevant handoffs. Use targeted search/read and diff-oriented review; exclude dependencies, generated assets, caches, models, binaries, and .ai-bridge/local-agent. Continue routine implementation without repeated approval and update a concise handoff before context becomes crowded.
-
-```
-
-
-## FILE: source/templates/cpp-cmake/.devcontainer/devcontainer.json
-
-SHA256: 445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622 | Bytes: 209 | Git mode: 100644
-
-```
-{
-  "name": "__PROJECT_NAME__",
-  "dockerComposeFile": "../compose.yaml",
-  "service": "dev",
-  "workspaceFolder": "/workspaces/__PROJECT_SLUG__",
-  "shutdownAction": "stopCompose",
-  "remoteUser": "vscode"
-}
-
-```
-
-
-## FILE: source/templates/cpp-cmake/.devfleet/bootstrap.sh
-
-SHA256: 0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a | Bytes: 116 | Git mode: 100644
-
-```
-#!/usr/bin/env bash
-set -Eeuo pipefail
-echo "Preview template: install dependencies inside this project container."
-
-```
-
-
-## FILE: source/templates/cpp-cmake/.devfleet/codexpro-bootstrap.sh
-
-SHA256: 18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b | Bytes: 2254 | Git mode: 100644
-
-```
-#!/usr/bin/env bash
-set -Eeuo pipefail
-root=$(pwd -P)
-workspace_root=${DEVFLEET_WORKSPACES_ROOT:-/workspaces}
-[[ "$workspace_root" == /* && "$workspace_root" != */ ]] || { echo 'DEVFLEET_WORKSPACES_ROOT must be an absolute directory.' >&2; exit 2; }
-[[ "$root" == "$workspace_root"/* ]] || { echo "CodexPro root must be under $workspace_root." >&2; exit 2; }
-project_rel=${root#"$workspace_root"/}
-[[ "$project_rel" != */* && -n "$project_rel" ]] || { echo 'CodexPro root must identify one project.' >&2; exit 2; }
-runtime="$root/.devfleet/runtime"; bridge="$root/.ai-bridge/local-agent"; mkdir -p "$runtime" "$bridge/logs"
-log="$runtime/codexpro-bootstrap.log"; status="$runtime/codexpro-status.json"; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-health_url=${DEVFLEET_CODEXPRO_HEALTH_URL:-http://127.0.0.1:8787/healthz}
-write_status(){ python3 - "$status" "$1" "$2" "$now" <<'PY2'
-import json,sys
-p,state,msg,now=sys.argv[1:];open(p,'w').write(json.dumps({'state':state,'healthy':state=='healthy','message':msg,'updated_at':now},indent=2)+'\n')
-PY2
-}
-if DEVFLEET_CODEXPRO_HEALTH_URL="$health_url" python3 - <<'PY2' >/dev/null 2>&1
-import urllib.request
-import os
-urllib.request.urlopen(os.environ['DEVFLEET_CODEXPRO_HEALTH_URL'],timeout=2)
-PY2
-then write_status healthy 'CodexPro loopback health endpoint is responding.'; echo 'CodexPro is already healthy.' | tee -a "$log"; exit 0; fi
-if ! command -v codexpro >/dev/null 2>&1; then write_status unavailable 'CodexPro executable is not installed in this project container.'; echo 'CodexPro is unavailable. Install it using your verified private/local installation source, then rerun this hook. No credential is embedded.' | tee -a "$log"; exit 0; fi
-export CODEXPRO_TOOL_CARDS=${CODEXPRO_TOOL_CARDS:-1}
-( codexpro start >>"$log" 2>&1 & )
-sleep 2
-if DEVFLEET_CODEXPRO_HEALTH_URL="$health_url" python3 - <<'PY2' >/dev/null 2>&1
-import urllib.request
-import os
-urllib.request.urlopen(os.environ['DEVFLEET_CODEXPRO_HEALTH_URL'],timeout=2)
-PY2
-then write_status healthy 'CodexPro started successfully.'; exit 0; fi
-write_status authorization-required 'CodexPro is installed but not healthy; inspect the log for authorization or configuration requirements.'
-echo "CodexPro did not become healthy. Review $log"; exit 0
-
-```
-
-
-## FILE: source/templates/cpp-cmake/.devfleet/codexpro-
+        if a

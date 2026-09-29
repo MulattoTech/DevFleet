@@ -7,7 +7,7 @@ DevFleet v1.2.13 configures isolated Windows-hosted development compute, Surroga
 
 ## Certification progress
 
-Snapshot from original MULATTOTECHBOX native authority at 2026-09-28 14:34 UTC. This is a dated, manually published view, not a live GitHub status check. A later tooling/source change can invalidate a green qualification. Current proof and phase credit cannot be transferred from a prior tuple.
+Snapshot from original MULATTOTECHBOX native authority at 2026-09-29 17:21 UTC. This is a dated, manually published view, not a live GitHub status check. A later tooling/source change can invalidate a green qualification. Current proof and phase credit cannot be transferred from a prior tuple.
 
 Legend: 🟩 current native PASS; 🟨 blocked or historical-only work; ⬜ not established for the current tuple; 🟥 current native FAIL. Each ten-cell bar shows the indicated current numerator/denominator. Historical progress is labeled separately.
 
@@ -15,18 +15,20 @@ Legend: 🟩 current native PASS; 🟨 blocked or historical-only work; ⬜ not 
 |---|---|---|
 | Coherent signed candidate identity | 🟩 ██████████ 1/1 | Current candidate flags true; signed installer hash and fingerprints remain bound. |
 | Developer standard-token qualification | 🟩 ██████████ 1/1 | Native receipt recorded on current HEAD; a new tooling HEAD requires requalification. |
-| Current repaired checkpoint binding | 🟨 ░░░░░░░░░░ 0/1 | Accepted generation 4 is bound to prior tooling; next-generation proposal is unintegrated/unapproved. |
-| Authenticated guest readiness | ⬜ ░░░░░░░░░░ 0/1 | PASS_READY_FOR_PROOF_RESERVATION not established on current tuple. |
-| Laptop / Surrogate role proof | ⬜ ░░░░░░░░░░ 0/1 | Older role PASS is historical to prior tooling. |
-| Desktop / Primary role proof | ⬜ ░░░░░░░░░░ 0/1 | Older role PASS is historical to prior tooling. |
+| Current repaired checkpoint binding | 🟩 ██████████ 1/1 | Owner-approved generation 5 binds the existing repaired checkpoint to the current tuple. |
+| Authenticated guest readiness | 🟩 ██████████ 1/1 | Current R5 authenticated readiness passed; no role-proof credit is implied. |
+| Laptop / Surrogate role proof | 🟨 ░░░░░░░░░░ 0/1 | Current R5 attempt BLOCKED before Failover creation: image remote unavailable; slot consumed. |
+| Desktop / Primary role proof | ⬜ ░░░░░░░░░░ 0/1 | Not run for this tuple; required sequence blocks admission after failed Laptop. |
 | One coherent FullRelease | ⬜ ░░░░░░░░░░ 0/31 | Current-tuple phase count is 0/31; older blocked run reached 17/31. |
 | Real user journeys U01–U05 | ⬜ ░░░░░░░░░░ 0/5 | No current coherent FullRelease journey credit. |
 | Required maintenance scenarios | ⬜ ░░░░░░░░░░ 0/5 | Older run passed 5/5, but that tuple is historical. |
-| RECONCILE | ⬜ ░░░░░░░░░░ 0/1 | Current terminal reconciliation not established. |
-| Certified CLEANUP | 🟨 ░░░░░░░░░░ 0/1 | Last exact L1 observation was Off; failed-run L2 terminal state is UNVERIFIED. |
+| RECONCILE | ⬜ ░░░░░░░░░░ 0/1 | Failed-proof authority reconciled; final FullRelease RECONCILE is not run. |
+| Certified CLEANUP | 🟨 ░░░░░░░░░░ 0/1 | Diagnostic cleanup proves repaired CLEAN / L2 ABSENT / L1 Off; final release CLEANUP is not run. |
 | Pre-acceptance audit | ⬜ ░░░░░░░░░░ 0/1 | Requires current complete native evidence. |
 | Native FINAL-ACCEPTANCE | ⬜ ░░░░░░░░░░ 0/1 | Not present for current tuple. |
 | Clean-extracted RELEASE-mode audit | ⬜ ░░░░░░░░░░ 0/1 | Current AI audit is diagnostic PASS_WITH_BLOCKER; no release eligibility. |
+
+**Latest diagnostic:** [image-remote investigation](ai/diagnostics/2026-09-29-image-remote.md) completed with safe cleanup. The first catalog query succeeded before forced refresh; no installation retry or proven fix. Current proof credit remains **0/2**, and native promotion remains false.
 
 **Historical diagnostic reach:** 🟨 ██████░░░░ 17/31 phases passed in the blocked R2-REPAIR-3 run; phase 18 blocked and 13 later phases did not run. **Current FullRelease credit: 0/31.** No phase stitching is permitted.
 
@@ -92,4 +94,4 @@ The five maintenance phases (REPAIR, CLEAN-REINSTALL, UNINSTALL, FACTORY-RESET, 
 - [Source import and synchronization provenance](ai/GITHUB-IMPORT.md)
 - [Release completion requirements](docs/ai/devfleet-release/DONE.md)
 
-The installer payload and 976 reviewed original tracked publishable source/tooling/docs files are included. Dependencies, licensed guest images, private credentials, private signing keys, VM/checkpoint state, signed release binary and private attempt ledgers remain outside this public repository. GitHub commit identity differs from the original host's source HEAD and cannot grant release or public publisher trust.
+The installer payload and 981 reviewed original tracked publishable source/tooling/docs files are included. Dependencies, licensed guest images, private credentials, private signing keys, VM/checkpoint state, signed release binary and private attempt ledgers remain outside this public repository. GitHub commit identity differs from the original host's source HEAD and cannot grant release or public publisher trust.

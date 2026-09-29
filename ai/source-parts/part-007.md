@@ -1,10 +1,164 @@
 # DevFleet source part 007
 
 Full-source UTF-8 byte interval [279000, 325500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 8e3075c314aebe8229801e0a455eeefee93921a0dbb526625e9c432292640632
+Payload SHA-256: 364c1169d765efefe1b5af71c7dc0089471f182b30b1addadad38c2c1efc8bad
 
 <!-- BEGIN SOURCE SLICE -->
-tion('devfleet_fastlane',p)
+rror('Proof lineage or role malformed')
+    if final.get('runId')!=run_id or final.get('status')!='PASS' or final.get('outcome')!='PASS':raise ValueError('Proof is not terminal PASS')
+    rows=binding.get('evidence');names=set();chosen=[]
+    if not isinstance(rows,list) or not rows:raise ValueError('Bound native proof evidence missing')
+    for row in rows:
+        n=row.get('file','');h=row.get('sha256','')
+        if n in names:raise ValueError('duplicate native evidence')
+        names.add(n)
+        if not re.fullmatch(r'product-lifecycle-(?:completion-authority|generation-[1-3])\.json',n) or not re.fullmatch(r'[0-9a-f]{64}',h):raise ValueError('Unexpected bound evidence')
+        canonical=checked_path(rd,n);nested=checked_path(rd,f'lifecycle-{phase}-{lineage}/{n}')
+        present=[p for p in (canonical,nested) if p.is_file()]
+        if not present:raise ValueError('Missing exact lineage-bound native evidence: '+n)
+        if any(digest(p)!=h for p in present):raise ValueError('Native evidence hash mismatch: '+n)
+        chosen.append((present[0],n,h))
+    if 'product-lifecycle-completion-authority.json' not in names:raise ValueError('Completion authority missing')
+    destination.mkdir(parents=True,exist_ok=False)
+    for n in ('proof-start.json','proof-final.json','cleanup-state.json'):
+        shutil.copyfile(checked_path(rd,n),destination/n)
+    for src,n,h in chosen:
+        shutil.copyfile(src,destination/n)
+        if digest(destination/n)!=h:raise ValueError('Evidence changed during copy')
+    return [{'file':n,'source':p.relative_to(rd).as_posix(),'sha256':h} for p,n,h in chosen]
+
+def select_suites(area):
+    if area=='all':return [row for rows in SUITES.values() for row in rows]
+    if area=='quick':return SUITES['clock']+[SUITES['observer'][1]]+SUITES['vault'][:2]+SUITES['acceptance'][:1]
+    if area not in SUITES:raise ValueError('Unknown test area; no arbitrary command execution')
+    return list(SUITES[area])
+
+def source_snapshot(repo):
+    rows={}
+    for folder in ('source','installer-source','tools','automation'):
+        base=repo/folder
+        for p in sorted(base.rglob('*')):
+            parts=p.relative_to(base).parts
+            if any(x in ('.git','__pycache__','.pytest_cache','bin','obj','outputs','.test-runtime','Payload') or x.startswith('.venv') for x in parts):continue
+            if p.is_file():
+                rel=p.relative_to(repo).as_posix();checked_path(repo,rel);rows[rel]=digest(p)
+    for n in ('CURRENT-CANDIDATE.json','evidence/CURRENT-RELEASE-AUTHORITY.json','evidence/CURRENT-STANDARD-TOKEN.json','finalization-state.json','outputs/final-artifact-hashes.json','audit/run-exact-candidate-proof.ps1'):
+        p=checked_path(repo,n)
+        if p.is_file():rows[n]=digest(p)
+    return rows
+
+def assert_authority(authority,expected):
+    for k in ('repositoryHead',*TUPLE):
+        if authority.get(k)!=expected.get(k):raise ValueError('Native authority tuple disagrees: '+k)
+    for k,value in (('candidateIsCurrent',True),('sourceChangedSinceCandidate',False),('rebuildRequired',False)):
+        if authority.get(k) is not value:raise ValueError('Native candidate flag is not current: '+k)
+
+def native_inspection(repo):
+    authority=read_json(checked_path(repo,'evidence/CURRENT-RELEASE-AUTHORITY.json'))
+    before=source_snapshot(repo)
+    sys.path.insert(0,str(repo/'tools'))
+    try:
+        spec=importlib.util.spec_from_file_location('fastlane_native_validator',checked_path(repo,'tools/validate_release_bundle.py'))
+        v=importlib.util.module_from_spec(spec);spec.loader.exec_module(v)
+        state=v.read_json(repo/'finalization-state.json');expected=v._tuple_from_state(state);artifacts=v._artifact_map(repo)
+        assert_authority(authority,expected)
+        v._validate_workspace_candidate(repo,expected,artifacts)
+        token=v._validate_standard_token(repo,expected,artifacts,'workspace')
+        selected=authority.get('proofs',{}).get('runs',[])
+        if len(selected)!=2 or len({r['runId'] for r in selected})!=2:raise ValueError('Current authority must select two independent proof RunIds')
+        source_paths={
+          'proofScriptSha256':'audit/run-exact-candidate-proof.ps1',
+          'invokeRealProductPhaseSha256':'automation/release-e2e/modules/executors/Invoke-RealProductPhase.psm1',
+          'invokeWpfUiAutomationSha256':'automation/release-e2e/modules/executors/Invoke-WpfUiAutomation.ps1',
+          'wpfLaunchContractSha256':'automation/release-e2e/modules/executors/WpfLaunchContract.psm1'}
+        sources={k:checked_path(repo,p) for k,p in source_paths.items()}
+        pe={k:expected[k] for k in ('repositoryHead','candidateCommit','shippingInputIdentity')};pe.update(releaseFingerprint=expected['releaseFingerprintId'],toolingFingerprint=expected['toolingFingerprintId'])
+        results=[]
+        with tempfile.TemporaryDirectory(prefix='devfleet-readonly-revalidation-') as td:
+            for row in selected:
+                name=row['runId'];view=Path(td)/name;copies=proof_view(repo,name,view)
+                tx,lineage,role=v.validate_native_proof(view,checked_path(repo,'source/config/devfleet.config.json'),sources,pe,{n:x['sha256'] for n,x in artifacts.items()})
+                start=read_json(view/'proof-start.json');cleanup=read_json(view/'cleanup-state.json')
+                results.append({'runId':name,'transactionId':tx,'lineageId':lineage,'role':role,'nativeValidation':'PASS','observedSecondsIncludingCleanup':elapsed(start.get('generatedAtUtc'),cleanup.get('completedAtUtc')),'cleanupSeconds':elapsed(cleanup.get('startedAtUtc'),cleanup.get('completedAtUtc')),'evidenceLayout':copies})
+        v.validate_proof_independence([x['runId'] for x in results],[x['transactionId'] for x in results],[x['lineageId'] for x in results],[x['role'] for x in results])
+        if before!=source_snapshot(repo):raise ValueError('Material/native inputs changed during revalidation')
+        return {'status':'PASS','scope':'READ_ONLY_REVALIDATION','authorityId':authority['authorityId'],
+          'candidate':{k:expected[k] for k in ('repositoryHead',*TUPLE)},'proofs':results,
+          'standardTokenRunId':token.get('runId'),'proofIndependence':'PASS','sourceSnapshotSha256':hashlib.sha256(json.dumps(before,sort_keys=True).encode()).hexdigest(),
+          'candidateRebuildRequired':authority.get('rebuildRequired'),'fullReleasePassed':authority.get('fullReleasePassed') is True,
+          'newProofsProduced':0,'runtimeAuthorizationGranted':False,'next':'Fresh native host/ownership admission, then current FullRelease under existing explicit authorization. Do not rerun these proofs for a new chat.'}
+    finally:sys.path.pop(0)
+
+def standalone_python_command(python,path):
+    # Embedded Windows Python ignores PYTHONPATH. Add only the trusted test's
+    # directory in this child process; do not edit ._pth or global config.
+    shim="import runpy,sys;from pathlib import Path;p=Path(sys.argv[1]).resolve();sys.path.insert(0,str(p.parent));sys.argv=[str(p)];runpy.run_path(str(p),run_name='__main__')"
+    return [str(python),'-B','-c',shim,str(path)]
+
+def tests(repo,area,out):
+    pwsh=shutil.which('pwsh.exe') or shutil.which('pwsh')
+    python=repo/'.venv-test/Scripts/python.exe'
+    if not python.is_file():python=Path(sys.executable)
+    before=source_snapshot(repo);results=[]
+    env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1','PYTHONPATH':os.pathsep.join(str(x) for x in (repo,repo/'tools',repo/'source/app')),'PYTHONIOENCODING':'utf-8'}
+    for label,kind,relative in select_suites(area):
+        path=checked_path(ROOT if kind=='skill' else repo,relative)
+        if kind=='pytest':cmd=[str(python),'-B','-m','pytest','-q','-p','no:cacheprovider',str(path)]
+        elif kind=='python':cmd=standalone_python_command(python,path)
+        else:
+            if not pwsh:raise ValueError('PowerShell 7 is required; no installation attempted')
+            cmd=[pwsh,'-NoLogo','-NoProfile','-NonInteractive','-File',str(path)]
+            if kind=='skill':cmd+=['-Repository',str(repo)]
+        t=time.monotonic();log=out/(label+'.log');source_hash=digest(path)
+        with log.open('w',encoding='utf-8') as f:
+            try:cp=subprocess.run(cmd,cwd=repo,env=env,stdout=f,stderr=subprocess.STDOUT,timeout=180)
+            except subprocess.TimeoutExpired:
+                results.append({'suite':label,'status':'TIMEOUT','seconds':round(time.monotonic()-t,3),'log':str(log),'cleanupMustBeChecked':True});break
+        results.append({'suite':label,'status':'PASS' if cp.returncode==0 else 'FAIL','exitCode':cp.returncode,'seconds':round(time.monotonic()-t,3),'log':str(log),'scriptSha256':source_hash})
+        if cp.returncode!=0:break
+    clean=before==source_snapshot(repo)
+    return {'status':'PASS' if len(results)==len(select_suites(area)) and all(x['status']=='PASS' for x in results) and clean else 'FAIL',
+            'scope':'VM_FREE_REGRESSION_ONLY','area':area,'suites':results,'materialAndNativeInputsUnchanged':clean,
+            'certificationCredit':False,'vmOperations':0,'note':'Mocks/injected clocks test harness decisions; not a simulated VM certification.'}
+
+def main():
+    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('command',choices=['inspect','test'])
+    ap.add_argument('--repo',required=True,type=Path);ap.add_argument('--area',choices=['quick','all',*SUITES],default='quick')
+    ap.add_argument('--out',type=Path,help='New diagnostic directory OUTSIDE the repository')
+    a=ap.parse_args();repo=a.repo.resolve(strict=True)
+    base=Path(os.environ.get('LOCALAPPDATA',tempfile.gettempdir()))/'DevFleet/Fastlane'
+    out=(a.out or base/dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S-%fZ')).resolve()
+    if out.is_relative_to(repo):ap.error('Diagnostic output must be outside the repository')
+    out.mkdir(parents=True,exist_ok=False);start=time.monotonic()
+    try:report=native_inspection(repo) if a.command=='inspect' else tests(repo,a.area,out)
+    except Exception as exc:
+        # Keep traceback locally, do not expose arbitrary file/credential contents.
+        import traceback
+        (out/'error.log').write_text(traceback.format_exc(),encoding='utf-8')
+        report={'status':'FAIL','scope':'DIAGNOSTIC_ONLY','errorType':type(exc).__name__,'details':str(out/'error.log'),'certificationCredit':False,'runtimeAuthorizationGranted':False}
+    report.update(observedUtc=utc(),elapsedSeconds=round(time.monotonic()-start,3),reportPath=str(out/'report.json'))
+    (out/'report.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8');print(json.dumps(report,indent=2))
+    return 0 if report['status']=='PASS' else 2
+if __name__=='__main__':raise SystemExit(main())
+
+```
+
+
+## FILE: .agents/skills/devfleet-e2e-fastlane/tests/test_fastlane.py
+
+SHA256: 3205f4695cf362414c5d97bada87326261c72e2315b628164367d5245c2e56c8 | Bytes: 8050 | Git mode: 100644
+
+```
+from __future__ import annotations
+import json, hashlib, sys, importlib.util
+from pathlib import Path
+import pytest
+ROOT=Path(__file__).resolve().parents[1]
+
+def impl():
+    p=ROOT/'scripts/fastlane.py'
+    assert p.is_file(), 'Missing safe preflight/replay implementation'
+    spec=importlib.util.spec_from_file_location('devfleet_fastlane',p)
     m=importlib.util.module_from_spec(spec);sys.modules[spec.name]=m;spec.loader.exec_module(m)
     return m
 
@@ -799,159 +953,4 @@ function Invoke-ExactProofCleanup([Parameter(Mandatory)][psobject]$Vm) {
             if([string]$finalVm.Name -cne 'DevFleet-E2E-Win11-01' -or $finalVm.Id -ne $vmId){throw 'Final L1 cleanup identity mismatch.'}
             if($finalVm.State -ne 'Off'){Stop-VM -VM $finalVm -Force -Confirm:$false -ErrorAction Stop}
             $deadline=(Get-Date).AddMinutes(2)
-            do{Start-Sleep -Seconds 2;$finalVm=Get-VM -Id $vmId -ErrorAction Stop}while($finalVm.State -ne 'Off' -and (Get-Date) -lt $deadline)
-            $cleanup.l1=[ordered]@{status=if($finalVm.State -eq 'Off'){'OFF'}else{'UNVERIFIED'};name=$finalVm.Name;id=$finalVm.Id.ToString();observedUtc=(Get-Date).ToUniversalTime().ToString('o')}
-        } catch {
-            $cleanup.l1=[ordered]@{status='UNVERIFIED';error=$_.Exception.Message;observedUtc=(Get-Date).ToUniversalTime().ToString('o')}
-        }
-        if($null -eq $cleanup.l1 -or [string]$cleanup.l1.status -ne 'OFF' -or $null -eq $cleanup.l2 -or [string]$cleanup.l2.status -ne 'ABSENT'){$cleanup.status='BLOCKED'}
-        $cleanup.completedAtUtc=(Get-Date).ToUniversalTime().ToString('o')
-        $cleanupPath=Join-Path $runDir 'cleanup-state.json'
-        Write-EvidenceJson -Path $cleanupPath -Value $cleanup
-        if([string]$cleanup.status -eq 'PASS'){Publish-DevFleetTerminalCleanupSummary -WorkspaceRoot $WorkspaceRoot -CleanupEvidencePath $cleanupPath|Out-Null}
-    }
-    return [pscustomobject]$cleanup
-}
-
-$configPath=Join-Path $scriptRoot 'config\devfleet-e2e.defaults.json'
-$config=Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json -ErrorAction Stop
-$budgetPolicy=Get-HarnessBudgetPolicy -Config $config
-Assert-HarnessBudgetPolicy -Policy $budgetPolicy | Out-Null
-
-try {
-    $vm = Get-VM -Id $vmId -ErrorAction Stop
-    if ($vm.Name -notlike 'DevFleet-E2E-*' -or $vm.Id.ToString() -ne $vmId.ToString()) { throw 'Exact disposable VM identity assertion failed.' }
-    $fingerprint = Get-CandidateFingerprint -WorkspaceRoot $WorkspaceRoot -CandidatePath $candidatePath
-    $baseline=Set-DevFleetBaselineBinding -WorkspaceRoot $WorkspaceRoot -Fingerprint $fingerprint
-    $cleanId=[guid][string]$baseline.id
-    $cleanName=[string]$baseline.name
-    $liveToolingArguments=@('--source-root',(Join-Path $WorkspaceRoot 'source'),'--installer-root',(Join-Path $WorkspaceRoot 'installer-source'))
-    foreach($artifact in @(@('exe',$fingerprint.candidate.path),@('tar',$fingerprint.tar.path),@('portable',$fingerprint.portable.path),@('installerSource',$fingerprint.installerSource.path))){$liveToolingArguments+=@('--artifact',"$($artifact[0])=$($artifact[1])")}
-    $liveToolingRaw=@(& $python (Join-Path $WorkspaceRoot 'tools\compute_shipping_input_identity.py') @liveToolingArguments)
-    if($LASTEXITCODE -ne 0 -or $liveToolingRaw.Count -eq 0){throw 'Exact proof could not compute the live release-tooling identity.'}
-    try{$liveTooling=($liveToolingRaw -join "`n")|ConvertFrom-Json -ErrorAction Stop}catch{throw 'Exact proof live release-tooling identity was not valid JSON.'}
-    if([string]$liveTooling.toolingFingerprint.toolingFingerprintId -cne [string]$fingerprint.toolingFingerprintId){throw 'Exact proof refused a tooling materialization that differs from current candidate authority.'}
-    $provenance = [ordered]@{
-        repositoryHead = (& git -C $WorkspaceRoot rev-parse HEAD).Trim()
-        candidateCommit = [string]$fingerprint.gitCommit
-        shippingInputIdentity = [string]$fingerprint.shippingInputIdentity
-        releaseFingerprint = [string]$fingerprint.releaseFingerprintId
-        toolingFingerprint = [string]$fingerprint.toolingFingerprintId
-        liveToolingFingerprint = [string]$liveTooling.toolingFingerprint.toolingFingerprintId
-        invokeRealProductPhaseSha256 = (Get-FileHash (Join-Path $scriptRoot 'modules\executors\Invoke-RealProductPhase.psm1') -Algorithm SHA256).Hash.ToLowerInvariant()
-        invokeWpfUiAutomationSha256 = (Get-FileHash (Join-Path $scriptRoot 'modules\executors\Invoke-WpfUiAutomation.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
-        wpfLaunchContractSha256 = (Get-FileHash (Join-Path $scriptRoot 'modules\executors\WpfLaunchContract.psm1') -Algorithm SHA256).Hash.ToLowerInvariant()
-        proofScriptSha256 = (Get-FileHash $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        certificationEligible = (-not [bool]$DiagnosticOnly)
-        diagnosticOnly = [bool]$DiagnosticOnly
-        role = $proofRole
-        phaseId = $proofPhase
-        cleanCheckpointId = $cleanId.ToString()
-        cleanCheckpointName = $cleanName
-        baselineReceiptSha256 = $baseline.receiptSha256
-        invocation = [ordered]@{runId=$RunId;switches=@('-RunId', $RunId, '-WorkspaceRoot', $WorkspaceRoot) + $(if($AllowRamPressure){@('-AllowRamPressure')}else{@()}) + $(if($DiagnosticOnly){@('-DiagnosticOnly')}else{@()}) + $(if($LaptopSurrogate){@('-LaptopSurrogate')}else{@()});fastMode=$false;ramPressureOverrideAuthorized=[bool]$AllowRamPressure;diagnosticOnly=[bool]$DiagnosticOnly}
-        exactArtifacts = [ordered]@{exe=$fingerprint.candidate;tar=$fingerprint.tar;portable=$fingerprint.portable;installerSource=$fingerprint.installerSource}
-        deadlinePolicy = $budgetPolicy
-    }
-    $safety = Apply-RamPressureOverride -Snapshot (Get-HostSafetySnapshot -Vm $vm -ExpectedVmStartCostGiB 14.38) -AllowRamPressure:$AllowRamPressure
-    Write-EvidenceJson -Path (Join-Path $runDir 'proof-start.json') -Value ([ordered]@{
-        status = if ($safety.effectiveE2EStartAuthorized) { if($safety.ramPressureOverrideAuthorized){'PASS — USER-AUTHORIZED RAM PRESSURE'}else{'PASS'} } else { 'BLOCKED' }
-        generatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
-        runId = $RunId
-        vmName = $vm.Name
-        vmId = $vm.Id.ToString()
-        hostSafety = $safety
-         candidate = $fingerprint
-         provenance = $provenance
-         credentialLoaded = Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'DevFleet\E2E\secrets.json') -PathType Leaf
-        passwordLogged = $false
-    })
-    if (-not $safety.effectiveE2EStartAuthorized) { throw 'BLOCKED — HOST-SAFETY' }
-    $snapshot = Get-ExactCheckpoint -Vm $vm -Name $cleanName
-    if($snapshot.Id -ne $cleanId){throw 'Exact canonical CLEAN proof identity mismatch.'}
-    $restored = Restore-ExactCheckpoint -Vm $vm -Name $cleanName -StartAfterRestore
-    $context = [ordered]@{
-        runId = $RunId
-        phaseId = $proofPhase
-        label = "EXACT CURRENT-CANDIDATE $proofRole PROOF"
-        checkpoint = $cleanName
-        destructive = $true
-        candidate = $fingerprint
-        vmName = $vm.Name
-        vmId = $vm.Id.ToString()
-        runDir = $runDir
-        config = $config
-        deadlinePolicy = $budgetPolicy
-        # A clean disposable first-install may legitimately need several minutes
-        # to settle its durable reboot handoff before install-state/health appear.
-        # Keep the observation bounded and fail closed; do not shorten it to the
-        # generic 180-second diagnostic window.
-        diagnosticObservationSeconds = 1800
-    }
-    # Keep a small outer bound beyond the observer's immutable lifecycle
-    # deadline. A broken observer must become an explicit harness outcome,
-    # never an inferred product defect and never an unbounded proof process.
-    $contextJson = $context | ConvertTo-Json -Depth 32 -Compress
-    # The policy is authoritative and already validated before restoring the
-    # disposable checkpoint. Never silently truncate an outer watchdog.
-    $innerLifecycleBoundSeconds=[int]$budgetPolicy.exactProofInnerBoundSeconds
-    $outerWatchdogSeconds=[int]$budgetPolicy.exactProofOuterWatchdogSeconds
-    if($outerWatchdogSeconds -le $innerLifecycleBoundSeconds){throw 'Invalid exact-proof deadline hierarchy: outer watchdog does not exceed calculated inner bound.'}
-    $phaseModule = Join-Path $scriptRoot 'modules\executors\Invoke-RealProductPhase.psm1'
-    $phaseJob = Start-Job -ScriptBlock {
-        param($modulePath,$serializedContext)
-        Import-Module $modulePath -Force
-        Invoke-RealProductPhase -ContextJson $serializedContext
-    } -ArgumentList $phaseModule,$contextJson
-    try {
-        $finished = Wait-Job -Job $phaseJob -Timeout $outerWatchdogSeconds
-        if(-not $finished){
-            Stop-Job -Job $phaseJob -ErrorAction SilentlyContinue
-            Wait-Job -Job $phaseJob -Timeout 15 -ErrorAction SilentlyContinue | Out-Null
-            $watchdog = [ordered]@{status='HARNESS_WATCHDOG_EXPIRED';classification='RELEASE HARNESS';runId=$RunId;outerWatchdogSeconds=$outerWatchdogSeconds;innerLifecycleBoundSeconds=$innerLifecycleBoundSeconds;outerExceedsInnerBound=($outerWatchdogSeconds -gt $innerLifecycleBoundSeconds);boundModel=$budgetPolicy;preserveEvidence=$true;timestampUtc=(Get-Date).ToUniversalTime().ToString('o')}
-            Write-EvidenceJson -Path (Join-Path $runDir 'proof-watchdog.json') -Value $watchdog
-            throw 'HARNESS_WATCHDOG_EXPIRED: proof outer watchdog exceeded the observer bound.'
-        }
-        $jobErrors=@($phaseJob.ChildJobs | ForEach-Object {
-            $reason=$_.JobStateInfo.Reason
-            if($reason){
-                $message=if($reason.Exception -and $reason.Exception.Message){[string]$reason.Exception.Message}else{[string]$reason.ToString()}
-                if($message){$message}
-            }
-        } | Where-Object { $_ })
-        if($jobErrors.Count){throw "Proof lifecycle job failed: $($jobErrors -join ' | ')"}
-        $jobOutput=@(Receive-Job -Job $phaseJob -ErrorAction Stop)
-        if($jobOutput.Count -eq 0){throw "Proof lifecycle job returned no terminal evidence (state=$($phaseJob.State); childState=$($phaseJob.ChildJobs[0].State))."}
-        $result=$jobOutput[-1]
-    } finally {
-        if($phaseJob){Remove-Job -Job $phaseJob -Force -ErrorAction SilentlyContinue}
-    }
-    if ([string]$result.status -ne 'REAL E2E PASS') { throw 'Exact candidate reboot/resume proof did not return REAL E2E PASS.' }
-    $proofBinding = New-DevFleetExactProofBinding -Context ([pscustomobject]$context) -PhaseResult $result -ExpectedRole $proofRole
-    $cleanupAttempted=$true
-    $cleanup=Invoke-ExactProofCleanup -Vm $vm
-    if([string]$cleanup.status -ne 'PASS'){throw "Exact proof cleanup did not PASS: $([string]$cleanup.error)"}
-    Write-EvidenceJson -Path (Join-Path $runDir 'proof-final.json') -Value ([ordered]@{
-        status = 'PASS'
-        outcome = 'PASS'
-        runId = $RunId
-        role = $proofRole
-        provenance = $provenance
-        proofStartSha256 = (Get-FileHash -LiteralPath (Join-Path $runDir 'proof-start.json') -Algorithm SHA256).Hash.ToLowerInvariant()
-        transactionId = $proofBinding.transactionId
-        checkpointLineageId = $proofBinding.checkpointLineageId
-        proofBinding = $proofBinding
-        candidate = $fingerprint
-        # Hyper-V's raw VMSnapshot object exposes a recursive provider graph;
-        # serializing it can emit a depth warning and stall proof finalization.
-        # Persist only the exact identity already validated by Get-ExactCheckpoint.
-        cleanCheckpoint = [ordered]@{name=[string]$snapshot.Name;id=[string]$snapshot.Id;verification='native exact cleanup owner'}
-        restored = $restored
-        phase = $result
-        cleanup = $cleanup
-        diagnosticOnly = [bool]$DiagnosticOnly
-        certificationEligible = (-not [bool]$DiagnosticOnly)
-        passwordLogged = $false
-    })
-    Set-CurrentProofPointer $(if($DiagnosticOnly){'DIAGNOSTIC_PASS'}else{'PASS'})
-    [ordered]@{status='PASS';runId=$RunId;evidencePath=(Join-Path $runDir 'proof-final.json');ca
+            do{Start-Sleep -Seconds 2

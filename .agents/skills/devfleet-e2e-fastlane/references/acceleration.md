@@ -44,6 +44,14 @@ The old MAINTENANCE-READY checkpoint can contain old software even when its name
 
 Do not create/change canonical CLEAN to speed up the run. Standard snapshots retain VM memory, while production snapshots do not; restoring either affects state outside simple elapsed-time arithmetic. Never copy security tokens/SSH identity from a snapshot into unrelated machines. Do not share warmed test state between independent role proofs.
 
+## Late-phase failures
+
+When FullRelease passes early phases and blocks later, preserve that terminal RunId, phase records, checkpoint/provenance, and cleanup state. Diagnose the blocked phase with the narrowest production-path VM-free test. If the failure needs guest observation, a separately authorized diagnostic can use a checkpoint only after native validation of the exact current candidate, installation generation, checkpoint GUID, origin RunId, L1 identity, and safety/admission. The diagnostic may start near the failing scenario; it earns no FullRelease or earlier-phase credit and must leave the exact lab terminally safe.
+
+For example, `PERMANENT-DELETE` normally restores the run's `MAINTENANCE-READY` checkpoint before its executor. A dedicated admitted diagnostic could test its nested Primary readiness without repeating installation phases, provided that checkpoint still belongs to the current tuple. Do not execute the product phase directly in an ad hoc shell: its normal executor mutates guest/nested resources and needs an owned context and cleanup. A timeout that exposes only the last Multipass command calls for a mocked deadline/telemetry regression first, then a scoped guest diagnostic if the cause remains unresolved.
+
+The current `Invoke-FullReleaseRun` always starts at phase 1; top-level `Resume` only verifies identity. A failed RunId cannot be promoted by appending a later phase result. After the causal fix and required tuple qualification, a certifying attempt must rerun one coherent FullRelease, including phases previously observed as PASS. Building a true certifying resume would require a new native contract that binds an immutable checkpoint, phase state, product generation, candidate tuple, ownership, and validator acceptance to the same run; this skill does not authorize or simulate such a change.
+
 ## Immediate constraints in this campaign
 
 At authoring, candidate `4f1ca4570466f1595c0f05fb84eab408f6e99b31` had two independently validated role proofs and a matching Developer receipt. The actual new FullRelease was not run. Reconcile live files; this sentence is not authority.

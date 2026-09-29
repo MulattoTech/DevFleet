@@ -1,10 +1,123 @@
 # DevFleet source part 014
 
 Full-source UTF-8 byte interval [604500, 651000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 96775a41bdad0d0284057c43dde5e9388bec934d9aa649b35aeb272413dbee38
+Payload SHA-256: c221a6ba88de9d3ec6be3eb728bc823ea3cf285fde7dbc6d386138b10b1b357a
 
 <!-- BEGIN SOURCE SLICE -->
-Prepare
+g $binding))|Out-Null
+            }
+            foreach($binding in @($ownership.Services)) {
+                $service=Get-CimInstance Win32_Service -Filter "Name='$([string]$binding.Name)'" -ErrorAction Stop
+                if(-not $service){throw "MAINTENANCE-READY owned service is missing: $([string]$binding.Name)"}
+                $actual=@{Name=[string]$service.Name;ImagePath=[string]$service.PathName;Account=[string]$service.StartName;StartMode=[string]$service.StartMode;Generation=[string]$binding.Generation}
+                Assert-DevFleetServiceBinding -Expected $binding -Actual $actual|Out-Null
+            }
+            # Re-prove authenticated Host Agent health at the maintenance
+            # boundary. A restored checkpoint can report Hyper-V Heartbeat
+            # before the SYSTEM scheduled task has bound HttpListener 8790.
+            # Retry only connection-level WebException failures within a
+            # finite readiness window; authentication, HTTP, and identity
+            # failures remain fail-closed. The token is read and used only
+            # inside the guest and is never returned in evidence.
+            $protocol='C:\ProgramData\DevFleetHostAgent\DevFleet-HostAgentProtocol.psm1';$tokenPath='C:\ProgramData\DevFleetHostAgent\token.txt'
+            if(-not(Test-Path -LiteralPath $protocol -PathType Leaf)-or-not(Test-Path -LiteralPath $tokenPath -PathType Leaf)){throw 'MAINTENANCE-READY authenticated Host Agent health prerequisites are missing.'}
+            foreach($path in @($env:ProgramData,(Split-Path -Parent $protocol),$protocol,$tokenPath)){
+                if((Get-Item -LiteralPath $path -Force -ErrorAction Stop).Attributes-band[IO.FileAttributes]::ReparsePoint){throw 'MAINTENANCE-READY health input is a reparse point.'}
+            }
+            $actualProtocol=(Get-FileHash -LiteralPath $protocol -Algorithm SHA256).Hash.ToLowerInvariant()
+            if($actualProtocol-cne[string]$request.protocolSha256){throw 'MAINTENANCE-READY health protocol differs from the exact shipping input.'}
+            Import-Module $protocol -Force
+            function Invoke-MaintenanceReadyAuthenticatedHealth {
+                param([Parameter(Mandatory)][string]$ProtocolTokenPath,[ValidateRange(1,120)][int]$WaitSeconds=60)
+                $healthDeadline=[datetime]::UtcNow.AddSeconds($WaitSeconds);$attempts=0
+                do {
+                    $attempts++
+                    try {
+                        $currentToken=(Get-Content -LiteralPath $ProtocolTokenPath -Raw).Trim();if(-not $currentToken){throw 'MAINTENANCE-READY Host Agent token is empty.'}
+                        try{$currentHealth=Invoke-HostAgentAuthenticatedJson -Uri 'http://127.0.0.1:8790/healthz' -Method GET -Key $currentToken -ExpectedHost $env:COMPUTERNAME;return [pscustomobject]@{health=$currentHealth;attempts=$attempts}}finally{$currentToken=$null}
+                    } catch [Net.WebException] {
+                        if([datetime]::UtcNow-ge$healthDeadline){throw}
+                        Start-Sleep -Seconds 1
+                    }
+                } while($true)
+            }
+            $healthProbe=Invoke-MaintenanceReadyAuthenticatedHealth -ProtocolTokenPath $tokenPath -WaitSeconds 60;$health=$healthProbe.health
+            if($health.ok-isnot[bool]-or-not$health.ok){throw 'MAINTENANCE-READY authenticated Host Agent health returned invalid or false ok.'}
+            [ordered]@{
+                status='PASS';computer=$env:COMPUTERNAME;installLedgerPath=$installPath;ownershipLedgerPath=$ownershipPath
+                installLedgerSha256=(Get-FileHash -LiteralPath $installPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                ownershipLedgerSha256=(Get-FileHash -LiteralPath $ownershipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                devFleetVersion=[string]$install.DevFleetVersion;installerVersion=[string]$install.InstallerVersion;packageSha256=[string]$install.PackageSha256
+                installationGeneration=[string]$install.InstallationGeneration;ownershipSchemaVersion=[int]$ownership.SchemaVersion;bindingCount=$bindings.Count
+                firewallConvergence=@($firewallConvergence)
+                runtimeVersion=$PSVersionTable.PSVersion.ToString();protocolSha256=$actualProtocol
+                hostAgentHealth=[ordered]@{authenticated=$true;ok=$true;hostName=[string]$health.host_name;hostId=[string]$health.host_id};hostAgentHealthProbeAttempts=[int]$healthProbe.attempts
+            }
+        }
+        $request=[ordered]@{version=[string]$Fingerprint.releaseVersion;installer=[string]$Fingerprint.installerVersion;payload=[string]$Fingerprint.tar.sha256;protocolSha256=$protocolSha256}|ConvertTo-Json -Compress
+        $requestBase64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($request))
+        $body="& {"+$validationScript.ToString()+"} ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"+$requestBase64+"'))) | ConvertTo-Json -Depth 8 -Compress"
+        $body='try {'+$body+'} catch {$safe=([string]$_.FullyQualifiedErrorId-replace''[^A-Za-z0-9_. ,:-]'','''');[ordered]@{status=''BLOCKED'';failureId=$safe.Substring(0,[math]::Min(160,$safe.Length))}|ConvertTo-Json -Compress}'
+        $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($body))
+        $remaining=[int][math]::Floor(($deadline-[datetime]::UtcNow).TotalSeconds)
+        if($remaining-le10){throw 'MAINTENANCE-READY collection margin is exhausted.'}
+        $childDeadline=[datetime]::UtcNow.AddSeconds([math]::Min(120,$remaining-10))
+        $process=Invoke-DevFleetBoundedGuestProcess -Session $Session -FilePath 'C:\Program Files\PowerShell\7\pwsh.exe' -ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand',$encoded) -OwnerDeadlineUtc $childDeadline
+        if([datetime]::UtcNow-gt$childDeadline){throw 'MAINTENANCE-READY result arrived after its child deadline.'}
+        if([string]$process.outcome-cne'PASS'-or$process.outputComplete-isnot[bool]-or-not$process.outputComplete){throw 'MAINTENANCE-READY bounded PowerShell7 validation failed or returned incomplete output.'}
+        $value=[string]$process.stdout|ConvertFrom-Json -ErrorAction Stop
+        if([string]$value.status-ceq'BLOCKED'){
+            $safe=([string]$value.failureId-replace'[^A-Za-z0-9_. ,:-]','')
+            throw ('MAINTENANCE-READY child validation failed: '+$safe.Substring(0,[math]::Min(160,$safe.Length)))
+        }
+        $runtime=$null
+        if([string]$value.status-cne'PASS'-or-not[version]::TryParse([string]$value.runtimeVersion,[ref]$runtime)-or$runtime.Major-lt7-or[string]$value.protocolSha256-cne$protocolSha256){throw 'MAINTENANCE-READY result runtime/protocol identity is invalid.'}
+        if($value.hostAgentHealth.authenticated-isnot[bool]-or-not$value.hostAgentHealth.authenticated-or$value.hostAgentHealth.ok-isnot[bool]-or-not$value.hostAgentHealth.ok){throw 'MAINTENANCE-READY result does not prove authenticated health.'}
+        if([string]$value.devFleetVersion-cne[string]$Fingerprint.releaseVersion-or[string]$value.installerVersion-cne[string]$Fingerprint.installerVersion-or[string]$value.packageSha256-cne[string]$Fingerprint.tar.sha256){throw 'MAINTENANCE-READY result candidate identity changed.'}
+        return $value
+    } finally { if($ownsSession-and$Session){Remove-DevFleetGuestSession -Session $Session -ErrorAction SilentlyContinue} }
+}
+
+function Ensure-MaintenanceReadyFixture {
+    param(
+        [Parameter(Mandatory)][psobject]$Vm,[Parameter(Mandatory)][psobject]$Fingerprint,
+        [Parameter(Mandatory)][psobject]$Config,[Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][string]$RunId,[Parameter(Mandatory)][string]$RunDir
+    )
+    $baseline=Set-DevFleetBaselineBinding -WorkspaceRoot $WorkspaceRoot -Fingerprint $Fingerprint
+    $provenancePath=Join-Path $WorkspaceRoot 'audit\automation-harness\maintenance-ready-provenance.json'
+    $currentVm=Get-AssertedDisposableVm -ExpectedVm $Vm
+    $snapshots=@(Get-VMSnapshot -VM $currentVm -ErrorAction Stop|Where-Object{$_.Name -ceq 'DevFleet-E2E-MAINTENANCE-READY'})
+    if($snapshots.Count -gt 1){throw 'MAINTENANCE-READY checkpoint identity is ambiguous; refusing adoption or cleanup.'}
+    $snapshot=if($snapshots.Count -eq 1){$snapshots[0]}else{$null}
+    $provenance=$null;$staleReason='missing provenance sidecar'
+    if(Test-Path -LiteralPath $provenancePath -PathType Leaf){
+        try{$provenance=Get-Content -LiteralPath $provenancePath -Raw|ConvertFrom-Json -ErrorAction Stop;if($snapshot){Assert-MaintenanceReadyProvenance -Provenance $provenance -Vm $currentVm -Snapshot $snapshot -Fingerprint $Fingerprint|Out-Null;$staleReason='guest validation required'}}catch{$staleReason=$_.Exception.Message;$provenance=$null}
+    }
+    if($provenance -and $snapshot){
+        $restored=Restore-ExactCheckpoint -Vm $Vm -Name 'DevFleet-E2E-MAINTENANCE-READY' -StartAfterRestore
+        $guest=Invoke-MaintenanceReadyGuestValidation -VmId ([guid][string]$Vm.Id) -Fingerprint $Fingerprint
+        if([string]$guest.status -ne 'PASS' -or [string]$guest.installationGeneration -ne [string]$provenance.install.installationGeneration){throw 'MAINTENANCE-READY guest provenance did not match the current sidecar.'}
+        return [ordered]@{status='PASS';reprovisioned=$false;checkpoint=$restored;guest=$guest;provenancePath=$provenancePath;vault=$provenance.vault}
+    }
+    $oldSnapshot=$snapshot
+    Restore-ExactCheckpoint -Vm $Vm -Name ([string]$baseline.name) -StartAfterRestore|Out-Null
+    # Reprovision through the pure product lifecycle. MAINTENANCE-READY must
+    # not rerun the unrelated synthetic PFRO probe; the fixture layer only
+    # validates the resulting durable installation ledger.
+    $maintenanceContext=[ordered]@{runId=$RunId;phaseId='MAINTENANCE-READY-PROVISION';label='MAINTENANCE-READY PROVISION';checkpoint=[string]$baseline.name;destructive=$true;candidate=$Fingerprint;vmName=$Vm.Name;vmId=$Vm.Id.ToString();runDir=$RunDir;config=$Config;workspaceRoot=$WorkspaceRoot}
+    $resumeEvidence=Invoke-MaintenanceReadyProductLifecycle -WorkspaceRoot $WorkspaceRoot -Context ([pscustomobject]$maintenanceContext)
+    if([string]$resumeEvidence.status -notin @('PASS','REAL E2E PASS')){throw 'MAINTENANCE-READY supported reboot/resume install did not pass.'}
+    $productProperty=$resumeEvidence.PSObject.Properties['product']
+    $productValue=if($productProperty){$productProperty.Value}else{$null}
+    $legsProperty=if($productValue){$productValue.PSObject.Properties['legs']}else{$null}
+    $freshEvidence=if($legsProperty -and @($legsProperty.Value).Count -gt 0){$legsProperty.Value[0]}else{$resumeEvidence}
+    $syntheticProperty=$resumeEvidence.PSObject.Properties['synthetic']
+    $rebootFeature=if($syntheticProperty -and $syntheticProperty.Value){$syntheticProperty.Value}else{'PURE_PRODUCT_LIFECYCLE'}
+    $guest=Invoke-MaintenanceReadyGuestValidation -VmId ([guid][string]$Vm.Id) -Fingerprint $Fingerprint
+    if([string]$guest.status -ne 'PASS'){throw 'MAINTENANCE-READY guest validation did not pass.'}
+    # Positive destructive scenarios require a configured authenticated Vault;
+    # an ordinary bundle-free Desktop install intentionally has none. Prepare
     # only the run-owned nested prerequisite before publishing the checkpoint.
     if(-not(Get-Command Initialize-MaintenanceVaultFixture -ErrorAction SilentlyContinue)){Import-Module (Join-Path $PSScriptRoot 'MaintenanceVault.psm1') -Scope Local -DisableNameChecking}
     $vault=Initialize-MaintenanceVaultFixture -Context ([pscustomobject]$maintenanceContext)
@@ -372,122 +485,4 @@ function Write-PostCleanupFinalization {
         $toUtcText={param($value)if($value -is [datetimeoffset]){return $value.UtcDateTime.ToString('o')}if($value -is [datetime]){return $value.ToUniversalTime().ToString('o')}return [string]$value}
         $nestedUtcText=&$toUtcText $nested.observedUtc;$l1UtcText=&$toUtcText $l1.timestampUtc;$l2UtcText=&$toUtcText $l2.timestampUtc
         $nestedUtc=[datetimeoffset]::MinValue;$l1Utc=[datetimeoffset]::MinValue
-        $roundtrip=[Globalization.DateTimeStyles]::RoundtripKind;$invariant=[Globalization.CultureInfo]::InvariantCulture
-        if(-not[datetimeoffset]::TryParse($nestedUtcText,$invariant,$roundtrip,[ref]$nestedUtc)-or$nestedUtc.Offset-ne[timespan]::Zero-or-not[datetimeoffset]::TryParse($l1UtcText,$invariant,$roundtrip,[ref]$l1Utc)-or$l1Utc.Offset-ne[timespan]::Zero-or$nestedUtc-gt$l1Utc){throw 'Post-cleanup nested and L1 observations have invalid or out-of-order UTC timestamps.'}
-        if([string]$nested.runId -cne $runId -or [string]$nested.status -cne 'ABSENT' -or $nested.present -isnot [bool] -or $nested.present -ne $false -or [string]$nested.expectedName -cne $expectedL2 -or [string]$nested.nestedScope -cne 'inside the exact L1 guest session' -or [string]$nested.observer -cne 'Get-DevFleetNestedL2State' -or [string]$nested.l1.name -cne [string]$Vm.Name -or [string]$nested.l1.id -cne [string]$Vm.Id){throw 'Post-cleanup nested observation source does not match the terminal claim.'}
-        if(($nested.exactMatchCount -isnot [int] -and $nested.exactMatchCount -isnot [long]) -or [long]$nested.exactMatchCount -ne 0){throw 'Post-cleanup nested observation exact-match result is absent or invalid.'}
-        $candidateTuplePatterns=[ordered]@{
-            repositoryHead='^[0-9a-f]{40}$'
-            candidateCommit='^[0-9a-f]{40}$'
-            shippingInputIdentity='^[0-9a-f]{64}$'
-            releaseFingerprintId='^[0-9a-f]{64}$'
-            toolingFingerprintId='^[0-9a-f]{64}$'
-        }
-        foreach($key in $candidateTuplePatterns.Keys){
-            $tupleValue=''
-            if($State.candidateHashes -is [System.Collections.IDictionary]){$tupleValue=[string]$State.candidateHashes[$key]}
-            elseif($State.candidateHashes){$tupleProperty=$State.candidateHashes.PSObject.Properties[$key];if($tupleProperty){$tupleValue=[string]$tupleProperty.Value}}
-            if($tupleValue -cnotmatch $candidateTuplePatterns[$key]){throw 'Post-cleanup finalization candidate tuple is malformed or incomplete.'}
-        }
-        foreach($key in $candidateTuplePatterns.Keys){
-            if([string]$l2.candidate.$key -cne [string]$State.candidateHashes.$key -or [string]$nested.candidate.$key -cne [string]$State.candidateHashes.$key -or [string]$cleanupValue.candidate.$key -cne [string]$State.candidateHashes.$key){throw "Post-cleanup nested evidence is stale for candidate field $key."}
-        }
-        if($l2UtcText -cne $nestedUtcText -or [string]$l2.verificationMethod -cne [string]$nested.verification -or [string]::IsNullOrWhiteSpace([string]$nested.verification)){throw 'Post-cleanup nested observation verification method or timestamp is absent or changed.'}
-        if([string]$nested.verification -ceq 'Bounded Multipass JSON inventory inside exact L1'){
-            if(($nested.inventoryCount -isnot [int] -and $nested.inventoryCount -isnot [long]) -or [long]$nested.inventoryCount -lt 0){throw 'Post-cleanup Multipass inventory completeness is missing.'}
-        }elseif([string]$nested.verification -ceq 'Multipass CLI absent; complete read-only inventories from every supported in-L1 virtualization backend'){
-            $backendRows=@($nested.backendInventories)
-            if($backendRows.Count -ne 2){throw 'Post-cleanup nested absence is missing a supported backend inventory.'}
-            foreach($provider in @('Hyper-V','VirtualBox')){
-                $rows=@($backendRows|Where-Object{[string]$_.provider -ceq $provider})
-                if($rows.Count -ne 1 -or [string]$rows[0].status -cne 'PASS' -or $rows[0].names -isnot [array] -or [string]::IsNullOrWhiteSpace([string]$rows[0].verification)){throw "Post-cleanup $provider nested inventory is incomplete or ambiguous."}
-                $instanceNames=[Collections.Generic.List[string]]::new()
-                foreach($instanceName in $rows[0].names){
-                    if($instanceName -isnot [string] -or [string]::IsNullOrWhiteSpace([string]$instanceName)){throw "Post-cleanup $provider nested inventory contains an invalid instance name."}
-                    if($instanceNames.Contains([string]$instanceName)){throw "Post-cleanup $provider nested inventory contains a duplicate instance name."}
-                    if([string]$instanceName -ceq $expectedL2){throw "Post-cleanup $provider nested inventory still contains the exact L2 target."}
-                    $instanceNames.Add([string]$instanceName)
-                }
-            }
-        }else{throw 'Post-cleanup nested absence uses an unsupported inventory method.'}
-        # The host-side exact-name lookup is only an additional foreign-resource exclusion.
-        $live=Get-VM -Id ([guid][string]$Vm.Id) -ErrorAction Stop
-        if($live.Name -cne [string]$Vm.Name -or [guid][string]$live.Id -ne [guid][string]$Vm.Id -or [string]$live.State -ne 'Off'){throw 'Post-cleanup live L1 verification failed.'}
-        $hostL2Exclusion=Get-DevFleetHostNameExclusion -Name $expectedL2
-        if([string]$hostL2Exclusion.name -cne $expectedL2 -or [string]$hostL2Exclusion.inventoryScope -cne 'host Hyper-V exact-name exclusion only' -or $hostL2Exclusion.present -isnot [bool]){throw 'Post-cleanup host exclusion result is malformed or has the wrong scope.'}
-        $hostRows=@($hostL2Exclusion.resources)
-        if(($hostL2Exclusion.present -eq $false -and ([string]$hostL2Exclusion.status -cne 'ABSENT' -or $hostRows.Count -ne 0)) -or ($hostL2Exclusion.present -eq $true -and ([string]$hostL2Exclusion.status -cne 'PRESENT' -or $hostRows.Count -lt 1))){throw 'Post-cleanup host exclusion result is incomplete or inconsistent.'}
-        if($hostL2Exclusion.present){throw 'Post-cleanup host inventory found a same-name resource; it was preserved and nested evidence cannot override the host conflict.'}
-        $value=[ordered]@{schemaVersion=3;status='PASS';contract='authoritative-post-cleanup-finalization';runId=$runId;cleanupConsumed=$true;cleanupRecordStatus=[string]$cleanup.status;cleanupEvidenceHash=$bound.cleanup.sha256;terminalL1='l1-terminal-state.json';terminalL1Hash=$bound.l1.sha256;terminalL1Timestamp=[string]$l1.timestampUtc;terminalL2='l2-terminal-state.json';terminalL2Hash=$bound.l2.sha256;terminalL2Timestamp=$nestedUtcText;nestedL2Observation='nested-l2-terminal-observation.json';nestedL2ObservationSha256=$bound.nested.sha256;expectedL2Name=$expectedL2;candidate=$l2.candidate;liveChecks=[ordered]@{l1ExactOff=$true;l2ExactAbsent=$true;hostSameNameL2Absent=$true;foreignResourcesMutated=$false};reconcileAfterCleanup=$true;timestampUtc=(Get-Date).ToUniversalTime().ToString('o')}
-        Write-EvidenceJson -Path (Join-Path $resolvedRunDir 'post-cleanup-finalization.json') -Value $value
-        return $value
-    } finally { foreach($stream in $boundStreams){$stream.Dispose()} }
-}
-
-function Set-FullReleasePassState {
-    param(
-        [Parameter(Mandatory)][System.Collections.IDictionary]$FinalizationState,
-        [Parameter(Mandatory)][psobject]$Result,
-        [Parameter(Mandatory)][string]$ExpectedRunId
-    )
-    if ([string]::IsNullOrWhiteSpace($ExpectedRunId)) { throw 'FullRelease PASS cannot be promoted without a RunId.' }
-    if ([string]$Result.status -cne 'PASS') { throw 'FullRelease PASS promotion requires a PASS result.' }
-    if ([string]$Result.runId -cne $ExpectedRunId) { throw 'FullRelease PASS result RunId does not match the current authority RunId.' }
-    $postCleanup = $Result.postCleanupFinalization
-    if (-not $postCleanup -or [string]$postCleanup.status -cne 'PASS' -or -not [bool]$postCleanup.cleanupConsumed -or -not [bool]$postCleanup.reconcileAfterCleanup) {
-        throw 'FullRelease PASS promotion requires current post-cleanup finalization evidence.'
-    }
-    $liveChecks = $postCleanup.liveChecks
-    if (-not $liveChecks -or -not [bool]$liveChecks.l1ExactOff -or -not [bool]$liveChecks.l2ExactAbsent) {
-        throw 'FullRelease PASS promotion requires exact L1 OFF and L2 ABSENT live checks.'
-    }
-    $FinalizationState['full_release_run_id'] = $ExpectedRunId
-    $FinalizationState['full_release_current'] = $true
-    $FinalizationState['full_release_passed'] = $true
-    $FinalizationState['validation_evidence_current'] = $true
-    $FinalizationState['internal_promotion_allowed'] = $false
-    $FinalizationState['public_promotion_allowed'] = $false
-    $FinalizationState['public_publisher_trust'] = $false
-    $FinalizationState['release_status'] = 'BLOCKED'
-    $FinalizationState['status'] = 'BLOCKED — FullRelease PASS recorded; exact proofs and remaining acceptance gates required'
-    $FinalizationState['current_phase'] = 'FULLRELEASE-PASS'
-    $FinalizationState['last_completed_phase'] = 'CLEANUP'
-    return $FinalizationState
-}
-
-function Invoke-FullReleaseRun {
-    param(
-        [Parameter(Mandatory)][psobject]$State,
-        [Parameter(Mandatory)][psobject]$Fingerprint,
-        [Parameter(Mandatory)][psobject]$Vm,
-        [Parameter(Mandatory)][psobject]$Config,
-        [Parameter(Mandatory)][string]$WorkspaceRoot,
-        [Parameter(Mandatory)][string]$RunDir,
-        [Parameter(Mandatory)][string]$StatePath,
-        [Parameter(Mandatory)][psobject]$HostSnapshot,
-        [Parameter(Mandatory)][psobject]$SelfTest
-    )
-    $effectiveStartAuthorized = if($HostSnapshot.PSObject.Properties['effectiveE2EStartAuthorized']){[bool]$HostSnapshot.effectiveE2EStartAuthorized}else{[bool]$HostSnapshot.startSafe}
-    if (-not $effectiveStartAuthorized) { throw 'USER ACTION REQUIRED — FREE HOST RAM' }
-    $baseline=Set-DevFleetBaselineBinding -WorkspaceRoot $WorkspaceRoot -Fingerprint $Fingerprint
-    $phases=Get-FullReleasePhasePlan
-    $records = [System.Collections.Generic.List[object]]::new()
-    $context = [ordered]@{ runId=$State.runId; phaseId=''; label=''; checkpoint=$null; destructive=$false; candidate=$Fingerprint; vmName=$Vm.Name; vmId=$Vm.Id.ToString(); statePath=$StatePath; runDir=$RunDir; workspaceRoot=$WorkspaceRoot; config=$Config }
-    $realUsePairingCapture = $null
-    $realUsePairingPrivateState = $null
-    $realUseSurrogateEvidence = $null
-    foreach ($phase in $phases) {
-        $context.phaseId=$phase.id
-        $context.label=$phase.label;$context.checkpoint=$phase.checkpoint;$context.destructive=[bool]$phase.destructive
-        $State.currentPhase=$phase.id
-        Save-RunState -State $State -Path $StatePath
-        $record = [ordered]@{ id=$phase.id; label=$phase.label; checkpoint=$phase.checkpoint; destructive=[bool]$phase.destructive; status='NOT RUN'; evidence=$null; startedAt=(Get-Date).ToUniversalTime().ToString('o') }
-        try {
-            if ($phase.id -eq 'HOST-SAFETY') {
-                if (-not $effectiveStartAuthorized) { throw 'Host safety threshold was not met.' }
-                $record.status='PASS';$record.evidence=$HostSnapshot
-            } elseif ($phase.id -eq 'CANDIDATE-VERIFY') {
-                $checks=$SelfTest.requiredChecks
-                $bad=if ($checks -is [System.Collections.IDictionary]) { @($checks.GetEnumerator() | Where-Object { -not [bool]$_.Value }) } else { @($checks.PSObject.Properties | Where-Object { -not [bool]$_.Value }) }
-                if ($SelfTest.result -ne 'PASS' -or @($bad).Count -gt 0) { throw 'Candidate self-test is not a complete PASS.' }
-                $record.status='PASS';$record.evidence=[ordered]
+        $roundtrip=[Globalization.DateTimeStyles]::RoundtripKind;$inv

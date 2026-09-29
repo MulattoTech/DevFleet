@@ -1,10 +1,269 @@
 # DevFleet source part 119
 
 Full-source UTF-8 byte interval [5487000, 5533500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 46835de8aaf64d7ce3b2da7aa025fccdf7f6f9b032cb655a6a3c44f7256ed64c
+Payload SHA-256: f8741ddd0e230e440d6a9c3b5bf7957cef1e9562ca07019e58a173021441e348
 
 <!-- BEGIN SOURCE SLICE -->
-nction Get-NewestJson([string]$Root,[string]$Name) {
+n){$result.l2State='UNVERIFIED';$result.l2ExactAbsent=$false;$result.l2Observation=[ordered]@{schemaVersion=2;expectedName=$L2Name;status='UNVERIFIED';present=$null;verificationMethod='Nested L2 terminal observation could not be validated';ownershipScope='exact expected nested L2 name inside exact disposable L1';evidenceClass='finalizer observation; non-certifying'}}
+    }
+    return $result
+}
+
+function Invoke-CanonicalAuditBundle {
+    $builder=Join-Path $Workspace 'tools\Build-AIAuditBundle.ps1'
+    if (-not(Test-Path -LiteralPath $builder -PathType Leaf)){throw "Canonical audit builder is missing: $builder"}
+    $builderOutput=@(& (Get-Command pwsh.exe -ErrorAction Stop).Source -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $builder -Workspace $Workspace 2>&1)
+    if($LASTEXITCODE -ne 0){throw "Canonical audit builder failed: $($builderOutput -join [Environment]::NewLine)"}
+    if(-not(Test-Path -LiteralPath $zipPath -PathType Leaf)){throw 'Canonical audit builder returned without an audit ZIP.'}
+    $zipHash=Get-FileSha256 $zipPath; $zipBytes=[int64](Get-Item -LiteralPath $zipPath).Length
+    $validator=Join-Path $Workspace 'source\tools\validate_ai_audit_bundle.py'; $mode=if($finalizerStatus -eq 'PASS'){'release'}else{'diagnostic'}
+    $validation=@(& python $validator --archive $zipPath --mode $mode 2>&1)
+    if($LASTEXITCODE -ne 0){throw "Audit ZIP $mode validation failed: $($validation -join [Environment]::NewLine)"}
+    $result=try{($validation -join "`n")|ConvertFrom-Json}catch{throw "Audit ZIP validator did not return JSON: $($_.Exception.Message)"}
+    if($mode -eq 'diagnostic' -and [bool]$result.releaseEligible){throw 'Diagnostic audit ZIP was incorrectly marked release eligible.'}
+    # No ZIP write occurs after this point. The sidecar is deliberately last.
+    @("PATH: $([IO.Path]::GetFullPath($zipPath))","BYTES: $zipBytes","SHA-256: $zipHash")|Set-Content -LiteralPath $sidecarPath -Encoding UTF8
+    [ordered]@{path=$zipPath;bytes=$zipBytes;sha256=$zipHash;sidecar=$sidecarPath;mode=$mode;validation=$result}
+}
+
+try {
+    if($StageScript){if(-not(Test-Path -LiteralPath $StageScript -PathType Leaf)){throw "Stage script is missing: $StageScript"};$stageResult=@(& $StageScript @StageArgumentList);if($LASTEXITCODE -ne 0){throw "Stage exited with code $LASTEXITCODE."}}
+    $finalizerStatus=if($TerminalMode -eq 'PASS'){'PASS'}elseif($TerminalMode -eq 'BLOCKED'){'BLOCKED'}elseif($PrimaryBlocker){'BLOCKED'}else{'PASS'}
+} catch {
+    $stageError=$_;if(-not $PrimaryBlocker){$PrimaryBlocker=Get-SafeError $_};$finalizerStatus='BLOCKED'
+} finally {
+    try {
+        New-Item -ItemType Directory -Force -Path $audit,$evidence,$outputs|Out-Null
+        # Durable interactive cleanup is performed before the touched L1 force-stop
+        # inside Invoke-ExactTerminalCleanup. Do not reconnect after power-off.
+    } catch { Add-SecondaryError "Interactive cleanup: $(Get-SafeError $_)" }
+    try {
+        $terminal=Invoke-ExactTerminalCleanup
+        Write-AtomicJson (Join-Path $evidence 'FINALIZER-TERMINAL-STATE.json') $terminal
+        if($terminal.l1Observation){Write-AtomicJson (Join-Path $evidence 'l1-terminal-state.json') $terminal.l1Observation}
+        if($terminal.l2Observation){Write-AtomicJson (Join-Path $evidence 'l2-terminal-state.json') $terminal.l2Observation}
+        $interactivePath=Join-Path $evidence 'CURRENT-INTERACTIVE-LOGIN.json'
+        if(Test-Path -LiteralPath $interactivePath -PathType Leaf){
+            $interactive=Get-Content -LiteralPath $interactivePath -Raw|ConvertFrom-Json -AsHashtable
+            if($terminal.l1Observation){$interactive.finalL1=$terminal.l1Observation.state}
+            if($terminal.l2Observation){
+                $interactive.finalL2=if([string]$terminal.l2Observation.status -ceq 'ABSENT' -and $terminal.l2Observation.present -eq $false){'ABSENT'}elseif($terminal.l2Observation.present -eq $true){'PRESENT'}else{'UNVERIFIED'}
+            }
+            Write-AtomicJson $interactivePath $interactive
+        }
+        $terminalOutcome=Merge-FinalizerTerminalOutcome -CurrentStatus $finalizerStatus -PrimaryBlocker $PrimaryBlocker -PrimaryBlockerClassification $PrimaryBlockerClassification -SecondaryErrors @($secondaryErrors) -Terminal $terminal
+        $finalizerStatus=$terminalOutcome.status;$PrimaryBlocker=$terminalOutcome.primaryBlocker;$PrimaryBlockerClassification=$terminalOutcome.primaryBlockerClassification
+        $secondaryErrors.Clear();foreach($message in @($terminalOutcome.secondaryErrors)){Add-SecondaryError $message}
+    }catch{
+        $finalizerStatus='BLOCKED'
+        $terminalError=Get-SafeError $_
+        if(-not $PrimaryBlocker){$PrimaryBlocker=$terminalError;$PrimaryBlockerClassification='BLOCKED — FINALIZER TERMINAL EVIDENCE'}else{Add-SecondaryError "Terminal cleanup: $terminalError"}
+        Add-SecondaryError "Terminal cleanup publication: $terminalError"
+    }
+    try { $safePrimary=if($PrimaryBlocker){Get-SafeError $PrimaryBlocker}else{$null};Write-PrimaryRecord $finalizerStatus $PrimaryBlockerClassification $safePrimary @($secondaryErrors) } catch { Add-SecondaryError "Primary blocker record: $(Get-SafeError $_)" }
+    try {
+        $statePath=Join-Path $Workspace 'finalization-state.json'
+        if(Test-Path -LiteralPath $statePath -PathType Leaf){
+            $stateBeforeRefresh=Get-Content -LiteralPath $statePath -Raw|ConvertFrom-Json
+            if(-not [bool]$stateBeforeRefresh.full_release_passed -and (Test-CandidateEvidenceRefreshRequired -State $stateBeforeRefresh)){
+                $candidateBinder=Join-Path $Workspace 'tools\Finalize-CandidateEvidence.ps1'
+                $bindOutput=@(& (Get-Command pwsh.exe -ErrorAction Stop).Source -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $candidateBinder -Workspace $Workspace 2>&1)
+                if($LASTEXITCODE -ne 0){throw "Current tooling fingerprint refresh failed: $($bindOutput -join [Environment]::NewLine)"}
+            }
+        }
+        # A tooling-only commit advances the live tooling tuple without
+        # invalidating shipping bytes. Before rebuilding the diagnostic
+        # authority, bind the live non-shipping tuple when no release is
+        # currently promoted; a promoted release remains immutable.
+        $statePath=Join-Path $Workspace 'finalization-state.json'
+        if(Test-Path -LiteralPath $statePath -PathType Leaf){
+            $stateForAuthority=Get-Content -LiteralPath $statePath -Raw|ConvertFrom-Json -AsHashtable
+            if(-not [bool]$stateForAuthority.full_release_passed){
+                $stateForAuthority.working_tree_tooling_fingerprint_id=[string]$stateForAuthority.toolingFingerprintId
+                $stateForAuthority.working_tree_shipping_input_identity=[string]$stateForAuthority.shipping_input_identity
+                Write-AtomicJson $statePath $stateForAuthority
+            }
+        }
+        $authorityUpdater=Join-Path $Workspace 'tools\Update-CurrentReleaseAuthority.ps1';$updateArgs=@('-Workspace',$Workspace)
+        if(-not[string]::IsNullOrWhiteSpace($RunId)){$updateArgs+=@('-FullReleaseRunId',$RunId)}
+        if($PrimaryBlocker){$classification=if($PrimaryBlockerClassification){$PrimaryBlockerClassification}else{'BLOCKED — FINALIZER'};$updateArgs+=@('-TerminalBlocker',(Get-SafeError $PrimaryBlocker),'-TerminalBlockerClassification',$classification)}
+        # Isolate the updater exit from expected nonzero nested acceptance checks.
+        $authorityOutput=@(& (Get-Command pwsh.exe -ErrorAction Stop).Source -NoProfile -NonInteractive -File $authorityUpdater @updateArgs 2>&1)
+        if($LASTEXITCODE -ne 0){throw 'Current authority refresh failed.'}
+    } catch {
+        $authorityFailure='Current authority refresh failed.'
+        if(-not $PrimaryBlocker){$PrimaryBlocker=$authorityFailure;$PrimaryBlockerClassification='BLOCKED — AUTHORITY REFRESH'}else{Add-SecondaryError "Authority refresh: $(Get-SafeError $_)"}
+        $finalizerStatus='BLOCKED'
+        try {$safePrimary=Get-SafeError $PrimaryBlocker;Write-PrimaryRecord $finalizerStatus $PrimaryBlockerClassification $safePrimary @($secondaryErrors)}catch{Add-SecondaryError "Primary blocker record: $(Get-SafeError $_)"}
+    }
+    try {
+        $diff=@(& git -C $Workspace diff --check 2>&1)
+        if($LASTEXITCODE -ne 0){if(-not $PrimaryBlocker){$PrimaryBlocker='Repository diff contains whitespace errors.';$PrimaryBlockerClassification='BLOCKED — WORKTREE VALIDATION'}else{Add-SecondaryError "git diff --check: $($diff -join [Environment]::NewLine)"};$finalizerStatus='BLOCKED'}
+    }catch{if(-not $PrimaryBlocker){$PrimaryBlocker='Repository diff validation failed.';$PrimaryBlockerClassification='BLOCKED — WORKTREE VALIDATION'}else{Add-SecondaryError "git diff --check: $(Get-SafeError $_)"};$finalizerStatus='BLOCKED'}
+    try {$bundle=Invoke-CanonicalAuditBundle}catch{
+        $bundle=$null
+        if(-not $PrimaryBlocker){$PrimaryBlocker='Canonical audit bundle validation or finalization failed.';$PrimaryBlockerClassification='BLOCKED — AUDIT BUNDLE FINALIZATION'}else{Add-SecondaryError "AUDIT_BUNDLE_FINALIZATION_FAILURE: $(Get-SafeError $_)"}
+        $finalizerStatus='BLOCKED'
+        try {$safePrimary=Get-SafeError $PrimaryBlocker;Write-PrimaryRecord $finalizerStatus $PrimaryBlockerClassification $safePrimary @($secondaryErrors)}catch{Add-SecondaryError "Primary blocker record: $(Get-SafeError $_)"}
+    }
+    try {
+        $statePath=Join-Path $Workspace 'finalization-state.json'
+        if(Test-Path -LiteralPath $statePath -PathType Leaf){$state=Get-Content -LiteralPath $statePath -Raw|ConvertFrom-Json -AsHashtable;$state.finalizer_primary_blocker=if($PrimaryBlocker){Get-SafeError $PrimaryBlocker}else{$null};$state.finalizer_secondary_blockers=@($secondaryErrors);$state.audit_bundle_finalization_status=if($bundle){'PASS'}else{'BLOCKED'};$state.audit_bundle_path=if($bundle){$bundle.path}else{$null};$state.audit_bundle_sha256=if($bundle){$bundle.sha256}else{$null};$state.finalizer_completed_utc=(Get-Date).ToUniversalTime().ToString('o');Write-AtomicJson $statePath $state}
+    }catch{Add-SecondaryError "Finalization state update: $(Get-SafeError $_)"}
+}
+
+[ordered]@{status=$finalizerStatus;primaryBlocker=if($PrimaryBlocker){Get-SafeError $PrimaryBlocker}else{$null};secondaryBlockers=@($secondaryErrors);stageOutput=$stageResult;auditBundle=$bundle}|ConvertTo-Json -Depth 20
+if($stageError){throw $stageError}
+if([string]$finalizerStatus -cne 'PASS'){throw 'Final convergence remained BLOCKED because the primary stage or exact terminal evidence did not establish a safe PASS.'}
+
+```
+
+
+## FILE: tools/PythonRuntime.psm1
+
+SHA256: 7b549bdaa54e822dc1875dbb75cbda8b610aed67a3ba4ed85a75879d87aade1d | Bytes: 1235 | Git mode: 100644
+
+```
+Set-StrictMode -Version Latest
+
+function Resolve-DevFleetPython {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Workspace)
+    $root = (Resolve-Path -LiteralPath $Workspace).Path
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    foreach ($relative in @('.venv-test\Scripts\python.exe','source\.venv-test\Scripts\python.exe','source\.venv-test-win\Scripts\python.exe')) {
+        [void]$candidates.Add((Join-Path $root $relative))
+    }
+    foreach ($name in @('python.exe','python')) {
+        $command = Get-Command $name -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($command -and $command.Source) { [void]$candidates.Add([string]$command.Source) }
+    }
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+        try {
+            $version = @(& $candidate --version 2>&1)
+            if ($LASTEXITCODE -eq 0 -and ($version -join ' ') -match '^Python 3\.') { return (Resolve-Path -LiteralPath $candidate).Path }
+        } catch { }
+    }
+    throw 'No working repository-local or PATH Python 3 runtime is available.'
+}
+
+Export-ModuleMember -Function Resolve-DevFleetPython
+
+```
+
+
+## FILE: tools/Test-FinalizerAuthorityExitBoundary.ps1
+
+SHA256: 79bbec96d0e6f0db06d446c83d009230502c5ef01f7ab1b6be10fc3d941fd574 | Bytes: 3090 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([Parameter(Mandatory)][string]$WorkspaceRoot)
+$ErrorActionPreference='Stop'
+$text=Get-Content (Join-Path $WorkspaceRoot 'tools/Invoke-DevFleetFinalConvergence.ps1') -Raw
+$start=$text.IndexOf('$authorityUpdater=Join-Path')
+$end=$text.IndexOf('    } catch { Add-SecondaryError "Authority refresh:', $start)
+if($start -lt 0 -or $end -le $start){throw 'Native authority call boundary not found'}
+$handler=[scriptblock]::Create($text.Substring($start,$end-$start))
+$root=Join-Path ([IO.Path]::GetTempPath()) ('devfleet-authority-exit-'+[guid]::NewGuid().ToString('N'))
+$checks=[Collections.Generic.List[object]]::new()
+function Check([string]$Name,[bool]$Pass){$checks.Add([pscustomobject]@{name=$Name;pass=$Pass})}
+function Get-SafeError([object]$Value){[string]$Value}
+try {
+    New-Item -ItemType Directory -Path (Join-Path $root 'tools') -Force|Out-Null
+    $fixture=@'
+param($Workspace,$TerminalBlocker,$TerminalBlockerClassification)
+$ErrorActionPreference='Stop'
+$mode=Get-Content (Join-Path $Workspace 'mode.txt')
+if($mode -eq 'throws'){throw 'Fixture authority write rejected'}
+if($mode -eq 'native-nonzero'){& (Join-Path $PSHOME 'pwsh.exe') -NoProfile -NonInteractive -Command 'exit 37'}
+[ordered]@{workspace=$Workspace;blocker=$TerminalBlocker;classification=$TerminalBlockerClassification;nativeExit=$LASTEXITCODE}|ConvertTo-Json|Set-Content (Join-Path $Workspace 'receipt.json')
+'completed updater without terminating error'
+'@
+    Set-Content (Join-Path $root 'tools/Update-CurrentReleaseAuthority.ps1') $fixture -Encoding utf8
+    foreach($mode in @('native-nonzero','inherited-nonzero','throws')){
+        Set-Content (Join-Path $root 'mode.txt') $mode -Encoding utf8
+        Remove-Item (Join-Path $root 'receipt.json') -ErrorAction SilentlyContinue
+        $Workspace=$root;$PrimaryBlocker='EXACT PROOF NOT OBSERVED; fixture';$PrimaryBlockerClassification='BLOCKED - FIXTURE'
+        $LASTEXITCODE=37;$caught=$null
+        try { & $handler|Out-Null } catch {$caught=$_.Exception.Message}
+        $receipt=Join-Path $root 'receipt.json'
+        if($mode -eq 'throws'){
+            Check 'actual updater exception remains failure' ([bool]$caught)
+            Check 'failed updater did not manufacture receipt' (-not(Test-Path $receipt))
+        }else{
+            Check ($mode+': successful updater accepted') (-not $caught)
+            Check ($mode+': updater actually executed') (Test-Path $receipt)
+            if(Test-Path $receipt){$j=Get-Content $receipt -Raw|ConvertFrom-Json;Check ($mode+': argument values preserved') ($j.workspace -eq $Workspace -and $j.blocker -eq $PrimaryBlocker -and $j.classification -eq $PrimaryBlockerClassification)}
+        }
+    }
+} finally {if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force}}
+$failed=@($checks|Where-Object {-not $_.pass})
+[ordered]@{scope='VM_FREE_NATIVE_FINALIZER_CALL_BOUNDARY';releaseCredit=$false;status=if($failed.Count){'FAIL'}else{'PASS'};passed=$checks.Count-$failed.Count;total=$checks.Count;checks=@($checks)}|ConvertTo-Json -Depth 6
+if($failed.Count){exit 1}
+
+```
+
+
+## FILE: tools/Update-CurrentReleaseAuthority.ps1
+
+SHA256: 179bbdd0b389cc521cb59e156334bfaa9e0617a8416d1f8cde82267f99e07903 | Bytes: 37062 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param(
+    [string]$Workspace = (Split-Path -Parent $PSScriptRoot),
+    [string]$CurrentProofRunId,
+    [string]$FullReleaseRunId,
+    [string]$TerminalBlocker,
+    [string]$TerminalBlockerClassification
+)
+
+$ErrorActionPreference = 'Stop'
+$Workspace = (Resolve-Path -LiteralPath $Workspace).Path
+Import-Module (Join-Path $PSScriptRoot 'AuthorityTime.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'PythonRuntime.psm1') -Force
+$python = Resolve-DevFleetPython -Workspace $Workspace
+$outputs = Join-Path $Workspace 'outputs'
+$audit = Join-Path $Workspace 'audit'
+$evidence = Join-Path $Workspace 'evidence'
+$runRoot = Join-Path $audit 'automation-harness\runs'
+
+function Read-Json([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+}
+function Write-AtomicJson([string]$Path,$Value) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+    $temporary = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [IO.File]::WriteAllText($temporary,(($Value | ConvertTo-Json -Depth 40) + [Environment]::NewLine),[Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $temporary -Destination $Path -Force
+    } finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+}
+function Write-AtomicText([string]$Path,[string]$Value) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+    $temporary = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [IO.File]::WriteAllText($temporary,$Value,[Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $temporary -Destination $Path -Force
+    } finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+}
+function Get-StringHash([string]$Value) {
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try { return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value)) | ForEach-Object { $_.ToString('x2') }) -join '') }
+    finally { $sha.Dispose() }
+}
+function Get-FirstProperty($Value,[string[]]$Names) {
+    if ($null -eq $Value) { return $null }
+    foreach ($name in $Names) {
+        if ($Value -is [Collections.IDictionary] -and $Value.Contains($name)) { return $Value[$name] }
+        if ($Value.PSObject.Properties.Name -contains $name) { return $Value.$name }
+    }
+    return $null
+}
+function Get-NewestJson([string]$Root,[string]$Name) {
     if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return $null }
     $file = Get-ChildItem -LiteralPath $Root -Filter $Name -File -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
     if (-not $file) { return $null }
@@ -257,222 +516,4 @@ $authority = [ordered]@{authorityId=$authorityId} + $authorityCore
 $candidate.authorityId=$authorityId;$candidate.status=$status;$candidate.blockerClassification=$blockerClassification
 $proof.authorityId=$authorityId;$fullSummary.authorityId=$authorityId
 
-$currentStatus = [ordered]@{schemaVersion=3;authorityId=$authorityId;generatedAtUtc=$authority.generatedAtUtc;status=$status;blockerClassification=$blockerClassification;blocker=$blocker;nextAction=$nextAction;repositoryHead=$head;candidateCommit=$candidateCommit;shippingInputIdentity=$shippingIdentity;candidateShippingInputIdentity=$shippingIdentity;releaseFingerprintId=$releaseId;toolingFingerprintId=$toolingId;workingTree=$workingTree;candidateIsCurrent=$candidateFlags.candidateIsCurrent;sourceChangedSinceCandidate=$candidateFlags.sourceChangedSinceCandidate;rebuildRequired=$candidateFlags.rebuildRequired;validationEvidenceCurrent=$candidateFlags.validationEvidenceCurrent;fullReleasePassed=$fullPassed;internalPromotionAllowed=$candidateFlags.internalPromotionAllowed;publicPromotionAllowed=$false;publicPublisherTrust=$false;currentProofRunId=if($CurrentProofRunId){$CurrentProofRunId}else{$null};currentProofOutcome=$proofOutcome;proofsPassed=$passingProofs.Count;proofsRequired=2;fullReleaseRunId=if($FullReleaseRunId){$FullReleaseRunId}else{$null};f005Attempted=$false;productionUnchanged=$true;mulattoTechSurfaceTouched=$false;disposableLabOnly=$true}
-$currentGates = [ordered]@{schemaVersion=3;authorityId=$authorityId;generatedAtUtc=$authority.generatedAtUtc;status=$status;repositoryHead=$head;candidateCommit=$candidateCommit;shippingInputIdentity=$shippingIdentity;releaseFingerprintId=$releaseId;toolingFingerprintId=$toolingId;candidate=$candidate;proofs=$authority.proofs;fullRelease=$fullSummary;gates=$state.gates;blockers=if($blocker){@($blocker)}else{@()};currentPhase=[string]$state.current_phase;lastCompletedPhase=[string]$state.last_completed_phase}
-$l1 = Read-Json (Join-Path $evidence 'l1-terminal-state.json');$l2 = Read-Json (Join-Path $evidence 'l2-terminal-state.json')
-$handoff = [ordered]@{schemaVersion=3;authorityId=$authorityId;historical=$false;generatedAtUtc=$authority.generatedAtUtc;status=$status;blockerClassification=$blockerClassification;blocker=$blocker;nextAction=$nextAction;repositoryHead=$head;candidateCommit=$candidateCommit;shippingInputIdentity=$shippingIdentity;candidateShippingInputIdentity=$shippingIdentity;releaseFingerprintId=$releaseId;toolingFingerprintId=$toolingId;currentProofRunId=if($CurrentProofRunId){$CurrentProofRunId}else{$null};currentProofOutcome=$proofOutcome;phase=$terminalPhase;provider=$terminalProvider;lastStableStep=$terminalStable;terminalError=$terminalError;proofsPassed=$passingProofs.Count;proofsRequired=2;fullReleaseRunId=if($FullReleaseRunId){$FullReleaseRunId}else{$null};fullReleaseStatus=$fullStatus;l1State=if($l1){[string]$l1.state}else{'UNVERIFIED'};l2State=if($l2){if([string]$l2.status -ceq 'ABSENT' -and $l2.present -eq $false){'ABSENT'}elseif($l2.present -eq $true){'PRESENT'}else{'UNVERIFIED'}}else{'UNVERIFIED'};f005Attempted=$false;formatterOnlyAuditCleanup=$false;f005StructuralRefactor=$false;publicPromotionAllowed=$false;publicPublisherTrust=$false}
-$next = [ordered]@{schemaVersion=3;authorityId=$authorityId;historical=$false;generatedFrom='evidence/CURRENT-RELEASE-AUTHORITY.json';status=$status;blockerClassification=$blockerClassification;blocker=$blocker;nextAction=$nextAction;repository=[ordered]@{branch=$branch;head=$head;candidateCommit=$candidateCommit};candidate=$candidate;workingTree=$workingTree;runtime=[ordered]@{currentProofRunId=if($CurrentProofRunId){$CurrentProofRunId}else{$null};currentProofOutcome=$proofOutcome;proofs=$authority.proofs;fullRelease=$fullSummary;internalPromotionAllowed=$candidateFlags.internalPromotionAllowed;publicPromotionAllowed=$false;publicPublisherTrust=$false};safety=[ordered]@{protectedProductionMutated=$false;hostRebooted=$false;amdRadeonTouched=$false;biosUefiTouched=$false;mulattoTechSurfaceTouched=$false;githubPushed=$false;privateSigningKeyExported=$false};f005=$authority.f005}
-
-Write-AtomicJson (Join-Path $evidence 'CURRENT-RELEASE-AUTHORITY.json') $authority
-Write-AtomicJson (Join-Path $Workspace 'CURRENT-CANDIDATE.json') $candidate
-Write-AtomicJson (Join-Path $evidence 'CURRENT-STATUS.json') $currentStatus
-Write-AtomicJson (Join-Path $evidence 'CURRENT-GATES.json') $currentGates
-Write-AtomicJson (Join-Path $evidence 'CURRENT-PROOF.json') $proof
-Write-AtomicJson (Join-Path $evidence 'FULLRELEASE-SUMMARY.json') $fullSummary
-Write-AtomicJson (Join-Path $evidence 'CURRENT-HANDOFF.json') $handoff
-Write-AtomicJson (Join-Path $audit 'CURRENT-HANDOFF.json') $handoff
-Write-AtomicJson (Join-Path $audit 'NEXT-CODEX-HANDOFF.json') $next
-$nextMd = (@('# DevFleet v1.2.13 current release handoff','',"Authority: $authorityId","Status: $status","Repository/tooling HEAD: $head","Candidate commit: $candidateCommit","Shipping input: $shippingIdentity","Release fingerprint: $releaseId","Tooling fingerprint: $toolingId","Exact proofs: $($passingProofs.Count) / 2 PASS","FullRelease: $fullStatus",'',"Blocker: $(if($blocker){$blocker}else{'None'})","Next action: $nextAction",'','F-005 attempted: NO','Formatter-only F-005 cleanup: NO','F-005 structural refactoring: NO') -join [Environment]::NewLine) + [Environment]::NewLine
-Write-AtomicText (Join-Path $audit 'NEXT-CODEX-HANDOFF.md') $nextMd
-
-$mutableState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json -AsHashtable
-$mutableState.repository_head=$head;$mutableState.git_commit=$head;$mutableState.current_authority_id=$authorityId;$mutableState.current_proof_run_id=if($CurrentProofRunId){$CurrentProofRunId}else{$null};$mutableState.current_proof_outcome=$proofOutcome;$mutableState.current_proof_updated_utc=$authority.generatedAtUtc;$mutableState.proofs_passed=[int]$passingProofs.Count;$mutableState.proofs_required=2
-$mutableState.blockers=if($blocker){@($blocker)}else{@()};$mutableState.status=$status;$mutableState.release_status=$status;$mutableState.validation_evidence_current=$finalAcceptanceValid;$mutableState.full_release_passed=$finalAcceptanceValid;$mutableState.internal_promotion_allowed=$finalAcceptanceValid;$mutableState.public_promotion_allowed=$false;$mutableState.public_publisher_trust=$false
-if($finalAcceptanceValid){$mutableState.candidate_is_current=$true;$mutableState.source_identity_matches_candidate=$true;$mutableState.source_changed_since_candidate=$false;$mutableState.rebuild_required=$false;$mutableState.candidate_build_current=$true;$mutableState.artifact_tuple_matches_candidate=$true;$mutableState.full_release_current=$true;$mutableState.full_release_run_id=[string]$finalAcceptance.fullReleaseRunId;$mutableState.proof_run_ids=@($finalAcceptance.proofRunIds)}
-Write-AtomicJson $statePath $mutableState
-
-[pscustomobject]@{schemaVersion=3;authorityId=$authorityId;status=$status;repositoryHead=$head;candidateCommit=$candidateCommit;releaseFingerprintId=$releaseId;toolingFingerprintId=$toolingId;currentProofRunId=$CurrentProofRunId;currentProofOutcome=$proofOutcome;passingProofs=$passingProofs.Count;fullReleaseRunId=$FullReleaseRunId;fullReleaseStatus=$fullStatus;blocker=$blocker} | ConvertTo-Json -Depth 12
-
-```
-
-
-## FILE: tools/astra-causal-evidence.json
-
-SHA256: 1fc036786413175dd43c0fc5b79be90b884ea4f8c800179a78d1300ce571ede9 | Bytes: 137578 | Git mode: 100644
-
-```
-{
-  "schemaVersion": 1,
-  "purpose": "Frozen historical Astra causal originals and explicitly selected local/controller context; no release or proof credit.",
-  "missingHistoricalEvidence": [
-    "M2 has no original start/end operation journals for launch, info-running, ssh-ready, cloud-init or info-final: ten files remain missing. No replacements manufactured."
-  ],
-  "limitations": [
-    "M5 live-network-and-transport.json is the original truncated invalid JSON; retry1 is separate, not a replacement.",
-    "M6 initial fractional-time analysis is superseded by the selected final analysis; original raw bytes are unchanged.",
-    "M4 two and M5 one UNAVAILABLE snapshots remain unavailable; inclusion is not successful observation.",
-    "Local transport fixtures do not exercise actual Multipass SFTP or Linux ACL enforcement.",
-    "Corrective Proof1 ended after a documented exact-worker operator stop following confirmed product exit5; the native remoting terminal reflects that stop and is not the original product cause.",
-    "Corrective Proof1 confirms real launch and stdin transport through secrets input, but full installation and release eligibility remain unproven.",
-    "Corrective replay2 lacks a pre-cleanup guest setup log. Its retained signed-payload Python syntax error is a demonstrated required correction in the observed failed stage, not a captured live stderr traceback.",
-    "Corrective replay3 bootstrap/receipt/ownership completed but authenticated live health was not observed. Exact worker stop followed a proven PS5.1 health-client runtime incompatibility; native transport failure was the stop consequence. Local PS7 correction tests grant no proof credit.",
-    "Laptop connected-pairing correction is locally qualified only. Missing Tailscale account configuration remains a prerequisite; no browser, auth provider, Vault service or proof PASS is inferred from fixtures.",
-    "Replay4: exact protocol matched; hidden ProgramData Get-Item without Force prevented authentication before hashing. Generic protocol mismatch obscured the early failure. Operator stop preserved evidence and native cleanup. Zero proof; corrective4/4 exhausted.",
-    "Current local maintenance transport uses supported PS7 with exact VM/protocol/candidate/deadline checks. No installed runtime credit or execution-policy override. Historical coordinator projections are preserved before current Astra closeout."
-  ],
-  "records": [
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-prereq-20260907t025814z/astra-host-observations.jsonl",
-      "destination": "e2e-astra-prereq-20260907t025814z/astra-host-observations.jsonl",
-      "sha256": "2a8b5304d27685bdb4e48e6e07a04efda27dae6341e6bc177b459eb4e5cb6d6c",
-      "bytes": 612,
-      "kind": "original"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/lifecycle-CAMPAIGN-E-M4-b060195b300a468cbc794d39bdb011b0/resume-generation-1-wpf-evidence.json",
-      "destination": "e2e-astra-m5-20260907t052903z/lifecycle-CAMPAIGN-E-M4-b060195b300a468cbc794d39bdb011b0/resume-generation-1-wpf-evidence.json",
-      "sha256": "7b0d4e2196565c21443be289633a16e5f2add10e62060b67172bc44801ee265a",
-      "bytes": 7413,
-      "kind": "explicit-observer-causal-context"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/lifecycle-CAMPAIGN-E-M4-b060195b300a468cbc794d39bdb011b0/product-lifecycle-progress.jsonl",
-      "destination": "e2e-astra-m5-20260907t052903z/lifecycle-CAMPAIGN-E-M4-b060195b300a468cbc794d39bdb011b0/product-lifecycle-progress.jsonl",
-      "sha256": "2d8f98127be9e4be6e4d31ad975c3cae5062b49bcc762adbb7c07919d87ba15f",
-      "bytes": 1138765,
-      "kind": "explicit-observer-causal-context"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/lifecycle-CAMPAIGN-E-M4-b060195b300a468cbc794d39bdb011b0/product-lifecycle-observer-generation-1.json",
-      "destination": "e2e-astra-m5-20260907t052903z/lifecycle-CAMPAIGN-E-M4-b060195b300a468cbc794d39bdb011b0/product-lifecycle-observer-generation-1.json",
-      "sha256": "4788f390f1426b37d466a1ac758909ff60887070851e38b0c75df54b8c4727a7",
-      "bytes": 1252694,
-      "kind": "explicit-observer-causal-context"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/lifecycle-CAMPAIGN-E-M4-b060195b300a468cbc794d39bdb011b0/product-lifecycle-observer-generation-0.json",
-      "destination": "e2e-astra-m5-20260907t052903z/lifecycle-CAMPAIGN-E-M4-b060195b300a468cbc794d39bdb011b0/product-lifecycle-observer-generation-0.json",
-      "sha256": "79ae25420c73745aa3a0c0ff8d473f87bff2ea7f45edb1c6a9f05006591d3842",
-      "bytes": 176742,
-      "kind": "explicit-observer-causal-context"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/lifecycle-CAMPAIGN-E-M4-b060195b300a468cbc794d39bdb011b0/initial-FreshInstall-wpf-evidence.json",
-      "destination": "e2e-astra-m5-20260907t052903z/lifecycle-CAMPAIGN-E-M4-b060195b300a468cbc794d39bdb011b0/initial-FreshInstall-wpf-evidence.json",
-      "sha256": "6c4f2bfd53aa168297befd23fe2ec39cfd3ccee72a0371807d055ec816d6398d",
-      "bytes": 8597,
-      "kind": "explicit-observer-causal-context"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0025-before-cleanup.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0025-before-cleanup.json",
-      "sha256": "d9a13e75ca714ce9290a1e5da1ab9f21a69bf44bf3d5ee1b8c4b461e885a8379",
-      "bytes": 261,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0024-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0024-during-product.json",
-      "sha256": "f31ec152a4b82f8d05995bdd7822d77cb9df71c1d253e0ba45161073d2793784",
-      "bytes": 5537,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0023-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0023-during-product.json",
-      "sha256": "de0b08f5afb0dc970029e0a8cda5ea4aa80b3f8843cffd18edd5e0ce5c80083b",
-      "bytes": 5536,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0022-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0022-during-product.json",
-      "sha256": "e1556eb1b19224331555e0a730b3ca7a57aa39cdd4e85bafc3a339b3f38354e7",
-      "bytes": 5535,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0021-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0021-during-product.json",
-      "sha256": "7bbd371cab8d94596e2c21fe83aaad821b0b9bc8c6b92db2b6767e42d113b9bb",
-      "bytes": 5694,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0020-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0020-during-product.json",
-      "sha256": "7790de1d9141761c34cec0b538d317d3eb49c0ea4336d265f3a9b4c4452c6bf4",
-      "bytes": 5537,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0019-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0019-during-product.json",
-      "sha256": "34e31fcf28fd0d6a52ffce92472cce4bb838feae5aab9136c346e8d0803b471a",
-      "bytes": 5530,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0018-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0018-during-product.json",
-      "sha256": "190f2b8bdcf856380c1512533355615f285a9c96d88099ddba30c26f44414fe2",
-      "bytes": 5895,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0017-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0017-during-product.json",
-      "sha256": "af16378f846ee0ce3aeb3ea52c907d714d9a094a78ae8b7074a98088d1856ee3",
-      "bytes": 5537,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0016-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0016-during-product.json",
-      "sha256": "bff00f539b9bd2d2b2845f313b3976b9a7157c3d20032e505e4478e53547a754",
-      "bytes": 5694,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0015-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0015-during-product.json",
-      "sha256": "b0abb18ded605468c50f1b27950cac937bdb943a8af258065fec248e510dfe68",
-      "bytes": 5695,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0014-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0014-during-product.json",
-      "sha256": "e085fc623faffe96f0bf775d23cd3ca79e7ce881c890c452ef8ef9ab2622f608",
-      "bytes": 5536,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0013-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0013-during-product.json",
-      "sha256": "961d83fbe197c2d1be5c86aa2db6c22cf3f84a7594b3e339300afb4f53357442",
-      "bytes": 5536,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0012-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0012-during-product.json",
-      "sha256": "84a266037bd752d24d23e197522d3388c3bac77494a039339d0c7dc09094e6c6",
-      "bytes": 5535,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0011-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0011-during-product.json",
-      "sha256": "2966be7cccff3aa3a55cfdbb4b9331bb257056f5feb16c40f79783d213ea1ac0",
-      "bytes": 23417,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0010-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0010-during-product.json",
-      "sha256": "2652c28352b0909467f2f6ef96a36b0e82490c38f814d1b8a8292cc4dc7fe524",
-      "bytes": 8488,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0009-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0009-during-product.json",
-      "sha256": "a0f9762f3b82f89a939c9c6f8834b95e135c13ea53d095455b12ab100a681359",
-      "bytes": 14226,
-      "kind": "controller-bound-observation"
-    },
-    {
-      "source": "audit/automation-harness/runs/e2e-astra-m5-20260907t052903z/snapshot-0008-during-product.json",
-      "destination": "e2e-astra-m5-20260907t052903z/snapshot-0008-during-product.json",
-      "sha256": "aea3665f58f50ab433682a
+$currentStatus = [ordered]@{schemaVersion=3;authorityId=$authorityId;generatedAtUtc=$authority.generatedAtUtc;status=$status;blockerClassification=$blockerClassification;blocker=$blocker;nextAction=$nextAction;repositoryHead=$head;candidateCommit=$candidateCommit;shippingInputIdentity=$shippingIdentity;candidateShippingInputIdentity=$shippingIdentity;releaseFingerprintId=$releaseId;toolingFingerprintId=$toolingId;workingTree=$workingTree;candidateIsCurrent=$candidateFlags.candidateIsCurrent;sourceChangedSinceCandidate=$candidateFlags.sourceChangedSinceCandidate;rebuildRequired=$candidateFlags.rebuildRequired;validationEvidenceCurrent=$candidateFlags.validationEvidenceCurrent;fullReleasePassed=$fullPassed;internalPromotionAllowed=$candidateFlags.internalPromotionAllowed;publicPromotionAllowed=$false;publicPublisherTrust=$false;currentProofRunId=if($CurrentProofRunId){$CurrentProofRunId}else{$null};currentProofOutcome=$proofOutcome;proofsPassed=$passingProofs.Count;proofsRequired=2;fu

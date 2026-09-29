@@ -1,10 +1,58 @@
 # DevFleet source part 023
 
 Full-source UTF-8 byte interval [1023000, 1069500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 1d5a6c6f252b7475f790e1d2afa14028179fbc44c21b30a28656b466c71fa2e7
+Payload SHA-256: 50840ab12f413a73e7976e45352e992ace056f6a1c12e330bf05ad2823d3b842
 
 <!-- BEGIN SOURCE SLICE -->
-rty=InvocationID','--value') 'REAL_USE_SERVICE_INVOCATION_MISSING';if($before-cnotmatch'^[0-9a-f]{32}$'){throw 'REAL_USE_SERVICE_INVOCATION_INVALID'}
+epare|resume|cleanup)\z'){throw 'REAL_USE_DRIVER_UNIT_NAME_INVALID'}
+                $probe=Invoke-RealUseMultipass -Arguments @('exec',$compute,'--','systemctl','show',$Unit,'--property=LoadState','--property=ActiveState','--property=MainPID') -TimeoutSeconds 30
+                if($probe.exitCode-ne 0){throw 'REAL_USE_DRIVER_UNIT_OBSERVATION_FAILED'}
+                $fields=@{};foreach($line in @($probe.stdout)){if([string]$line-cnotmatch'\A(LoadState|ActiveState|MainPID)=(.*)\z'-or$fields.ContainsKey($matches[1])){throw 'REAL_USE_DRIVER_UNIT_STATE_INVALID'};$fields[$matches[1]]=$matches[2]}
+                if($fields.Count-ne 3-or-not$fields.ContainsKey('LoadState')-or-not$fields.ContainsKey('ActiveState')-or-not$fields.ContainsKey('MainPID')-or[string]$fields.MainPID-cnotmatch'\A[0-9]+\z'){throw 'REAL_USE_DRIVER_UNIT_STATE_INVALID'}
+                $load=[string]$fields.LoadState;$active=[string]$fields.ActiveState;$mainPid=[int64]$fields.MainPID
+                if($load-ceq'not-found'){if($active-cne'inactive'-or$mainPid-ne 0){throw 'REAL_USE_DRIVER_UNIT_STATE_INVALID'};return [pscustomobject]@{loadState=$load;activeState=$active;mainPid=$mainPid;exists=$false}}
+                if($load-cne'loaded'-or$active-notin@('active','activating','reloading','deactivating','inactive','failed','dead')){throw 'REAL_USE_DRIVER_UNIT_STATE_INVALID'}
+                return [pscustomobject]@{loadState=$load;activeState=$active;mainPid=$mainPid;exists=$true}
+            }
+            function Confirm-DriverUnitQuiescent([string]$Unit,[switch]$StopIfRunning){$observation=Get-DriverUnitState $Unit;if($observation.activeState-in@('active','activating','reloading','deactivating')-or$observation.mainPid-ne 0){if(-not$StopIfRunning){throw 'REAL_USE_DRIVER_UNIT_STILL_ACTIVE'};$stop=Invoke-RealUseMultipass -Arguments @('exec',$compute,'--','sudo','systemctl','stop',$Unit) -TimeoutSeconds 120;if($stop.exitCode-ne 0){throw 'REAL_USE_DRIVER_UNIT_STOP_FAILED'}};$deadline=[datetime]::UtcNow.AddSeconds(60);do{$observation=Get-DriverUnitState $Unit;if((-not$observation.exists-or$observation.activeState-in@('inactive','failed','dead'))-and$observation.mainPid-eq 0){return $true};Start-Sleep -Seconds 2}while([datetime]::UtcNow-lt$deadline);throw 'REAL_USE_DRIVER_UNIT_QUIESCENCE_UNPROVEN'}
+            function Invoke-DriverStage([string]$Stage,[string]$Output,[int]$Timeout){$unit="devfleet-real-use-$unitHash-$Stage";$driverUnits.Add($unit)|Out-Null;$runtime=[Math]::Max(1,$Timeout-60);try{$call=Invoke-RealUseMultipass -Arguments @('exec',$compute,'--','sudo','systemd-run','--wait','--pipe','--collect','--quiet',"--unit=$unit",'-p','Type=exec','-p','User=devfleet-control','-p','Group=devfleet-control','-p','SupplementaryGroups=devrunner','-p',"RuntimeMaxSec=${runtime}s",'-p','TimeoutStopSec=30s','-p','KillMode=control-group','/usr/bin/env','-i','PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','LANG=C.UTF-8','/bin/bash','-c',$driverWrapper,'devfleet-real-use-driver',$l2Runner,'--stage',$Stage,'--input',$inputPath,'--state',$statePath,'--output',$Output) -TimeoutSeconds $Timeout;Confirm-DriverUnitQuiescent $unit|Out-Null;return $call}catch{$stageError=$_.Exception;try{Confirm-DriverUnitQuiescent $unit -StopIfRunning|Out-Null}catch{throw 'REAL_USE_DRIVER_UNIT_QUIESCENCE_FAILED'};throw $stageError}}
+            function Read-Report([string]$Path,[string]$Code){$value=Invoke-RequiredMultipass @('exec',$compute,'--','sudo','cat',$Path) 60 $Code;try{return (($value.stdout-join"`n")|ConvertFrom-Json -ErrorAction Stop)}catch{throw $Code}}
+            function Test-DriverCleanupProven([AllowNull()][object]$Report){
+                if(-not$Report-or[int]$Report.schemaVersion-ne 1-or[string]$Report.contract-cne'devfleet-real-use-acceptance-v1'-or[string]$Report.runId-cne[string]$request.runId-or[string]$Report.phaseId-cne'REAL-USE-ACCEPTANCE'-or[string]$Report.runnerSha256-cne[string]$expectedRunnerHash){return $false}
+                if([string]$Report.stage-notin@('prepare','resume','cleanup')-or[string]$Report.cleanup.status-cne'PASS'-or$Report.cleanup.ownedOnly-isnot[bool]-or-not[bool]$Report.cleanup.ownedOnly-or@($Report.cleanup.errors).Count-ne 0-or$null-ne$Report.cleanupFailure){return $false}
+                if(([string]$Report.stage-ceq'resume'-and[string]$Report.status-cne'PASS')-or([string]$Report.stage-ceq'cleanup'-and[string]$Report.status-cne'BLOCKED')-or([string]$Report.stage-ceq'prepare'-and[string]$Report.status-cne'BLOCKED')){return $false}
+                foreach($resource in @($Report.cleanup.resources)){if([string]::IsNullOrWhiteSpace([string]$resource.kind)-or[string]::IsNullOrWhiteSpace([string]$resource.path)-or[string]$resource.status-notin@('ABSENT','REMOVED')){return $false}}
+                return $true
+            }
+            try{
+                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','install','-d','-o','root','-g','root','-m','0755','/var/lib/devfleet/e2e-real-use') 60 'REAL_USE_PARENT_ROOT_CREATE_FAILED')
+                $parentStat=Read-MultipassLine @('exec',$compute,'--','sudo','stat','-c','%U:%G:%a:%F','/var/lib/devfleet/e2e-real-use') 'REAL_USE_PARENT_ROOT_POLICY_INVALID';if($parentStat-cne'root:root:755:directory'){throw 'REAL_USE_PARENT_ROOT_POLICY_INVALID'}
+                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','mkdir','--',$l2Root) 60 'REAL_USE_L2_ROOT_COLLISION_OR_CREATE_FAILED');$l2RootOwned=$true
+                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','chown','root:devfleet-control','--',$l2Root) 60 'REAL_USE_OWNED_ROOT_OWNER_FAILED')
+                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','chmod','0750','--',$l2Root) 60 'REAL_USE_OWNED_ROOT_MODE_FAILED')
+                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','mkdir','--',$incoming) 60 'REAL_USE_INCOMING_COLLISION_OR_CREATE_FAILED');$incomingOwned=$true
+                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','chown','ubuntu:ubuntu','--',$incoming) 60 'REAL_USE_INCOMING_OWNER_FAILED')
+                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','chmod','0700','--',$incoming) 60 'REAL_USE_INCOMING_MODE_FAILED')
+                [void](Invoke-RequiredMultipass @('transfer',$runner,"$compute`:$incomingRunner") 300 'REAL_USE_RUNNER_TRANSFER_FAILED')
+                $incomingHash=(Read-MultipassLine @('exec',$compute,'--','sha256sum',$incomingRunner) 'REAL_USE_INCOMING_RUNNER_HASH_MISSING').Split(' ',[StringSplitOptions]::RemoveEmptyEntries)[0].ToLowerInvariant();if($incomingHash-cne$expectedRunnerHash){throw 'REAL_USE_INCOMING_RUNNER_HASH_MISMATCH'}
+                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','chown','-R','root:root','--',$incoming) 60 'REAL_USE_INCOMING_LOCK_FAILED')
+                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','install','-T','-o','root','-g','root','-m','0555',$incomingRunner,$l2Runner) 60 'REAL_USE_RUNNER_PROMOTION_FAILED')
+                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','rm','-rf','--',$incoming) 60 'REAL_USE_INCOMING_CLEANUP_FAILED');$incomingOwned=$false
+                $l2RunnerHash=(Read-MultipassLine @('exec',$compute,'--','sudo','sha256sum',$l2Runner) 'REAL_USE_L2_RUNNER_HASH_MISSING').Split(' ',[StringSplitOptions]::RemoveEmptyEntries)[0].ToLowerInvariant();if($l2RunnerHash-cne$expectedRunnerHash){throw 'REAL_USE_L2_RUNNER_HASH_MISMATCH'}
+                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','install','-d','-o','devfleet-control','-g','devfleet-control','-m','0700',$stateDir) 60 'REAL_USE_STATE_DIRECTORY_INVALID')
+                $input=[ordered]@{schemaVersion=1;runId=[string]$request.runId;deadlineUtc=[string]$request.deadlineUtc;runnerSha256=$expectedRunnerHash;candidate=$request.candidate;execution=[ordered]@{role='Laptop / Surrogate';vmName=[string]$request.vmName;vmId=[string]$request.vmId;computeInstanceName=$compute;vaultInstanceName=$vault;deploymentId=[string]$computeIdentity.deployment_id;nodeId=[string]$computeIdentity.node_id;nodeName=[string]$computeIdentity.node_name;transactionId=[string]$request.transactionId;invocationId=[string]$request.invocationId;surrogateEvidenceSha256=[string]$request.surrogateEvidenceSha256};paths=[ordered]@{workspaces=[string]$computeConfig.workspaces;quarantine=[string]$computeConfig.quarantine;runtimeRoot=[string]$computeConfig.runtime_root};baseUrl=('http://127.0.0.1:{0}'-f[int]$computeConfig.portal_port)}
+                $inputJson=$input|ConvertTo-Json -Depth 12 -Compress;$inputBytes=[Text.Encoding]::UTF8.GetBytes($inputJson);$inputBase64=[Convert]::ToBase64String($inputBytes);$sha=[Security.Cryptography.SHA256]::Create();try{$inputHash=($sha.ComputeHash($inputBytes)|ForEach-Object{$_.ToString('x2')})-join''}finally{$sha.Dispose()}
+                $writeScript='set -Eeuo pipefail; umask 027; printf %s "$1" | base64 -d > "$2"; chown root:devfleet-control "$2"; chmod 0640 "$2"'
+                [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','bash','-c',$writeScript,'devfleet-real-use-input',$inputBase64,$inputPath) 60 'REAL_USE_INPUT_WRITE_FAILED')
+                $remoteInputHash=(Read-MultipassLine @('exec',$compute,'--','sudo','sha256sum',$inputPath) 'REAL_USE_INPUT_HASH_MISSING').Split(' ',[StringSplitOptions]::RemoveEmptyEntries)[0].ToLowerInvariant();if($remoteInputHash-cne$inputHash){throw 'REAL_USE_INPUT_HASH_MISMATCH'}
+                $preflight=[ordered]@{laptopInstalled=$true;failoverReady=$true;vaultReady=$true;brokerReady=$true;tailscaleReady=$true;secretFilePolicy=$true;credentialBoundary=$true}
+                $stageEvidence=[ordered]@{l1Sha256=$expectedRunnerHash;l2Sha256=$l2RunnerHash;inputSha256=$inputHash;onlyRunnerStaged=$true}
+                $remaining=[int][Math]::Floor(([datetime]$request.deadlineUtc-[datetime]::UtcNow).TotalSeconds)-[int]$request.cleanupReserveSeconds;if($remaining-lt 1){throw 'REAL_USE_OWNER_DEADLINE_EXHAUSTED'};$prepareBudget=[Math]::Min([int]$request.prepareTimeoutSeconds,$remaining);$prepareCall=Invoke-DriverStage 'prepare' $preparePath $prepareBudget;$prepareExit=$prepareCall.exitCode;$prepareReport=Read-Report $preparePath 'REAL_USE_PREPARE_REPORT_INVALID'
+                if($prepareCall.exitCode-ne 0-or[string]$prepareReport.status-cne'PREPARED'){
+                    $cleanupRemaining=[Math]::Max(1,[Math]::Min([int]$request.cleanupReserveSeconds,[int][Math]::Floor(([datetime]$request.deadlineUtc-[datetime]::UtcNow).TotalSeconds)));$cleanupCall=Invoke-DriverStage 'cleanup' $cleanupPath $cleanupRemaining;$cleanupExit=$cleanupCall.exitCode;try{$cleanupReport=Read-Report $cleanupPath 'REAL_USE_CLEANUP_REPORT_INVALID'}catch{}
+                    $transportResult=[pscustomobject][ordered]@{input=$input;preflight=$preflight;stage=$stageEvidence;prepareReport=$prepareReport;prepareExitCode=$prepareExit;restart=$null;resumeReport=$null;resumeExitCode=$null;cleanupReport=$cleanupReport;cleanupExitCode=$cleanupExit;ownedRootRemoved=$false}
+                }else{
+                    $before=Read-MultipassLine @('exec',$compute,'--','systemctl','show','devfleet.service','--property=InvocationID','--value') 'REAL_USE_SERVICE_INVOCATION_MISSING';if($before-cnotmatch'^[0-9a-f]{32}$'){throw 'REAL_USE_SERVICE_INVOCATION_INVALID'}
                     [void](Invoke-RequiredMultipass @('exec',$compute,'--','sudo','systemctl','restart','devfleet.service') 120 'REAL_USE_EXACT_SERVICE_RESTART_FAILED')
                     $restartDeadline=[datetime]::UtcNow.AddSeconds(120);$after='';do{$active=Invoke-RealUseMultipass @('exec',$compute,'--','systemctl','is-active','--quiet','devfleet.service') 30;if($active.exitCode-eq 0){try{$after=Read-MultipassLine @('exec',$compute,'--','systemctl','show','devfleet.service','--property=InvocationID','--value') 'REAL_USE_SERVICE_INVOCATION_MISSING'}catch{$after=''};if($after-match'^[0-9a-f]{32}$'-and$after-cne$before){break}};Start-Sleep -Seconds 2}while([datetime]::UtcNow-lt$restartDeadline)
                     if($after-cnotmatch'^[0-9a-f]{32}$'-or$after-ceq$before){throw 'REAL_USE_EXACT_SERVICE_RESTART_UNPROVEN'};$restartEvidence=[ordered]@{unit='devfleet.service';invocationChanged=($after-cne$before);otherUnitsRestarted=$false}
@@ -243,181 +291,4 @@ function Assert-RealUseAcceptancePhaseEvidence {
     $durableSummary = Get-Content -LiteralPath $resolved.summary -Raw | ConvertFrom-Json -ErrorAction Stop
     $summaryFields = @('schemaVersion','contract','status','runId','phaseId','candidate','execution','preflight','transport','restart','journeys','cleanup','evidence','credentialsStoredInEvidence','internalPromotionAllowed')
     Assert-RealUseAcceptanceKeys -Value $durableSummary -Allowed $summaryFields -Required $summaryFields -Label 'REAL-USE-ACCEPTANCE durable summary' | Out-Null
-    if ([int]$durableSummary.schemaVersion -ne 1 -or [string]$durableSummary.contract -cne 'devfleet-real-use-acceptance-evidence-v1' -or [string]$durableSummary.status -cne 'PASS' -or [string]$durableSummary.runId -cne [string]$Context.runId -or [string]$durableSummary.phaseId -cne $script:RealUseAcceptancePhase -or $durableSummary.credentialsStoredInEvidence -isnot [bool] -or [bool]$durableSummary.credentialsStoredInEvidence -or $durableSummary.internalPromotionAllowed -isnot [bool] -or [bool]$durableSummary.internalPromotionAllowed) { throw 'FullRelease rejected incomplete durable REAL-USE-ACCEPTANCE summary evidence.' }
-    Assert-RealUseAcceptanceCandidate -Actual $durableSummary.candidate -Expected $contextCandidate -Label 'REAL-USE-ACCEPTANCE summary candidate' | Out-Null
-    Assert-RealUseAcceptanceExecution -Actual $durableSummary.execution -Expected $PhaseResult.binding.execution -Label 'REAL-USE-ACCEPTANCE summary execution' | Out-Null
-    if (-not (Test-RealUseAcceptanceJsonEqual $durableSummary.preflight $PhaseResult.preflight) -or -not (Test-RealUseAcceptanceJsonEqual $durableSummary.transport $PhaseResult.transport) -or -not (Test-RealUseAcceptanceJsonEqual $durableSummary.restart $PhaseResult.restart)) { throw 'FullRelease rejected divergent durable REAL-USE-ACCEPTANCE execution evidence.' }
-    $summaryJourneys = @($durableSummary.journeys)
-    if ($summaryJourneys.Count -ne 5 -or @('U01','U02','U03','U04','U05' | Where-Object { $id=$_; @($summaryJourneys | Where-Object { [string]$_.id -ceq $id -and [string]$_.status -ceq 'PASS' }).Count -ne 1 }).Count) { throw 'FullRelease rejected incomplete durable REAL-USE-ACCEPTANCE journey summary.' }
-    Assert-RealUseAcceptanceKeys -Value $durableSummary.cleanup -Allowed @('status','ownedOnly','vaultSnapshots') -Required @('status','ownedOnly','vaultSnapshots') -Label 'REAL-USE-ACCEPTANCE summary cleanup' | Out-Null
-    if ([string]$durableSummary.cleanup.status -cne 'PASS' -or $durableSummary.cleanup.ownedOnly -isnot [bool] -or -not [bool]$durableSummary.cleanup.ownedOnly -or [string]$durableSummary.cleanup.vaultSnapshots -cne 'RETAINED_APPEND_ONLY_IN_DISPOSABLE_VAULT') { throw 'FullRelease rejected incomplete durable REAL-USE-ACCEPTANCE cleanup summary.' }
-    Assert-RealUseAcceptanceKeys -Value $durableSummary.evidence -Allowed @('binding','prepare','report') -Required @('binding','prepare','report') -Label 'REAL-USE-ACCEPTANCE summary evidence links' | Out-Null
-    foreach ($name in @('binding','prepare','report')) {
-        Assert-RealUseAcceptanceKeys -Value $durableSummary.evidence.$name -Allowed @('path','sha256') -Required @('path','sha256') -Label "REAL-USE-ACCEPTANCE summary $name link" | Out-Null
-        $pathName="${name}Path";$hashName="${name}Sha256"
-        if ([string]$durableSummary.evidence.$name.path -cne [string]$PhaseResult.evidence.$pathName -or [string]$durableSummary.evidence.$name.sha256 -cne [string]$PhaseResult.evidence.$hashName) { throw "FullRelease rejected divergent REAL-USE-ACCEPTANCE summary $name link." }
-    }
-    return $true
-}
-
-Export-ModuleMember -Function New-RealUseAcceptancePrimaryPairingCapture,Complete-RealUseAcceptanceClusterJoin,Remove-RealUseAcceptancePrivateState,Get-RealUseAcceptanceSurrogateBinding,Assert-RealUseAcceptanceInput,Assert-RealUseAcceptanceReport,Invoke-RealUseAcceptancePhase,Assert-RealUseAcceptancePhaseEvidence
-
-```
-
-
-## FILE: automation/release-e2e/modules/ResumeState.psm1
-
-SHA256: b8ce4a186694603ff0e7eb246f39052e2ee335f002b10bd55ad9c8014eb2f661 | Bytes: 2459 | Git mode: 100644
-
-```
-Set-StrictMode -Version Latest
-
-function Write-AtomicJson {
-    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][object]$Value)
-    $full = [IO.Path]::GetFullPath($Path)
-    $dir = Split-Path -Parent $full
-    New-Item -ItemType Directory -Force -Path $dir | Out-Null
-    $tmp = "$full.$([guid]::NewGuid().ToString('N')).tmp"
-    $json = $Value | ConvertTo-Json -Depth 32
-    $bytes = [Text.Encoding]::UTF8.GetBytes($json)
-    $stream = [IO.File]::Open($tmp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-    try { $stream.Write($bytes,0,$bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
-    try {
-        for($attempt=1;$attempt -le 4;$attempt++) {
-            try {
-                Move-Item -LiteralPath $tmp -Destination $full -Force
-                return
-            } catch {
-                if($attempt -eq 4){throw}
-                Start-Sleep -Milliseconds (100*$attempt)
-            }
-        }
-    } finally {
-        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-    }
-}
-
-function Read-StrictJson {
-    param([Parameter(Mandatory)][string]$Path)
-    if (-not (Test-Path -LiteralPath $Path)) { throw "State file not found: $Path" }
-    $raw = Get-Content -LiteralPath $Path -Raw -Encoding utf8
-    if ([string]::IsNullOrWhiteSpace($raw)) { throw "State file is empty: $Path" }
-    try { $raw | ConvertFrom-Json -ErrorAction Stop } catch { throw "Invalid JSON state: $Path" }
-}
-
-function New-HarnessRunId { "e2e-$((Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'))-$([guid]::NewGuid().ToString('N').Substring(0,8))" }
-
-function Save-RunState { param([Parameter(Mandatory)][psobject]$State,[Parameter(Mandatory)][string]$Path); Write-AtomicJson -Path $Path -Value $State }
-
-function Assert-ResumeIdentity {
-    param([Parameter(Mandatory)][psobject]$State,[Parameter(Mandatory)][psobject]$Fingerprint,[psobject]$Vm)
-    if ($State.candidateHashes -and $State.candidateHashes.exe -ne $Fingerprint.candidate.sha256) { throw 'Resume refused: candidate hash changed.' }
-    if ($State.candidateHashes -and $State.candidateHashes.tar -ne $Fingerprint.tar.sha256) { throw 'Resume refused: TAR hash changed.' }
-    if ($State.vmId -and $Vm -and $State.vmId -ne $Vm.Id.ToString()) { throw 'Resume refused: disposable VM identity changed.' }
-    $true
-}
-
-Export-ModuleMember -Function Write-AtomicJson,Read-StrictJson,New-HarnessRunId,Save-RunState,Assert-ResumeIdentity
-
-```
-
-
-## FILE: automation/release-e2e/modules/Secrets.psm1
-
-SHA256: 52c0820d2047f6839ad319170045f06ec65726fc1b8bb0ec977d007792182f53 | Bytes: 7992 | Git mode: 100644
-
-```
-Set-StrictMode -Version Latest
-
-function Get-DevFleetE2ESecretPath {
-    Join-Path $env:LOCALAPPDATA 'DevFleet\E2E\secrets.json'
-}
-
-function Protect-DevFleetE2ESecretFile {
-    param([Parameter(Mandatory)][string]$Path)
-    try {
-        $identity = [Security.Principal.WindowsIdentity]::GetCurrent().User
-        $security = [Security.AccessControl.FileSecurity]::new()
-        $security.SetAccessRuleProtection($true,$false)
-        $security.SetOwner($identity)
-        foreach($rule in @(
-            [Security.AccessControl.FileSystemAccessRule]::new($identity,'FullControl','Allow'),
-            [Security.AccessControl.FileSystemAccessRule]::new('BUILTIN\Administrators','FullControl','Allow'),
-            [Security.AccessControl.FileSystemAccessRule]::new('NT AUTHORITY\SYSTEM','FullControl','Allow')
-        )) { $security.AddAccessRule($rule) | Out-Null }
-        Set-Acl -LiteralPath $Path -AclObject $security -ErrorAction Stop
-    } catch { throw 'Secure E2E credential store ACL could not be established.' }
-}
-
-function Write-DevFleetE2ESecretRecord {
-    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][object]$Data)
-    $parent=Split-Path -Parent $Path
-    New-Item -ItemType Directory -Force -Path $parent | Out-Null
-    $temporary="$Path.$([guid]::NewGuid().ToString('N')).tmp"
-    try {
-        # The temporary file is ACL'd before credential bytes are written.
-        [IO.File]::WriteAllText($temporary,'',[Text.UTF8Encoding]::new($false))
-        Protect-DevFleetE2ESecretFile -Path $temporary
-        [IO.File]::WriteAllText($temporary,(($Data|ConvertTo-Json -Depth 8)+[Environment]::NewLine),[Text.UTF8Encoding]::new($false))
-        Move-Item -LiteralPath $temporary -Destination $Path -Force
-        Protect-DevFleetE2ESecretFile -Path $Path
-        [IO.File]::SetAttributes($Path,[IO.FileAttributes]::Hidden)
-    } finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
-}
-
-function Read-DevFleetE2ESecretRecord {
-    param([Parameter(Mandatory)][string]$Path)
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
-    $item=Get-Item -LiteralPath $Path -Force -ErrorAction Stop
-    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Secure E2E credential store is a reparse point.' }
-    Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-}
-
-function Save-DevFleetE2ECredential {
-    param([Parameter(Mandatory)][pscredential]$Credential)
-    $path = Get-DevFleetE2ESecretPath
-    $existing = $null
-    if (Test-Path -LiteralPath $path -PathType Leaf) {
-        try { $existing = Read-DevFleetE2ESecretRecord -Path $path } catch { throw 'Secure E2E credential store is corrupt; repair it before replacing the interactive credential.' }
-    }
-    $data = [ordered]@{ schemaVersion=2; username=$Credential.UserName; passwordDpapi=$Credential.Password | ConvertFrom-SecureString; createdAt=(Get-Date).ToUniversalTime().ToString('o') }
-    if ($existing) {
-        foreach ($name in @('tailscaleOAuthClientId','tailscaleOAuthClientSecretDpapi')) {
-            if ($existing.PSObject.Properties[$name]) { $data[$name] = $existing.$name }
-        }
-    }
-    Write-DevFleetE2ESecretRecord -Path $path -Data $data
-    $path
-}
-
-function ConvertTo-DevFleetPlainSecret {
-    param([Parameter(Mandatory)][securestring]$Secret)
-    $bstr=[IntPtr]::Zero
-    try { $bstr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secret);return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
-    finally { if($bstr -ne [IntPtr]::Zero){[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)} }
-}
-
-function Save-DevFleetTailscaleOAuthCredential {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][securestring]$ClientSecret,[string]$ClientId='')
-    if($ClientId -and ($ClientId.Length -gt 256 -or $ClientId -match '[\r\n]')){throw 'Tailscale OAuth client ID is malformed.'}
-    $plain=ConvertTo-DevFleetPlainSecret -Secret $ClientSecret
-    try {
-        if([string]::IsNullOrWhiteSpace($plain) -or $plain.IndexOfAny([char[]]"`0`r`n") -ge 0 -or $plain.Length -gt 2048){throw 'Tailscale OAuth client secret is empty or malformed.'}
-    } finally { $plain=$null }
-    $path=Get-DevFleetE2ESecretPath;$existing=$null
-    try {$existing=Read-DevFleetE2ESecretRecord -Path $path} catch { throw 'Secure E2E credential store is corrupt; repair it before adding Tailscale OAuth.' }
-    $data=[ordered]@{schemaVersion=2;createdAt=(Get-Date).ToUniversalTime().ToString('o')}
-    if($existing){foreach($name in @('username','passwordDpapi','createdAt')){if($existing.PSObject.Properties[$name]){$data[$name]=$existing.$name}}}
-    if(-not $data.Contains('username')){$data.username='';$data.passwordDpapi=''}
-    $data.tailscaleOAuthClientId=$ClientId
-    $data.tailscaleOAuthClientSecretDpapi=($ClientSecret | ConvertFrom-SecureString)
-    Write-DevFleetE2ESecretRecord -Path $path -Data $data
-    $path
-}
-
-function Get-DevFleetTailscaleOAuthCredential {
-    $path=Get-DevFleetE2ESecretPath;$data=$null
-    try {$data=Read-DevFleetE2ESecretRecord -Path $path} catch { return [pscustomobject]@{available=$false;provider='OAuthClientSecretStore';reason='secure E2E credential store is corrupt';secret=$null;clientId='';path=$path;invalid=$true} }
-    $clientId=if($data -and $data.PSObject.Properties['tailscaleOAuthClientId']){[string]$data.tailscaleOAuthClientId}else{''}
-    if(-not $data -or -not $data.PSObject.Properties['tailscaleOAuthClientSecretDpapi'] -or [string]::IsNullOrWhiteSpace([string]$data.tailscaleOAuthClientSecretDpapi)){return [pscustomobject]@{available=$false;provider='OAuthC
+    if ([int]$durableSummary.schemaVersion -ne 1 -or [string]$durableSummary.contract -cne 'devfleet-real-use-acceptance-evidence-v1' -or [string]$durableSummary.status -cne 'PASS' -or [string]$durableSummary.runId -cne [string]$Context.runId -or [string]$durableSummary.phaseId -cne $script:RealUseAcceptancePhase -or $durableSummary.credentialsStoredInEvidence -isnot [bool] -or [bool]$durableSummary.credentialsStoredInEvidence -or $durableSummary.internalPromotionAllowed -isnot [bool] -or [bool]$durableSummary.internalPromotionAllowed) { throw 'FullRelease rejected incomplete durable REAL-USE-ACCEPTANCE summary eviden

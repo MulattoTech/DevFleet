@@ -1,10 +1,126 @@
 # DevFleet source part 031
 
 Full-source UTF-8 byte interval [1395000, 1441500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 2437e98c1e4298f93145bb15150b199ad3745c221a66e1d1abca5d5ebc0c0d07
+Payload SHA-256: 8e4de45c965f453c6241fa58e93848403a0bbd9df37bb6621e5367e2d15d96af
 
 <!-- BEGIN SOURCE SLICE -->
-eUrl=''; OllamaModel='e2e-disabled'; OllamaProfile='stable-interactive'
+stname -RunId ([string]$Context.runId) -Role 'windows') -Force
+            }
+            $tailscaleWaitSeconds=if($tailscaleConfig.PSObject.Properties['PollTimeoutSeconds'] -and [int]$tailscaleConfig.PollTimeoutSeconds -gt 0){[int]$tailscaleConfig.PollTimeoutSeconds}else{120}
+            $tailscaleOwnerDeadline=[datetime]::UtcNow.AddSeconds($tailscaleWaitSeconds+30)
+            $auth=Invoke-TailscaleAuthentication -Session $session -Config $tailscaleConfig -OwnerDeadlineUtc $tailscaleOwnerDeadline
+            if(-not [bool]$auth.authenticationAttempted -and [bool]$auth.userActionRequired) { Write-TailscaleOAuthActionRequired; throw "USER ACTION REQUIRED - TAILSCALE-AUTH: $([string]$auth.reason)." }
+            Assert-TailscaleAuthenticationResult -Result $auth | Out-Null
+            $productConfigPath=Join-Path ((Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path) 'source\config\devfleet.config.json'
+            if(-not(Test-Path -LiteralPath $productConfigPath -PathType Leaf)){throw 'TAILSCALE_CONTROL_PLANE_OFFLINE: product configuration is unavailable for readiness endpoint discovery.'}
+            $productConfig=Get-Content -LiteralPath $productConfigPath -Raw|ConvertFrom-Json -ErrorAction Stop
+            $expectedPeer=Get-TailscaleE2EHostname -RunId ([string]$Context.runId) -Role 'primary'
+            $servicePort=[int]$productConfig.Network.PortalPort
+            $servicePath='/healthz'
+            $expectedNode=if($provider-in @('OAuthClientSecretStore','OAuthAutomation','OAuthClientSecretDpapi')){Get-TailscaleE2EHostname -RunId ([string]$Context.runId) -Role 'windows'}else{[string]$Context.config.Tailscale.ExpectedGuestNodePattern}
+            $expectedTag=if($authConfig.PSObject.Properties['Tag']){[string]$authConfig.Tag}else{''}
+            $readiness=Get-TailscaleReadiness -Session $session -ExpectedNodePattern $expectedNode -ExpectedTag $expectedTag -ExpectedPeer $expectedPeer -ServicePort $servicePort -ServicePath $servicePath -OwnerDeadlineUtc $tailscaleOwnerDeadline
+            if(-not [bool]$readiness.ready){throw "$([string]$readiness.failureClass): TAILSCALE-AUTH structured readiness did not pass."}
+            return [ordered]@{status='REAL E2E PASS';phase=[string]$Context.phaseId;contract=if($provider-in @('OAuthClientSecretStore','OAuthAutomation','OAuthClientSecretDpapi')){'oauth-client-secret-provider-with-layered-readiness'}else{'auth-key-fallback-provider-with-layered-readiness'};configuredMode=$configuredMode;candidate=$candidate;guest=$readiness.layer2;readiness=$readiness;authenticationAttempted=[bool]$auth.authenticationAttempted;authenticationSucceeded=[bool]$auth.authenticationSucceeded;authProvider=$provider;expectedPeer=$expectedPeer;servicePort=$servicePort;servicePath=$servicePath;credentialsStoredInEvidence=$false;userActionRequired=$false}
+        }finally{if($session){Remove-DevFleetGuestSession $session -ErrorAction SilentlyContinue}}
+    }
+    if($configuredMode -ne 'Deferred'){throw 'USER ACTION REQUIRED - configured Tailscale policy requires the official interactive authentication boundary.'}
+    $session=$null
+    try{
+        $session=Connect-DevFleetGuest -VmId ([guid][string]$Context.vmId)
+        $status=Get-TailscaleGuestStatus -Session $session -ExpectedNodePattern ([string]$Context.config.Tailscale.ExpectedGuestNodePattern)
+        if([bool]$status.online -or -not[bool]$status.needsLogin){throw 'Deferred Tailscale policy expected an installed but unauthenticated guest.'}
+        if([string]::IsNullOrWhiteSpace([string]$status.version) -or [string]$status.version -match 'not recognized|not found'){throw 'Deferred Tailscale policy could not verify the installed Tailscale client.'}
+        return [ordered]@{status='REAL E2E PASS';phase=[string]$Context.phaseId;contract=if([string]$Context.phaseId -eq 'TAILSCALE-DEFERRED'){'installed-client-deferred-no-auth'}else{'authentication-explicitly-not-run-by-supported-deferred-policy'};configuredMode=$configuredMode;candidate=$candidate;guest=$status;authenticationAttempted=$false;credentialsStoredInEvidence=$false;userActionRequired=$false}
+    }finally{if($session){Remove-DevFleetGuestSession $session -ErrorAction SilentlyContinue}}
+}
+
+function ConvertTo-LfShellText([string]$Text) {
+    if ($null -eq $Text) { return '' }
+    return $Text.Replace("`r`n", "`n").Replace("`r", "`n")
+}
+
+function Invoke-LinuxBootstrapPhase {
+    param([Parameter(Mandatory)][string]$ContextJson)
+    $context = Read-PhaseContext $ContextJson
+    $candidate = Assert-ExactCandidate $context
+    $tarPath = [string]$context.candidate.tar.path
+    if (-not (Test-Path -LiteralPath $tarPath -PathType Leaf)) { throw "Linux phase TAR is missing: $tarPath" }
+    $tarHash = (Get-FileHash -LiteralPath $tarPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($tarHash -ne [string]$context.candidate.tar.sha256) { throw 'Linux phase TAR hash differs from the exact candidate tuple.' }
+    $aiBundle = $null
+    $aiBundleFound=$false;$aiBundleValue=Get-LifecycleProperty $context 'aiAuditZip' ([ref]$aiBundleFound);if ($aiBundleFound -and $aiBundleValue) {
+        $aiPathFound=$false;$aiPathValue=Get-LifecycleProperty $aiBundleValue 'path' ([ref]$aiPathFound);$aiHashFound=$false;$aiHashValue=Get-LifecycleProperty $aiBundleValue 'sha256' ([ref]$aiHashFound);$aiBundlePath = [string]$aiPathValue
+        $expectedAiBundleHash = ([string]$aiHashValue).ToLowerInvariant()
+        if (-not (Test-Path -LiteralPath $aiBundlePath -PathType Leaf)) { throw "Focused Linux AI audit bundle is missing: $aiBundlePath" }
+        if ($expectedAiBundleHash -notmatch '^[0-9a-f]{64}$') { throw 'Focused Linux AI audit bundle is missing an exact SHA-256 identity.' }
+        $actualAiBundleHash = (Get-FileHash -LiteralPath $aiBundlePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualAiBundleHash -ne $expectedAiBundleHash) { throw 'Focused Linux AI audit bundle hash differs from the supplied exact identity.' }
+        $aiBundle = [ordered]@{path=(Resolve-Path -LiteralPath $aiBundlePath).Path;sha256=$actualAiBundleHash;bytes=(Get-Item -LiteralPath $aiBundlePath).Length}
+    }
+    if ([string]$context.vmName -notlike 'DevFleet-E2E-*') { throw 'LINUX phase requires an ownership-scoped disposable L1.' }
+    if ($env:COMPUTERNAME -notmatch '^MULATTOTechBOX$|^MULATTOTECHBOX$' -or $env:COMPUTERNAME -match 'SURFACE') { throw 'LINUX phase is not running on the approved MULATTOTECHBOX host.' }
+    $l1 = Get-VM -Id ([guid][string]$context.vmId) -ErrorAction Stop
+    if ($l1.Name -cne [string]$context.vmName) { throw 'LINUX phase disposable L1 identity/name mismatch.' }
+    $vmProcessor = Get-VMProcessor -VM $l1 -ErrorAction Stop
+    if (-not [bool]$vmProcessor.ExposeVirtualizationExtensions) { throw 'Disposable L1 does not expose nested virtualization.' }
+    $nested = $context.config.NestedLinux
+    if (-not $nested) { throw 'E2E config is missing the NestedLinux resource policy.' }
+    $l2Name = [string]$nested.Name
+    $l2Image = [string]$nested.UbuntuImage
+    $l2Cpus = [int]$nested.Cpus
+    $l2Memory = [string]$nested.Memory
+    $l2Disk = [string]$nested.Disk
+    $budgetPolicy = Get-HarnessBudgetPolicy -Config $context.config
+    $l2BootstrapTimeout = [int]$budgetPolicy.operationMaximumsSeconds.guestBootstrap
+    if ($l2Name -notlike 'DevFleet-E2E-*' -or $l2Name -eq ([string]$context.vmName)) { throw 'Nested Linux identity is outside the disposable E2E namespace.' }
+    if ($l2Cpus -lt 1 -or $l2BootstrapTimeout -lt 1) { throw 'Nested Linux resource policy contains an invalid positive integer.' }
+    # Each FullRelease phase restores its declared checkpoint independently.
+    # The clean checkpoint intentionally has no product prerequisites, so the
+    # Linux phase must exercise the candidate's real install path in this same
+    # phase before asking the installed L1 to provide Multipass.
+    $productInstall = Invoke-SupportedFreshInstallLifecycle -Context $context -Role 'Primary / Desktop' -CompleteLifecycle
+    if ([string]$productInstall.status -ne 'REAL E2E PASS' -or -not [bool]$productInstall.guest.completionVerified) {
+        throw "LINUX requires a genuine supported FreshInstall lifecycle PASS before Multipass; observed $($productInstall.status)."
+    }
+    $bootstrapTransactionId = [string]$productInstall.transactionId
+    $bootstrapPayloadSha256 = [string]$context.candidate.tar.sha256
+    $bootstrapPackageVersion = [string]$context.candidate.releaseVersion
+    $bootstrapNodeRole = 'surrogate'
+    if ($bootstrapTransactionId -notmatch '^[0-9a-fA-F]{32}$' -or
+        $bootstrapPayloadSha256 -notmatch '^[0-9a-fA-F]{64}$' -or
+        $bootstrapPackageVersion -notmatch '^\d+\.\d+\.\d+$') {
+        throw 'LINUX product lifecycle did not return an exact bootstrap transaction, payload, or package identity.'
+    }
+    # The supported Desktop lifecycle leaves its exact product Multipass child
+    # running after completion. A fixed 16 GiB nested L1 cannot safely allocate
+    # that product child and the independent 4 GiB Linux L2 at the same time.
+    # Quiesce only the candidate-bound product identity after its completion
+    # authority has passed; never infer ownership from the harness L2 name.
+    $productComputeName = Get-DevFleetProductComputeInstanceName -Context $context -Role 'Primary / Desktop'
+    if ($productComputeName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$' -or $productComputeName -eq $l2Name -or $productComputeName -like 'DevFleet-E2E-*') {
+        throw 'LINUX product compute identity is malformed or overlaps the disposable L2 namespace.'
+    }
+    $session = $null
+    try {
+        $session = Connect-DevFleetGuest -VmId ([guid][string]$context.vmId)
+        $remoteRoot = "C:\Users\Public\DevFleet-E2E\$($context.runId)\$($context.phaseId)"
+        $remoteTar = Join-Path $remoteRoot (Split-Path -Leaf $tarPath)
+        Invoke-Command -Session $session -ScriptBlock { param($root) New-Item -ItemType Directory -Force -Path $root | Out-Null } -ArgumentList $remoteRoot
+        $stage = Get-StageIntegrity -LocalPath $tarPath -Session $session -RemotePath $remoteTar
+        if (-not $stage.equal) { throw 'Exact candidate TAR did not survive host-to-L1 staging.' }
+        $remoteAiBundle = $null
+        $aiBundleStage = $null
+        if ($aiBundle) {
+            $remoteAiBundle = Join-Path $remoteRoot (Split-Path -Leaf ([string]$aiBundle.path))
+            $aiBundleStage = Get-StageIntegrity -LocalPath ([string]$aiBundle.path) -Session $session -RemotePath $remoteAiBundle
+            if (-not $aiBundleStage.equal -or ([string]$aiBundleStage.remoteSha256).ToLowerInvariant() -ne [string]$aiBundle.sha256) { throw 'Exact AI audit ZIP did not survive host-to-L1 staging.' }
+        }
+        $secretJson = [ordered]@{
+            NodeName=$l2Name; NodeRole='surrogate'; FriendlyName='DevFleet E2E Linux'; PortalPort=8787
+            DeploymentId=("e2e-$($context.runId)"); NodeId=([guid]::NewGuid().ToString()); CoordinatorNodeId=''
+            ProtocolVersion=1; AdminUser='e2e-admin'; AdminPassword=('E2E-' + [guid]::NewGuid().ToString('N')); ApiToken=('e2e-token-' + [guid]::NewGuid().ToString('N'))
+            GitName='DevFleet E2E'; GitEmail='e2e@example.invalid'; OllamaBaseUrl=''; OllamaModel='e2e-disabled'; OllamaProfile='stable-interactive'
             DevelopmentProfile='strict'; DockerMode='rootless'; EnableSharedCaches=$false; EnableAnalyzerCache=$true; AutoStartCodexPro=$false
             AllowTailnetPorts=$false; BackupBeforeRebuild=$false; BackupBeforeQuarantine=$true; BackupIntervalMinutes=15; PackageVersion=$context.candidate.releaseVersion
         } | ConvertTo-Json -Compress
@@ -334,120 +450,4 @@ function Invoke-DependencyMatrix {
     $scenarioIds=@('WinGet-Missing','WinGet-Broken','WinGet-Source-Broken','Official-Direct-Fallback','Valid-Nonstandard-Path','Outdated-Prerequisites')
     if(@($adversarial.scenario|Sort-Object -Unique).Count -ne $scenarioIds.Count -or @($adversarial).Count -ne $scenarioIds.Count -or (@($adversarial.scenario|Sort-Object -Unique) -join '|') -ne (@($scenarioIds|Sort-Object) -join '|')){throw 'Dependency policy runner returned duplicate, missing, or unexpected scenario IDs.'}
     foreach($row in $adversarial){
-        if([string]$row.status -ne 'PASS' -or [string]$row.evidenceClass -ne 'ADVERSARIAL_PRODUCT_POLICY' -or -not [bool]$row.actualConditionProven){throw "Dependency policy scenario did not prove its intended branch: $($row.scenario)."}
-        [void]$records.Add($row)
-    }
-    if(@($records).Count -ne $scenarios.Count){throw 'Dependency matrix did not execute every required policy condition.'}
-    return [ordered]@{status='PASS';phase=$Context.phaseId;scenarios=$scenarios;evidence=@($records);contract='one-real-healthy-L1-plus-adversarial-resolver-policy';runner=$runnerProject}
-}
-
-function Get-DevFleetNestedPrimaryReadinessScriptBlock {
-    # One shared restored-nested readiness route for FullRelease and diagnostics.
-    # Providers isolate VM/transport I/O in local tests; live callers omit them.
-    return {
-        param(
-            [Parameter(Mandatory)][string]$Primary,
-            [Parameter(Mandatory)][string]$MultipassPath,
-            [scriptblock]$NativeProbeProvider=$null,
-            [scriptblock]$ControlPlaneRecoveryProvider=$null,
-            [scriptblock]$ServiceLookupProvider={Get-CimInstance Win32_Service -Filter "Name='Multipass'" -ErrorAction Stop},
-            [scriptblock]$ServiceControlProvider={param($Action)$sc=Join-Path $env:SystemRoot 'System32\sc.exe';if(-not(Test-Path -LiteralPath $sc -PathType Leaf)){throw 'Trusted Windows service controller is missing.'};& $sc $Action Multipass 2>&1|Out-Null},
-            [scriptblock]$DaemonLookupProvider={param($Id)Get-Process -Id $Id -ErrorAction Stop},
-            [scriptblock]$DaemonStopProvider={param($Id)Stop-Process -Id $Id -Force -ErrorAction Stop},
-            [scriptblock]$ClockProvider={[DateTime]::UtcNow},
-            [scriptblock]$SleepProvider={param($Milliseconds)Start-Sleep -Milliseconds $Milliseconds},
-            [scriptblock]$VmLookupProvider={param($Name,$Id)if($Id){Get-VM -Id ([guid]$Id) -ErrorAction Stop}else{Get-VM -Name $Name -ErrorAction Stop}},
-            [scriptblock]$VmStopProvider={param($Vm)Stop-VM -VM $Vm -TurnOff -Confirm:$false -ErrorAction Stop},
-            [scriptblock]$VmStartProvider={param($Vm)Start-VM -VM $Vm -Confirm:$false -ErrorAction Stop}
-        )
-        if($env:COMPUTERNAME -cnotlike 'DEVFLEET-E2E-*'){throw 'Nested readiness is restricted to the disposable L1 guest.'}
-        if($Primary -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$'){throw 'Configured nested Primary name is invalid.'}
-        $mp=$MultipassPath
-        function Invoke-NestedMultipass {
-            param([Parameter(Mandatory)][string[]]$Arguments,[int]$TimeoutSeconds=300)
-            # A restored L1 checkpoint can leave a nested Hyper-V VM running
-            # while the Multipass management IP/SSH state is stale.  Every
-            # nested call is therefore bounded and owned by this disposable
-            # scenario; never reuse this recovery contract for host VMs.
-            $effective=[Math]::Max(1,[Math]::Min(900,$TimeoutSeconds))
-            $psi=[Diagnostics.ProcessStartInfo]::new();$psi.FileName=$mp;$psi.UseShellExecute=$false;$psi.CreateNoWindow=$true;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
-            if($psi.PSObject.Properties.Name -contains 'ArgumentList' -and $null -ne $psi.ArgumentList){
-                foreach($argument in $Arguments){[void]$psi.ArgumentList.Add([string]$argument)}
-            } else {
-                $quotedArguments=@($Arguments|ForEach-Object{
-                    $value=[string]$_
-                    if($value.Length -gt 0 -and $value -notmatch '[\s"]'){ $value; return }
-                    $builder=[Text.StringBuilder]::new();[void]$builder.Append([char]34);$slashes=0
-                    foreach($character in $value.ToCharArray()){
-                        if([int]$character -eq 92){$slashes++;continue}
-                        if([int]$character -eq 34){for($i=0;$i -lt ($slashes*2+1);$i++){[void]$builder.Append([char]92)};[void]$builder.Append([char]34);$slashes=0;continue}
-                        for($i=0;$i -lt $slashes;$i++){[void]$builder.Append([char]92)}
-                        $slashes=0;[void]$builder.Append($character)
-                    }
-                    for($i=0;$i -lt ($slashes*2);$i++){[void]$builder.Append([char]92)}
-                    [void]$builder.Append([char]34);$builder.ToString()
-                })
-                $psi.Arguments=$quotedArguments -join ' '
-            }
-            $process=[Diagnostics.Process]::new();$process.StartInfo=$psi
-            try{
-                if(-not $process.Start()){throw 'Unable to start nested Multipass operation.'}
-                $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
-                if(-not $process.WaitForExit($effective*1000)){
-                    try{$process.Kill($true)}catch{
-                        $taskkill=Join-Path $env:SystemRoot 'System32\taskkill.exe'
-                        if(Test-Path -LiteralPath $taskkill -PathType Leaf){try{& $taskkill '/PID' ([string]$process.Id) '/T' '/F' 2>&1|Out-Null}catch{}}
-                    }
-                    try{if(-not $process.WaitForExit(5000)){try{$process.Kill()}catch{};[void]$process.WaitForExit(5000)}}catch{}
-                    try{[void]([Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdout,$stderr)).Wait([TimeSpan]::FromSeconds(5)))}catch{}
-                    $stillRunning=$false;try{$stillRunning=-not $process.HasExited}catch{}
-                    if($stillRunning){throw "Nested Multipass operation timed out after $effective seconds and its exact child process could not be terminated: $($Arguments -join ' ')"}
-                    throw "Nested Multipass operation timed out after $effective seconds: $($Arguments -join ' ')"
-                }
-                try{[void]([Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdout,$stderr)).Wait([TimeSpan]::FromSeconds(5)))}catch{}
-                $stdoutLines=@();$stderrLines=@()
-                if($stdout.Status -eq [Threading.Tasks.TaskStatus]::RanToCompletion){$stdoutLines=@(([string]$stdout.GetAwaiter().GetResult() -split "`r?`n")|Where-Object{$_.Length -gt 0}|ForEach-Object{[string]$_})}
-                if($stderr.Status -eq [Threading.Tasks.TaskStatus]::RanToCompletion){$stderrLines=@(([string]$stderr.GetAwaiter().GetResult() -split "`r?`n")|Where-Object{$_.Length -gt 0}|ForEach-Object{[string]$_})}
-                return [pscustomobject]@{exitCode=[int]$process.ExitCode;stdout=$stdoutLines;stderr=$stderrLines;output=@($stdoutLines)+@($stderrLines)}
-            } finally {$process.Dispose()}
-        }
-        function Invoke-NestedMultipassControlPlaneRecovery {
-            param([Parameter(Mandatory)][string]$Reason,[Parameter(Mandatory)][datetime]$OwnerDeadlineUtc)
-            $service=@(& $ServiceLookupProvider)
-            if($service.Count -ne 1){throw "Expected exactly one Multipass service; found $($service.Count)."}
-            $service=$service[0]
-            $expectedDaemon=Join-Path (Split-Path -Parent $mp) 'multipassd.exe'
-            $serviceCommand=[Environment]::ExpandEnvironmentVariables([string]$service.PathName)
-            if($serviceCommand -notmatch [regex]::Escape($expectedDaemon)){throw 'Multipass service executable does not match the trusted installation.'}
-            if([string]$service.StartName -notin @('LocalSystem','NT AUTHORITY\SYSTEM')){throw 'Multipass service identity is not LocalSystem.'}
-            $before=[string]$service.State;$initialPid=[int]$service.ProcessId;$forced=$false;$autoRestarted=$false
-            if($before -ne 'Stopped'){& $ServiceControlProvider 'stop'}
-            $stopDeadline=([datetime](& $ClockProvider)).AddSeconds(20);if($OwnerDeadlineUtc -lt $stopDeadline){$stopDeadline=$OwnerDeadlineUtc}
-            do{$service=@(& $ServiceLookupProvider);if($service.Count -ne 1){throw "Expected exactly one Multipass service during stop; found $($service.Count)."};$service=$service[0];if([string]$service.State -eq 'Stopped'){break};& $SleepProvider 250}while([datetime](& $ClockProvider) -lt $stopDeadline)
-            if([string]$service.State -ne 'Stopped'){
-                $daemonPid=[int]$service.ProcessId;if($daemonPid -le 0){$daemonPid=$initialPid}
-                if($daemonPid -le 0){throw "Multipass service remained $([string]$service.State) without an exact daemon PID."}
-                $daemon=& $DaemonLookupProvider $daemonPid
-                if([string]$daemon.ProcessName -cne 'multipassd'){throw 'Multipass service PID did not identify the exact multipassd process.'}
-                $daemonPath='';try{$daemonPath=[string]$daemon.Path}catch{}
-                if(-not [string]::IsNullOrWhiteSpace($daemonPath) -and [IO.Path]::GetFullPath($daemonPath) -cne [IO.Path]::GetFullPath($expectedDaemon)){throw 'Multipass daemon PID resolved outside the trusted installation.'}
-                & $DaemonStopProvider $daemonPid;$forced=$true
-                $forcedDeadline=([datetime](& $ClockProvider)).AddSeconds(10);if($OwnerDeadlineUtc -lt $forcedDeadline){$forcedDeadline=$OwnerDeadlineUtc}
-                do{& $SleepProvider 250;$service=@(& $ServiceLookupProvider);if($service.Count -ne 1){throw "Expected exactly one Multipass service after daemon termination; found $($service.Count)."};$service=$service[0]}while([string]$service.State -ne 'Stopped' -and [datetime](& $ClockProvider) -lt $forcedDeadline)
-                if([string]$service.State -eq 'Running'){
-                    # SCM may restart the service immediately after its exact daemon exits.
-                    # Accept only a distinct trusted daemon; the caller must still re-probe
-                    # Multipass JSON inventory and the configured Primary's SSH readiness.
-                    $replacementPid=[int]$service.ProcessId
-                    if($replacementPid -le 0 -or $replacementPid -eq $daemonPid){throw 'Multipass service is Running without a new exact daemon PID after termination.'}
-                    $replacement=& $DaemonLookupProvider $replacementPid
-                    $replacementPath='';try{$replacementPath=[string]$replacement.Path}catch{}
-                    if([string]$replacement.ProcessName -cne 'multipassd' -or [string]::IsNullOrWhiteSpace($replacementPath) -or [IO.Path]::GetFullPath($replacementPath) -cne [IO.Path]::GetFullPath($expectedDaemon)){throw 'Multipass service auto-restarted outside the trusted daemon identity.'}
-                    $autoRestarted=$true
-                }elseif([string]$service.State -ne 'Stopped'){throw "Multipass service did not reach Stopped after exact daemon termination; state=$([string]$service.State)."}
-            }
-            if([datetime](& $ClockProvider) -ge $OwnerDeadlineUtc){throw 'Multipass control-plane recovery exhausted the readiness deadline before restart.'}
-            if(-not $autoRestarted){& $ServiceControlProvider 'start'}
-            $startDeadline=([datetime](& $ClockProvider)).AddSeconds(45);if($OwnerDeadlineUtc -lt $startDeadline){$startDeadline=$OwnerDeadlineUtc}
-            do{$service=@(& $ServiceLookupProvider);if($service.Count -ne 1){throw "Expected exactly one Multipass service during start; found $($service.Count)."};$service=$service[0];if([string]$service.State -eq 'Running'){break};& $SleepProvider 250}while([datetime](& $ClockProvider) -lt $startDeadline)
-            if([stri
+        if([string]$row.status -ne 'PASS' -or [string]$row.evidenceClass -ne 'ADVERSARIAL_PRODUCT_POLICY' -or -not [bool]$row.actualConditionProven){thro

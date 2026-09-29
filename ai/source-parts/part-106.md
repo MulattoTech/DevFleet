@@ -1,10 +1,369 @@
 # DevFleet source part 106
 
 Full-source UTF-8 byte interval [4882500, 4929000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 9bb4a5a26a7dec964f87fb434ee1c2d22146d692641f19ee2912c6056c632cd2
+Payload SHA-256: c96e994d477d4781d536120c54dbd249e84cceb53f8ded9e341cc5698726b485
 
 <!-- BEGIN SOURCE SLICE -->
-.chmod(archived_mode)
+cs/11-REMOTE-VSCODE.md", "docs/12-UPGRADING-FROM-1.0.0.md",
+    "docs/13-PERFORMANCE-TUNING.md",
+]
+CORE = {"generic", "python", "python-fastapi", "node", "typescript-node",
+        "typescript-next", "go-service", "dotnet-service", "java-spring", "rust-service"}
+
+
+DEFAULT_EXTERNAL_TIMEOUT_SECONDS = 120
+DEFAULT_EXTERNAL_OUTPUT_LIMIT = 2 * 1024 * 1024
+
+
+def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
+    """Terminate one external hook and descendants without relying on shell quoting."""
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    else:
+        try:
+            import signal
+
+            os.killpg(process.pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+    try:
+        process.kill()
+    except OSError:
+        pass
+
+
+def run_bounded(
+    args: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    timeout: float = DEFAULT_EXTERNAL_TIMEOUT_SECONDS,
+    output_limit: int = DEFAULT_EXTERNAL_OUTPUT_LIMIT,
+    label: str = "external hook",
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    """Run a package hook with a deadline, process-tree kill, and bounded output."""
+    if output_limit <= 0 or timeout <= 0:
+        raise ValueError("run_bounded limits must be positive")
+    creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+    process = subprocess.Popen(
+        args,
+        cwd=cwd,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=os.name != "nt",
+        creationflags=creationflags,
+    )
+    captured: dict[str, bytearray] = {"stdout": bytearray(), "stderr": bytearray()}
+    overflow = threading.Event()
+
+    def drain(name: str, stream: object) -> None:
+        assert hasattr(stream, "read")
+        reader = stream  # type: ignore[assignment]
+        while True:
+            chunk = reader.read(65536)
+            if not chunk:
+                return
+            remaining = output_limit - len(captured[name])
+            if len(chunk) > remaining:
+                if remaining > 0:
+                    captured[name].extend(chunk[:remaining])
+                overflow.set()
+                return
+            captured[name].extend(chunk)
+
+    threads = [
+        threading.Thread(target=drain, args=(name, stream), daemon=True)
+        for name, stream in (("stdout", process.stdout), ("stderr", process.stderr))
+    ]
+    for thread in threads:
+        thread.start()
+    deadline = time.monotonic() + timeout
+    timed_out = False
+    while process.poll() is None:
+        if overflow.is_set():
+            _terminate_process_tree(process)
+            break
+        if time.monotonic() >= deadline:
+            timed_out = True
+            _terminate_process_tree(process)
+            break
+        time.sleep(0.02)
+    if timed_out:
+        reason = f"{label} exceeded {timeout:g}s timeout"
+    elif overflow.is_set():
+        reason = f"{label} exceeded {output_limit} byte output limit"
+    else:
+        reason = ""
+    if reason:
+        process.wait(timeout=10)
+    for thread in threads:
+        thread.join(timeout=10)
+    result = subprocess.CompletedProcess(
+        args,
+        process.returncode,
+        captured["stdout"].decode(errors="replace"),
+        captured["stderr"].decode(errors="replace"),
+    )
+    if reason:
+        raise RuntimeError(f"{reason}; stdout/stderr excerpt: {result.stdout[-1000:]} {result.stderr[-1000:]}")
+    if check and result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, args, result.stdout, result.stderr)
+    return result
+
+
+def is_transient(path: Path, root: Path = ROOT) -> bool:
+    """Return whether a path belongs to generated/test state excluded from a package."""
+    return any(is_transient_part(part) for part in path.relative_to(root).parts)
+
+
+def package_files(root: Path = ROOT) -> set[str]:
+    return {
+        p.relative_to(root).as_posix()
+        for p in root.rglob("*")
+        if p.is_file() and not is_transient(p, root)
+    }
+
+
+def require_files(root: Path = ROOT) -> None:
+    for rel in REQUIRED:
+        assert (root / rel).is_file(), f"missing {rel}"
+
+
+def parse_data(root: Path = ROOT) -> None:
+    for rel in package_files(root):
+        p = root / rel
+        if p.suffix == ".json":
+            json.loads(p.read_text(encoding="utf-8"))
+    vscode = root / "client/vscode-settings.jsonc"
+    json.loads(re.sub(r"(?m)^\s*//.*$", "", vscode.read_text(encoding="utf-8")))
+    for p in list((root / "cloud-init").glob("*.yaml")) + list((root / "templates").glob("*/compose.yaml")):
+        assert isinstance(yaml.safe_load(p.read_text(encoding="utf-8")), dict), f"YAML root is not mapping: {p}"
+
+
+def compile_python_jinja(root: Path = ROOT) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        cache = Path(td)
+        for rel in package_files(root):
+            p = root / rel
+            if p.suffix == ".py":
+                py_compile.compile(str(p), cfile=str(cache / (hashlib.sha256(rel.encode()).hexdigest() + ".pyc")), doraise=True)
+    jinja2.Environment().parse((root / "app/templates/index.html").read_text(encoding="utf-8"))
+
+
+def bash_available() -> bool:
+    try:
+        return shutil.which("bash") is not None and run_bounded(["bash", "-c", "exit 0"], timeout=5, label="bash probe", check=False).returncode == 0
+    except (OSError, RuntimeError):
+        return False
+
+
+def bash_syntax(root: Path = ROOT) -> None:
+    if not bash_available():
+        return
+    for rel in package_files(root):
+        p = root / rel
+        if p.suffix == ".sh" or (p.parts and p.parts[-1] == "devfleet-switch-docker-mode"):
+            run_bounded(["bash", "-n", str(p)], label=f"bash syntax check {p}")
+
+
+def linux_executable_hooks(root: Path = ROOT) -> None:
+    """Require every command-referenced template hook to be exactly 0755."""
+    hooks = executable_template_hooks(root)
+    assert hooks, "no executable template hooks were derived from metadata"
+    for rel in sorted(hooks):
+        p = root / rel
+        assert p.is_file(), f"trusted hook is not a regular file: {p}"
+        if os.name != "nt":
+            assert p.stat().st_mode & 0o777 == 0o755, f"template hook mode is not 0755: {p}"
+        first = p.read_text(encoding="utf-8").splitlines()[0] if p.stat().st_size else ""
+        assert first == "#!/usr/bin/env bash", f"trusted hook has invalid shebang: {p}"
+
+
+def powershell_lexical(root: Path = ROOT) -> None:
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    for rel in package_files(root):
+        p = root / rel
+        if p.suffix not in {".ps1", ".psm1"}:
+            continue
+        t = p.read_text(encoding="utf-8-sig")
+        stack: list[str] = []
+        quote = here = None
+        i = 0
+        line = True
+        while i < len(t):
+            if here:
+                end = "'@" if here == "'" else '"@'
+                if line and t.startswith(end, i):
+                    here = None; i += 2; line = False; continue
+                line = t[i] == "\n"; i += 1; continue
+            c = t[i]
+            if quote:
+                if c == "`": i += 2; continue
+                if c == quote:
+                    if quote == "'" and i + 1 < len(t) and t[i + 1] == "'": i += 2; continue
+                    quote = None
+                line = c == "\n"; i += 1; continue
+            if line and t.startswith("@'", i): here = "'"; i += 2; line = False; continue
+            if line and t.startswith('@"', i): here = '"'; i += 2; line = False; continue
+            if c == "#":
+                while i < len(t) and t[i] != "\n": i += 1
+                line = True; continue
+            if c in "'\"": quote = c
+            elif c in pairs: stack.append(c)
+            elif c in pairs.values(): assert stack and pairs[stack.pop()] == c, f"unbalanced {c} in {p}"
+            line = c == "\n"; i += 1
+        assert not stack and quote is None and here is None, f"unbalanced PowerShell structure: {p}"
+
+
+def template_smoke(root: Path = ROOT) -> None:
+    if not bash_available():
+        return
+    for source in (root / "templates").glob("*"):
+        if not source.is_dir() or is_transient(source, root):
+            continue
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "demo"; shutil.copytree(source, dest)
+            for p in dest.rglob("*"):
+                if p.is_file() and not p.is_symlink():
+                    try:
+                        p.write_text(p.read_text().replace("__PROJECT_SLUG__", "demo-project").replace("__PROJECT_NAME__", "Demo Project").replace("__PROJECT_PROFILE__", "balanced").replace("__PROJECT_LANGUAGE__", "test").replace("__PROJECT_FRAMEWORK__", "test").replace("__OLLAMA_BASE_URL__", "http://127.0.0.1:11434/v1").replace("__OLLAMA_MODEL__", "test-model"))
+                    except UnicodeDecodeError:
+                        pass
+            meta = json.loads((dest / ".devfleet/template.json").read_text())
+            smoke = ".devfleet/smoke-test.sh"
+            if (dest / smoke).is_file():
+                run_bounded(["bash", str(dest / smoke)], cwd=dest, label=f"template smoke {source.name}")
+            if source.name in CORE:
+                for key in ("bootstrap_command", "format_command", "lint_command", "test_command", "health_command"):
+                    assert meta.get(key), f"{source.name} missing {key}"
+
+
+def codexpro_guard_tests(root: Path = ROOT) -> None:
+    """Exercise the production /workspaces guard without running CodexPro."""
+    if not bash_available():
+        print("CodexPro guard tests skipped: POSIX bash is unavailable.")
+        return
+    hook = root / "templates/generic/.devfleet/codexpro-bootstrap.sh"
+    with tempfile.TemporaryDirectory() as outside:
+        refused = run_bounded(["bash", str(hook)], cwd=Path(outside), label="CodexPro guard refusal", check=False)
+        assert refused.returncode == 2, "CodexPro hook must refuse a non-/workspaces project root"
+        assert "must be under /workspaces" in refused.stderr
+    workspaces = Path("/workspaces")
+    try:
+        workspaces.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=workspaces) as valid:
+            accepted = run_bounded(["bash", str(hook)], cwd=Path(valid), label="CodexPro guard success", check=False)
+            assert accepted.returncode == 0, accepted.stderr
+    except (OSError, PermissionError):
+        print("CodexPro success-path test skipped: /workspaces is unavailable.")
+
+
+def fastapi_smoke(root: Path = ROOT) -> None:
+    try:
+        import fastapi  # noqa: F401
+    except ModuleNotFoundError as exc:
+        print(f"FastAPI smoke skipped: verification environment does not provide runtime dependency {exc.name}.")
+        return
+    except SystemError as exc:
+        if "pydantic-core version" in str(exc):
+            print("FastAPI smoke skipped: local Python dependency set has an existing pydantic/pydantic-core mismatch.")
+            return
+        raise
+    with tempfile.TemporaryDirectory() as td:
+        b = Path(td); [(b / d).mkdir() for d in ("workspaces", "quarantine", "runtime", "cache")]
+        cfg = {"node_name": "verify", "node_role": "primary", "friendly_name": "CodexDevVM", "portal_port": 8787, "workspaces": str(b / "workspaces"), "quarantine": str(b / "quarantine"), "peer_file": str(b / "peer.json"), "runtime_root": str(b / "runtime"), "cache_root": str(b / "cache"), "development_profile": "balanced", "docker_mode": "rootless", "ollama_base_url": "", "ollama_model": "", "ollama_profile": "stable-interactive", "require_tailscale": False, "public_binding_allowed": True}
+        (b / "config.json").write_text(json.dumps(cfg)); (b / "peer.json").write_text("{}")
+        env = os.environ.copy(); env.update({"PYTHONPATH": str(root / "app"), "DEVFLEET_CONFIG_PATH": str(b / "config.json"), "DEVFLEET_STATIC_DIR": str(root / "app/static"), "DEVFLEET_TEMPLATE_DIR": str(root / "app/templates"), "DEVFLEET_ADMIN_USER": "x", "DEVFLEET_ADMIN_PASSWORD": "y", "DEVFLEET_API_TOKEN": "z"})
+        code = 'from fastapi.testclient import TestClient;from devfleet.main import app;r=TestClient(app).get("/healthz");assert r.status_code==200 and r.json()["agent_version"]=="' + PACKAGE_VERSION + '"'
+        run_bounded([sys.executable, "-c", code], env=env, label="FastAPI smoke")
+
+
+def verify_checksums(root: Path = ROOT) -> None:
+    p = root / CHECKSUM_MANIFEST
+    assert p.is_file(), "missing checksum manifest"
+    entries: dict[str, str] = {}
+    for line in p.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("  ", 1)
+        assert len(parts) == 2 and re.fullmatch(r"[0-9a-fA-F]{64}", parts[0]), f"malformed checksum line: {line}"
+        expected, rel = parts; rel = rel.replace("\\", "/")
+        assert rel != CHECKSUM_MANIFEST and not is_transient(root / rel, root), f"invalid checksum target: {rel}"
+        assert rel not in entries, f"duplicate checksum entry: {rel}"
+        target = root / rel
+        try:
+            target.resolve().relative_to(root.resolve())
+        except ValueError:
+            raise AssertionError(f"checksum target escapes package root: {rel}")
+        assert target.is_file(), f"missing checksum target {rel}"
+        actual = hashlib.sha256(target.read_bytes()).hexdigest().lower()
+        if actual != expected.lower() and target.is_file():
+            # Windows may materialize committed LF text as CRLF. Accept only
+            # the exact LF-normalized bytes; content changes still fail.
+            raw = target.read_bytes()
+            if b"\r" in raw.replace(b"\r\n", b""):
+                normalized = None
+            else:
+                normalized = raw.replace(b"\r\n", b"\n")
+            if normalized is not None:
+                actual = hashlib.sha256(normalized).hexdigest().lower()
+        assert actual == expected.lower(), f"checksum mismatch {rel}"
+        entries[rel] = expected.lower()
+    eligible = package_files(root) - {CHECKSUM_MANIFEST}
+    assert set(entries) == eligible, f"checksum manifest coverage mismatch: missing={sorted(eligible-set(entries))[:10]} extra={sorted(set(entries)-eligible)[:10]}"
+
+
+def no_empty(root: Path = ROOT) -> None:
+    assert not [rel for rel in package_files(root) if (root / rel).stat().st_size == 0 and Path(rel).name != "__init__.py"]
+
+
+def baseline_preserved(root: Path = ROOT) -> None:
+    for rel in (root / "BASELINE-v1.0.0-FILES.txt").read_text(encoding="utf-8").splitlines():
+        if rel.strip(): assert (root / rel).exists(), f"v1 baseline path removed: {rel}"
+
+
+def _safe_member(name: str) -> str:
+    normalized = name.replace("\\", "/")
+    pure = PurePosixPath(normalized)
+    assert normalized and not pure.is_absolute() and ".." not in pure.parts, f"unsafe archive member: {name}"
+    assert not any(is_transient_part(part) for part in pure.parts), f"transient archive member: {name}"
+    return str(pure)
+
+
+def _safe_target(dest: Path, name: str) -> Path:
+    target = dest / name
+    try:
+        target.resolve().relative_to(dest.resolve())
+    except ValueError:
+        raise AssertionError(f"archive member escapes extraction root: {name}")
+    return target
+
+
+def _extract_regular_zip_member(archive: zipfile.ZipFile, info: zipfile.ZipInfo, dest: Path, name: str) -> None:
+    target = _safe_target(dest, name)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    mode = (info.external_attr >> 16) & 0o170000
+    assert mode not in (stat.S_IFLNK, stat.S_IFDIR), f"unsupported ZIP entry type: {name}"
+    with archive.open(info, "r") as source, target.open("xb") as output:
+        shutil.copyfileobj(source, output)
+    archived_mode = (info.external_attr >> 16) & 0o777
+    if archived_mode and os.name != "nt":
+        target.chmod(archived_mode)
 
 
 def _extract_regular_tar_member(archive: tarfile.TarFile, info: tarfile.TarInfo, dest: Path, name: str) -> None:
@@ -481,227 +840,4 @@ $nodeSecrets=[ordered]@{
  AdminUser=$secrets.PortalAdminUser; AdminPassword=$secrets.PortalAdminPassword; ApiToken=$secrets.NodeApiToken
  GitName=$config.Git.UserName; GitEmail=$config.Git.Email; OllamaBaseUrl=($(if($config.Ollama.PreferredBaseUrl){$config.Ollama.PreferredBaseUrl}else{$config.Ollama.BaseUrl})); OllamaModel=$config.Ollama.Model; OllamaProfile=$config.Ollama.Profile
  DevelopmentProfile=$config.Development.Profile; DockerMode=($(if($NodeRole -eq 'Primary'){$config.Docker.PrimaryMode}else{$config.Docker.FailoverMode}))
- EnableSharedCaches=[bool]$config.Development.EnableSharedBuildCaches; EnableAnalyzerCache=[bool]$config.Development.EnableAnalyzerCache; AutoStartCodexPro=[bool]$config.Development.AutoStartCodexPro; AllowTailnetPorts=[bool]$config.Development.AllowTailnetPortPublishing; BackupBeforeRebuild=[bool]$config.Development.BackupBeforeRebuild; BackupBeforeQuarantine=[bool]$config.Development.BackupBeforeQuarantine
- BackupIntervalMinutes=[int]$config.Backup.IntervalMinutes
- PackageVersion=$packageVersion
-}
-$zip=Join-Path (Get-DevFleetStateRoot) "tmp\payload-$name.zip"
-Remove-Item $zip -Force -ErrorAction SilentlyContinue
-Compress-Archive -Path (Join-Path $tmp '*') -DestinationPath $zip
-$payloadDeadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetOperationMaximumSeconds 'payloadTransfer'))
-$payloadContext=Get-DevFleetDeadlineContext
-if($payloadContext -and ([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime() -lt $payloadDeadline){$payloadDeadline=([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime()}
-try {
- Invoke-External $mp @('transfer',$zip,"${name}:/tmp/devfleet-payload.zip") -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
- Write-StageMarker -Name $bootstrapBoundary.payloadTransferredStageName -Transaction $activeTransaction
- Invoke-External $mp @('exec',$name,'--','bash','-lc',$bootstrapBoundary.extractionCommand) -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
- Write-StageMarker -Name $bootstrapBoundary.payloadExtractedStageName -Transaction $activeTransaction
- $bootstrapDeadline=[datetime]::UtcNow.AddSeconds($bootstrapBoundary.bootstrapMaxSeconds)
- $bootstrapContext=Get-DevFleetDeadlineContext
- if($bootstrapContext -and ([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime() -lt $bootstrapDeadline){$bootstrapDeadline=([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime()}
- Invoke-MultipassWithStandardInput -FilePath $mp -InstanceName $name -CommandArgumentList @('bash','-lc',$bootstrapBoundary.bootstrapCommand) -TimeoutSeconds $bootstrapBoundary.bootstrapMaxSeconds -DeadlineUtc $bootstrapDeadline -StandardInputText ($nodeSecrets | ConvertTo-Json -Compress)
-} finally {
- Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
- Remove-Item $zip -Force -ErrorAction SilentlyContinue
- $nodeSecrets=$null
-}
-Add-LocalSshKeyToInstance -InstanceName $name
-Write-StageMarker -Name $bootstrapBoundary.completionStageName -Transaction $activeTransaction
-Write-Host "$name provisioned. Portal credentials are stored under C:\ProgramData\DevFleet\secrets." -ForegroundColor Green
-
-```
-
-
-## FILE: source/windows/03-Provision-Vault.ps1
-
-SHA256: 620c99ab23861ad44f74b5d79ceda9e79eba20feb89ff6694e0e548e2a5308c6 | Bytes: 7647 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param(
- [switch]$ForceReprovision,
- [string]$TransactionId,
- [string]$TransactionPayloadSha256,
- [string]$TransactionAction,
- [string]$TransactionRole,
- [string]$TransactionPreparedUtc
-)
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-Assert-PowerShell7;Assert-Administrator
-$deadlineContext=Get-DevFleetDeadlineContext
-if(-not $deadlineContext){$fallbackDeadline=[DateTime]::UtcNow.AddSeconds((Get-DevFleetStageBudgetSeconds 'vault'));Set-DevFleetDeadlineContext -TransactionDeadlineUtc $fallbackDeadline -StageName 'vault' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'vault') | Out-Null}
-$config=Get-DevFleetConfig;$v=$config.Vault;$name=$v.InstanceName;$package=Get-PackageRootFromState
-$activeTransaction=Wait-ActiveDevFleetTransaction -ExpectedRole 'Laptop'
-if(-not $activeTransaction -and $TransactionId -and $TransactionPayloadSha256 -and $TransactionAction -and $TransactionRole -and $TransactionPreparedUtc){
- $propagated=[pscustomobject]@{transactionId=$TransactionId;payloadSha256=$TransactionPayloadSha256;action=$TransactionAction;role=$TransactionRole;preparedUtc=$TransactionPreparedUtc}
- if(Test-DevFleetTransactionBinding -Transaction $propagated -ExpectedRole 'Laptop'){$activeTransaction=$propagated}
-}
-if(-not $activeTransaction){throw 'Active DevFleet transaction is missing, malformed, or not bound to the Vault role.'}
-$bootstrapSeconds=Get-DevFleetOperationMaximumSeconds 'vaultBootstrap'
-$bootstrapBoundary=New-DevFleetBootstrapBoundary -Kind vault -InstanceName $name -TransactionId ([string]$activeTransaction.transactionId) -PayloadSha256 ([string]$activeTransaction.payloadSha256) -BootstrapMaxSeconds $bootstrapSeconds -PackageVersion 'vault' -NodeRole 'vault'
-$mp=Get-MultipassExe
-Write-StageMarker -Name $bootstrapBoundary.multipassResolvedStageName -Transaction $activeTransaction
-Assert-MultipassIsolation -InstanceNames @($name)
-Write-StageMarker -Name $bootstrapBoundary.isolationVerifiedStageName -Transaction $activeTransaction
-$secrets=Get-OrCreateSecrets;$vaultIdentity=Get-OrCreateVaultIdentity
-$instancePresent=Test-MultipassInstance $name
-Write-StageMarker -Name $(if($instancePresent){$bootstrapBoundary.instancePresentStageName}else{$bootstrapBoundary.instanceAbsentStageName}) -Transaction $activeTransaction
-if($instancePresent){
- if($ForceReprovision){throw 'Refusing automatic destruction of an existing backup vault.'}
-  New-DevFleetSnapshotSafe -InstanceName $name -SnapshotName "pre-refresh-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"|Out-Null
-  Invoke-External $mp @('start',$name) -IgnoreExitCode
-  Write-StageMarker -Name $bootstrapBoundary.instanceStartedStageName -Transaction $activeTransaction
- Wait-MultipassReady $name 1200
- Write-Host "$name already exists; refreshing safe configuration." -ForegroundColor Yellow
-}else{
- $cloud=Join-Path (Get-DevFleetStateRoot) "tmp\cloud-$name.yaml"
- $dependencyPolicy=Get-Content -LiteralPath (Join-Path $package 'linux/dependency-policy.json') -Raw|ConvertFrom-Json
- $tailscaleFingerprint=[string]$dependencyPolicy.tailscale.signingKeySha256Fingerprint
- if($tailscaleFingerprint-notmatch'^[A-F0-9]{40}$'){throw 'Canonical Tailscale signing-key fingerprint is invalid.'}
- (Get-Content (Join-Path $package 'cloud-init\vault.yaml') -Raw).Replace('__NODE_NAME__',(ConvertTo-YamlSingleQuotedScalar $name)).Replace('__TAILSCALE_SIGNING_FINGERPRINT__',$tailscaleFingerprint)|Set-Content $cloud -Encoding utf8
-  # PowerShell `if` is a statement, not an expression; resolve the owning
-  # stage deadline before passing it to the fresh-launch recovery helper.
-  $launchDeadline=[datetime]::MinValue
-  if($deadlineContext){$launchDeadline=([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime()}
-  Invoke-MultipassLaunchWithReadinessRecovery -InstanceName $name -LaunchArguments @('launch',[string]$v.UbuntuImage,'--name',$name,'--cpus',[string]$v.Cpus,'--memory',[string]$v.Memory,'--disk',[string]$v.Disk,'--cloud-init',$cloud) -ReadinessTimeoutSeconds 1200 -DeadlineUtc $launchDeadline -OnInstanceEstablished { param($launch) Write-StageMarker -Name $bootstrapBoundary.instanceLaunchedStageName -Transaction $activeTransaction }
-}
-Write-StageMarker -Name $bootstrapBoundary.instanceReadyStageName -Transaction $activeTransaction
-if($instancePresent){
- $client=Invoke-External $mp @('exec',$name,'--','sh','-c','if command -v tailscale >/dev/null 2>&1; then printf PRESENT; else printf ABSENT; fi') -Capture -TimeoutSeconds 20
- if($client-cne'PRESENT'){throw 'The existing Vault is missing its Tailscale client. Restore the client from the verified signed repository before running Repair; the existing Vault and backups have been preserved.'}
-}
-# Vault bootstrap and client configuration require an authenticated tailnet.
-# Fresh cloud-init installs the verified client; pair before transferring secrets
-# or starting bootstrap stages that depend on tailscale0 and its private IP.
-& (Join-Path $PSScriptRoot '04-Connect-Tailscale.ps1') -InstanceName $name
-$tmp=Join-Path (Get-DevFleetStateRoot) 'tmp\vault-payload';Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue;New-Item -ItemType Directory $tmp -Force|Out-Null
-Copy-Item (Join-Path $package 'linux') $tmp -Recurse
-$vaultSecrets=[ordered]@{VaultPort=$config.Network.VaultPort;RestUser=$secrets.VaultRestUser;RestPassword=$secrets.VaultRestPassword;ResticPassword=$secrets.ResticPassword;ClusterName=$config.ClusterName;DeploymentId=$vaultIdentity.deployment_id;NodeId=$vaultIdentity.node_id;NodeName=$vaultIdentity.node_name}|ConvertTo-Json -Compress
-$zip=Join-Path (Get-DevFleetStateRoot) 'tmp\vault-payload.zip';Remove-Item $zip -Force -ErrorAction SilentlyContinue;Compress-Archive -Path (Join-Path $tmp '*') -DestinationPath $zip
-$payloadDeadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetOperationMaximumSeconds 'payloadTransfer'))
-$payloadContext=Get-DevFleetDeadlineContext
-if($payloadContext -and ([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime() -lt $payloadDeadline){$payloadDeadline=([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime()}
-try {
- Invoke-External $mp @('transfer',$zip,"${name}:/tmp/devfleet-vault-payload.zip") -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
- Write-StageMarker -Name $bootstrapBoundary.payloadTransferredStageName -Transaction $activeTransaction
- Invoke-External $mp @('exec',$name,'--','bash','-lc',$bootstrapBoundary.extractionCommand) -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
- Write-StageMarker -Name $bootstrapBoundary.payloadExtractedStageName -Transaction $activeTransaction
- $bootstrapDeadline=[datetime]::UtcNow.AddSeconds($bootstrapBoundary.bootstrapMaxSeconds)
- $bootstrapContext=Get-DevFleetDeadlineContext
- if($bootstrapContext -and ([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime() -lt $bootstrapDeadline){$bootstrapDeadline=([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime()}
- Invoke-MultipassWithStandardInput -FilePath $mp -InstanceName $name -CommandArgumentList @('bash','-lc',$bootstrapBoundary.bootstrapCommand) -TimeoutSeconds $bootstrapBoundary.bootstrapMaxSeconds -DeadlineUtc $bootstrapDeadline -StandardInputText $vaultSecrets
-} finally {
- Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
- Remove-Item $zip -Force -ErrorAction SilentlyContinue
- $vaultSecrets=$null
-}
-Write-StageMarker -Name $bootstrapBoundary.completionStageName -Transaction $activeTransaction;Write-Host "$name provisioned. Do not delete or purge this instance." -ForegroundColor Green
-
-```
-
-
-## FILE: source/windows/04-Connect-Tailscale.ps1
-
-SHA256: a8c18e358eeeeb4c00058fc893f165c2d47f90015e06abde8265bd7ae98b077b | Bytes: 1873 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$')][string]$InstanceName)
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Tailscale.psm1') -Force
-$mp=Get-MultipassExe
-$deadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetStageBudgetSeconds 'tailscale'))
-$activeTransaction = $null
-try { $activeTransaction = Get-ActiveDevFleetTransaction } catch { }
-$transactionId = if ($activeTransaction) { [string]$activeTransaction.transactionId } else { '' }
-$payloadSha256 = if ($activeTransaction) { [string]$activeTransaction.payloadSha256 } else { '' }
-$evidenceName = if ($transactionId -match '^[0-9a-fA-F]{32}$') { "setup-tailscale-pairing-$transactionId.log" } else { "setup-tailscale-pairing-pid-$PID.log" }
-$evidencePath = Join-Path (Join-Path $env:ProgramData 'M-TechLabs\DevFleet\Logs') $evidenceName
-$profile=Get-DevFleetTailscaleEnrollmentProfile
-$expectedPeer=if([string]$profile.hostName){[string]$profile.hostName}else{"$env:COMPUTERNAME-devfleet-host"}
-try {
-    $result=Invoke-DevFleetTailscaleOAuthPairing -FilePath $mp -InstanceName $InstanceName -Hostname $InstanceName -ExpectedPeer $expectedPeer -DeadlineUtc $deadline -EvidencePath $evidencePath -RunId ([string]$env:DEVFLEET_RUN_ID) -TransactionId $transactionId -PayloadSha256 $payloadSha256 -StageName 'tailscale' -TargetRole 'Guest' -PendingRebootProvider { Test-PendingReboot }
-} catch {
-    if ([string]$_.Exception.Message -match '^DEVFLEET_REBOOT_REQUIRED:') {
-        Write-Warning "Windows servicing requires a reboot during guest Tailscale stage for $InstanceName; returning 3010 before Vault completion is published."
-        exit 3010
-    }
-    throw
-}
-Write-Host "$InstanceName authenticated Tailscale IP: $($result.ipv4)" -ForegroundColor Green
-
-```
-
-
-## FILE: source/windows/04a-Connect-WindowsTailscale.ps1
-
-SHA256: 361255d8773a9de440bac3007db55635a7940e49409d77f9245651df44c3585b | Bytes: 1720 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param()
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Tailscale.psm1') -Force
-Assert-Administrator
-$service=Get-Service -Name Tailscale -ErrorAction SilentlyContinue
-$ts=Get-TailscaleExe
-$deadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetStageBudgetSeconds 'windowsTailscale'))
-$activeTransaction = $null
-try { $activeTransaction = Get-ActiveDevFleetTransaction } catch { }
-$transactionId = if ($activeTransaction) { [string]$activeTransaction.transactionId } else { '' }
-$payloadSha256 = if ($activeTransaction) { [string]$activeTransaction.payloadSha256 } else { '' }
-$evidenceName = if ($transactionId -match '^[0-9a-fA-F]{32}$') { "setup-tailscale-pairing-$transactionId.log" } else { "setup-tailscale-pairing-pid-$PID.log" }
-$evidencePath = Join-Path (Join-Path $env:ProgramData 'M-TechLabs\DevFleet\Logs') $evidenceName
-$hostname = ("{0}-devfleet-host" -f $env:COMPUTERNAME.ToLower())
-try {
-    $result=Invoke-DevFleetTailscaleOAuthPairing -FilePath $ts -Hostname $hostname -DeadlineUtc $deadline -EvidencePath $evidencePath -RunId ([string]$env:DEVFLEET_RUN_ID) -TransactionId $transactionId -PayloadSha256 $payloadSha256 -StageName 'windows-tailscale' -TargetRole 'Host' -PendingRebootProvider { Test-PendingReboot }
-} catch {
-    if ([string]$_.Exception.Message -match '^DEVFLEET_REBOOT_REQUIRED:') {
-        Write-Warning 'Windows servicing requires a reboot during the Tailscale stage; returning 3010 before the stage marker is written.'
-        exit 3010
-    }
-    throw
-}
-Write-Host "Windows host $env:COMPUTERNAME authenticated Tailscale IP: $($result.ipv4)" -ForegroundColor Green
-
-```
-
-
-## FILE: source/windows/05-Configure-LocalVaultClient.ps1
-
-SHA256: 9687c9be4a3bf40a2e1481cd402c7d4118aaa0c4533e9037244b7bb3a25e0c62 | Bytes: 1235 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([Parameter(Mandatory)][string]$InstanceName)
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-$config=Get-DevFleetConfig;$secrets=Get-OrCreateSecrets;$mp=Get-MultipassExe
-$vaultIp=Get-InstanceIPv4 $config.Vault.InstanceName -PreferTailscale
-$pairingMode=if($vaultIp -match '^100\.'){'tailscale'}else{throw 'Authenticated Vault transport requires a Tailscale address; plaintext LAN fallback is disabled.'}
-$obj=[ordered]@{Repository="rest:http://${vaultIp}:$($config.Network.VaultPort)/$($secrets.VaultRestUser)/$($config.ClusterName)";RestUser=$secrets.VaultRestUser;RestPassword=$secrets.VaultRestPassword;ResticPassword=$secrets.ResticPassword;VaultIp=$vaultIp;VaultPort=$config.Network.VaultPort;PairingMode=$pairingMode}
-$tmp=Join-Path (Get-DevFleetStateRoot) 'secrets\vault-client.json';$obj|ConvertTo-Json|Set-Content $tmp -Encoding utf8
-Protect-DevFleetStateAcl
-Invoke-External $mp @('transfer',$tmp,"${InstanceName}:/tmp/vault-client.json")
-Invoke-External $mp @('exec',$InstanceName,'--','sudo','/usr/local/sbin/devfleet-configure-backup','/tmp/vault-client.json')
-Write-Host "Append-only backups configured for $InstanceName." -ForegroundColor Green
-
-```
-
-
-## FILE: source/windows/06-Import-Laptop-Bootstrap.ps1
-
-SHA256: e38b19b780ca0a6ef94aba9a71a225d4a6cc28d5c3fe6c80333f7fa0d00c8452 | Bytes: 2442 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([Parameter(Mandatory)][ValidateScript({Test-Path $_})][string]$BundlePath)
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-$config=Get-DevFleetConfig;$mp=Get-MultipassExe;$dest=Join-Path (Get-DevFleetStateRoot) 'tmp\import-laptop';$peerFile=$null;Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue
-Expand-EncryptedBundle -BundlePath $BundlePath -Destination $dest
-try {
-$vault=Get-C
+ EnableSharedCaches=[bool]$config.Development.EnableSharedBuildCaches; EnableAnalyzerCache=[bool]$config.Development.EnableAnalyzerCache; AutoStartCodexPro=[bool]$config.Development.AutoStartCodexPro; AllowTailnetPorts=[b

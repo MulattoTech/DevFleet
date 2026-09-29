@@ -1,10 +1,357 @@
 # DevFleet source part 066
 
 Full-source UTF-8 byte interval [3022500, 3069000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 0ba7babe15ca99c16d5d65f95ef6d8ae408668905fcfd49203aaaeabc5efec3b
+Payload SHA-256: 71d4c6e72decec45e92aa1ce61e89adf3ce325028974f3b65542e50a68d1084c
 
 <!-- BEGIN SOURCE SLICE -->
-ates were checked for required formatter, linter, test, bootstrap, and health metadata.
+_init__.py`
+- `templates/python-fastapi/src/app/main.py`
+- `templates/python-fastapi/tests/test_smoke.py`
+- `templates/python/.ai-bridge/chatgpt-memory.md`
+- `templates/python/.ai-bridge/codexpro-project-instructions.md`
+- `templates/python/.ai-bridge/current-plan.template.md`
+- `templates/python/.ai-bridge/prompts/broken-session-recovery.md`
+- `templates/python/.ai-bridge/prompts/handoff-template.md`
+- `templates/python/.ai-bridge/prompts/reconnect.md`
+- `templates/python/.ai-bridge/prompts/session-bootstrap.md`
+- `templates/python/.devfleet/bootstrap.sh`
+- `templates/python/.devfleet/codexpro-profile.json`
+- `templates/python/.devfleet/health-check.sh`
+- `templates/python/.devfleet/project-tools.json`
+- `templates/python/.devfleet/smoke-test.sh`
+- `templates/python/.devfleet/template.json`
+- `templates/python/.editorconfig`
+- `templates/python/docs/architecture.md`
+- `templates/python/src/app/main.py`
+- `templates/python/tests/test_smoke.py`
+- `templates/ruby-rails/.ai-bridge/chatgpt-memory.md`
+- `templates/ruby-rails/.ai-bridge/codexpro-project-instructions.md`
+- `templates/ruby-rails/.ai-bridge/current-plan.template.md`
+- `templates/ruby-rails/.ai-bridge/prompts/broken-session-recovery.md`
+- `templates/ruby-rails/.ai-bridge/prompts/handoff-template.md`
+- `templates/ruby-rails/.ai-bridge/prompts/reconnect.md`
+- `templates/ruby-rails/.ai-bridge/prompts/session-bootstrap.md`
+- `templates/ruby-rails/.devcontainer/devcontainer.json`
+- `templates/ruby-rails/.devfleet/bootstrap.sh`
+- `templates/ruby-rails/.devfleet/codexpro-bootstrap.sh`
+- `templates/ruby-rails/.devfleet/codexpro-profile.json`
+- `templates/ruby-rails/.devfleet/codexpro.env.example`
+- `templates/ruby-rails/.devfleet/health-check.sh`
+- `templates/ruby-rails/.devfleet/project-tools.json`
+- `templates/ruby-rails/.devfleet/smoke-test.sh`
+- `templates/ruby-rails/.devfleet/template.json`
+- `templates/ruby-rails/.editorconfig`
+- `templates/ruby-rails/.gitignore`
+- `templates/ruby-rails/README.md`
+- `templates/ruby-rails/compose.yaml`
+- `templates/ruby-rails/docs/architecture.md`
+- `templates/rust-service/.ai-bridge/chatgpt-memory.md`
+- `templates/rust-service/.ai-bridge/codexpro-project-instructions.md`
+- `templates/rust-service/.ai-bridge/current-plan.template.md`
+- `templates/rust-service/.ai-bridge/prompts/broken-session-recovery.md`
+- `templates/rust-service/.ai-bridge/prompts/handoff-template.md`
+- `templates/rust-service/.ai-bridge/prompts/reconnect.md`
+- `templates/rust-service/.ai-bridge/prompts/session-bootstrap.md`
+- `templates/rust-service/.devcontainer/devcontainer.json`
+- `templates/rust-service/.devfleet/bootstrap.sh`
+- `templates/rust-service/.devfleet/codexpro-bootstrap.sh`
+- `templates/rust-service/.devfleet/codexpro-profile.json`
+- `templates/rust-service/.devfleet/codexpro.env.example`
+- `templates/rust-service/.devfleet/health-check.sh`
+- `templates/rust-service/.devfleet/project-tools.json`
+- `templates/rust-service/.devfleet/smoke-test.sh`
+- `templates/rust-service/.devfleet/template.json`
+- `templates/rust-service/.editorconfig`
+- `templates/rust-service/.gitignore`
+- `templates/rust-service/Cargo.toml`
+- `templates/rust-service/README.md`
+- `templates/rust-service/compose.yaml`
+- `templates/rust-service/docs/architecture.md`
+- `templates/rust-service/src/main.rs`
+- `templates/scientific-julia/.ai-bridge/chatgpt-memory.md`
+- `templates/scientific-julia/.ai-bridge/codexpro-project-instructions.md`
+- `templates/scientific-julia/.ai-bridge/current-plan.template.md`
+- `templates/scientific-julia/.ai-bridge/prompts/broken-session-recovery.md`
+- `templates/scientific-julia/.ai-bridge/prompts/handoff-template.md`
+- `templates/scientific-julia/.ai-bridge/prompts/reconnect.md`
+- `templates/scientific-julia/.ai-bridge/prompts/session-bootstrap.md`
+- `templates/scientific-julia/.devcontainer/devcontainer.json`
+- `templates/scientific-julia/.devfleet/bootstrap.sh`
+- `templates/scientific-julia/.devfleet/codexpro-bootstrap.sh`
+- `templates/scientific-julia/.devfleet/codexpro-profile.json`
+- `templates/scientific-julia/.devfleet/codexpro.env.example`
+- `templates/scientific-julia/.devfleet/health-check.sh`
+- `templates/scientific-julia/.devfleet/project-tools.json`
+- `templates/scientific-julia/.devfleet/smoke-test.sh`
+- `templates/scientific-julia/.devfleet/template.json`
+- `templates/scientific-julia/.editorconfig`
+- `templates/scientific-julia/.gitignore`
+- `templates/scientific-julia/README.md`
+- `templates/scientific-julia/compose.yaml`
+- `templates/scientific-julia/docs/architecture.md`
+- `templates/shell-automation/.ai-bridge/chatgpt-memory.md`
+- `templates/shell-automation/.ai-bridge/codexpro-project-instructions.md`
+- `templates/shell-automation/.ai-bridge/current-plan.template.md`
+- `templates/shell-automation/.ai-bridge/prompts/broken-session-recovery.md`
+- `templates/shell-automation/.ai-bridge/prompts/handoff-template.md`
+- `templates/shell-automation/.ai-bridge/prompts/reconnect.md`
+- `templates/shell-automation/.ai-bridge/prompts/session-bootstrap.md`
+- `templates/shell-automation/.devcontainer/devcontainer.json`
+- `templates/shell-automation/.devfleet/bootstrap.sh`
+- `templates/shell-automation/.devfleet/codexpro-bootstrap.sh`
+- `templates/shell-automation/.devfleet/codexpro-profile.json`
+- `templates/shell-automation/.devfleet/codexpro.env.example`
+- `templates/shell-automation/.devfleet/health-check.sh`
+- `templates/shell-automation/.devfleet/project-tools.json`
+- `templates/shell-automation/.devfleet/smoke-test.sh`
+- `templates/shell-automation/.devfleet/template.json`
+- `templates/shell-automation/.editorconfig`
+- `templates/shell-automation/.gitignore`
+- `templates/shell-automation/README.md`
+- `templates/shell-automation/compose.yaml`
+- `templates/shell-automation/docs/architecture.md`
+- `templates/sql-project/.ai-bridge/chatgpt-memory.md`
+- `templates/sql-project/.ai-bridge/codexpro-project-instructions.md`
+- `templates/sql-project/.ai-bridge/current-plan.template.md`
+- `templates/sql-project/.ai-bridge/prompts/broken-session-recovery.md`
+- `templates/sql-project/.ai-bridge/prompts/handoff-template.md`
+- `templates/sql-project/.ai-bridge/prompts/reconnect.md`
+- `templates/sql-project/.ai-bridge/prompts/session-bootstrap.md`
+- `templates/sql-project/.devcontainer/devcontainer.json`
+- `templates/sql-project/.devfleet/bootstrap.sh`
+- `templates/sql-project/.devfleet/codexpro-bootstrap.sh`
+- `templates/sql-project/.devfleet/codexpro-profile.json`
+- `templates/sql-project/.devfleet/codexpro.env.example`
+- `templates/sql-project/.devfleet/health-check.sh`
+- `templates/sql-project/.devfleet/project-tools.json`
+- `templates/sql-project/.devfleet/smoke-test.sh`
+- `templates/sql-project/.devfleet/template.json`
+- `templates/sql-project/.editorconfig`
+- `templates/sql-project/.gitignore`
+- `templates/sql-project/README.md`
+- `templates/sql-project/compose.yaml`
+- `templates/sql-project/docs/architecture.md`
+- `templates/typescript-next/.ai-bridge/chatgpt-memory.md`
+- `templates/typescript-next/.ai-bridge/codexpro-project-instructions.md`
+- `templates/typescript-next/.ai-bridge/current-plan.template.md`
+- `templates/typescript-next/.ai-bridge/prompts/broken-session-recovery.md`
+- `templates/typescript-next/.ai-bridge/prompts/handoff-template.md`
+- `templates/typescript-next/.ai-bridge/prompts/reconnect.md`
+- `templates/typescript-next/.ai-bridge/prompts/session-bootstrap.md`
+- `templates/typescript-next/.devcontainer/devcontainer.json`
+- `templates/typescript-next/.devfleet/bootstrap.sh`
+- `templates/typescript-next/.devfleet/codexpro-bootstrap.sh`
+- `templates/typescript-next/.devfleet/codexpro-profile.json`
+- `templates/typescript-next/.devfleet/codexpro.env.example`
+- `templates/typescript-next/.devfleet/health-check.sh`
+- `templates/typescript-next/.devfleet/project-tools.json`
+- `templates/typescript-next/.devfleet/smoke-test.sh`
+- `templates/typescript-next/.devfleet/template.json`
+- `templates/typescript-next/.editorconfig`
+- `templates/typescript-next/.gitignore`
+- `templates/typescript-next/README.md`
+- `templates/typescript-next/app/layout.tsx`
+- `templates/typescript-next/app/page.tsx`
+- `templates/typescript-next/compose.yaml`
+- `templates/typescript-next/docs/architecture.md`
+- `templates/typescript-next/package.json`
+- `templates/typescript-next/test/smoke.test.js`
+- `templates/typescript-next/tsconfig.json`
+- `templates/typescript-node/.ai-bridge/chatgpt-memory.md`
+- `templates/typescript-node/.ai-bridge/codexpro-project-instructions.md`
+- `templates/typescript-node/.ai-bridge/current-plan.template.md`
+- `templates/typescript-node/.ai-bridge/prompts/broken-session-recovery.md`
+- `templates/typescript-node/.ai-bridge/prompts/handoff-template.md`
+- `templates/typescript-node/.ai-bridge/prompts/reconnect.md`
+- `templates/typescript-node/.ai-bridge/prompts/session-bootstrap.md`
+- `templates/typescript-node/.devcontainer/devcontainer.json`
+- `templates/typescript-node/.devfleet/bootstrap.sh`
+- `templates/typescript-node/.devfleet/codexpro-bootstrap.sh`
+- `templates/typescript-node/.devfleet/codexpro-profile.json`
+- `templates/typescript-node/.devfleet/codexpro.env.example`
+- `templates/typescript-node/.devfleet/health-check.sh`
+- `templates/typescript-node/.devfleet/project-tools.json`
+- `templates/typescript-node/.devfleet/smoke-test.sh`
+- `templates/typescript-node/.devfleet/template.json`
+- `templates/typescript-node/.editorconfig`
+- `templates/typescript-node/.gitignore`
+- `templates/typescript-node/README.md`
+- `templates/typescript-node/compose.yaml`
+- `templates/typescript-node/docs/architecture.md`
+- `templates/typescript-node/package.json`
+- `templates/typescript-node/src/index.ts`
+- `templates/typescript-node/test/index.test.ts`
+- `templates/typescript-node/tsconfig.json`
+- `tests/conftest.py`
+- `tests/test_analyzer_v11.py`
+- `tests/test_client_generation.py`
+- `tests/test_codexpro_hook.py`
+- `tests/test_configuration.py`
+- `tests/test_dashboard_v11.py`
+- `tests/test_docker_modes.py`
+- `tests/test_failover.py`
+- `tests/test_language_templates.py`
+- `tests/test_ollama.py`
+- `tests/test_operations_leases.py`
+- `tests/test_package_structure.py`
+- `tests/test_profiles.py`
+- `tests/test_project_safety.py`
+- `tests/test_upgrade_preservation.py`
+- `tests/test_worktrees_and_v1_restore.py`
+- `tools/migrate_config.py`
+- `windows/Configure-Ollama.ps1`
+- `windows/Migrate-Config.ps1`
+- `windows/Set-DevFleetDockerMode.ps1`
+- `windows/Test-Ollama.ps1`
+
+## Modified v1.0.0 files
+
+- `CHANGELOG.md`
+- `CHECKSUMS.sha256`
+- `INSTALL-CHECKLIST.txt`
+- `Install-DevFleet.ps1`
+- `README-FIRST.md`
+- `app/devfleet/analyzer.py`
+- `app/devfleet/core.py`
+- `app/devfleet/main.py`
+- `app/devfleet/projects.py`
+- `app/devfleet/status.py`
+- `app/static/style.css`
+- `app/systemd/devfleet.service`
+- `app/templates/index.html`
+- `config/devfleet.config.json`
+- `docs/00-HARD-STOPS-AND-ASSUMPTIONS.md`
+- `docs/01-ARCHITECTURE.md`
+- `docs/02-INSTALL-ORDER.md`
+- `docs/03-DAILY-USE.md`
+- `docs/04-RECOVERY.md`
+- `docs/05-SECURITY-MODEL.md`
+- `docs/06-CODEXPRO-INTEGRATION.md`
+- `docs/07-OFFICIAL-SOURCES.md`
+- `linux/bootstrap-compute.sh`
+- `linux/devfleet-repair`
+- `linux/devfleet-restore-project`
+- `linux/devfleet-safe-update`
+- `linux/devfleet-user-repair`
+- `templates/generic/.devcontainer/devcontainer.json`
+- `templates/generic/.devfleet/codexpro-bootstrap.sh`
+- `templates/generic/.devfleet/codexpro.env.example`
+- `templates/generic/.gitignore`
+- `templates/generic/README.md`
+- `templates/generic/compose.yaml`
+- `templates/node/.devcontainer/devcontainer.json`
+- `templates/node/.devfleet/codexpro-bootstrap.sh`
+- `templates/node/.devfleet/codexpro.env.example`
+- `templates/node/.gitignore`
+- `templates/node/README.md`
+- `templates/node/compose.yaml`
+- `templates/node/package.json`
+- `templates/python/.devcontainer/devcontainer.json`
+- `templates/python/.devfleet/codexpro-bootstrap.sh`
+- `templates/python/.devfleet/codexpro.env.example`
+- `templates/python/.gitignore`
+- `templates/python/README.md`
+- `templates/python/compose.yaml`
+- `templates/python/pyproject.toml`
+- `tools/Verify-Package.ps1`
+- `tools/verify_package.py`
+- `windows/02-Provision-ComputeNode.ps1`
+- `windows/03-Provision-Vault.ps1`
+- `windows/Complete-Cluster.ps1`
+- `windows/DevFleet.Common.psm1`
+- `windows/Repair-DevFleet.ps1`
+- `windows/Update-DevFleet.ps1`
+
+## Removed v1.0.0 files
+
+- None.
+
+## Unchanged v1.0.0 files
+
+- `Bootstrap-Install.ps1`
+- `SECURITY-NOTES.txt`
+- `START-HERE-DESKTOP.cmd`
+- `START-HERE-LAPTOP.cmd`
+- `app/devfleet/__init__.py`
+- `app/devfleet/auth.py`
+- `app/requirements.txt`
+- `app/systemd/devfleet-backup.service`
+- `app/systemd/devfleet-backup.timer`
+- `cloud-init/compute.yaml`
+- `cloud-init/vault.yaml`
+- `linux/bootstrap-vault.sh`
+- `linux/devfleet-backup`
+- `linux/devfleet-configure-backup`
+- `linux/devfleet-health`
+- `linux/devfleet-purge-quarantine`
+- `linux/devfleet-set-peer`
+- `linux/devfleet-vault-health`
+- `linux/devfleet-vault-maintenance`
+- `templates/python/src/app/__init__.py`
+- `tests/test_analyzer.py`
+- `windows/00-Preflight.ps1`
+- `windows/01-Install-Prerequisites.ps1`
+- `windows/04-Connect-Tailscale.ps1`
+- `windows/04a-Connect-WindowsTailscale.ps1`
+- `windows/05-Configure-LocalVaultClient.ps1`
+- `windows/06-Import-Laptop-Bootstrap.ps1`
+- `windows/08-Install-Shortcuts.ps1`
+- `windows/09-Export-Laptop-Bootstrap.ps1`
+- `windows/10-Export-Desktop-Pairing.ps1`
+- `windows/Configure-GitHub.ps1`
+- `windows/Export-Diagnostics.ps1`
+- `windows/Export-Vault-OfflineCopy.ps1`
+- `windows/Invoke-Quarantine-Maintenance.ps1`
+- `windows/Invoke-Vault-Maintenance.ps1`
+- `windows/Show-DevFleet-Credentials.ps1`
+- `windows/Start-DevFleet.ps1`
+- `windows/Stop-DevFleet.ps1`
+- `windows/Test-DevFleet.ps1`
+- `windows/Update-Vault.ps1`
+
+```
+
+
+## FILE: source/DevFleet-v1.1.0-MIGRATION.md
+
+SHA256: 28666495394ce7fa029bbf0c0d0949512333328d28181fb238bd901345af30f2 | Bytes: 1101 | Git mode: 100644
+
+````
+# DevFleet v1.0.0 to v1.1.0 migration
+
+Run the preview and then the upgrade from an elevated PowerShell 7 terminal:
+
+```powershell
+pwsh -File .\Upgrade-DevFleet.ps1 -FromVersion 1.0.0 -PreviewOnly
+pwsh -File .\Upgrade-DevFleet.ps1 -FromVersion 1.0.0
+```
+
+The entry point backs up `C:\ProgramData\DevFleet` configuration, secrets, exports, and package metadata; validates Multipass host-mount isolation; stops each local DevFleet VM; creates a named snapshot; restores the prior running state; previews schema 2; and refreshes only existing instances. It does not delete or recreate VMs, projects, Git repositories, Docker stores/volumes, backup credentials, restic snapshots, vault data, Tailscale identities, SSH keys, dashboard credentials, pairing data, quarantine, or custom values.
+
+A schema-1 baseline becomes Strict/rootless first. Rootless and rootful Docker have separate stores; optional switching requires a report, stopped projects, and explicit rootful acknowledgement. Re-running the v1.1 upgrade is safe and creates another recovery set rather than resetting the selected v1.1 profile.
+
+````
+
+
+## FILE: source/DevFleet-v1.1.0-VALIDATION.md
+
+SHA256: 9b3a513c9e8dc3a351bcb721eaf6ab05044f1d0583c61f2eaff41e1c88abcd38 | Bytes: 3068 | Git mode: 100644
+
+```
+# DevFleet v1.2.1 validation report
+
+## Offline validation completed
+
+The recovered package tree passed the following checks before final archive creation; the release version is 1.2.1.
+
+- **66 focused pytest tests** covering configuration migration, preservation, profiles, Docker-store detection/switching, analyzer policy/cache invalidation, project templates/language metadata, Git worktrees, ownership leases and interrupted transfer, operation progress, dashboard confirmation boundaries, CodexPro bootstrap states, Ollama checks, SSH/Docker-context generation, Windows-host mount prevention, traversal/symlink escapes, backup-before-quarantine, v1 project restoration, and package structure.
+- Python bytecode compilation for DevFleet application, tools, and tests.
+- Bash syntax checks for Linux helpers and every template hook.
+- JSON and JSONC parsing.
+- YAML parsing for cloud-init and generated Compose definitions.
+- Jinja template parsing.
+- FastAPI `/healthz` smoke test.
+- All 20 project templates materialized and ran their package-level smoke hook; all 10 core templates were checked for required formatter, linter, test, bootstrap, and health metadata.
 - Native sample tests executed successfully where the sandbox toolchain was available: Python, Python/FastAPI, Node.js, and Go.
 - Preservation comparison against the verified v1.0.0 ZIP confirmed that no baseline file path was removed.
 - Embedded SHA-256 verification and independent post-extraction archive verification are performed after the final manifests are frozen.
@@ -438,310 +785,4 @@ COMPOSE_HOST_NAMESPACE_KEYS = {"network_mode", "pid", "ipc", "uts", "userns_mode
 DEVCONTAINER_KEYS = {
     "name", "image", "dockerFile", "dockerfile", "context", "build", "dockerComposeFile", "service", "workspaceFolder",
     "workspaceMount", "shutdownAction", "overrideCommand", "remoteUser", "containerUser", "containerEnv", "remoteEnv",
-    "mounts", "runArgs", "privileged", "capAdd", "securityOpt", "features", "overrideFeatureInstallOrder",
-    "initializeCommand", "onCreateCommand", "updateContentCommand", "postCreateCommand", "postStartCommand",
-    "postAttachCommand", "forwardPorts", "portsAttributes", "otherPortsAttributes", "appPort", "init", "customizations",
-    "hostRequirements", "waitFor", "userEnvProbe", "secrets",
-}
-
-
-def finding(severity: str, code: str, message: str, file: str = "") -> dict[str, str]:
-    return {"severity": severity, "code": code, "message": message, "file": file}
-
-
-def _unsafe_source(source: str) -> str | None:
-    source = source.strip()
-    norm = source.replace("\\", "/")
-    if not source:
-        return "empty path"
-    if "$" in source:
-        return "environment-variable interpolation"
-    if WINDOWS_PATH.search(source) or UNC_PATH.search(source):
-        return "Windows/UNC host path"
-    if DOCKER_SOCKET.search(source):
-        return "Docker socket"
-    if source.startswith(("/", "~")):
-        return "absolute host path"
-    if ".." in PurePosixPath(norm).parts:
-        return "parent-directory traversal"
-    return None
-
-
-def _severity(profile: str, kind: str) -> str:
-    p = get_profile(profile)
-    if kind in {"hardening", "health"}:
-        return "critical" if p.block_hardening else "warning"
-    if kind in {"device", "privileged"}:
-        return "warning" if p.name == "fast" else "critical"
-    return "critical"
-
-
-def _inside_project(project: Path, candidate: Path) -> bool:
-    try:
-        candidate.resolve(strict=False).relative_to(project.resolve())
-        return True
-    except ValueError:
-        return False
-
-
-def _contains_symlink(project: Path, candidate: Path) -> bool:
-    try:
-        relative = candidate.relative_to(project)
-    except ValueError:
-        return True
-    current = project
-    for part in relative.parts:
-        current = current / part
-        if current.is_symlink():
-            return True
-    return False
-
-
-def _reference(project: Path, base: Path, raw: Any, rel: str, kind: str, findings: list[dict[str, str]], references: set[Path], *, required: bool = False) -> Path | None:
-    path_code = "docker.mount-resolution" if kind == "bind mount source" else "docker.build-context" if kind == "build.context" else "compose.path-escape"
-    value = str(raw or "").strip()
-    reason = _unsafe_source(value)
-    if reason:
-        findings.append(finding("critical", "compose.path-reference", f"{kind} is unsafe ({reason}): {value!r}.", rel))
-        return None
-    candidate = (base / value).resolve(strict=False)
-    if not _inside_project(project, candidate):
-        findings.append(finding("critical", path_code, f"{kind} resolves outside the project boundary: {value!r}.", rel))
-        return None
-    lexical = base / value
-    if _contains_symlink(project, lexical):
-        findings.append(finding("critical", path_code, f"{kind} may not traverse a symlink: {value!r}.", rel))
-        return None
-    if required and not candidate.is_file():
-        findings.append(finding("critical", "compose.missing-reference", f"Referenced {kind} does not exist: {value!r}.", rel))
-        return None
-    references.add(candidate)
-    return candidate
-
-
-def _short_bind_source(value: str) -> str | None:
-    value = value.strip()
-    if not value:
-        return None
-    if WINDOWS_PATH.search(value) or UNC_PATH.search(value) or DOCKER_SOCKET.search(value):
-        return value
-    if ":" not in value:
-        return value if value.startswith((".", "..", "/", "~")) else None
-    return value.split(":", 1)[0]
-
-
-def _volume_source(value: Any) -> tuple[str, bool]:
-    if isinstance(value, dict):
-        kind = str(value.get("type", "volume")).lower()
-        source = str(value.get("source") or value.get("src") or "")
-        return source, kind == "bind"
-    source = _short_bind_source(str(value))
-    return source or "", source is not None
-
-
-def _parse_yaml(path: Path) -> dict[str, Any] | None:
-    try:
-        value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return None
-    return value if isinstance(value, dict) else None
-
-
-def _iter_env_files(value: Any) -> Iterable[Any]:
-    if isinstance(value, (str, dict)):
-        return (value,)
-    return value or ()
-
-
-def _strings(value: Any) -> Iterable[str]:
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, dict):
-        for key, item in value.items():
-            yield from _strings(key)
-            yield from _strings(item)
-    elif isinstance(value, list):
-        for item in value:
-            yield from _strings(item)
-
-
-def _preflight_compose(project: Path, path: Path, findings: list[dict[str, str]], references: set[Path], seen: set[Path], state: dict[str, int], depth: int) -> dict[str, Any] | None:
-    rel = str(path.relative_to(project)) if _inside_project(project, path) else str(path)
-    if depth > MAX_REFERENCE_DEPTH:
-        findings.append(finding("critical", "compose.reference-depth", "Compose reference depth exceeds the bounded policy.", rel))
-        return None
-    path = path.resolve(strict=False)
-    if path in seen:
-        return _parse_yaml(path)
-    if len(seen) >= MAX_REFERENCE_FILES:
-        findings.append(finding("critical", "compose.reference-count", "Compose reference count exceeds the bounded policy.", rel))
-        return None
-    seen.add(path)
-    if not path.is_file():
-        findings.append(finding("critical", "compose.missing-reference", "Compose configuration is missing.", rel))
-        return None
-    state["bytes"] += path.stat().st_size
-    if state["bytes"] > MAX_REFERENCE_BYTES:
-        findings.append(finding("critical", "compose.reference-bytes", "Compose referenced input bytes exceed the bounded policy.", rel))
-        return None
-    data = _parse_yaml(path)
-    if data is None:
-        findings.append(finding("error", "yaml.invalid", "Compose configuration is not a YAML object.", rel))
-        return None
-    if any("${" in text for text in _strings(data)):
-        findings.append(finding("critical", "compose.interpolation", "Compose environment interpolation is blocked in the security-reviewed subset.", rel))
-    for key in data:
-        if not str(key).startswith("x-") and key not in COMPOSE_TOP_LEVEL_KEYS:
-            findings.append(finding("critical", "compose.unknown-field", f"Unreviewed top-level Compose field is blocked: {key!r}.", rel))
-    includes = data.get("include")
-    if includes:
-        findings.append(finding("critical", "compose.include", "Compose include is blocked until a bounded resolver is certified.", rel))
-        entries = includes if isinstance(includes, list) else [includes]
-        for entry in entries:
-            include_path = entry.get("path") if isinstance(entry, dict) else entry
-            included = _reference(project, path.parent, include_path, rel, "Compose include", findings, references)
-            if included and included.is_file():
-                _preflight_compose(project, included, findings, references, seen, state, depth + 1)
-    services = data.get("services") or {}
-    if not isinstance(services, dict):
-        findings.append(finding("error", "compose.services", "Compose services must be a mapping.", rel))
-        return data
-    for name, service in services.items():
-        if not isinstance(service, dict):
-            findings.append(finding("error", "compose.service", f"Compose service {name!r} must be a mapping.", rel))
-            continue
-        for key in service:
-            if key not in COMPOSE_SERVICE_KEYS and not str(key).startswith("x-"):
-                findings.append(finding("critical", "compose.unknown-field", f"Unreviewed service field is blocked: {name}.{key}.", rel))
-        extends = service.get("extends")
-        if extends:
-            findings.append(finding("critical", "compose.extends", "Compose extends is blocked until effective-model resolution is certified.", rel))
-            if isinstance(extends, dict) and extends.get("file"):
-                inherited = _reference(project, path.parent, extends.get("file"), rel, "Compose extends file", findings, references)
-                if inherited and inherited.is_file():
-                    _preflight_compose(project, inherited, findings, references, seen, state, depth + 1)
-        for env_file in _iter_env_files(service.get("env_file")):
-            env_path = env_file.get("path") if isinstance(env_file, dict) else env_file
-            _reference(project, path.parent, env_path, rel, "env_file", findings, references)
-        build = service.get("build")
-        if isinstance(build, str):
-            _reference(project, path.parent, build, rel, "build.context", findings, references)
-        elif isinstance(build, dict):
-            context = build.get("context")
-            if context:
-                context_path = _reference(project, path.parent, context, rel, "build.context", findings, references)
-                if context_path and build.get("dockerfile"):
-                    _reference(project, context_path.parent, build.get("dockerfile"), rel, "build.dockerfile", findings, references, required=True)
-        for volume in service.get("volumes") or ():
-            source, is_bind = _volume_source(volume)
-            if is_bind:
-                _reference(project, path.parent, source, rel, "bind mount source", findings, references)
-        for key in ("secrets", "configs"):
-            value = service.get(key)
-            if value:
-                findings.append(finding("critical", "compose.secret-config", f"Service {name}.{key} is blocked until host-file authorization is certified.", rel))
-    for key in ("secrets", "configs"):
-        declarations = data.get(key)
-        if isinstance(declarations, dict):
-            for name, declaration in declarations.items():
-                if isinstance(declaration, dict) and declaration.get("file"):
-                    _reference(project, path.parent, declaration["file"], rel, f"{key}.{name} file", findings, references, required=True)
-                if declaration:
-                    findings.append(finding("critical", "compose.secret-config", f"Top-level {key}.{name} is blocked until host-file authorization is certified.", rel))
-    return data
-
-
-def _scan_compose_service(project: Path, path: Path, name: str, svc: dict[str, Any], profile: str, out: list[dict[str, str]]) -> None:
-    rel = str(path.relative_to(project))
-    metadata: dict[str, Any] = {}
-    try:
-        value = read_project_metadata(project).value
-        metadata = value if isinstance(value, dict) else {}
-    except Exception:
-        pass
-    for key in COMPOSE_UNSUPPORTED_KEYS:
-        if key in svc and svc.get(key) not in (None, False, [], {}):
-            out.append(finding("critical", f"compose.{key.replace('_', '-')}", f"{name}.{key} is blocked by the supported Compose security policy.", rel))
-    if svc.get("container_name"):
-        out.append(finding("critical" if profile == "strict" else "warning", "docker.container-name", f"{name}: explicit container_name can collide across projects.", rel))
-    if svc.get("privileged") is True:
-        severity = _severity(profile, "privileged")
-        if profile == "fast" and not metadata.get("allow_privileged"):
-            severity = "critical"
-        out.append(finding(severity, "docker.privileged", f"{name}: privileged mode requires Fast Trusted plus project-level acknowledgement.", rel))
-    for key in COMPOSE_HOST_NAMESPACE_KEYS:
-        value = str(svc.get(key, "")).lower()
-        if value == "host" or value.startswith(("container:", "service:")):
-            out.append(finding("critical", "docker.host-namespace", f"{name}: {key}={value} is forbidden.", rel))
-    caps = [str(x).upper() for x in (svc.get("cap_add") or [])]
-    if caps:
-        severity = _severity(profile, "device")
-        if profile == "fast" and not metadata.get("allow_privileged"):
-            severity = "critical"
-        out.append(finding(severity, "docker.capabilities", f"{name}: capabilities require explicit reviewed acknowledgement: {caps}.", rel))
-    if svc.get("devices"):
-        severity = _severity(profile, "device")
-        if profile == "fast" and not metadata.get("allow_devices"):
-            severity = "critical"
-        out.append(finding(severity, "docker.devices", f"{name}: device access requires Fast Trusted plus project-level acknowledgement.", rel))
-    for volume in svc.get("volumes") or ():
-        source, is_bind = _volume_source(volume)
-        if is_bind:
-            reason = _unsafe_source(source)
-            if reason:
-                out.append(finding("critical", "docker.mount", f"{name}: rejected {reason}: {source!r}.", rel))
-    build = svc.get("build")
-    if build:
-        context = build if isinstance(build, str) else str(build.get("context", "."))
-        reason = _unsafe_source(context)
-        if reason and context not in {".", "./"}:
-            out.append(finding("critical", "docker.build-context", f"{name}: rejected {reason}: {context}.", rel))
-        if isinstance(build, dict) and build.get("privileged"):
-            out.append(finding("critical", "docker.build-privileged", f"{name}: privileged image builds are blocked.", rel))
-        if isinstance(build, dict) and build.get("secrets"):
-            out.append(finding("critical", "docker.build-secrets", f"{name}: build secrets are blocked.", rel))
-        context_path = (path.parent / context).resolve(strict=False)
-        dockerfile_name = "Dockerfile" if isinstance(build, str) else str(build.get("dockerfile", "Dockerfile"))
-        dockerfile = (context_path / dockerfile_name).resolve(strict=False)
-        if _inside_project(project, dockerfile) and dockerfile.is_file():
-            users = []
-            for line in dockerfile.read_text(encoding="utf-8", errors="ignore").splitlines():
-                parts = line.split(None, 1)
-                if len(parts) == 2 and parts[0].upper() == "USER":
-                    users.append(parts[1].strip())
-            if not users or users[-1].lower() in {"root", "0", "0:0"}:
-                out.append(finding(_severity(profile, "hardening"), "docker.non-root-user", f"{name}: Dockerfile does not finish with a non-root USER.", str(dockerfile.relative_to(project))))
-    for env_file in _iter_env_files(svc.get("env_file")):
-        value = str(env_file.get("path", "")) if isinstance(env_file, dict) else str(env_file)
-        reason = _unsafe_source(value)
-        if reason:
-            out.append(finding("critical", "docker.env-file", f"{name}: unsafe env_file ({reason}): {value}.", rel))
-    for port in svc.get("ports") or ():
-        state, text = _port_state(port)
-        if state == "public":
-            out.append(finding("critical", "docker.port-public", f"{name}: public/unbound port publication is forbidden: {text}.", rel))
-        elif state == "tailnet" and not (get_profile(profile).allow_tailnet and SETTINGS.allow_tailnet_ports):
-            out.append(finding("critical", "docker.port-tailnet", f"{name}: tailnet port requires policy approval: {text}.", rel))
-    if "healthcheck" not in svc:
-        out.append(finding(_severity(profile, "health"), "docker.healthcheck", f"{name}: no container healthcheck is defined.", rel))
-    image = str(svc.get("image", ""))
-    if image.endswith(":latest") or (image and ":" not in image):
-        out.append(finding(_severity(profile, "hardening"), "docker.unpinned-image", f"{name}: development image is not pinned.", rel))
-    security = [str(x).lower() for x in (svc.get("security_opt") or [])]
-    if any("unconfined" in x for x in security):
-        out.append(finding("critical", "docker.unconfined", f"{name}: unconfined security profile is forbidden.", rel))
-    if not any("no-new-privileges" in x for x in security):
-        out.append(finding(_severity(profile, "hardening"), "docker.no-new-privileges", f"{name}: no-new-privileges is not set.", rel))
-
-
-def _strip_jsonc(text: str) -> str:
-    result: list[str] = []
-    i = 0
-    in_string = False
-    escaped = False
-    while i < len(text):
-        char = text[i]
-        if in_string:
-            result.append(char)
-            if escaped:
-                escaped = False
+    "mounts"

@@ -1,10 +1,370 @@
 # DevFleet source part 075
 
 Full-source UTF-8 byte interval [3441000, 3487500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 21520037f973a527506f69457f234755e1475f5c7cb668effcfda374bb20bde3
+Payload SHA-256: 414118b5725464f39ece560d260aed9e3994bc835a08bf30d0d8242b8236d067
 
 <!-- BEGIN SOURCE SLICE -->
-roject.iterdir()):
+ destructive: bool = False,
+) -> str:
+    project = safe_child(SETTINGS.workspaces, slug)
+    if not project.is_dir():
+        raise FileNotFoundError(slug)
+    meta = load_authoritative_project_identity_for_mutation(project)
+    if provider_for(meta).is_vm:
+        if not str(meta.get("runtime_id") or ""):
+            if str(meta.get("lifecycle_status") or "") != "failed":
+                raise RuntimeError(
+                    "A VM project without a runtime id is not in a verified failed-provisioning state."
+                )
+            root = SETTINGS.runtime_root / "workspace-backups"
+            backup_id = f'{validate_slug(slug)}-{time.strftime("%Y%m%d-%H%M%S")}-{uuid.uuid4().hex[:8]}'
+            directory = root / backup_id
+            archive = directory / f"{validate_slug(slug)}.tar.gz"
+            result = create_workspace_archive(project, slug, archive, include_generated=destructive, consistency_level=consistency_level)
+            manifest = write_backup_manifest(
+                directory,
+                slug=slug,
+                project_id=str(meta.get("project_id") or ""),
+                runtime={"provider": "local-workspace-archive", "runtime_id": ""},
+                archive=result,
+                consistency_level=consistency_level,
+            )
+            meta.update(
+                {
+                    "backup_status": "verified",
+                    "backup_id": backup_id,
+                    "backup_path": str(archive),
+                    "backup_sha256": result["archive_sha256"],
+                    "backup_manifest": str(directory / "manifest.json"),
+                    "updated_at": now_iso(),
+                }
+            )
+            _write_project_metadata(project, meta)
+            return json.dumps(
+                {
+                    "ok": True,
+                    "provider": "local-workspace-archive",
+                    "backup_status": "verified",
+                    "backup_id": backup_id,
+                    "backup_path": str(archive),
+                    "backup_sha256": result["archive_sha256"],
+                    "manifest": manifest,
+                }
+            )
+        result = VmRuntimeOperations.backup(slug, meta, consistency_level=consistency_level, destructive=destructive)
+        if str(result.get("backup_status", "")).lower() != "verified":
+            raise RuntimeError(
+                "Host provider did not return a verified workspace backup artifact."
+            )
+        meta.update(
+            {
+                "backup_status": "verified",
+                "backup_id": result.get("backup_id", ""),
+                "backup_sha256": result.get("backup_sha256", ""),
+                "backup_manifest_sha256": result.get("manifest_sha256", ""),
+                "backup_reference": result.get("backup_reference"),
+                "updated_at": now_iso(),
+            }
+        )
+        _write_project_metadata(project, meta)
+        update_lease(project, backup_time=now_iso())
+        return json.dumps(
+            {
+                "ok": True,
+                "provider": "multipass-host-agent",
+                "backup_status": meta["backup_status"],
+                "runtime": result,
+            },
+            default=str,
+        )
+    root = SETTINGS.runtime_root / "workspace-backups"
+    backup_id = (
+        f'{validate_slug(slug)}-{time.strftime("%Y%m%d-%H%M%S")}-{uuid.uuid4().hex[:8]}'
+    )
+    directory = root / backup_id
+    archive = directory / f"{validate_slug(slug)}.tar.gz"
+    result = create_workspace_archive(project, slug, archive, include_generated=destructive, consistency_level=consistency_level)
+    manifest = write_backup_manifest(
+        directory,
+        slug=slug,
+        project_id=str(meta.get("project_id") or ""),
+        runtime={"provider": "docker-compose", "runtime_id": ""},
+        archive=result,
+        consistency_level=consistency_level,
+    )
+    vault = _vault_request("backup", timeout=1860)
+    if (
+        vault.get("local_backup_status") != "verified"
+        or vault.get("vault_upload_status") != "verified"
+        or vault.get("durability_level") != "vault"
+    ):
+        raise RuntimeError("Vault broker did not verify the encrypted backup upload.")
+    meta.update(
+        {
+            "backup_status": "verified",
+            "backup_id": backup_id,
+            "backup_path": str(archive),
+            "backup_sha256": result["archive_sha256"],
+            "backup_manifest": str(directory / "manifest.json"),
+            "updated_at": now_iso(),
+        }
+    )
+    _write_project_metadata(project, meta)
+    update_lease(project, backup_time=now_iso())
+    return json.dumps(
+        {
+            "ok": True,
+            "provider": "docker-compose",
+            "backup_status": "verified",
+            "backup_id": backup_id,
+            "backup_path": str(archive),
+            "backup_sha256": result["archive_sha256"],
+            "vault_exit_code": 0,
+            "vault_upload_status": "verified",
+            "durability_level": "vault",
+            "manifest": manifest,
+        },
+        default=str,
+    )
+
+
+def safety_backup_project(slug: str, _lock_held: bool = False) -> dict[str, Any]:
+    """Stop managed writers, create a fresh stable backup, and bind its identity."""
+    project = safe_child(SETTINGS.workspaces, slug)
+    if not project.is_dir() or project.is_symlink():
+        raise ValueError("Project workspace is not a safe directory.")
+    with contextlib.nullcontext() if _lock_held else _destructive_lock(slug):
+        meta = load_authoritative_project_identity_for_mutation(project)
+        transaction_id = f"destroy-{uuid.uuid4().hex}"
+        meta.update(
+            {
+                "lifecycle_status": "destructive-quiesce-pending",
+                "destructive_transaction_id": transaction_id,
+                "updated_at": now_iso(),
+            }
+        )
+        _write_project_metadata(project, meta)
+        stop_project(slug)
+        refreshed = load_authoritative_project_identity_for_mutation(project)
+        if provider_for(refreshed).is_vm:
+            if str(refreshed.get("lifecycle_status") or "").lower() == "running":
+                raise RuntimeError(
+                    "Destructive deletion blocked: owned VM is still running after quiesce."
+                )
+        elif running(project):
+            raise RuntimeError(
+                "Destructive deletion blocked: DevFleet-owned containers remain running after compose down."
+            )
+        meta = load_authoritative_project_identity_for_mutation(project)
+        meta.update(
+            {
+                "lifecycle_status": "destructive-quiesced",
+                "destructive_transaction_id": transaction_id,
+                "updated_at": now_iso(),
+            }
+        )
+        _write_project_metadata(project, meta)
+        # backup_project records its verified backup in ownership-lease.json.
+        # Exclude that one self-update only from the during-backup comparison;
+        # the final binding still includes the complete post-backup lease.
+        before = _source_state_fingerprint(
+            project, include_generated=True, exclude_ownership_lease=True
+        )
+        # Consistency is transaction-local and explicit.  The signature check
+        # keeps older focused test doubles compatible without reintroducing
+        # mutable module state.
+        import inspect
+        backup_signature = inspect.signature(backup_project)
+        if "consistency_level" in backup_signature.parameters:
+            result = json.loads(backup_project(slug, consistency_level="quiesced", destructive=True))
+        else:
+            result = json.loads(backup_project(slug))
+        result.setdefault("consistency_level", "quiesced")
+        meta = load_authoritative_project_identity_for_mutation(project)
+        after, bound_fingerprint = _source_state_fingerprint(
+            project,
+            include_generated=True,
+            exclude_ownership_lease=True,
+            return_full_lease_variant=True,
+        )
+        if before != after:
+            raise RuntimeError(
+                "Destructive deletion blocked: workspace changed during the safety backup; no deletion was performed."
+            )
+        backup_id, backup_sha, status = _safety_backup_fields(result, meta)
+        if (
+            status != "verified"
+            or not backup_id
+            or not re.fullmatch(r"[0-9a-f]{64}", backup_sha.lower())
+        ):
+            raise RuntimeError(
+                "Destructive deletion blocked: fresh safety backup was not cryptographically verified."
+            )
+        provider = provider_for(meta)
+        if provider.is_vm:
+            reference = result.get("backup_reference") or (result.get("runtime") or {}).get("backup_reference") or meta.get("backup_reference")
+            from .host_control import validate_backup_reference
+            checked_reference = validate_backup_reference(reference, project_id=str(meta.get("project_id") or ""), slug=slug, runtime_id=str(meta.get("runtime_id") or ""))
+            if checked_reference["archive_sha256"].lower() != backup_sha.lower():
+                raise RuntimeError("Destructive deletion blocked: provider backup reference hash changed after verification.")
+            meta["backup_reference"] = checked_reference
+        else:
+            archive = Path(str(result.get("backup_path") or meta.get("backup_path") or ""))
+            if not archive.is_file():
+                raise RuntimeError("Destructive deletion blocked: fresh safety backup archive is unavailable.")
+            verified = validate_archive(archive, slug)
+            if verified.get("archive_sha256", "").lower() != backup_sha.lower():
+                raise RuntimeError("Destructive deletion blocked: fresh safety backup hash changed after verification.")
+        binding = {
+            "transaction_id": transaction_id,
+            "project_id": str(meta.get("project_id") or ""),
+            "runtime_id": str(meta.get("runtime_id") or ""),
+            "backup_id": backup_id,
+            "backup_sha256": backup_sha.lower(),
+            "source_state_fingerprint": bound_fingerprint,
+            "fingerprint_policy": {
+                "schema_version": FINGERPRINT_POLICY_VERSION,
+                "algorithm": FINGERPRINT_ALGORITHM,
+                "include_generated": True,
+                "ignored_directories": [],
+                "result": "verified",
+            },
+            "created_at": now_iso(),
+        }
+        meta.update(
+            {
+                "lifecycle_status": "destructive-backup-verified",
+                "destructive_backup_binding": binding,
+                "updated_at": now_iso(),
+            }
+        )
+        _write_project_metadata(project, meta)
+        return {"result": result, "binding": binding, "meta": meta}
+
+
+def list_backups(slug: str) -> list[dict[str, Any]]:
+    slug = validate_slug(slug)
+    project = safe_child(SETTINGS.workspaces, slug)
+    meta = load_authoritative_project_identity_for_mutation(project)
+    project_id = str(meta.get("project_id") or "")
+    if provider_for(meta).is_vm and str(meta.get("runtime_id") or ""):
+        return VM_RUNTIME.list_backups(slug, meta)
+    root = SETTINGS.runtime_root / "workspace-backups"
+    items = []
+    if root.is_dir():
+        for directory in sorted(
+            (p for p in root.iterdir() if p.is_dir()), reverse=True
+        ):
+            manifest_file = directory / "manifest.json"
+            try:
+                manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if manifest.get("slug") != slug or (
+                project_id and str(manifest.get("project_id") or "") != project_id
+            ):
+                continue
+            workspace = (
+                manifest.get("workspace")
+                if isinstance(manifest.get("workspace"), dict)
+                else {}
+            )
+            archive = Path(str(workspace.get("archive_path") or ""))
+            digest = str(workspace.get("archive_sha256") or "")
+            eligible = archive.is_file()
+            if eligible:
+                try:
+                    eligible = (
+                        validate_archive(archive, slug).get("archive_sha256") == digest
+                    )
+                except (OSError, ValueError, tarfile.TarError):
+                    eligible = False
+            items.append(
+                {
+                    "backup_id": directory.name,
+                    "created_at": manifest.get("created_at", ""),
+                    "project_id": manifest.get("project_id", ""),
+                    "provider": str(
+                        (manifest.get("runtime") or {}).get("provider")
+                        or "docker-compose"
+                    ),
+                    "runtime_id": str(
+                        (manifest.get("runtime") or {}).get("runtime_id") or ""
+                    ),
+                    "archive_path": str(archive),
+                    "archive_bytes": archive.stat().st_size if archive.is_file() else 0,
+                    "archive_sha256": digest,
+                    "sha_verified": eligible,
+                    "restore_eligible": eligible,
+                    "reason": (
+                        ""
+                        if eligible
+                        else "Archive is missing or failed SHA/path verification."
+                    ),
+                    "status": "eligible" if eligible else "invalid",
+                    "manifest_path": str(manifest_file),
+                }
+            )
+    return items
+
+
+def restore_backup(
+    slug: str,
+    backup_id: str,
+    confirm_restore: bool = False,
+    allow_overwrite: bool = False,
+) -> dict[str, Any]:
+    slug = validate_slug(slug)
+    if "/" in backup_id or "\\" in backup_id or backup_id in {".", ".."}:
+        raise ValueError("Invalid backup identifier.")
+    project = safe_child(SETTINGS.workspaces, slug)
+    meta = load_authoritative_project_identity_for_mutation(project)
+    project_id = str(meta.get("project_id") or "")
+    if provider_for(meta).is_vm and str(meta.get("runtime_id") or ""):
+        if not confirm_restore:
+            raise ValueError("Backup restore requires explicit confirmation.")
+        if not allow_overwrite:
+            raise ValueError(
+                "VM backup restore replaces the current workspace and requires explicit overwrite confirmation."
+            )
+        result = VM_RUNTIME.restore_backup(slug, meta, backup_id, confirm_restore=True)
+        restored = {
+            **meta,
+            "backup_status": "verified",
+            "backup_id": backup_id,
+            "backup_sha256": str(result.get("backup_sha256") or ""),
+            "updated_at": now_iso(),
+            "last_restore_at": now_iso(),
+        }
+        _write_project_metadata(project, restored)
+        return {
+            "ok": True,
+            "provider": "multipass-host-agent",
+            "backup_id": backup_id,
+            "backup_sha256": restored["backup_sha256"],
+            "project": restored,
+            "restore": result,
+        }
+    directory = (SETTINGS.runtime_root / "workspace-backups" / backup_id).resolve()
+    root = (SETTINGS.runtime_root / "workspace-backups").resolve()
+    if directory.parent != root or not directory.is_dir():
+        raise FileNotFoundError(backup_id)
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    workspace = (
+        manifest.get("workspace") if isinstance(manifest.get("workspace"), dict) else {}
+    )
+    archive = Path(str(workspace.get("archive_path") or ""))
+    if (
+        manifest.get("slug") != slug
+        or str(manifest.get("project_id") or "") != project_id
+    ):
+        raise ValueError("Backup identity does not match this project.")
+    if not confirm_restore:
+        raise ValueError("Backup restore requires explicit confirmation.")
+    verified = validate_archive(archive, slug)
+    if verified.get("archive_sha256") != str(workspace.get("archive_sha256") or ""):
+        raise ValueError("Backup archive hash does not match its manifest.")
+    if project.exists() and any(project.iterdir()):
         if not allow_overwrite:
             raise ValueError(
                 "Restore refuses to overwrite a non-empty workspace without explicit overwrite confirmation."
@@ -727,381 +1087,4 @@ class RequestAdmissionMiddleware:
                 await _send_rejection(send, 415, "login requires a bounded form content type")
                 return
         if limit is not None and declared is not None and declared > limit:
-            reason = "declared login body exceeds limit" if is_login else "declared request body exceeds limit"
-            message = "login form body exceeds the bounded limit" if is_login else "request body exceeds the bounded limit"
-            _reject_reason(scope, reason, declared=declared, observed=0, started=started)
-            await _send_rejection(send, 413, message)
-            return
-
-        if limit is not None:
-            # Read only the bounded body before invoking FastAPI.  The
-            # buffer can never exceed `limit`; an over-limit chunk is rejected
-            # without being retained, so parser work cannot start first and
-            # turn the admission failure into a generic 400 response.
-            buffered: list[dict[str, Any]] = []
-            observed = 0
-            while True:
-                message = await receive()
-                if message.get("type") != "http.request":
-                    buffered.append(message)
-                    break
-                body = message.get("body", b"") or b""
-                observed += len(body)
-                if observed > limit:
-                    reason = "observed login body exceeds limit" if is_login else "observed request body exceeds limit"
-                    message = "login form body exceeds the bounded limit" if is_login else "request body exceeds the bounded limit"
-                    _reject_reason(scope, reason, declared=declared, observed=observed, started=started)
-                    await _send_rejection(send, 413, message)
-                    return
-                buffered.append(message)
-                if not message.get("more_body", False):
-                    break
-            replay = iter(buffered)
-
-            async def bounded_receive() -> dict[str, Any]:
-                try:
-                    return next(replay)
-                except StopIteration:
-                    return {"type": "http.disconnect"}
-
-            await self.app(scope, bounded_receive, send)
-            return
-
-        await self.app(scope, receive, send)
-
-```
-
-
-## FILE: source/app/devfleet/resource_profiles.py
-
-SHA256: 9bec3c14f6019fe4439065f8419dd7f11cc2de01ed9e9bd15bbbc5bf94102eb1 | Bytes: 14021 | Git mode: 100644
-
-```
-"""Central resource profiles and host-safe allocation policy."""
-from __future__ import annotations
-
-from dataclasses import asdict, dataclass
-import json
-from pathlib import Path
-from typing import Any
-
-import yaml
-
-from .core import atomic_text
-
-
-_RESOURCE_POLICY_DEFAULTS = {
-    "schemaVersion": 1,
-    "policyVersion": "1.0.0",
-    "physicalFloorMinGiB": 8.0,
-    "physicalFloorPercent": 0.10,
-    "commitHeadroomFloorMinGiB": 16.0,
-    "commitHeadroomPercent": 0.20,
-    "commitUsageLimitPercent": 80.0,
-}
-_RESOURCE_POLICY_PATH = Path(__file__).resolve().parents[2] / "config" / "resource-policy.json"
-try:
-    _RESOURCE_POLICY = {**_RESOURCE_POLICY_DEFAULTS, **json.loads(_RESOURCE_POLICY_PATH.read_text(encoding="utf-8"))}
-except (OSError, ValueError, TypeError):
-    _RESOURCE_POLICY = dict(_RESOURCE_POLICY_DEFAULTS)
-RESOURCE_POLICY_VERSION = str(_RESOURCE_POLICY["policyVersion"])
-
-
-@dataclass(frozen=True)
-class ResourceProfile:
-    name: str
-    label: str
-    cpus: float
-    memory: str
-    disk_gb: int
-    pids: int
-    rationale: str
-
-    @property
-    def vcpus(self) -> float:
-        return self.cpus
-
-    @property
-    def memory_gb(self) -> float:
-        return float(str(self.memory).lower().replace("gb", "").replace("g", "").strip())
-
-    def limits(self, runtime_type: str = "container") -> dict[str, Any]:
-        result = {
-            "cpus": self.cpus,
-            "memory": self.memory,
-            "memory_gb": self.memory_gb,
-            "disk_gb": self.disk_gb,
-            "pids": self.pids,
-        }
-        if runtime_type == "vm":
-            result["vcpus"] = self.vcpus
-        return result
-
-
-@dataclass(frozen=True)
-class HostResourcePolicy:
-    # Legacy fields remain for config compatibility; adaptive admission below
-    # is the authoritative host-memory rule and does not use fixed reserves.
-    minimum_free_memory_gb: float = 0.0
-    reserved_memory_gb: float = 0.0
-    reserved_logical_processors: float = 2.0
-    minimum_free_disk_gb: float = 50.0
-    maximum_vm_count: int = 4
-    maximum_parallel_provisioning: int = 1
-    max_project_cpus: float = 6.0
-    max_project_memory_gb: float = 12.0
-    max_project_disk_gb: float = 120.0
-
-
-@dataclass(frozen=True)
-class AdaptiveHostThresholds:
-    physical_floor_gb: float
-    commit_headroom_floor_gb: float
-    commit_usage_limit_percent: float = 80.0
-
-
-def adaptive_host_thresholds(usable_physical_gb: float, commit_limit_gb: float) -> AdaptiveHostThresholds:
-    """Return the versioned host-admission floors used by E2E and capacity UI."""
-    usable = float(usable_physical_gb)
-    commit_limit = float(commit_limit_gb)
-    if usable < 0 or commit_limit < 0:
-        raise ValueError("Host memory values must be non-negative.")
-    return AdaptiveHostThresholds(
-        physical_floor_gb=max(float(_RESOURCE_POLICY["physicalFloorMinGiB"]), usable * float(_RESOURCE_POLICY["physicalFloorPercent"])),
-        commit_headroom_floor_gb=max(float(_RESOURCE_POLICY["commitHeadroomFloorMinGiB"]), commit_limit * float(_RESOURCE_POLICY["commitHeadroomPercent"])),
-        commit_usage_limit_percent=float(_RESOURCE_POLICY["commitUsageLimitPercent"]),
-    )
-
-
-def evaluate_host_memory_admission(
-    *,
-    usable_physical_gb: float,
-    available_physical_gb: float,
-    commit_limit_gb: float,
-    committed_gb: float,
-    projected_allocation_gb: float,
-    resource_exhaustion: bool = False,
-) -> dict[str, Any]:
-    thresholds = adaptive_host_thresholds(usable_physical_gb, commit_limit_gb)
-    projected_available = float(available_physical_gb) - float(projected_allocation_gb)
-    projected_headroom = float(commit_limit_gb) - float(committed_gb) - float(projected_allocation_gb)
-    commit_percent = (float(committed_gb) / float(commit_limit_gb) * 100.0) if commit_limit_gb else 100.0
-    return {
-        "policy_version": RESOURCE_POLICY_VERSION,
-        "physical_floor_gb": round(thresholds.physical_floor_gb, 2),
-        "commit_headroom_floor_gb": round(thresholds.commit_headroom_floor_gb, 2),
-        "projected_available_physical_gb": round(projected_available, 2),
-        "projected_commit_headroom_gb": round(projected_headroom, 2),
-        "current_commit_usage_percent": round(commit_percent, 2),
-        "resource_exhaustion": bool(resource_exhaustion),
-        "start_safe": bool(
-            projected_available >= thresholds.physical_floor_gb
-            and projected_headroom >= thresholds.commit_headroom_floor_gb
-            and commit_percent < thresholds.commit_usage_limit_percent
-            and not resource_exhaustion
-        ),
-    }
-
-
-def resolved_resource_metadata(
-    profile_name: str,
-    runtime_type: str = "container",
-    *,
-    actual_runtime_resources: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Keep requested profile, resolved limits, and observed runtime separate."""
-    if profile_name == "custom":
-        requested = dict(actual_runtime_resources or {})
-    else:
-        requested = resource_metadata(profile_name, runtime_type)
-    resolved = dict(requested)
-    actual = dict(actual_runtime_resources or {})
-    drift = {
-        key: {"expected": resolved.get(key), "actual": actual.get(key)}
-        for key in ("cpus", "memory_gb", "disk_gb")
-        if key in actual and str(actual.get(key)) != str(resolved.get(key))
-    }
-    return {
-        "policy_version": RESOURCE_POLICY_VERSION,
-        "requested_profile": profile_name,
-        "requested_limits": requested,
-        "resolved_resources": resolved,
-        "actual_runtime_resources": actual,
-        "resource_drift": drift,
-        "resource_drift_status": "RESOURCE DRIFT" if drift else "MATCH",
-    }
-
-
-RESOURCE_PROFILES = {
-    "small": ResourceProfile("small", "Light", 1.0, "2g", 20, 512, "Lightweight prototype or automation workload."),
-    "standard": ResourceProfile("standard", "Standard", 2.0, "4g", 40, 768, "Normal web, API, CLI, or service development."),
-    "large": ResourceProfile("large", "Performance", 4.0, "8g", 80, 1536, "Multi-service, production-like, or data-heavy development."),
-    "xlarge": ResourceProfile("xlarge", "Intensive", 6.0, "12g", 120, 2048, "Heavy build or infrastructure workload; still GPU-free."),
-}
-
-RUNTIME_ISOLATIONS = {
-    "container": "Project-isolated containers on the shared DevFleet host",
-    "vm": "Dedicated Multipass VM (host-assisted provisioning; no GPU path)",
-}
-
-LAPTOP_PROFILE_DEFAULT = {"failover_memory_gb": 5.0, "vault_memory_gb": 2.0}
-LAPTOP_PROFILE_MINIMUM_TESTED = {"failover_memory_gb": 4.0, "vault_memory_gb": 2.0}
-
-
-def laptop_surrogate_profile(*, failover_memory_gb: float = 5.0, vault_memory_gb: float = 2.0) -> dict[str, float]:
-    """Return the conservative tested Laptop/Surrogate memory profile."""
-    failover = float(failover_memory_gb)
-    vault = float(vault_memory_gb)
-    if failover < LAPTOP_PROFILE_MINIMUM_TESTED["failover_memory_gb"] or vault < LAPTOP_PROFILE_MINIMUM_TESTED["vault_memory_gb"]:
-        raise ValueError("Laptop/Surrogate memory is below the lowest tested stable profile.")
-    return {"failover_memory_gb": failover, "vault_memory_gb": vault}
-
-
-def policy_from_config(values: dict[str, Any] | None = None) -> HostResourcePolicy:
-    values = values or {}
-    aliases = {
-        "minimum_free_memory": "minimum_free_memory_gb",
-        "reserved_memory": "reserved_memory_gb",
-        "reserved_logical_processors": "reserved_logical_processors",
-        "minimum_free_disk": "minimum_free_disk_gb",
-        "max_vm_count": "maximum_vm_count",
-        "maximum_vm_count": "maximum_vm_count",
-        "max_parallel_provisioning": "maximum_parallel_provisioning",
-    }
-    normalized = {aliases.get(k, k): v for k, v in values.items()}
-    defaults = asdict(HostResourcePolicy())
-    for key, default in defaults.items():
-        if key in normalized:
-            try:
-                defaults[key] = type(default)(normalized[key])
-            except (TypeError, ValueError):
-                raise ValueError(f"Invalid host resource policy value: {key}")
-    return HostResourcePolicy(**defaults)
-
-
-def get_resource_profile(name: str) -> ResourceProfile:
-    key = str(name or "").strip().lower()
-    if key not in RESOURCE_PROFILES:
-        raise ValueError(f"Unknown resource profile: {key}")
-    return RESOURCE_PROFILES[key]
-
-
-def custom_resource_metadata(values: dict[str, Any], *, runtime_type: str = "container") -> dict[str, Any]:
-    """Validate dashboard-supplied limits without allowing privileged PID mode."""
-    if str(values.get("pid_mode", "private") or "private").lower() != "private":
-        raise ValueError("Host PID namespace is not supported by the safe DevFleet runtime policy.")
-    return validate_resource_limits(values, runtime_type=runtime_type)
-
-
-def validate_resource_limits(values: dict[str, Any], *, runtime_type: str = "container", policy: HostResourcePolicy | None = None) -> dict[str, Any]:
-    policy = policy or HostResourcePolicy()
-    try:
-        cpus = float(values.get("cpus", values.get("vcpus")))
-        memory_gb = float(values.get("memory_gb", str(values.get("memory", "")).lower().replace("gb", "").replace("g", "")))
-        disk_gb = int(values.get("disk_gb"))
-        pids = int(values.get("pids", 0))
-    except (TypeError, ValueError):
-        raise ValueError("Resource limits must contain numeric CPU, memory, disk, and PID values.")
-    if cpus < 1 or cpus > policy.max_project_cpus:
-        raise ValueError("CPU allocation is outside the host-agent policy.")
-    if memory_gb < 2 or memory_gb > policy.max_project_memory_gb:
-        raise ValueError("Memory allocation is outside the host-agent policy.")
-    if disk_gb < 20 or disk_gb > policy.max_project_disk_gb:
-        raise ValueError("Disk allocation is outside the host-agent policy.")
-    if pids < 0 or pids > 4096:
-        raise ValueError("PID limit is outside the host-agent policy.")
-    return {
-        "cpus": cpus,
-        "vcpus": cpus,
-        "memory_gb": memory_gb,
-        "memory": f"{int(memory_gb) if memory_gb.is_integer() else memory_gb:g}g",
-        "disk_gb": disk_gb,
-        "pids": pids,
-        "runtime_type": runtime_type,
-    }
-
-
-def capacity_allows(capacity: dict[str, Any], limits: dict[str, Any]) -> tuple[bool, str]:
-    checks = (
-        ("allocatable_cpus", float(limits.get("cpus", limits.get("vcpus", 0))), "CPU"),
-        ("allocatable_memory_gb", float(limits.get("memory_gb", 0)), "memory"),
-        ("allocatable_disk_gb", float(limits.get("disk_gb", 0)), "disk"),
-    )
-    for key, requested, label in checks:
-        available = float(capacity.get(key, 0) or 0)
-        if requested > available:
-            return False, f"Host capacity is below the safe threshold for {label}: requested {requested:g}, available {available:g}."
-    return True, "Host capacity is sufficient."
-
-
-def recommend_resource_profile(*, scale: str = "", intent: str = "", project_kind: str = "", language: str = "", framework: str = "") -> ResourceProfile:
-    scale = str(scale or "").lower()
-    intent = str(intent or "").lower()
-    kind = str(project_kind or "").lower()
-    language = str(language or "").lower()
-    framework = str(framework or "").lower()
-    if scale == "large" or kind in {"infrastructure-service", "full-stack-web"} or "data" in kind or "spark" in framework:
-        return RESOURCE_PROFILES["large"]
-    if intent == "production" and (kind in {"web-frontend", "rapid-api", "full-stack-web"} or framework in {"next.js", "spring", "spring-boot", "fastapi"}):
-        return RESOURCE_PROFILES["large"]
-    if scale == "medium" or intent == "production" or language in {"java", "csharp", "c++", "cpp", "rust"}:
-        return RESOURCE_PROFILES["standard"]
-    return RESOURCE_PROFILES["small"]
-
-
-def recommend_runtime_isolation(*, scale: str = "", intent: str = "", project_kind: str = "") -> str:
-    if str(scale or "").lower() == "large" and str(intent or "").lower() == "production":
-        return "vm"
-    if str(project_kind or "").lower() == "infrastructure-service":
-        return "vm"
-    return "container"
-
-
-def resource_metadata(name: str, runtime_type: str = "container") -> dict[str, Any]:
-    profile = get_resource_profile(name)
-    return {**asdict(profile), **profile.limits(runtime_type)}
-
-
-def resource_override_path(project: Path) -> Path:
-    return project / ".devfleet" / "runtime-resources.yaml"
-
-
-def ownership_override_path(project: Path) -> Path:
-    return project / ".devfleet" / "runtime-ownership.yaml"
-
-
-def write_ownership_override(project: Path, compose_file: Path, labels: dict[str, str]) -> Path | None:
-    try:
-        document = yaml.safe_load(compose_file.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
-        return None
-    services = document.get("services") if isinstance(document, dict) else None
-    if not isinstance(services, dict) or not services:
-        return None
-    override = {"services": {str(service): {"labels": dict(labels)} for service in services}}
-    destination = ownership_override_path(project)
-    atomic_text(destination, yaml.safe_dump(override, sort_keys=False))
-    return destination
-
-
-def write_resource_override(project: Path, compose_file: Path, profile_name: str | dict[str, Any]) -> Path | None:
-    if isinstance(profile_name, dict):
-        limits = custom_resource_metadata(profile_name, runtime_type="container")
-    else:
-        limits = get_resource_profile(profile_name).limits("container")
-    try:
-        document = yaml.safe_load(compose_file.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
-        return None
-    services = document.get("services") if isinstance(document, dict) else None
-    if not isinstance(services, dict) or not services:
-        return None
-    override = {"services": {str(service): {"cpus": limits["cpus"], "mem_limit": limits["memory"], "pids_limit": limits["pids"]} for service in services}}
-    destination = resource_override_path(project)
-    atomic_text(destination, yaml.safe_dump(override, sort_keys=False))
-    return destination
-
-```
-
-
-## FILE: source/app/devfleet/runtim
+            reason = "declared login body exceeds limit" 

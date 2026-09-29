@@ -1,10 +1,370 @@
 # DevFleet source part 094
 
 Full-source UTF-8 byte interval [4324500, 4371000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: dd564799056fd00750712129f395ab3bba4b384a2e5c24bca342d208239bce4e
+Payload SHA-256: 8e9c2f95a1f7254fe35b04b67c80367a10665673e7ba7cabf371884da463f1be
 
 <!-- BEGIN SOURCE SLICE -->
- source
+ (row["root"], row["path"]))
+    assert flat != canonical
+
+
+def test_packaged_wrapper_preserves_diagnostic_candidate_status(monkeypatch, tmp_path: Path):
+    payload = {"status": "PASS_WITH_BLOCKER", "blockerCode": "HISTORICAL_CANDIDATE_REBUILD_REQUIRED", "releaseEligible": False}
+    monkeypatch.setattr(_AI_MODULE.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr=""))
+    result = _AI_MODULE._run_candidate_validator([sys.executable, "candidate-validator"], tmp_path, "diagnostic")
+    assert result == payload
+
+
+@pytest.mark.parametrize("output", ["not-json", "{}\n{}"])
+def test_packaged_wrapper_rejects_malformed_or_multiple_candidate_json(monkeypatch, tmp_path: Path, output: str):
+    monkeypatch.setattr(_AI_MODULE.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=output, stderr=""))
+    with pytest.raises(ValueError, match="structured JSON|malformed JSON|non-object"):
+        _AI_MODULE._run_candidate_validator([sys.executable, "candidate-validator"], tmp_path, "diagnostic")
+
+
+def test_packaged_wrapper_rejects_diagnostic_plain_pass_downgrade(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(_AI_MODULE.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps({"status": "PASS"}), stderr=""))
+    with pytest.raises(ValueError, match="downgraded or contradictory"):
+        _AI_MODULE._run_candidate_validator([sys.executable, "candidate-validator"], tmp_path, "diagnostic")
+
+
+def test_packaged_wrapper_rejects_release_blocker(monkeypatch, tmp_path: Path):
+    payload = {"status": "PASS_WITH_BLOCKER", "blockerCode": "PROOF_PENDING", "releaseEligible": False}
+    monkeypatch.setattr(_AI_MODULE.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr=""))
+    with pytest.raises(ValueError, match="contains a blocker"):
+        _AI_MODULE._run_candidate_validator([sys.executable, "candidate-validator"], tmp_path, "release")
+
+```
+
+
+## FILE: source/tests/test_auth_multiprocess.py
+
+SHA256: 5b678aec7d5e3adc3205a598f950a73b3102166c0495c9e52bb8076bb031bcaa | Bytes: 845 | Git mode: 100644
+
+```
+import json
+import multiprocessing
+
+from devfleet import auth
+
+
+def _issue_session_in_process(queue):
+    from devfleet.auth import issue_session
+    queue.put(issue_session("test")[0])
+
+
+def test_sessions_json_is_safe_for_separate_worker_processes():
+    path = auth._session_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}\n", encoding="utf-8")
+    ctx = multiprocessing.get_context("spawn")
+    queue = ctx.Queue()
+    workers = [ctx.Process(target=_issue_session_in_process, args=(queue,)) for _ in range(4)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(20)
+    assert all(worker.exitcode == 0 for worker in workers)
+    records = json.loads(path.read_text(encoding="utf-8"))
+    assert len(records) == 4
+    for worker in workers:
+        worker.close()
+
+```
+
+
+## FILE: source/tests/test_backup_exit_status.py
+
+SHA256: 3f7fa30cf012e8451beba327ca3fb255a4b30152c72d30aeb15ea844587b3ba7 | Bytes: 1900 | Git mode: 100644
+
+```
+"""Execute the shipping Bash wrapper with only the external restic command substituted."""
+from pathlib import Path
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.skipif(sys.platform != 'linux' or not shutil.which('bash'), reason='Shipping backup wrapper runs on Linux')
+@pytest.mark.parametrize('restic_exit', [0, 1, 3, 10, 11, 12, 75, 124])
+def test_backup_preserves_restic_failure_and_never_promotes_incomplete_snapshot(tmp_path, restic_exit):
+    status = tmp_path / 'status'; status.mkdir()
+    cache = status / 'cache'; cache.mkdir()
+    config = tmp_path / 'restic.env'
+    config.write_text(f'RESTIC_CACHE_DIR="{cache}"\n')
+    tools = tmp_path / 'bin'; tools.mkdir()
+    restic = tools / 'restic'
+    restic.write_text('#!/bin/sh\nexit '+str(restic_exit)+'\n'); restic.chmod(0o755)
+    # Relocate fixed paths into this disposable test directory; keep control flow intact.
+    text = (ROOT / 'linux/devfleet-backup').read_text()
+    for old, new in [('/etc/devfleet/restic.env', config),
+                     ('/var/lib/devfleet/backup-status', status),
+                     ('/run/lock/devfleet-vault-operation.lock', tmp_path / 'operation.lock')]:
+        text = text.replace(old, str(new))
+    wrapper = tmp_path / 'backup'; wrapper.write_text(text)
+    result = subprocess.run(['bash', str(wrapper)], env={**os.environ, 'PATH':str(tools)+os.pathsep+os.environ['PATH']},
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == restic_exit, 'The backup wrapper must retain the actual restic failure code'
+    telemetry = json.loads((status / 'latest.json').read_text())
+    assert telemetry['vault_upload_status'] == ('verified' if restic_exit == 0 else 'failed')
+    assert telemetry['durability_level'] == ('vault' if restic_exit == 0 else 'none')
+
+```
+
+
+## FILE: source/tests/test_backup_metadata_acl.py
+
+SHA256: eff0c7cc0f43496e74c46f1be348b76a8bedd536389e5f30b6d2521069964e78 | Bytes: 7834 | Git mode: 100644
+
+```
+"""Real Linux ACL regression: atomic metadata remains readable only by its backup identity."""
+from __future__ import annotations
+import errno
+import os
+from pathlib import Path
+import struct
+import subprocess
+import sys
+import tempfile
+from types import SimpleNamespace
+
+import pytest
+from devfleet import core, metadata_io
+
+BACKUP_UID = 60002
+OTHER_UID = 60003
+ACL_ACCESS = 'system.posix_acl_access'
+ACL_DEFAULT = 'system.posix_acl_default'
+
+
+def pack_acl(entries):
+    return struct.pack('<I', 2) + b''.join(struct.pack('<HHI', *entry) for entry in entries)
+
+
+def entries(raw):
+    assert struct.unpack('<I', raw[:4]) == (2,)
+    return list(struct.iter_unpack('<HHI', raw[4:]))
+
+
+@pytest.fixture
+def acl_workspace(monkeypatch):
+    if sys.platform != 'linux' or not hasattr(os, 'geteuid') or os.geteuid() != 0:
+        pytest.skip('Real different-UID ACL checks require Linux root in the isolated test environment')
+    import pwd
+    real_lookup = pwd.getpwnam
+    monkeypatch.setattr(pwd, 'getpwnam', lambda name: SimpleNamespace(pw_uid=BACKUP_UID)
+                        if name == 'devfleet-backup' else real_lookup(name))
+    with tempfile.TemporaryDirectory(prefix='devfleet-acl-test-') as root:
+        parent = Path(root)
+        parent.chmod(0o755)
+        workspace = parent / 'demo'
+        workspace.mkdir()
+        policy = pack_acl([(1,7,0xFFFFFFFF),(2,7,BACKUP_UID),(2,7,OTHER_UID),
+                           (4,0,0xFFFFFFFF),(16,7,0xFFFFFFFF),(32,0,0xFFFFFFFF)])
+        try:
+            os.setxattr(workspace, ACL_ACCESS, policy)
+            os.setxattr(workspace, ACL_DEFAULT, policy)
+        except OSError as exc:
+            if exc.errno in (errno.ENOTSUP, errno.EOPNOTSUPP):
+                pytest.skip('Test filesystem does not support POSIX ACLs')
+            raise
+        yield workspace
+
+
+def access_as(path, *, uid=BACKUP_UID, write=False):
+    code = ('from pathlib import Path; import sys; '
+            "p=Path(sys.argv[1]); " +
+            ("f=p.open('ab'); f.close()" if write else 'p.read_bytes()'))
+    result = subprocess.run([sys.executable, '-I', '-c', code, str(path)],
+                            user=uid, group=uid, extra_groups=[], capture_output=True,
+                            timeout=10, text=True)
+    return result.returncode == 0
+
+
+def assert_backup_only(path):
+    assert access_as(path), 'The configured backup identity cannot read newly published metadata'
+    assert not access_as(path, write=True), 'The backup identity must not write authoritative metadata'
+    assert not access_as(path, uid=OTHER_UID), 'Enabling backup read must not unmask another inherited principal'
+    assert path.stat().st_mode & 0o007 == 0, 'Metadata must not become world-accessible'
+
+
+def test_metadata_create_and_replace_keep_backup_read_access(acl_workspace):
+    p = acl_workspace
+    binding = metadata_io.write_project_metadata(p, {'test': 'initial'}, create=True)
+    assert_backup_only(p / '.devfleet/project.json')
+    binding = metadata_io.write_project_metadata(p, {'test': 'replacement'}, expected=binding)
+    assert_backup_only(p / '.devfleet/project.json')
+    assert metadata_io.read_project_metadata(p).value == {'test': 'replacement'}
+
+
+@pytest.mark.parametrize('writer,value', [(core.atomic_text, 'lease'), (core.atomic_bytes, b'lease'),
+                                         (core.atomic_json, {'lease': 'closed'})])
+def test_atomic_workspace_writes_keep_backup_read_access(acl_workspace, writer, value):
+    path = acl_workspace / 'ownership-lease.json'
+    writer(path, value)
+    assert_backup_only(path)
+    writer(path, value)
+    assert_backup_only(path)
+
+
+def test_paths_without_backup_acl_remain_private(tmp_path):
+    path = tmp_path / 'private.json'
+    core.atomic_json(path, {'private': True})
+    if os.name == 'posix':
+        assert path.stat().st_mode & 0o077 == 0
+
+
+def test_metadata_replacement_does_not_reintroduce_a_removed_acl(acl_workspace):
+    p = acl_workspace
+    binding = metadata_io.write_project_metadata(p, {'test': 'initial'}, create=True)
+    directory = p / '.devfleet'
+    os.removexattr(directory, ACL_DEFAULT)
+    binding = metadata_io.write_project_metadata(p, {'test': 'replacement'}, expected=binding)
+    assert not access_as(directory / 'project.json')
+    assert (directory / 'project.json').stat().st_mode & 0o077 == 0
+
+
+def test_default_acl_mask_denial_is_not_overridden(acl_workspace):
+    p = acl_workspace
+    acl = entries(os.getxattr(p, ACL_DEFAULT))
+    os.setxattr(p, ACL_DEFAULT, pack_acl([(t, 0 if t == 16 else v, u) for t,v,u in acl]))
+    target = p / 'denied-by-parent.json'
+    core.atomic_json(target, {'private': True})
+    assert not access_as(target), 'An explicitly masked parent backup grant is not permission to read'
+    assert target.stat().st_mode & 0o077 == 0
+
+
+def test_failed_acl_application_does_not_replace_committed_metadata(acl_workspace, monkeypatch):
+    p = acl_workspace
+    binding = metadata_io.write_project_metadata(p, {'original': True}, create=True)
+    previous = (p / '.devfleet/project.json').read_bytes()
+    def deny(*args, **kwargs):
+        raise OSError(errno.EACCES, 'synthetic ACL write refusal')
+    monkeypatch.setattr(metadata_io.os, 'setxattr', deny)
+    with pytest.raises(OSError):
+        metadata_io.write_project_metadata(p, {'replacement': True}, expected=binding)
+    assert (p / '.devfleet/project.json').read_bytes() == previous
+    assert not list((p / '.devfleet').glob('.project.json.*.tmp'))
+
+
+@pytest.mark.parametrize("publisher_default, expected_read, expected_write", [(7, True, True), (5, True, False), (0, False, False)])
+def test_inherited_publisher_acl_survives_restore_owner_change(acl_workspace, publisher_default, expected_read, expected_write):
+    """Restoration by an unprivileged backup UID cannot retain source ownership.
+
+    Exercise the actual ACL publication, then the ownership transition on this
+    disposable inode tree. This is not a restic/network certification test.
+    """
+    publisher_uid = 60004
+    p = acl_workspace
+    for attr in (ACL_ACCESS, ACL_DEFAULT):
+        policy = entries(os.getxattr(p, attr))
+        policy.insert(3, (2, 7 if attr == ACL_ACCESS else publisher_default, publisher_uid))
+        policy.sort(key=lambda row: (row[0], row[2]))
+        os.setxattr(p, attr, pack_acl(policy))
+    code = (
+        'import sys, pwd; from pathlib import Path; from types import SimpleNamespace; '
+        f'sys.path.insert(0, {str(Path(metadata_io.__file__).parents[1])!r}); '
+        'real = pwd.getpwnam; '
+        f'pwd.getpwnam = lambda n: SimpleNamespace(pw_uid={BACKUP_UID}) '
+        'if n == "devfleet-backup" else real(n); '
+        'from devfleet.metadata_io import write_project_metadata; '
+        'write_project_metadata(Path(sys.argv[1]), {"publisher": True}, create=True)'
+    )
+    created = subprocess.run([sys.executable, '-I', '-c', code, str(p)],
+                             user=publisher_uid, group=publisher_uid, extra_groups=[],
+                             capture_output=True, text=True, timeout=10)
+    assert created.returncode == 0, created.stderr
+    metadata = p / '.devfleet/project.json'
+    assert access_as(metadata, uid=publisher_uid)
+    assert_backup_only(metadata)
+    # Restore returns inode ownership to the restoring identity. The original
+    # publisher's *named* ACL must retain its formerly effective owner rights.
+    os.chown(metadata, BACKUP_UID, BACKUP_UID)
+    os.chown(metadata.parent, BACKUP_UID, BACKUP_UID)
+    assert access_as(metadata, uid=publisher_uid) == expected_read, 'Restore changed the inherited publisher read policy'
+    assert access_as(metadata, uid=publisher_uid, write=True) == expected_write, 'Restore changed the inherited publisher write policy'
+    assert not access_as(metadata, uid=OTHER_UID), 'Restore must not revive an unrelated principal'
+
+```
+
+
+## FILE: source/tests/test_bootstrap_input_safety.py
+
+SHA256: 6416e46165662fcc0e31c37f78c79e89d89991b71fbe6dd8c53786d84dda7be2 | Bytes: 4713 | Git mode: 100644
+
+```
+from pathlib import Path
+import json
+import sys
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def python_heredocs(name):
+    lines = (ROOT / "linux" / name).read_text(encoding="utf-8").splitlines()
+    blocks = []
+    for index, line in enumerate(lines):
+        if "<<'PY'" in line:
+            end = lines.index("PY", index + 1)
+            blocks.append((index + 2, "\n".join(lines[index + 1 : end]) + "\n"))
+    assert blocks, f"No embedded Python found in {name}"
+    return blocks
+
+
+@pytest.mark.parametrize("name", ["bootstrap-compute.sh", "bootstrap-vault.sh"])
+def test_bootstrap_embedded_python_compiles(name):
+    # bash -n cannot parse embedded Python; compile the exact production bodies.
+    for line, body in python_heredocs(name):
+        compile(body, f"{name}:heredoc-at-line-{line}", "exec")
+
+
+@pytest.mark.parametrize("forbidden", [None, "\x00", "\r", "\n"])
+def test_compute_secret_writer_executes_atomically_and_rejects_controls(tmp_path, monkeypatch, forbidden):
+    bodies = [body for _, body in python_heredocs("bootstrap-compute.sh") if "target.replace('/etc/devfleet/secrets.env')" in body]
+    assert len(bodies) == 1
+    body = compile(bodies[0], "bootstrap-compute.sh:secret-writer", "exec")
+    source, temporary, destination = (tmp_path / name for name in ("input.json", "temporary.env", "secrets.env"))
+    password = 'fixture-\\$`"' + (forbidden or "")
+    source.write_text(json.dumps({"AdminUser": "fixture-user", "AdminPassword": password, "ApiToken": "fixture-token"}), encoding="utf-8")
+    temporary.touch()
+    destination.write_text("original fixture\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["-", str(temporary), str(source)])
+    original_replace = Path.replace
+
+    def redirected_replace(path, target):
+        assert path == temporary and target == "/etc/devfleet/secrets.env"
+        return original_replace(path, destination)
+
+    monkeypatch.setattr(Path, "replace", redirected_replace)
+    if forbidden:
+        with pytest.raises(SystemExit, match="forbidden control character"):
+            exec(body, {})
+        assert destination.read_text(encoding="utf-8") == "original fixture\n"
+        assert temporary.read_bytes() == b""
+    else:
+        exec(body, {})
+        encoded = password.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+        expected = 'DEVFLEET_ADMIN_USER="fixture-user"\nDEVFLEET_ADMIN_PASSWORD="' + encoded + '"\nDEVFLEET_API_TOKEN="fixture-token"\n'
+        assert destination.read_bytes() == expected.encode("utf-8")
+        assert not temporary.exists()
+    assert source.exists()
+
+
+def test_compute_bootstrap_validates_numeric_and_secret_boundaries_before_templates():
+    source = (ROOT / "linux" / "bootstrap-compute.sh").read_text(encoding="utf-8")
+    assert "PORT =~ ^[0-9]+$" in source
+    assert "BACKUP_INTERVAL =~ ^[0-9]+$" in source
+    assert "value != *$'\\r'*" in source
+    assert "value != *$'\\n'*" in source
     assert "python3 - \"$SECRETS_ENV_TMP\"" in source
     assert "target.replace('/etc/devfleet/secrets.env')" in source
     assert "DEVFLEET_ADMIN_PASSWORD=$ADMIN_PASSWORD" not in source
@@ -689,477 +1049,4 @@ def test_malformed_metadata_is_not_silently_deleted(monkeypatch: pytest.MonkeyPa
     slug = "legacy-malformed-metadata"
     project = SETTINGS.workspaces / slug
     (project / ".devfleet").mkdir(parents=True, exist_ok=True)
-    (project / "compose.yaml").write_text("services:\n  app:\n    image: ubuntu:24.04\n", encoding="utf-8")
-    metadata_file = project / ".devfleet" / "project.json"
-    metadata_file.write_text("{not-json", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="malformed"):
-        projects.assign_project_runtime(slug, "container", "small")
-
-    assert metadata_file.read_text() == "{not-json"
-
-```
-
-
-## FILE: source/tests/test_failover.py
-
-SHA256: b69044da502f5c37cc4cd12d91091606a314ba90f0ff1157002439abb7ca5e6c | Bytes: 11565 | Git mode: 100644
-
-```
-from __future__ import annotations
-
-from collections import deque
-
-import pytest
-
-from devfleet import failover
-from devfleet.failover import guided_transfer
-
-
-class C:
-    def __init__(self):
-        self.events = []
-
-    def update(self, progress, message):
-        self.events.append((progress, message))
-
-
-def _receipt(operation_id: str) -> dict[str, object]:
-    return {
-        "ok": True,
-        "accepted": True,
-        "operation_id": operation_id,
-        "operation_url": f"/api/operations/{operation_id}",
-    }
-
-
-def _record(operation_id: str, state: str, **extra: object) -> dict[str, object]:
-    return {"operation_id": operation_id, "id": operation_id, "state": state, **extra}
-
-
-TRANSFER = {
-    "project_id": "12345678-1234-1234-1234-123456789abc",
-    "deployment_id": "deployment-1234",
-    "source_host_id": "devfleet-primary",
-    "destination_host_id": "devfleet-failover",
-}
-
-
-def _run_transfer(peer, events, *, finalize_source=None):
-    if finalize_source is None:
-        finalize_source = lambda slug, project_id, destination_host_id: events.append(
-            ("finalized", slug, project_id, destination_host_id)
-        )
-    return guided_transfer(
-        "demo",
-        C(),
-        stop=lambda slug: events.append(("stop", slug)),
-        backup=lambda slug: events.append(("backup", slug)),
-        assert_quiesced=lambda slug, project_id: events.append(
-            ("quiesced", slug, project_id)
-        ),
-        finalize_source=finalize_source,
-        peer_call=peer,
-        **TRANSFER,
-    )
-
-
-def test_guided_transfer_rejects_non_distinct_destination_before_stop():
-    with pytest.raises(ValueError, match="distinct destination"):
-        guided_transfer(
-            "demo",
-            C(),
-            stop=lambda _: (_ for _ in ()).throw(RuntimeError("must not run")),
-            backup=lambda _: (_ for _ in ()).throw(RuntimeError("must not run")),
-            assert_quiesced=lambda *_: (_ for _ in ()).throw(
-                RuntimeError("must not run")
-            ),
-            finalize_source=lambda *_: (_ for _ in ()).throw(
-                RuntimeError("must not run")
-            ),
-            peer_call=lambda *_: (_ for _ in ()).throw(RuntimeError("must not run")),
-            **{**TRANSFER, "destination_host_id": "DEVFLEET-PRIMARY"},
-        )
-
-
-def test_guided_transfer_receives_finalizes_then_activates_and_starts_atomically():
-    events = []
-    responses = {
-        ("POST", "/api/transfers/receive"): deque([_receipt("receive-op")]),
-        ("GET", "/api/operations/receive-op"): deque(
-            [_record("receive-op", "running"), _record("receive-op", "completed")]
-        ),
-        ("POST", "/api/transfers/activate"): deque([_receipt("activate-op")]),
-        ("GET", "/api/operations/activate-op"): deque(
-            [_record("activate-op", "running"), _record("activate-op", "completed")]
-        ),
-    }
-
-    def peer(method, path, payload, timeout):
-        events.append(("peer", method, path, payload, timeout))
-        return responses[(method, path)].popleft()
-
-    _run_transfer(peer, events)
-
-    sequence = [(event[1], event[2]) for event in events if event[0] == "peer"]
-    assert sequence == [
-        ("POST", "/api/transfers/receive"),
-        ("GET", "/api/operations/receive-op"),
-        ("GET", "/api/operations/receive-op"),
-        ("POST", "/api/transfers/activate"),
-        ("GET", "/api/operations/activate-op"),
-        ("GET", "/api/operations/activate-op"),
-    ]
-    receive_request = next(
-        event
-        for event in events
-        if event[:3] == ("peer", "POST", "/api/transfers/receive")
-    )
-    assert receive_request[3] == {
-        "slug": "demo",
-        **TRANSFER,
-        "confirm_slug": "demo",
-        "confirm_phrase": "RECEIVE TRANSFER demo",
-    }
-    activate_request = next(
-        event
-        for event in events
-        if event[:3] == ("peer", "POST", "/api/transfers/activate")
-    )
-    assert activate_request[3] == {
-        "slug": "demo",
-        **TRANSFER,
-        "confirm_slug": "demo",
-        "confirm_phrase": "ACTIVATE TRANSFER demo",
-    }
-    assert [event[0] for event in events[:4]] == [
-        "stop",
-        "quiesced",
-        "backup",
-        "quiesced",
-    ]
-    assert all(event[4] > 0 for event in events if event[0] == "peer")
-    finalize_index = next(
-        index for index, event in enumerate(events) if event[0] == "finalized"
-    )
-    receive_completion_index = max(
-        index
-        for index, event in enumerate(events)
-        if event[:3] == ("peer", "GET", "/api/operations/receive-op")
-    )
-    activate_index = next(
-        index
-        for index, event in enumerate(events)
-        if event[:3] == ("peer", "POST", "/api/transfers/activate")
-    )
-    assert receive_completion_index < finalize_index < activate_index
-    assert events[finalize_index] == (
-        "finalized",
-        "demo",
-        TRANSFER["project_id"],
-        TRANSFER["destination_host_id"],
-    )
-
-
-def test_guided_transfer_stops_when_source_is_not_quiesced():
-    events = []
-
-    def assert_quiesced(slug, project_id):
-        events.append(("quiesced", slug, project_id))
-        raise RuntimeError("source runtime remains active")
-
-    with pytest.raises(RuntimeError, match="source runtime remains active"):
-        guided_transfer(
-            "demo",
-            C(),
-            stop=lambda slug: events.append(("stop", slug)),
-            backup=lambda slug: events.append(("backup", slug)),
-            assert_quiesced=assert_quiesced,
-            finalize_source=lambda *_: pytest.fail("source must not finalize"),
-            peer_call=lambda *_: pytest.fail(
-                "peer must not receive an active source"
-            ),
-            **TRANSFER,
-        )
-
-    assert events == [
-        ("stop", "demo"),
-        ("quiesced", "demo", TRANSFER["project_id"]),
-    ]
-
-
-def test_guided_transfer_rechecks_quiescence_after_backup_before_peer_receive():
-    events = []
-    checks = {"count": 0}
-
-    def assert_quiesced(slug, project_id):
-        checks["count"] += 1
-        events.append(("quiesced", slug, project_id))
-        if checks["count"] == 2:
-            raise RuntimeError("source became active during backup")
-
-    with pytest.raises(RuntimeError, match="source became active during backup"):
-        guided_transfer(
-            "demo",
-            C(),
-            stop=lambda slug: events.append(("stop", slug)),
-            backup=lambda slug: events.append(("backup", slug)),
-            assert_quiesced=assert_quiesced,
-            finalize_source=lambda *_: pytest.fail("source must not finalize"),
-            peer_call=lambda *_: pytest.fail(
-                "peer must not receive an active source"
-            ),
-            **TRANSFER,
-        )
-
-    assert events == [
-        ("stop", "demo"),
-        ("quiesced", "demo", TRANSFER["project_id"]),
-        ("backup", "demo"),
-        ("quiesced", "demo", TRANSFER["project_id"]),
-    ]
-
-
-def test_guided_transfer_does_not_start_after_failed_receive_operation():
-    events = []
-
-    def peer(method, path, payload, timeout):
-        events.append((method, path))
-        if method == "POST":
-            return _receipt("receive-op")
-        return _record("receive-op", "failed")
-
-    with pytest.raises(RuntimeError, match="Peer receive transfer operation failed"):
-        _run_transfer(peer, events)
-
-    assert ("POST", "/api/transfers/activate") not in events
-    assert not any(event[0] == "finalized" for event in events)
-
-
-def test_guided_transfer_does_not_activate_when_source_finalization_fails():
-    events = []
-    responses = {
-        ("POST", "/api/transfers/receive"): deque([_receipt("receive-op")]),
-        ("GET", "/api/operations/receive-op"): deque(
-            [_record("receive-op", "completed")]
-        ),
-    }
-
-    def peer(method, path, payload, timeout):
-        events.append(("peer", method, path))
-        return responses[(method, path)].popleft()
-
-    def finalize_source(slug, project_id, destination_host_id):
-        events.append(("finalize", slug, project_id, destination_host_id))
-        raise RuntimeError("sensitive source-finalization detail")
-
-    with pytest.raises(RuntimeError, match="Source transfer finalization failed") as raised:
-        _run_transfer(peer, events, finalize_source=finalize_source)
-
-    assert "sensitive source-finalization detail" not in str(raised.value)
-    assert ("peer", "POST", "/api/transfers/activate") not in events
-
-
-@pytest.mark.parametrize("state", ["failed", "interrupted"])
-def test_guided_transfer_ends_after_unsuccessful_atomic_activation(state):
-    events = []
-    responses = {
-        ("POST", "/api/transfers/receive"): deque([_receipt("receive-op")]),
-        ("GET", "/api/operations/receive-op"): deque(
-            [_record("receive-op", "completed")]
-        ),
-        ("POST", "/api/transfers/activate"): deque([_receipt("activate-op")]),
-        ("GET", "/api/operations/activate-op"): deque(
-            [_record("activate-op", state, error="sensitive activation detail")]
-        ),
-    }
-
-    def peer(method, path, payload, timeout):
-        events.append(("peer", method, path))
-        return responses[(method, path)].popleft()
-
-    with pytest.raises(
-        RuntimeError, match=fr"Peer activate transfer operation {state}"
-    ) as raised:
-        _run_transfer(peer, events)
-
-    assert "sensitive activation detail" not in str(raised.value)
-    assert any(event[0] == "finalized" for event in events)
-
-
-def test_guided_transfer_does_not_activate_after_locked_receive_operation():
-    events = []
-
-    def peer(method, path, payload, timeout):
-        events.append((method, path))
-        if method == "POST":
-            return _receipt("receive-op")
-        return _record(
-            "receive-op", "failed", current_step="locked", error="operation_locked"
-        )
-
-    with pytest.raises(RuntimeError, match="Peer receive transfer operation is locked"):
-        _run_transfer(peer, events)
-
-    assert ("POST", "/api/transfers/activate") not in events
-
-
-def test_guided_transfer_times_out_before_activation(monkeypatch):
-    now = {"value": 0.0}
-    monkeypatch.setattr(failover, "PEER_OPERATION_TIMEOUT_SECONDS", 0.25)
-    monkeypatch.setattr(failover, "PEER_OPERATION_POLL_INTERVAL_SECONDS", 0.25)
-    monkeypatch.setattr(failover.time, "monotonic", lambda: now["value"])
-    monkeypatch.setattr(
-        failover.time,
-        "sleep",
-        lambda seconds: now.__setitem__("value", now["value"] + seconds),
-    )
-    events = []
-
-    def peer(method, path, payload, timeout):
-        events.append((method, path))
-        if method == "POST":
-            return _receipt("receive-op")
-        return _record("receive-op", "running")
-
-    with pytest.raises(RuntimeError, match="Peer receive transfer operation timed out"):
-        _run_transfer(peer, events)
-
-    assert ("POST", "/api/transfers/activate") not in events
-
-
-def test_guided_transfer_rejects_malformed_operation_receipt_before_activation():
-    events = []
-
-    def peer(method, path, payload, timeout):
-        events.append((method, path))
-        return {
-            "ok": True,
-            "accepted": True,
-            "operation_id": "receive-op",
-            "operation_url": "/api/operations/other-op",
-        }
-
-    with pytest.raises(
-        RuntimeError, match="Peer receive transfer operation response was malformed"
-    ):
-        _run_transfer(peer, events)
-
-    assert ("POST", "/api/transfers/receive") in events
-    assert ("POST", "/api/transfers/activate") not in events
-
-```
-
-
-## FILE: source/tests/test_hardening11_red_blue.py
-
-SHA256: c0639e0edc66abb29fdac71605866a0f1a488de357df153d743f825a2898546e | Bytes: 13557 | Git mode: 100644
-
-```
-from __future__ import annotations
-
-import json
-import stat
-from dataclasses import replace
-from pathlib import Path
-from types import SimpleNamespace
-
-import pytest
-
-from devfleet import auth, containers, core
-from devfleet.analyzer import analyze_project, has_blockers
-from devfleet.core import SETTINGS
-
-
-def _compose_project(tmp_path: Path, body: str) -> Path:
-    project = tmp_path / "red-compose"
-    project.mkdir()
-    (project / "compose.yaml").write_text(body, encoding="utf-8")
-    return project
-
-
-@pytest.mark.parametrize("profile", ["strict", "balanced", "fast"])
-@pytest.mark.parametrize(
-    ("body", "code"),
-    [
-        ("services:\n  app:\n    privileged: true\n", "docker.privileged"),
-        ("services:\n  app:\n    use_api_socket: true\n", "compose.use-api-socket"),
-        ("services:\n  app:\n    volumes_from: [base]\n", "compose.volumes-from"),
-        ("services:\n  app:\n    provider: {type: evil}\n", "compose.provider"),
-        ("services:\n  app:\n    post_start: [{command: whoami, privileged: true}]\n", "compose.post-start"),
-        ("services:\n  app:\n    future_execution_field: true\n", "compose.unknown-field"),
-    ],
-)
-def test_compose_red_attack_corpus_blocks_every_profile(tmp_path: Path, profile: str, body: str, code: str) -> None:
-    findings = analyze_project(_compose_project(tmp_path, body), profile, force=True)
-    assert has_blockers(findings)
-    assert code in {item["code"] for item in findings}
-
-
-def test_compose_extends_nested_and_host_root_bind_are_not_effective_model_gaps(tmp_path: Path) -> None:
-    project = _compose_project(
-        tmp_path,
-        """services:
-  app:
-    extends:
-      file: middle.yml
-      service: middle
-""",
-    )
-    (project / "middle.yml").write_text(
-        """services:
-  middle:
-    extends:
-      file: evil.yml
-      service: inherited
-""",
-        encoding="utf-8",
-    )
-    (project / "evil.yml").write_text(
-        """services:
-  inherited:
-    privileged: true
-    network_mode: host
-    volumes: ["/:/host"]
-""",
-        encoding="utf-8",
-    )
-    findings = analyze_project(project, "strict", force=True)
-    codes = {item["code"] for item in findings}
-    assert has_blockers(findings)
-    assert "compose.extends" in codes
-    assert "docker.privileged" not in codes or "compose.extends" in codes
-
-
-def test_compose_include_escape_and_symlink_escape_are_blocked(tmp_path: Path) -> None:
-    project = _compose_project(tmp_path, "include:\n  - ../outside.yml\nservices: {}\n")
-    findings = analyze_project(project, "strict", force=True)
-    assert has_blockers(findings)
-    assert "compose.include" in {item["code"] for item in findings}
-    assert "compose.path-reference" in {item["code"] for item in findings}
-
-    outside = tmp_path / "outside.yml"
-    outside.write_text("services: {}\n", encoding="utf-8")
-    link = project / "evil.yml"
-    try:
-        link.symlink_to(outside)
-    except OSError:
-        pytest.skip("symbolic-link creation unavailable")
-    (project / "compose.yaml").write_text("""services:
-  app:
-    extends: {file: evil.yml, service: x}
-""", encoding="utf-8")
-    findings = analyze_project(project, "strict", force=True)
-    assert {"compose.path-escape", "project.symlink-escape"} & {item["code"] for item in findings}
-
-
-@pytest.mark.parametrize("argument", [
-    "--privileged", "--network=host", "--network", "host", "--pid=host", "--pid", "host",
-    "--ipc", "--uts", "--userns=host", "--volume=/:/host", "-v", "/:/host", "--mount", "type=bind,src=/,dst=/host",
-    "--device=/dev/kvm", "--cap-add=SYS_ADMIN", "--security-opt", "seccomp=unconfined", "--env-file=/tmp/x",
-])
-@pytest.mark.parametrize("profile", ["strict", "balanced", "fast"])
-def test_devcontainer_structured_runargs_attack_corpus_blocks(tmp_path: Path, argument: str, profile: str) -> None:
-    project = tmp_path / "devcontainer"
-    (project / ".devcontainer").mkdir(parents=True)
-    (project / ".devcontainer/devcontainer.json").write_tex
+    (project / "compose.ya

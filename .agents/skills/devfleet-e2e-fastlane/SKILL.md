@@ -32,6 +32,8 @@ Before a VM retry: preserve the actual failure, reproduce it with an existing ca
 
 A same-candidate checkpoint may accelerate a separately authorized diagnostic after exact native provenance verification. An old installed checkpoint cannot validate a newer payload. Final certification remains one coherent current FullRelease with actual install/reboot, backup/restore, U01–U05 and certified cleanup. No historical phase stitching.
 
+After a late FullRelease failure, use the failed phase and its prerequisite checkpoint to narrow diagnosis before another full attempt. Run the relevant VM-free production-path test first. If that cannot establish the cause, design one separately admitted, non-certifying live diagnostic from the exact same-candidate checkpoint, with current HostSafety, guest authentication, ownership, and terminal L1/L2 cleanup. Do not call the native `Resume` mode a phase continuation or run a phase executor directly outside its admitted context. Read [late-phase guidance](references/acceleration.md#late-phase-failures) before proposing this shortcut.
+
 Do not alter VM/host clocks, shrink real timeouts, pre-mark stages, replace real authentication/health with fixtures, turn partial backup into success, or suppress a verified security finding. A time simulation is not a VM simulation.
 
 See [checkpoint and timing guidance](references/acceleration.md). On closeout, record exact results, next falsifiable action and actual ownership/cleanup. Never claim the remaining runtime gates were tested by this fastlane.

@@ -1,9 +1,238 @@
 # DevFleet source part 056
 
 Full-source UTF-8 byte interval [2557500, 2604000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 258aa8504e57918826648da48131a2fca0ae7d9b2002bea8dbbd80a57d063fe8
+Payload SHA-256: ff4163df6b01c4bc6a1a9423fc08ec826a18948a174af2918be9129ac901a73a
 
 <!-- BEGIN SOURCE SLICE -->
+ceptance gates remain unpromoted until exact-candidate evidence exists.') | Set-Content -LiteralPath (Join-Path $workspaceRoot 'finalization-state.txt') -Encoding utf8
+$preSignExe=[ordered]@{path="outputs/DevFleet-Setup-v$devfleetVersion-win-x64.exe";bytes=(Get-Item $unsignedExe).Length;sha256=(Get-FileHash $unsignedExe -Algorithm SHA256).Hash.ToLowerInvariant();authenticodeStatus=[string](Get-AuthenticodeSignature -LiteralPath $unsignedExe).Status}
+if(-not $UnsignedDeveloperBuild){
+  if($preSignExe.authenticodeStatus -ne 'NotSigned'){throw 'RELEASE BLOCKED — final build output was already signed before the selected signing profile ran.'}
+  $tool=if($SignToolPath){$SignToolPath}elseif($env:DEVFLEET_SIGNTOOL_PATH){$env:DEVFLEET_SIGNTOOL_PATH}else{(Get-Command signtool.exe -ErrorAction SilentlyContinue).Source}
+  $dlib=if($SigningDlibPath){$SigningDlibPath}else{$env:DEVFLEET_SIGNING_DLIB_PATH}
+  $metadata=if($SigningMetadataPath){$SigningMetadataPath}else{$env:DEVFLEET_SIGNING_METADATA_PATH}
+  $privateIdentity=$null;$timestampState='NOT TIMESTAMPED';$signtoolVerification='UNAVAILABLE — SignTool not installed'
+  if($SigningProfile -eq 'PrivateSelfSigned'){
+    $privateIdentity=$privateIdentityPreflight
+    $thumbprint=[string]$privateIdentity.thumbprint
+    if($CertificateThumbprint -and $CertificateThumbprint -cne $thumbprint){throw 'Configured certificate thumbprint does not match the persisted DevFleet private signing identity.'}
+    if($tool){
+      if(-not(Test-Path -LiteralPath $tool)){throw 'RELEASE BLOCKED — SIGNTOOL PATH IS INVALID.'}
+      & $tool sign /v /sha1 $thumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 $unsignedExe
+      $timestampExit=$LASTEXITCODE
+      if($timestampExit){
+        $afterTimestampAttempt=Get-AuthenticodeSignature -LiteralPath $unsignedExe
+        if($afterTimestampAttempt.Status -eq 'NotSigned'){
+          & $tool sign /v /sha1 $thumbprint /fd SHA256 $unsignedExe
+          if($LASTEXITCODE){throw "Private Authenticode signing without a timestamp failed with exit code $LASTEXITCODE."}
+        }elseif($afterTimestampAttempt.Status -ne 'Valid' -or $afterTimestampAttempt.SignerCertificate.Thumbprint -cne $thumbprint){
+          throw "Private Authenticode timestamp attempt failed with exit code $timestampExit and left an unusable signature; the artifact was not double-signed."
+        }
+        $timestampState='NOT TIMESTAMPED — RFC3161 timestamp unavailable; private SignTool signing completed without a timestamp'
+      }else{$timestampState='RFC3161 TIMESTAMPED'}
+    }else{
+      $certificate=Get-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint"
+      $setResult=Set-AuthenticodeSignature -LiteralPath $unsignedExe -Certificate $certificate -HashAlgorithm SHA256
+      if($setResult.Status -ne 'Valid'){throw "Private Authenticode fallback signing failed: $($setResult.Status)"}
+      $timestampState='NOT TIMESTAMPED — SignTool unavailable; Set-AuthenticodeSignature fallback used'
+    }
+  }else{
+    $thumbprint=if($CertificateThumbprint){$CertificateThumbprint}else{$env:DEVFLEET_SIGNING_CERTIFICATE_THUMBPRINT}
+    if($tool -and $dlib -and $metadata){
+      if(-not (Test-Path -LiteralPath $tool) -or -not (Test-Path -LiteralPath $dlib) -or -not (Test-Path -LiteralPath $metadata)){throw 'RELEASE BLOCKED — AUTHENTICODE SIGNING INPUT PATH IS INVALID.'}
+      & $tool sign /v /debug /fd SHA256 /tr $TimestampUrl /td SHA256 /dlib $dlib /dmdf $metadata $unsignedExe
+    }elseif($tool -and $thumbprint){
+      if(-not (Test-Path -LiteralPath $tool)){throw 'RELEASE BLOCKED — SIGNTOOL PATH IS INVALID.'}
+      & $tool sign /v /sha1 $thumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 $unsignedExe
+    }else{throw 'RELEASE BLOCKED — AUTHENTICODE PUBLISHER IDENTITY REQUIRED'}
+    if($LASTEXITCODE){throw "Authenticode signing failed with exit code $LASTEXITCODE."}
+    $timestampState='RFC3161 TIMESTAMPED'
+  }
+  $verifyText=Join-Path $outputs 'authenticode-verification.txt'
+  if($tool){
+    & $tool verify /pa /v $unsignedExe 2>&1 | Set-Content -LiteralPath $verifyText
+    if($LASTEXITCODE){throw 'SignTool /pa verification failed.'}
+    $signtoolVerification='PASS'
+  }else{
+    'UNAVAILABLE — SignTool is not installed; Get-AuthenticodeSignature verification is authoritative for this private build.' | Set-Content -LiteralPath $verifyText
+  }
+  $signature=Get-AuthenticodeSignature -LiteralPath $unsignedExe
+  if($signature.Status -ne 'Valid'){throw "Get-AuthenticodeSignature did not return Valid: $($signature.Status)"}
+  if($SigningProfile -eq 'PrivateSelfSigned'){
+    if($signature.SignerCertificate.Thumbprint -cne [string]$privateIdentity.thumbprint){throw 'Private Authenticode signer thumbprint does not match the expected DevFleet identity.'}
+    if('1.3.6.1.5.5.7.3.3' -notin @($signature.SignerCertificate.EnhancedKeyUsageList|ForEach-Object{[string]$_.ObjectId})){throw 'Private Authenticode signer lacks the Code Signing EKU.'}
+  }
+  $tamperedCopy=Join-Path $outputs ".authenticode-tamper-$([guid]::NewGuid().ToString('N')).exe"
+  try{
+    Copy-Item -LiteralPath $unsignedExe -Destination $tamperedCopy
+    $stream=[IO.File]::Open($tamperedCopy,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    try{$stream.Position=4096;$originalByte=$stream.ReadByte();$stream.Position=4096;$stream.WriteByte(($originalByte -bxor 1))}finally{$stream.Dispose()}
+    $tamperedStatus=[string](Get-AuthenticodeSignature -LiteralPath $tamperedCopy).Status
+    if($tamperedStatus -eq 'Valid'){throw 'Tampered Authenticode probe unexpectedly remained valid.'}
+  }finally{Remove-Item -LiteralPath $tamperedCopy -Force -ErrorAction SilentlyContinue}
+  $signedTest=Join-Path $outputs 'signed-self-test.txt';$env:DEVFLEET_SELF_TEST_OUTPUT=$signedTest
+  $signedProcess=Start-Process -FilePath $unsignedExe -ArgumentList '--self-test' -Wait -PassThru
+  Remove-Item Env:DEVFLEET_SELF_TEST_OUTPUT -ErrorAction SilentlyContinue
+  if($signedProcess.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $signedTest) -or (Get-Content -LiteralPath $signedTest -Raw) -notmatch '(?m)^PASS(?:\r?$)'){throw 'Signed installer self-test failed.'}
+  Assert-StageShippingIdentity 'post-sign'
+
+  $artifactRows[0]=[ordered]@{name='exe';path="outputs/DevFleet-Setup-v$devfleetVersion-win-x64.exe";bytes=(Get-Item $unsignedExe).Length;sha256=(Get-FileHash $unsignedExe -Algorithm SHA256).Hash.ToLowerInvariant()}
+  & $releasePython (Join-Path $buildSource 'tools\release_fingerprint.py') --source-root $buildSource --installer-root $buildInstaller --output (Join-Path $outputs 'release-fingerprint.json') --artifact "exe=$unsignedExe" --artifact "tar=$tar" --artifact "portable=$portable" --artifact "installerSource=$sourceZip"
+  if($LASTEXITCODE){throw 'Signed final release fingerprint generation failed.'}
+  $fingerprintObject=Get-Content (Join-Path $outputs 'release-fingerprint.json') -Raw|ConvertFrom-Json
+  $signingState=if($SigningProfile -eq 'PrivateSelfSigned'){'PRIVATE SELF-SIGNED AUTHENTICODE — VALID ON EXPLICITLY TRUSTED PERSONAL/TEST SYSTEMS'}else{'AUTHENTICODE SIGNED — VALID PUBLIC SIGNING PATH'}
+  $currentTooling.releaseFingerprintId=$fingerprintObject.releaseFingerprintId;$currentTooling.toolingFingerprintId=$fingerprintObject.toolingFingerprint.toolingFingerprintId;$currentTooling.artifacts=$artifactRows
+  [IO.File]::WriteAllText($currentToolingPath,(($currentTooling|ConvertTo-Json -Depth 12)+[Environment]::NewLine),(New-Object Text.UTF8Encoding($false)))
+  $finalManifest.releaseFingerprintId=$fingerprintObject.releaseFingerprintId;$finalManifest.toolingFingerprintId=$fingerprintObject.toolingFingerprint.toolingFingerprintId;$finalManifest.artifacts=$artifactRows;$finalManifest.signingState=$signingState;$finalManifest.signing=$signingState;$finalManifest.preSignExe=$preSignExe;$finalManifest.publicPromotionAllowed=$false
+  if($SigningProfile -eq 'PrivateSelfSigned'){$finalManifest.privateSigningProfile='PRIVATE_SELF_SIGNED';$finalManifest.privateSigningCertificateThumbprint=[string]$privateIdentity.thumbprint;$finalManifest.publicPublisherTrust=$false;$finalManifest.timestampState=$timestampState}
+  $finalManifest|ConvertTo-Json -Depth 10|Set-Content -LiteralPath (Join-Path $outputs 'final-artifact-hashes.json') -Encoding utf8
+  $state.releaseFingerprintId=$fingerprintObject.releaseFingerprintId;$state.toolingFingerprintId=$fingerprintObject.toolingFingerprint.toolingFingerprintId;$state.signing_state=$signingState;$state.candidate.exe=$artifactRows[0];$state.pre_sign_exe=$preSignExe
+  if($SigningProfile -eq 'PrivateSelfSigned'){$state.private_signing_profile='PRIVATE_SELF_SIGNED';$state.private_signing_certificate_thumbprint=[string]$privateIdentity.thumbprint;$state.public_publisher_trust=$false;$state.timestamp_state=$timestampState}
+  $state|ConvertTo-Json -Depth 12|Set-Content -LiteralPath (Join-Path $workspaceRoot 'finalization-state.json') -Encoding utf8
+  $publicCertificateRecord=$null
+  if($SigningProfile -eq 'PrivateSelfSigned'){
+    $publicCertificateOutput=Join-Path $outputs 'DevFleet-Private-Personal-Code-Signing.cer'
+    Copy-Item -LiteralPath ([string]$privateIdentity.publicCertificatePath) -Destination $publicCertificateOutput -Force
+    $publicCertificateRecord=[ordered]@{path='outputs/DevFleet-Private-Personal-Code-Signing.cer';bytes=(Get-Item $publicCertificateOutput).Length;sha256=(Get-FileHash $publicCertificateOutput -Algorithm SHA256).Hash.ToLowerInvariant()}
+  }
+  [ordered]@{provider=if($SigningProfile -eq 'PrivateSelfSigned' -and $tool){'Windows certificate store / SignTool'}elseif($SigningProfile -eq 'PrivateSelfSigned'){'Windows certificate store / Set-AuthenticodeSignature fallback'}elseif($dlib){'Azure Artifact Signing'}else{'Windows certificate store'};signingProfile=$SigningProfile;timestampState=$timestampState;signatureStatus=$signature.Status;signerSubject=$signature.SignerCertificate.Subject;signerThumbprint=$signature.SignerCertificate.Thumbprint;codeSigningEkuVerified=$true;signtoolVerification=$signtoolVerification;tamperedCopyStatus=$tamperedStatus;preSignExe=$preSignExe;finalSignedExe=$artifactRows[0];publicCertificate=$publicCertificateRecord;publicPublisherTrust=($SigningProfile -ne 'PrivateSelfSigned');publicPromotionAllowed=$false} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputs 'signing-provider.json')
+  @("DevFleet $devfleetVersion / Installer $installerVersion","Status: signed candidate current; awaiting exact-candidate clean FullRelease","Git commit: $candidateGitCommit","Release fingerprint: $($fingerprintObject.releaseFingerprintId)","Tooling fingerprint: $($fingerprintObject.toolingFingerprint.toolingFingerprintId)","Signing state: $signingState",'Source changed since candidate: FALSE','Rebuild required: FALSE','Candidate is current: TRUE','Public promotion allowed: FALSE')|Set-Content -LiteralPath (Join-Path $workspaceRoot 'finalization-state.txt') -Encoding utf8
+}else{Write-Warning 'Unsigned developer build explicitly requested; this artifact is not release eligible.'}
+Write-Host "Release complete: $outputs"
+
+```
+
+
+## FILE: installer-source/CLEAN-REINSTALL.md
+
+SHA256: 2d564d5f20f75e8314e0dba9690fc8231484a0357e8ea3ec3809d302dda98522 | Bytes: 334 | Git mode: 100644
+
+```
+# Clean Reinstall
+
+Clean Reinstall creates a redacted recovery ZIP, preserves projects, VMs, backups, identities, and data by default, removes installer-owned control-plane integration, installs the verified current payload through the production orchestrator, and reconciles preserved state. It never silently becomes Factory Reset.
+
+```
+
+
+## FILE: installer-source/CLEAN-ROOM-INSTALL.md
+
+SHA256: 51442b27ee7597662af6ac6898437565945da71078dcb4b256ee199f939cab3c | Bytes: 617 | Git mode: 100644
+
+```
+# Clean-room installation
+
+Supported release profile: Windows 11 Pro x64, fully patched, Internet-connected,
+administrator/UAC available, and hardware virtualization available. A clean test host
+must have no DevFleet, PowerShell 7, Git, Multipass, or DevFleet VMs. MULATTOTECHBOX is
+only a build/reference host and is never a clean-room target.
+
+Run the current `DevFleet-Setup-v<DevFleet VERSION>-win-x64.exe`; record preflight, dependency resolution,
+UAC, reboot/resume, role, Multipass, guest bootstrap, SSH, dashboard, and maintenance
+evidence. Do not treat mocked providers or source inspection as E2E evidence.
+
+```
+
+
+## FILE: installer-source/CODE-SIGNING.md
+
+SHA256: ac28c26aace63647228cb0d0900fe8906a653d686950be63f6455a4044e0cf94 | Bytes: 1359 | Git mode: 100644
+
+```
+# Authenticode signing
+
+Release signing uses Microsoft Azure Artifact Signing with SignTool, SHA-256, and the
+RFC 3161-compatible `http://timestamp.acs.microsoft.com` timestamp service, or a
+legitimate certificate-store identity with protected private key. The normal
+`Build-Release.ps1` fails closed when no identity is configured. Only
+`-UnsignedDeveloperBuild` permits an unsigned inner-loop build; it is not release
+eligible. Verify with `signtool verify /pa /v` and `Get-AuthenticodeSignature` and run
+the signed self-test before calculating the distributed hash.
+
+Private/personal releases may explicitly use `-SigningProfile PrivateSelfSigned`.
+That profile creates or reuses one exact-subject, RSA-3072, SHA-256 Code Signing
+certificate in `CurrentUser/My`, requires a non-exportable private key, persists only
+public metadata under `%LOCALAPPDATA%\DevFleet\Signing\PrivateSelfSigned`, and trusts
+only the exported public certificate in the signing user's Root and Trusted Publishers
+stores. Windows may require the interactive owner-consent prompt for the Root import;
+the release gate blocks until that exact thumbprint is present. It never creates a PFX
+and never enables public promotion. This profile means
+cryptographically signed and valid only on explicitly trusted personal/test systems;
+it does not mean publicly trusted publisher identity.
+
+```
+
+
+## FILE: installer-source/DEPENDENCY-RESOLUTION.md
+
+SHA256: 751d08beb7dc8bc6e9416791b8f488718959cbc6bd3b6e1c50818bba3b8e26b2 | Bytes: 580 | Git mode: 100644
+
+```
+# Dependency resolution
+
+`dependencies.json` is the single catalog consumed by WPF and PowerShell. Detection
+uses PATH, App Paths, registry, and known vendor locations, then probes version and
+compatibility. Only Compatible and Compatible-Newer states are preserved automatically;
+Outdated is updated, Broken is repaired/reinstalled, and Unsupported-Major is blocked.
+
+Every downloaded executable is restricted to an official vendor source and checked for
+expected file type and Authenticode signer before execution. Post-install discovery and
+version verification are mandatory.
+
+```
+
+
+## FILE: installer-source/DevFleet.Setup.Tests/DevFleet.Setup.Tests.csproj
+
+SHA256: 7d50c80ae886b551e3deeb53df04bcf0800402cfb5d87c3c56efb7fcac6febf7 | Bytes: 586 | Git mode: 100644
+
+```
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DevFleet.Setup\DevFleet.Setup.csproj" GlobalPropertiesToRemove="SelfContained;RuntimeIdentifier;PublishSingleFile" />
+  </ItemGroup>
+
+</Project>
+
+```
+
+
+## FILE: installer-source/DevFleet.Setup.Tests/Program.cs
+
+SHA256: f681ebed4f6fab1cd8a13584846834f15ad16739d4a753b193b34861d91cc841 | Bytes: 46971 | Git mode: 100644
+
+```
+using DevFleet.Setup;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Text.Json;
+
+// Test mode is an explicit fixture capability, never inferred from a debugger,
+// process name, or user-controlled environment variable in the Release binary.
+TestEnvironment.EnableForTests();
+
+static void Assert(bool condition, string message)
+{
+    if (!condition) throw new InvalidOperationException(message);
+}
+
+static void AssertInheritedPipeDescendant(int expectedExitCode)
+{
+    var pidPath = Path.Combine(Path.GetTempPath(), "devfleet-inherited-pipe-" + Guid.NewGuid().ToString("N") + ".pid");
+    var descendantPid = 0;
+    try
+    {
         var escapedPidPath = pidPath.Replace("'", "''", StringComparison.Ordinal);
         var parentCommand = "$childInfo=[Diagnostics.ProcessStartInfo]::new();$childInfo.FileName=(Get-Command powershell.exe).Source;$childInfo.UseShellExecute=$false;$childInfo.CreateNoWindow=$true;$childInfo.ArgumentList.Add('-NoProfile');$childInfo.ArgumentList.Add('-NonInteractive');$childInfo.ArgumentList.Add('-Command');$childInfo.ArgumentList.Add('Start-Sleep -Seconds 30');$child=[Diagnostics.Process]::Start($childInfo);[IO.File]::WriteAllText('" + escapedPidPath + "',[string]$child.Id);[Console]::Out.Write('parent-output');exit " + expectedExitCode;
         var timer = System.Diagnostics.Stopwatch.StartNew();
@@ -348,135 +577,4 @@ var backupArchive = Path.Combine(stateRoot, "backup.tar");
 File.WriteAllText(backupArchive, "verified backup");
 var backupManifest = Path.Combine(stateRoot, "backup.json");
 var backupHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(backupArchive))).ToLowerInvariant();
-File.WriteAllText(backupManifest, System.Text.Json.JsonSerializer.Serialize(new { project_id = "project-demo", backup_id = "backup-demo", archive = backupArchive, sha256 = backupHash }));
-File.WriteAllText(Path.Combine(stateRoot, "projects.json"), System.Text.Json.JsonSerializer.Serialize(new[] { new { project_id = "project-demo", slug = "demo", runtime_id = "devfleet-project-demo", vm_name = "devfleet-project-demo", host_id = "test-node", managed_by = "devfleet", state = "stopped", backup_manifest = backupManifest } }));
-var projectManifest = new { project_id = "project-demo", backup_id = "backup-demo", archive = backupArchive, sha256 = backupHash, slug = "demo", runtime_id = "devfleet-project-demo", source_archive_sha256 = backupHash, host_archive_sha256 = backupHash };
-File.WriteAllText(backupManifest, System.Text.Json.JsonSerializer.Serialize(projectManifest));
-var verified = new BackupVerificationService().Verify(new DiscoveredProject("project-demo", "demo", "Multipass", "devfleet-project-demo", "HostAgent", backupManifest, true));
-Assert(verified.IsVerified, "Backup verification must hash the archive and validate identity/eligibility.");
-var selectedPlan = PlanService.Build(InstallerMode.FactoryReset, true, true, false, true, true, "DELETE DEVFLEET", "DELETE DEVFLEET PROJECT DATA", ["project-demo"]);
-Assert(selectedPlan.IsAllowed && selectedPlan.SelectedProjects.Count == 1, "Selected project plan must use the project-specific verified backup.");
-
-var vmProvider = new RecordingVmProvider([new VmRecord("Multipass", "devfleet-project-demo", "project-demo", true), new VmRecord("Multipass", "unrelated-vm", "other", false)]);
-new VmOwnershipService(vmProvider).DeleteOwnedExact("project-demo", "devfleet-project-demo", verified);
-Assert(vmProvider.DeletedRuntimeIds.SequenceEqual(["devfleet-project-demo"]), "Provider-aware deletion did not target the exact owned runtime.");
-Assert(vmProvider.Inventory.Single(x => x.RuntimeId == "devfleet-project-demo").BackupId == "", "Fixture inventory must remain immutable.");
-var wildcardBlocked = false;
-try { new VmOwnershipService(new RecordingVmProvider([new VmRecord("Multipass", "*", "project-demo", true)])).DeleteOwnedExact("project-demo", "*"); } catch (InvalidOperationException) { wildcardBlocked = true; }
-Assert(wildcardBlocked, "Wildcard provider deletion must be blocked.");
-var endpointBuilder = typeof(MultipassHostAgentProvider).GetMethod("BuildHostAgentBaseUri", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-var wildcardEndpoint = (Uri)endpointBuilder!.Invoke(null, ["http://+:8790/"])!;
-Assert(wildcardEndpoint.Host == "127.0.0.1" && wildcardEndpoint.Port == 8790, "Wildcard Host Agent listen prefix must normalize to the local endpoint for destruction requests.");
-
-Console.WriteLine("PASS installer stage, backup, provider, shortcut-contract tests");
-
-var auth = TailscaleAuthenticationService.ParseAuthenticationUri("To authenticate, visit: https://login.tailscale.com/a/abcDEF123");
-Assert(auth?.Host == "login.tailscale.com", "Official Tailscale authentication URL parser failed.");
-Assert(TailscaleAuthenticationService.ParseAuthenticationUri("https://evil.example/a/abc") is null, "Non-Tailscale authentication URL must be rejected.");
-var tailscaleRunner = new RecordingProcessRunner();
-tailscaleRunner.QueueResult(new ProcessResult(1, "", "To authenticate, visit: https://login.tailscale.com/a/abcDEF123"));
-var tailscaleBegin = TailscaleAuthenticationService.Begin(tailscaleRunner, "tailscale.exe");
-Assert(tailscaleRunner.Invocations.Single().Arguments.SequenceEqual(["up", "--timeout=30s"]), "Tailscale authentication must use a bounded CLI timeout.");
-Assert(tailscaleBegin.State == "Authentication required" && tailscaleBegin.AuthenticationUri?.Host == "login.tailscale.com", "Bounded Tailscale authentication must preserve the official URL result.");
-var incompleteTailscaleRunner = new RecordingProcessRunner();
-incompleteTailscaleRunner.QueueResult(new ProcessResult(1, "", "To authenticate, visit: https://login.tailscale.com/a/abcDEF123", OutputComplete: false));
-var incompleteTailscale = TailscaleAuthenticationService.Begin(incompleteTailscaleRunner, "tailscale.exe");
-Assert(incompleteTailscale.State == "Error" && incompleteTailscale.AuthenticationUri is null && incompleteTailscale.Detail.Contains("incomplete", StringComparison.OrdinalIgnoreCase), "Tailscale must reject a trusted URL parsed from incomplete output.");
-
-var deps = DependencyService.Catalog;
-Assert(deps.Any(d => d.Name == "PowerShell 7" && d.Required) && deps.Any(d => d.Name == "Multipass" && d.Required), "Core connected dependency catalog is incomplete.");
-Assert(deps.All(d => d.OfficialMetadata.Scheme == "https"), "Every dependency must use an HTTPS official metadata source.");
-var seven = deps.Single(d => d.Id == "sevenzip");
-var git = deps.Single(d => d.Id == "git");
-Assert(git.DirectOfficialVendorResolver.AllowedHosts.Contains("release-assets.githubusercontent.com"), "GitHub release assets must allow the official release-assets redirect host.");
-Assert(deps.Where(d => d.DirectOfficialVendorResolver.Type.Equals("github-release", StringComparison.OrdinalIgnoreCase)).All(d => d.DirectOfficialVendorResolver.AllowedHosts.Contains("release-assets.githubusercontent.com")), "Every GitHub release dependency must allow the official release-assets redirect host.");
-Assert(deps.Single(d => d.Id == "multipass").InstallerAuthenticityPolicy.AllowedSignerSubjectsExact.SequenceEqual(["CN=CANONICAL GROUP LIMITED, O=CANONICAL GROUP LIMITED, L=London, C=GB"]), "Multipass must use the exact currently published Canonical Group signer identity.");
-Assert(deps.Single(d => d.Id == "multipass").InstallerAuthenticityPolicy.InstalledExecutableTrust == "signed-installer-locked-path", "Multipass must bind unsigned installed binaries to a signed installer and locked machine path.");
-Assert(!seven.Required && seven.Classification == "OPTIONAL" && seven.Features.Contains("encrypted-transfer-bundle"), "7-Zip must be optional for core install and feature-scoped.");
-Assert(seven.InstallerAuthenticityPolicy.Strategy == "VendorReleaseSha256", "7-Zip must use the explicit vendor release digest strategy.");
-Assert(seven.DirectOfficialVendorResolver.ExpectedOwner == "ip7z" && seven.DirectOfficialVendorResolver.ExpectedRepository == "7zip", "7-Zip vendor identity must be narrowly bound to ip7z/7zip.");
-Assert(seven.DirectOfficialVendorResolver.AllowedHosts.Contains("api.github.com") && seven.DirectOfficialVendorResolver.AllowedHosts.Contains("github.com") && seven.DirectOfficialVendorResolver.AllowedHosts.Contains("release-assets.githubusercontent.com"), "7-Zip release hosts are incomplete.");
-Assert(deps.Where(d => d.Id != "sevenzip").Where(d => d.InstallerAuthenticityPolicy.Required).All(d => d.InstallerAuthenticityPolicy.Strategy == "Authenticode"), "Existing signed dependency policies must remain Authenticode-required.");
-var digestFixture = Path.Combine(stateRoot, "7z-fixture.bin");
-File.WriteAllBytes(digestFixture, [1, 2, 3, 4]);
-var digest = VendorReleaseAuthenticity.VerifySha256(digestFixture, "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a");
-Assert(digest.Length == 64, "Valid vendor digest was not accepted.");
-var digestBlocked = false;
-try { VendorReleaseAuthenticity.VerifySha256(digestFixture, "0000000000000000000000000000000000000000000000000000000000000000"); } catch (InvalidDataException) { digestBlocked = true; }
-Assert(digestBlocked, "Wrong vendor digest must fail closed.");
-var malformedBlocked = false;
-try { VendorReleaseAuthenticity.NormalizeDigest("not-a-sha256"); } catch (InvalidDataException) { malformedBlocked = true; }
-Assert(malformedBlocked, "Missing/malformed vendor digest must fail closed.");
-Assert(seven.DirectOfficialVendorResolver.OfficialPageUri == "https://www.7-zip.org/download.html", "7-Zip official page binding is missing.");
-Assert(seven.DirectOfficialVendorResolver.AssetRegex?.Contains("x64") == true, "7-Zip architecture restriction is missing.");
-Assert(seven.DirectOfficialVendorResolver.MetadataUri.Contains("api.github.com/repos/ip7z/7zip/releases", StringComparison.OrdinalIgnoreCase), "7-Zip release metadata must come from the official API.");
-Assert(seven.InstallerAuthenticityPolicy.Extensions.SequenceEqual([".exe"]), "7-Zip vendor digest policy must restrict the installer type.");
-Console.WriteLine("PASS authenticity strategy, vendor digest, release identity, host, architecture, and signed-policy preservation tests");
-
-var deferredRunner = new RecordingProcessRunner();
-new InstallService(deferredRunner).Run(installFixture, "Desktop", "FreshInstall", deferNetworkPairing: true, acknowledgeRootfulDocker: true);
-Assert(deferredRunner.Invocations.Single().Arguments.Contains("-DeferNetworkPairing"), "DeferNetworkPairing was not forwarded through the production install contract.");
-foreach (var mode in new[] { InstallerMode.FreshInstall, InstallerMode.Repair, InstallerMode.CleanReinstall, InstallerMode.LocalUpdate })
-{
-    var laptopDeferred = PlanService.Build(mode, true, true, false, false, false, "", "", deferNetworkPairing: true, role: "Laptop / Surrogate");
-    Assert(!laptopDeferred.IsAllowed && laptopDeferred.Blockers.Any(x => x.Contains("connected Tailscale pairing")), "A deferred Laptop plan must be blocked before mutation because Vault transport requires authentication.");
-    var laptopConnected = PlanService.Build(mode, true, true, false, false, false, "", "", deferNetworkPairing: false, role: "Laptop / Surrogate");
-    Assert(!laptopConnected.Blockers.Any(x => x.Contains("connected Tailscale pairing")), "Connected Laptop plan acquired an unrelated network-deferral blocker.");
-}
-Assert(deferredRunner.Invocations.Single().Arguments.Contains("-AcknowledgeRootfulDocker"), "Rootful Docker acknowledgement was not forwarded through the production install contract.");
-var elevatedArguments = InstallerLaunchContract.BuildElevatedResumeArguments("Primary / Desktop", InstallerMode.FreshInstall, deferNetworkPairing: true, acknowledgeRootfulDocker: true);
-var elevatedRequest = InstallerLaunchContract.Parse(elevatedArguments);
-Assert(elevatedRequest is { ElevatedResume: true, DeferNetworkPairing: true, AcknowledgeRootfulDocker: true, Action: InstallerMode.FreshInstall, Role: "Primary / Desktop" }, "UAC relaunch did not round-trip the exact reviewed action, role, network choice, and rootful Docker acknowledgement through the production parser contract.");
-var defaultElevatedRequest = InstallerLaunchContract.Parse(InstallerLaunchContract.BuildElevatedResumeArguments("Primary / Desktop", InstallerMode.Repair, deferNetworkPairing: false, acknowledgeRootfulDocker: false));
-Assert(!defaultElevatedRequest.DeferNetworkPairing && !defaultElevatedRequest.AcknowledgeRootfulDocker, "UAC relaunch fabricated optional reviewed choices that were not selected.");
-Console.WriteLine("PASS elevated relaunch reviewed-plan argument and parser contract");
-
-var incompleteSuccessRunner = new RecordingProcessRunner();
-incompleteSuccessRunner.QueueResult(new ProcessResult(0, "", "", OutputComplete: false));
-var incompleteSuccessReport = new InstallService(incompleteSuccessRunner).Run(installFixture, "Desktop", "FreshInstall");
-Assert(incompleteSuccessReport.ExitCode == 0 && incompleteSuccessReport.Detail.Contains("incomplete", StringComparison.OrdinalIgnoreCase), "Installer exit 0 must remain authoritative while incomplete diagnostics are explicit.");
-var incompleteRebootRunner = new RecordingProcessRunner();
-incompleteRebootRunner.QueueResult(new ProcessResult(3010, "", "", OutputComplete: false));
-var incompleteRebootReport = new InstallService(incompleteRebootRunner).Run(installFixture, "Desktop", "FreshInstall");
-Assert(incompleteRebootReport.ExitCode == 3010 && incompleteRebootReport.Detail.Contains("incomplete", StringComparison.OrdinalIgnoreCase), "Installer exit 3010 must remain authoritative while incomplete diagnostics are explicit.");
-
-var defaultInstallService = new InstallService();
-var installRunnerField = typeof(InstallService).GetField("_runner", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-var defaultInstallRunner = installRunnerField?.GetValue(defaultInstallService) as ProcessRunner;
-Assert(InstallService.ConnectedInstallTimeoutSeconds == DeadlinePolicy.DesktopTransactionSeconds, "Connected installation compatibility timeout must match the composed Desktop transaction policy.");
-Assert(defaultInstallRunner?.DefaultTimeoutSeconds == DeadlinePolicy.DesktopTransactionSeconds && !defaultInstallRunner.AllowEnvironmentOverride, "Default connected installation must use the composed role-aware transaction budget without the process-wide environment override.");
-Assert(DeadlinePolicy.LaptopTransactionSeconds > DeadlinePolicy.DesktopTransactionSeconds, "Laptop transaction must dominate its additional sequential compute, vault, and transport stages.");
-Assert(DeadlinePolicy.ComputeStageSeconds >= DeadlinePolicy.MultipassReadinessSeconds + DeadlinePolicy.GuestBootstrapSeconds, "Compute stage must contain both readiness and complete guest bootstrap allowances.");
-Assert(DeadlinePolicy.VaultStageSeconds > DeadlinePolicy.VaultBootstrapSeconds + DeadlinePolicy.SshAndMarkerSeconds, "Vault stage must contain its snapshot, transport, bounded Vault bootstrap, and SSH/marker allowances.");
-Assert(DeadlinePolicy.DesktopTransactionSeconds > DeadlinePolicy.ComputeStageSeconds, "Desktop transaction must dominate its compute stage and all surrounding stages.");
-Assert(DeadlinePolicy.LaptopTransactionSeconds > DeadlinePolicy.VaultStageSeconds + DeadlinePolicy.ComputeStageSeconds, "Laptop transaction must dominate both sequential provisioning stages.");
-Assert(DeadlinePolicy.PrerequisitesSeconds == DeadlinePolicy.PrerequisiteDependencyCount * (DeadlinePolicy.DependencyProbeSeconds + DeadlinePolicy.DependencyHealthSeconds + DeadlinePolicy.DependencyInstallSeconds + DeadlinePolicy.DependencyVerificationSeconds) + DeadlinePolicy.WindowsCapabilitySeconds + DeadlinePolicy.WindowsFeatureSeconds + (4 * DeadlinePolicy.MultipassConfigurationSeconds) + (3 * DeadlinePolicy.VsCodeExtensionSeconds), "Prerequisite stage must be derived from every finite sequential dependency/configuration operation.");
-Assert(new ProcessRunner().DefaultTimeoutSeconds == 900, "Ordinary process probes must retain their 900-second default bound.");
-
-var stress = new ProcessRunner().Run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$s='x'*200000;[Console]::Out.Write($s);[Console]::Error.Write($s)"]);
-Assert(stress.ExitCode == 0 && stress.OutputComplete && stress.StandardOutput.Length == 200000 && stress.StandardError.Length == 200000, "ProcessRunner stdout/stderr stress failed.");
-var ordinaryFailure = new ProcessRunner().Run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "[Console]::Out.Write('known-output');[Console]::Error.Write('known-error');exit 7"]);
-Assert(ordinaryFailure.ExitCode == 7 && ordinaryFailure.OutputComplete && ordinaryFailure.StandardOutput == "known-output" && ordinaryFailure.StandardError == "known-error", "ProcessRunner ordinary nonzero complete-output contract failed.");
-AssertInheritedPipeDescendant(23);
-AssertInheritedPipeDescendant(3010);
-var previousProcessTimeout = Environment.GetEnvironmentVariable("DEVFLEET_SETUP_PROCESS_TIMEOUT_SECONDS");
-try
-{
-    Environment.SetEnvironmentVariable("DEVFLEET_SETUP_PROCESS_TIMEOUT_SECONDS", "1");
-    var timeoutTimer = System.Diagnostics.Stopwatch.StartNew();
-    var directTimeout = new ProcessRunner(InstallService.ConnectedInstallTimeoutSeconds).Run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"]);
-    timeoutTimer.Stop();
-    Assert(directTimeout.ExitCode == -2 && timeoutTimer.Elapsed < TimeSpan.FromSeconds(10), "ProcessRunner direct-process timeout contract failed.");
-}
-finally { Environment.SetEnvironmentVariable("DEVFLEET_SETUP_PROCESS_TIMEOUT_SECONDS", previousProcessTimeout); }
-Console.WriteLine("PASS connected dependency, Tailscale, deferred pairing, and ProcessRunner tests");
-
-```
-
-
-## FILE: installer-source/DevFleet.Setup/App.xaml
-
-SHA256: 8bd96b935412a757a21e891815e4a153889803006b3d310d2291f4a7a54f2a66 | Bytes: 1712 | Git mode: 100644
-
-```
-<Application x:Class=
+File.WriteAllText(backupManifest, System.Text.Json.JsonSerializer.Serialize(new { project_id = "project-demo

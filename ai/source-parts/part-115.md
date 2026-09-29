@@ -1,10 +1,254 @@
 # DevFleet source part 115
 
 Full-source UTF-8 byte interval [5301000, 5347500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: eafc7c9cbad0e1b1940a70eea278ae3f61d22b6d4d8a9e79a3d96111b9eb57e8
+Payload SHA-256: ec19f1dd5995bed90389805bc9039fc026b40b149c4dd6979a7e7e60f6b7b177
 
 <!-- BEGIN SOURCE SLICE -->
-rCreateDevFleetSshKey)
+de_id -ne [string]$vaultIdentity.node_id -or [string]$liveVaultIdentity.node_name -ne $vaultName) {
+        throw 'SECRET RECOVERY REQUIRED: vault identity does not match the exact deployment inventory; no credentials were changed.'
+    }
+} elseif (Test-Path -LiteralPath (Join-Path $stateRoot 'secrets\vault-client.json') -PathType Leaf) {
+    throw 'SECRET RECOVERY REQUIRED: this primary is bound to an external vault. Run a coordinated all-node recovery from the surrogate/vault host; no credentials were changed.'
+}
+
+$hostAgentRoot = Join-Path $env:ProgramData 'DevFleetHostAgent'
+$hostTokenPath = Join-Path $hostAgentRoot 'token.txt'
+$hostOwnershipPath = Join-Path $hostAgentRoot 'integration-ownership.json'
+$hostOwnership = Read-DevFleetIntegrationOwnership -Path $hostOwnershipPath
+$taskBinding = @($hostOwnership.ScheduledTasks | Where-Object { [string]$_.Name -eq 'DevFleet Host Agent' })
+$task = Get-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue
+if ($taskBinding.Count -ne 1 -or -not $task -or @($task.Actions).Count -ne 1) { throw 'SECRET RECOVERY REQUIRED: Host Agent task ownership is incomplete; no credentials were changed.' }
+$taskActual = @{Name=[string]$task.TaskName;Executable=[string]$task.Actions[0].Execute;Arguments=[string]$task.Actions[0].Arguments;Principal=[string]$task.Principal.UserId;LogonType=[string]$task.Principal.LogonType;RunLevel=[string]$task.Principal.RunLevel;Description=[string]$task.Description;Generation=[string]$taskBinding[0].Generation}
+Assert-DevFleetTaskBinding -Expected $taskBinding[0] -Actual $taskActual | Out-Null
+
+$recoveryRoot = Join-Path $stateRoot "secret-recovery\$generation"
+New-Item -ItemType Directory -Path $recoveryRoot -Force | Out-Null
+Protect-DevFleetStateAcl
+$secretPath = Join-Path $stateRoot 'secrets\host-secrets.json'
+if (Test-Path -LiteralPath $secretPath -PathType Leaf) { Copy-Item -LiteralPath $secretPath -Destination (Join-Path $recoveryRoot 'host-secrets.before.json') -Force }
+if (Test-Path -LiteralPath $hostTokenPath -PathType Leaf) { Copy-Item -LiteralPath $hostTokenPath -Destination (Join-Path $recoveryRoot 'host-agent-token.before.txt') -Force }
+$pendingSecretsPath = Join-Path $recoveryRoot 'host-secrets.pending.json'
+Write-AtomicUtf8 -Path $pendingSecretsPath -Text (($newSecrets | ConvertTo-Json -Depth 5) + [Environment]::NewLine)
+
+$computeHelper = Join-Path (Get-PackageRootFromState) 'linux\devfleet-rotate-compute-secrets'
+$vaultHelper = Join-Path (Get-PackageRootFromState) 'linux\devfleet-rotate-vault-secrets'
+if (-not (Test-Path -LiteralPath $computeHelper -PathType Leaf) -or ($vaultName -and -not (Test-Path -LiteralPath $vaultHelper -PathType Leaf))) { throw 'Secret recovery helpers are missing from the exact package.' }
+$remoteComputeHelper = "/tmp/devfleet-rotate-compute-$generation"
+$remoteVaultHelper = "/tmp/devfleet-rotate-vault-$generation"
+$computeApplied = $false
+$vaultApplied = $false
+$hostTokenApplied = $false
+$committed = $false
+$evidence = [ordered]@{schemaVersion=1;secretGeneration=$generation;deploymentId=[string]$hostIdentity.deployment_id;hostNodeId=[string]$hostIdentity.node_id;compute=[ordered]@{name=$computeName;nodeId=[string]$computeIdentity.node_id;verified=$false};vault=if($vaultName){[ordered]@{name=$vaultName;nodeId=[string]$vaultIdentity.node_id;verified=$false}}else{$null};hostAgent=[ordered]@{task='DevFleet Host Agent';ownershipGeneration=[string]$hostOwnership.InstallationGeneration;verified=$false};plaintextSecretsLogged=$false;status='IN_PROGRESS';startedAt=(Get-Date).ToUniversalTime().ToString('o')}
+try {
+    New-DevFleetSnapshotSafe -InstanceName $computeName -SnapshotName "pre-secret-rekey-$($generation.Substring(0,8))" | Out-Null
+    Wait-MultipassReady -Name $computeName -TimeoutSeconds 600
+    Invoke-External $multipass @('transfer',$computeHelper,"${computeName}:$remoteComputeHelper")
+    if ($vaultName) {
+        New-DevFleetSnapshotSafe -InstanceName $vaultName -SnapshotName "pre-secret-rekey-$($generation.Substring(0,8))" | Out-Null
+        Wait-MultipassReady -Name $vaultName -TimeoutSeconds 600
+        Invoke-External $multipass @('transfer',$vaultHelper,"${vaultName}:$remoteVaultHelper")
+        $vaultPayload = [ordered]@{schema_version=1;secret_generation=$generation;deployment_id=[string]$hostIdentity.deployment_id;node_id=[string]$vaultIdentity.node_id;cluster=[string]$config.ClusterName;rest_user=[string]$newSecrets.VaultRestUser;rest_password=[string]$newSecrets.VaultRestPassword;restic_password=[string]$newSecrets.ResticPassword}
+        Invoke-MultipassWithStandardInput -FilePath $multipass -InstanceName $vaultName -CommandArgumentList @('sudo','bash',$remoteVaultHelper,'apply',$generation) -StandardInputText ($vaultPayload | ConvertTo-Json -Compress)
+        $vaultApplied = $true; $evidence.vault.verified = $true
+    }
+    $computePayload = [ordered]@{schema_version=1;secret_generation=$generation;deployment_id=[string]$hostIdentity.deployment_id;node_id=[string]$hostIdentity.node_id;admin_user=[string]$newSecrets.PortalAdminUser;admin_password=[string]$newSecrets.PortalAdminPassword;api_token=[string]$newSecrets.NodeApiToken;host_control_token=$newHostToken}
+    Invoke-MultipassWithStandardInput -FilePath $multipass -InstanceName $computeName -CommandArgumentList @('sudo','bash',$remoteComputeHelper,'apply',$generation) -StandardInputText ($computePayload | ConvertTo-Json -Compress)
+    $computeApplied = $true; $evidence.compute.verified = $true
+
+    if ($vaultName) {
+        $vaultIp = Get-InstanceIPv4 -Name $vaultName -PreferTailscale
+        if (-not $vaultIp) { throw 'Rotated vault endpoint has no verified reachable address.' }
+        $vaultClient = [ordered]@{Repository="rest:http://${vaultIp}:$($config.Network.VaultPort)/$($newSecrets.VaultRestUser)/$($config.ClusterName)";RestUser=[string]$newSecrets.VaultRestUser;RestPassword=[string]$newSecrets.VaultRestPassword;ResticPassword=[string]$newSecrets.ResticPassword;VaultIp=$vaultIp;VaultPort=[int]$config.Network.VaultPort;SecretGeneration=$generation}
+        $pendingVaultClient = Join-Path $recoveryRoot 'vault-client.pending.json'
+        Write-AtomicUtf8 -Path $pendingVaultClient -Text (($vaultClient | ConvertTo-Json -Depth 5) + [Environment]::NewLine)
+        Invoke-External $multipass @('transfer',$pendingVaultClient,"${computeName}:/tmp/devfleet-vault-client-$generation.json")
+        $remoteVaultClient = "/tmp/devfleet-vault-client-$generation.json"
+        $configureBackup = 'set -Eeuo pipefail; trap ''rm -f -- "$1"'' EXIT; /usr/local/sbin/devfleet-configure-backup "$1"'
+        Invoke-External $multipass @('exec',$computeName,'--','sudo','bash','-c',$configureBackup,'--',$remoteVaultClient)
+    }
+
+    Write-AtomicUtf8 -Path $hostTokenPath -Text ($newHostToken + [Environment]::NewLine)
+    $hostTokenApplied = $true
+    Stop-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue
+    Start-ScheduledTask -TaskName 'DevFleet Host Agent'
+    $hostHealth = $null
+    $hostAgentConfig = Get-Content -LiteralPath (Join-Path $hostAgentRoot 'config.json') -Raw | ConvertFrom-Json
+    if ([string]$hostAgentConfig.ListenPrefix -notmatch ':(\d{2,5})/$') { throw 'Host Agent listen prefix is invalid during secret verification.' }
+    $hostAgentPort = [int]$Matches[1]
+    for ($attempt = 0; $attempt -lt 20 -and -not $hostHealth; $attempt++) {
+        try { $hostHealth = Invoke-HostAgentAuthenticatedJson -Uri "http://127.0.0.1:$hostAgentPort/healthz" -Method GET -Key $newHostToken -ExpectedHost $env:COMPUTERNAME }
+        catch { Start-Sleep -Milliseconds 500 }
+    }
+    if (-not $hostHealth.ok) { throw 'Rotated Host Agent credential did not verify.' }
+    $evidence.hostAgent.verified = $true
+
+    if ($vaultName) {
+        $pendingVaultClient = Join-Path $recoveryRoot 'vault-client.pending.json'
+        $vaultClientPath = Join-Path $stateRoot 'secrets\vault-client.json'
+        Write-AtomicUtf8 -Path $vaultClientPath -Text (Get-Content -LiteralPath $pendingVaultClient -Raw)
+    }
+    Write-AtomicUtf8 -Path $secretPath -Text (($newSecrets | ConvertTo-Json -Depth 5) + [Environment]::NewLine)
+    Protect-DevFleetStateAcl
+    $committed = $true
+    $evidence.status='COMMITTED';$evidence.completedAt=(Get-Date).ToUniversalTime().ToString('o')
+} catch {
+    $evidence.status='ROLLED_BACK';$evidence.error=$_.Exception.Message;$evidence.failedAt=(Get-Date).ToUniversalTime().ToString('o')
+    if ($hostTokenApplied -and (Test-Path -LiteralPath (Join-Path $recoveryRoot 'host-agent-token.before.txt'))) {
+        Copy-Item -LiteralPath (Join-Path $recoveryRoot 'host-agent-token.before.txt') -Destination $hostTokenPath -Force
+        Stop-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue; Start-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue
+    } elseif ($hostTokenApplied) {
+        Remove-Item -LiteralPath $hostTokenPath -Force -ErrorAction SilentlyContinue
+        Stop-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue
+    }
+    if ($computeApplied) { try { Invoke-External $multipass @('exec',$computeName,'--','sudo','bash',$remoteComputeHelper,'rollback',$generation) } catch { $evidence.compute.rollbackError=$_.Exception.Message } }
+    if ($vaultApplied) { try { Invoke-External $multipass @('exec',$vaultName,'--','sudo','bash',$remoteVaultHelper,'rollback',$generation) } catch { $evidence.vault.rollbackError=$_.Exception.Message } }
+    throw
+} finally {
+    foreach ($target in @(@($computeName,$remoteComputeHelper),@($vaultName,$remoteVaultHelper))) {
+        if ($target[0]) { try { Invoke-External $multipass @('exec',[string]$target[0],'--','sudo','rm','-f','--',[string]$target[1]) -IgnoreExitCode } catch {} }
+    }
+    Remove-Item -LiteralPath $pendingSecretsPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $recoveryRoot 'vault-client.pending.json') -Force -ErrorAction SilentlyContinue
+    Write-AtomicUtf8 -Path (Join-Path $recoveryRoot 'recovery-evidence.json') -Text (($evidence | ConvertTo-Json -Depth 8) + [Environment]::NewLine)
+}
+if (-not $committed) { throw 'Secret recovery did not commit.' }
+[ordered]@{ok=$true;status='COMMITTED';secretGeneration=$generation;deploymentId=[string]$hostIdentity.deployment_id;compute=$computeName;vault=$vaultName;plaintextSecretsLogged=$false;recoveryEvidence=(Join-Path $recoveryRoot 'recovery-evidence.json')} | ConvertTo-Json -Compress
+
+```
+
+
+## FILE: source/windows/Set-DevFleetDockerMode.ps1
+
+SHA256: f76be7c8d6fc8364fba6b7a142efe687351355681473e56cc30b51e021377f95 | Bytes: 2185 | Git mode: 100644
+
+```
+[CmdletBinding(SupportsShouldProcess)]
+param(
+    [Parameter(Mandatory)][ValidateSet('Primary','Failover')][string]$NodeRole,
+    [Parameter(Mandatory)][ValidateSet('rootless','rootful')][string]$Mode,
+    [switch]$AcknowledgeRootful
+)
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+Assert-PowerShell7
+Assert-Administrator
+$config=Get-DevFleetConfig
+$node=if($NodeRole -eq 'Primary'){$config.Primary}else{$config.Failover}
+$instance=[string]$node.InstanceName
+if($Mode -eq 'rootful' -and -not $AcknowledgeRootful){
+    throw 'Rootful Docker requires -AcknowledgeRootful. It has broader authority inside the disposable VM, but still receives no Windows mounts or Docker TCP exposure.'
+}
+if(-not(Test-MultipassInstance $instance)){throw "Multipass instance is not installed locally: $instance"}
+Assert-MultipassIsolation -InstanceNames @($instance)
+$stamp=(Get-Date).ToString('yyyyMMdd-HHmmss')
+$logDir=Join-Path (Get-DevFleetStateRoot) 'logs'
+New-Item -ItemType Directory $logDir -Force|Out-Null
+if($PSCmdlet.ShouldProcess($instance,"Switch Docker mode to $Mode without migrating or deleting either store")){
+    New-DevFleetSnapshotSafe -InstanceName $instance -SnapshotName "pre-docker-mode-$Mode-$stamp"|Out-Null
+    $mp=Get-MultipassExe
+    Invoke-External $mp @('start',$instance) -IgnoreExitCode
+    $report=Invoke-External $mp @('exec',$instance,'--','sudo','/usr/local/bin/devfleet-docker-mode-report') -Capture
+    Set-Content (Join-Path $logDir "docker-mode-before-$instance-$stamp.txt") $report -Encoding utf8
+    $args=@('exec',$instance,'--','sudo','/usr/local/bin/devfleet-switch-docker-mode',$Mode)
+    if($Mode -eq 'rootful'){$args+='--acknowledge-rootful'}
+    Invoke-External $mp $args
+    if($NodeRole -eq 'Primary'){$config.Docker.PrimaryMode=$Mode}else{$config.Docker.FailoverMode=$Mode}
+    if($Mode -eq 'rootful'){$config.Docker.RootfulModeAcknowledged=$true}
+    Save-DevFleetConfig -Config $config
+    & (Join-Path $PSScriptRoot 'Test-DevFleet.ps1') -InstanceName $instance
+    Write-Host "Docker mode for $instance is now $Mode. The other Docker store was not migrated or deleted." -ForegroundColor Green
+}
+
+```
+
+
+## FILE: source/windows/Set-DevFleetTailscaleOAuthCredential.ps1
+
+SHA256: 0105c2847c27380d28d1dc28f2866309f107ced8dd750589b42185bd39bc27f3 | Bytes: 917 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Tailscale.psm1') -Force
+Assert-PowerShell7
+Assert-Administrator
+
+Write-Host 'DevFleet Tailscale OAuth setup' -ForegroundColor Cyan
+Write-Host 'Paste the OAuth client secret only into the local secure prompt. It is never sent to Codex, printed, or placed in a command argument.' -ForegroundColor DarkGray
+$secret = Read-Host 'Tailscale OAuth client secret' -AsSecureString
+try {
+    $path = Set-DevFleetTailscaleOAuthClientSecret -Secret $secret
+    [pscustomobject]@{
+        status = 'PASS'
+        provider = 'OAuthClientSecret'
+        storage = 'DevFleet protected local state ACL'
+        path = $path
+        secretPrinted = $false
+        secretInEvidence = $false
+    } | ConvertTo-Json -Compress
+} finally {
+    $secret = $null
+}
+
+```
+
+
+## FILE: source/windows/Show-DevFleet-Credentials.ps1
+
+SHA256: 71a2690913ce61e9a48b24bcf7bcf6a6933c41b46b432375a212ebc3a2b159aa | Bytes: 647 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([switch]$CopyPassword)
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+$secrets=Get-OrCreateSecrets
+Write-Host "`nDevFleet dashboard credentials for this Windows host" -ForegroundColor Cyan
+Write-Host "Username: $($secrets.PortalAdminUser)"
+Write-Host "Password: $($secrets.PortalAdminPassword)"
+if($CopyPassword){Set-Clipboard -Value $secrets.PortalAdminPassword;Write-Host 'Password copied to clipboard.' -ForegroundColor Yellow}
+Write-Host "Stored with restricted ACLs under C:\ProgramData\DevFleet\secrets." -ForegroundColor DarkGray
+Read-Host 'Press Enter to close'
+
+```
+
+
+## FILE: source/windows/Start-DevFleet.ps1
+
+SHA256: 111e3e8828b164feae5ec9bc7a0000683bbb8bbb77c4921aab5b28713447f404 | Bytes: 1989 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([Parameter(Mandatory)][string]$InstanceName,[ValidateSet('Dashboard','VSCode')][string]$Mode='Dashboard')
+$ErrorActionPreference='Stop'
+$InstanceName = $InstanceName.Trim() -replace '^(?i:devfleet-)+',''
+$InstanceName = "devfleet-$InstanceName"
+try {
+ Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+ $config=Get-DevFleetConfig;$mp=Get-MultipassExe
+ Assert-MultipassIsolation -InstanceNames @($InstanceName)
+ Invoke-External $mp @('start',$InstanceName) -IgnoreExitCode
+ Wait-MultipassReady $InstanceName 300
+ $ip=Get-InstanceIPv4 $InstanceName -PreferTailscale
+ if(-not $ip){throw 'Could not determine the DevFleet VM IP address.'}
+ if($Mode -eq 'Dashboard'){
+  $port=[int]$config.Network.PortalPort
+  if(-not (Test-NetConnection -ComputerName $ip -Port $port -InformationLevel Quiet -WarningAction SilentlyContinue)){
+   throw "The DevFleet VM is running, but its dashboard is not reachable at http://${ip}:$port/. The DevFleet service may still be starting; wait one minute and try again."
+  }
+  Start-Process "http://${ip}:$port/"
+ }else{
+  $sshDir=Join-Path $env:USERPROFILE '.ssh';New-Item -ItemType Directory $sshDir -Force|Out-Null
+  $cfg=Join-Path $sshDir 'config';$alias=$InstanceName
+  $block=@"
+Host $alias
+    HostName $ip
+    User devrunner
+    IdentityFile $(Get-OrCreateDevFleetSshKey)
     IdentitiesOnly yes
     StrictHostKeyChecking accept-new
 "@
@@ -228,7 +472,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 ## FILE: tools/Build-AIAuditBundle.ps1
 
-SHA256: b629ddf29c295f25cd7e4072b6d06d8a43e78270686b44309ab43d3a984c744f | Bytes: 98855 | Git mode: 100644
+SHA256: 98011014a59a1194a40dcbdc4c9af9365a8d80a19262ad510851d26df16085de | Bytes: 100487 | Git mode: 100644
 
 ```
 [CmdletBinding()]
@@ -444,184 +688,4 @@ try {
     $failedAttemptSnapshotRelative = 'audit/luna-high-failed-attempt-freeze-20260831T002237512571Z.json'
     $failedAttemptSnapshotPath = Join-Path $Workspace ($failedAttemptSnapshotRelative -replace '/','\')
     $failedAttemptContract = (Test-Path -LiteralPath $failedAttemptSnapshotPath -PathType Leaf) -and
-        $candidateCommit -eq '21752fc0e50978183322204c523b40947d073aa0' -and
-        [string]$state.blocker_code -eq 'REPLACEMENT_CANDIDATE_BINDING_MISMATCH'
-    # Compute both sides from the live filesystem and the exact candidate commit
-    # using source/tools/release_fingerprint.py.  Never treat the current
-    # release-fingerprint.json rows as a live identity: they are candidate
-    # metadata and may be stale after tooling-only commits.
-    $identityArguments = @('--workspace',$Workspace,'--candidate-commit',$candidateCommit)
-    foreach ($artifactName in $candidateArtifacts.Keys) {
-        $artifactFullPath = Join-Path $Workspace ([string]$candidateArtifacts[$artifactName].path)
-        $identityArguments += @('--artifact',"$artifactName=$artifactFullPath")
-    }
-    $identityRaw = @(& $python (Join-Path $Workspace 'tools\compute_shipping_input_identity.py') @identityArguments)
-    if ($LASTEXITCODE -ne 0 -or $identityRaw.Count -eq 0) { throw 'Live/candidate shipping-input identity computation failed.' }
-    try { $identity = ($identityRaw -join "`n") | ConvertFrom-Json } catch { throw "Shipping-input identity output was not valid JSON: $($_.Exception.Message)" }
-    function Normalize-ShippingRows([object[]]$Rows) {
-        return @($Rows | Sort-Object root,path | ForEach-Object {
-            [ordered]@{root=[string]$_.root;path=[string]$_.path;bytes=[int64]$_.bytes;sha256=[string]$_.sha256;mode=[string]$_.mode}
-        })
-    }
-    $liveRows = Normalize-ShippingRows @($identity.liveShippingInputs)
-    $candidateRows = Normalize-ShippingRows @($identity.candidateShippingInputs)
-    if ($liveRows.Count -eq 0 -or $candidateRows.Count -eq 0) { throw 'Shipping-input identity computation returned no inputs.' }
-    $liveMode = ($identity.liveShippingModeContract | ConvertTo-Json -Compress -Depth 10)
-    $candidateMode = ($identity.candidateShippingModeContract | ConvertTo-Json -Compress -Depth 10)
-    # The Python identity tool is the authoritative canonical algorithm.  Do
-    # not hash a PowerShell serialization of rows here; that would omit the
-    # version and mode contract and could silently disagree with validators.
-    $rawLiveShippingInputIdentity = [string]$identity.liveShippingInputIdentity
-    $currentShippingInputIdentity = $rawLiveShippingInputIdentity
-    $candidateComputedIdentity = [string]$identity.candidateShippingInputIdentity
-    $candidateShippingInputIdentity = [string]$state.shipping_input_identity
-    if (-not $candidateShippingInputIdentity) { $candidateShippingInputIdentity = [string]$state.shippingInputIdentity }
-    if (-not $candidateShippingInputIdentity) { $candidateShippingInputIdentity = [string]$artifactManifest.shippingInputIdentity }
-    if ($failedAttemptContract) { $currentShippingInputIdentity = [string]$state.failed_replacement_attempt.buildTimeShippingInputIdentity }
-    $historicalDiagnosticTuple = $candidateCommit -eq '2739e0366d070285e44b4fc764ef9247d40b2f94' -and
-        $candidateShippingInputIdentity -eq 'daa30ef9f521a47fedb4bacce91e3440c20e1a8f05543b4d5e823e5c3541e64e' -and
-        [string]$state.releaseFingerprintId -eq '80c8b88c2f2ec828f5ab0f9713d63fa3f4cc4cbad7c382aa2f154f3196c3de84' -and
-        [bool]$state.source_changed_since_candidate -and [bool]$state.rebuild_required -and -not [bool]$state.candidate_is_current
-    if (-not $currentShippingInputIdentity -or -not $candidateShippingInputIdentity -or ($candidateComputedIdentity -ne $candidateShippingInputIdentity -and -not $historicalDiagnosticTuple -and -not $failedAttemptContract)) { throw 'Candidate-bound shipping-input identity does not match the exact candidate commit rows.' }
-    $embeddedFingerprintRows = Normalize-ShippingRows @($releaseFingerprint.shippingInputs)
-    if (($embeddedFingerprintRows | ConvertTo-Json -Compress -Depth 12) -cne ($candidateRows | ConvertTo-Json -Compress -Depth 12)) { throw 'release-fingerprint.json shipping rows are not the exact candidate Git-object rows.' }
-    if ([string]$identity.candidateReleaseFingerprintId -cne $releaseId -or [string]$releaseFingerprint.releaseFingerprintId -cne $releaseId) { throw 'Declared release fingerprint does not recompute from the candidate Git-object rows and exact artifact tuple.' }
-    $liveToolingId = [string]$identity.liveToolingFingerprint.toolingFingerprintId
-    if ($liveToolingId -cne $toolingId) {
-        if (-not $sourceChanged -or -not $rebuildRequired -or $workingToolingId -notmatch '^[0-9a-f]{64}$' -or $liveToolingId -cne $workingToolingId) {
-            throw 'Live release tooling differs from the candidate tuple without an exact fail-closed working-tree tooling fingerprint.'
-        }
-    }
-    if (($releaseFingerprint.shippingModeContract | ConvertTo-Json -Compress -Depth 10) -cne ($identity.candidateShippingModeContract | ConvertTo-Json -Compress -Depth 10)) { throw 'release-fingerprint.json mode contract is not candidate-bound.' }
-    $rawAuthorizedShippingPaths = @($state.authorized_correction.shipping_paths | ForEach-Object { ([string]$_).Trim().Replace('\\','/').TrimStart('/') } | Where-Object { $_ })
-    $authorizedShippingPaths = @($rawAuthorizedShippingPaths | Sort-Object -Unique)
-    if ($authorizedShippingPaths.Count -ne $rawAuthorizedShippingPaths.Count -or @($authorizedShippingPaths | Where-Object { $_ -notmatch '^(source|installer-source)/[^/].*$' -or $_ -match '(^|/)\.\.(/|$)' }).Count -gt 0) {
-        throw 'Authorized shipping correction paths are duplicated, malformed, or outside the shipping roots.'
-    }
-    $liveByPath = @{}; foreach ($row in $liveRows) { $liveByPath[(([string]$row.root).TrimEnd('/') + '/' + [string]$row.path)] = ($row | ConvertTo-Json -Compress -Depth 10) }
-    $candidateByPath = @{}; foreach ($row in $candidateRows) { $candidateByPath[(([string]$row.root).TrimEnd('/') + '/' + [string]$row.path)] = ($row | ConvertTo-Json -Compress -Depth 10) }
-    $shippingChangedPaths = @((@($liveByPath.Keys) + @($candidateByPath.Keys)) | Sort-Object -Unique | Where-Object { $liveByPath[$_] -cne $candidateByPath[$_] })
-    # A Windows checkout may materialize committed LF blobs as CRLF without
-    # changing the canonical Git-object candidate.  Prove this narrowly with
-    # Git's EOL-only diff mode before accepting the candidate as unchanged.
-    $crlfOnlyPaths = [Collections.Generic.List[string]]::new()
-    $substantiveShippingChangedPaths = [Collections.Generic.List[string]]::new()
-    foreach ($changedPath in $shippingChangedPaths) {
-        if (-not $liveByPath.ContainsKey($changedPath) -or -not $candidateByPath.ContainsKey($changedPath)) {
-            $substantiveShippingChangedPaths.Add($changedPath)
-            continue
-        }
-        & git -C $Workspace diff --quiet --ignore-space-at-eol $candidateCommit -- $changedPath
-        if ($LASTEXITCODE -eq 0) { $crlfOnlyPaths.Add($changedPath); continue }
-        if ($LASTEXITCODE -eq 1) { $substantiveShippingChangedPaths.Add($changedPath); continue }
-        throw "Git could not classify the candidate/live line-ending delta for $changedPath."
-    }
-    $crlfOnlyPaths = @($crlfOnlyPaths | Sort-Object -Unique)
-    $substantiveShippingChangedPaths = @($substantiveShippingChangedPaths | Sort-Object -Unique)
-    $crlfOnlyMaterialization = $shippingChangedPaths.Count -gt 0 -and $substantiveShippingChangedPaths.Count -eq 0
-    if ($crlfOnlyMaterialization) { $currentShippingInputIdentity = $candidateComputedIdentity }
-    $postFailurePaths = @($state.failed_replacement_attempt.postFailureEvidenceTooling.paths | ForEach-Object { ([string]$_.path).Trim().Replace('\','/') } | Where-Object { $_ })
-    $attemptedChangedPaths = @($shippingChangedPaths | Where-Object { $postFailurePaths -notcontains $_ })
-    $historicalCrlfPaths = @($attemptedChangedPaths | Where-Object { $authorizedShippingPaths -notcontains $_ })
-    $unknownHistoricalPaths = @($historicalCrlfPaths | Where-Object { $_ -notmatch '^(source|installer-source)/' })
-    if (($historicalDiagnosticTuple -or $failedAttemptContract) -and ($historicalCrlfPaths.Count -ne 28 -or $unknownHistoricalPaths.Count -ne 0)) { throw "Historical CRLF/current-change partition is not exactly 28 classified shipping rows (rows=$($historicalCrlfPaths.Count), unknown=$($unknownHistoricalPaths.Count))." }
-    $splitIdentityCorrectionAllowed = $sourceChanged -and $rebuildRequired -and $substantiveShippingChangedPaths.Count -gt 0 -and
-        ((@($substantiveShippingChangedPaths) -join "`n") -ceq (@($authorizedShippingPaths) -join "`n"))
-    if ($rawLiveShippingInputIdentity -cne $candidateComputedIdentity -or $liveMode -cne $candidateMode -or [string]$identity.liveVersion -cne [string]$identity.candidateVersion -or [string]$identity.liveInstallerVersion -cne [string]$identity.candidateInstallerVersion) {
-        if (-not $splitIdentityCorrectionAllowed -and -not $historicalDiagnosticTuple -and -not $failedAttemptContract -and -not $crlfOnlyMaterialization) { throw 'Live shipping inputs differ from the candidate-bound source/installer identity without an authorized, fail-closed replacement correction.' }
-    }
-    $allChanges = @(& git -C $Workspace diff --name-only $candidateCommit --; & git -C $Workspace ls-files --others --exclude-standard)
-    $allowedToolingOnly = $true
-    foreach ($change in $allChanges) {
-        $normalized = ([string]$change).Trim().Replace('\','/')
-        if (-not $normalized) { continue }
-        # Shipping classification is defined by the canonical candidate/live
-        # inventory, not by a folder allowlist. Release-control documentation
-        # and installed skill files can legitimately live outside tools/ while
-        # remaining non-shipping; a newly added shipping file appears in the
-        # live inventory and is rejected here.
-        $isShippingPath = $liveByPath.ContainsKey($normalized) -or $candidateByPath.ContainsKey($normalized)
-        if (-not $isShippingPath -or $crlfOnlyPaths -contains $normalized) { continue }
-        $allowedToolingOnly = $false
-        break
-    }
-    if ($candidateShippingInputIdentity -ne $currentShippingInputIdentity -or -not $allowedToolingOnly -or $failedAttemptContract) { $sourceChanged = $true; $rebuildRequired = $true }
-    if ($artifactMismatch) { $sourceChanged = $true; $rebuildRequired = $true }
-    $candidateIsCurrent = [bool]$state.candidate_is_current -and -not $sourceChanged -and -not $rebuildRequired -and -not $failedAttemptContract
-    $status = if ($preAcceptanceAudit) { 'PRE_ACCEPTANCE_RELEASE_AUDIT' } elseif ($finalAcceptanceValid) { 'PASS' } elseif ($failedAttemptContract) { 'BLOCKED — USER ACTION REQUIRED' } elseif (-not $candidateIsCurrent -or [string]$state.status -match '(?i)blocked') { 'BLOCKED' } elseif ([string]$state.status -match '(?i)awaiting|progress') { 'READY_FOR_FULLRELEASE' } else { 'IN_PROGRESS' }
-    $bundleMode = if ($preAcceptanceAudit -or $finalAcceptanceValid) { 'release' } else { 'diagnostic' }
-    $releaseValidationMode = if ($preAcceptanceAudit) { 'pre-acceptance' } else { $bundleMode }
-
-    Add-Tree (Join-Path $Workspace 'source') $sourceStage 'source'
-    Add-Tree (Join-Path $Workspace 'installer-source') $installerStage 'installer-source'
-    if ($crlfOnlyPaths.Count -gt 0) {
-        # Normalize only independently proven EOL-only rows to their canonical
-        # Git-object bytes.  Mixed substantive changes remain live in the
-        # diagnostic bundle and are bound by authorized_correction below.
-        foreach ($crlfPath in $crlfOnlyPaths) {
-            $parts = $crlfPath -split '/', 2
-            $destinationRoot = if ($parts[0] -eq 'source') { $sourceStage } else { $installerStage }
-            Add-GitBlob $candidateCommit $crlfPath (Join-Path $destinationRoot ($parts[1] -replace '/','\\')) | Out-Null
-        }
-    }
-    $stagedIdentityArguments = @('--source-root',$sourceStage,'--installer-root',$installerStage)
-    foreach ($artifactName in $candidateArtifacts.Keys) {
-        $artifactFullPath = Join-Path $Workspace ([string]$candidateArtifacts[$artifactName].path)
-        $stagedIdentityArguments += @('--artifact',"$artifactName=$artifactFullPath")
-    }
-    $stagedIdentityRaw = @(& $python (Join-Path $Workspace 'tools\compute_shipping_input_identity.py') @stagedIdentityArguments)
-    if ($LASTEXITCODE -ne 0 -or $stagedIdentityRaw.Count -eq 0) { throw 'Canonicalized diagnostic shipping-input identity computation failed.' }
-    try { $stagedIdentity = ($stagedIdentityRaw -join "`n") | ConvertFrom-Json } catch { throw "Canonicalized diagnostic shipping-input identity output was not valid JSON: $($_.Exception.Message)" }
-    $currentShippingInputIdentity = [string]$stagedIdentity.shippingInputIdentity
-    if ($currentShippingInputIdentity -notmatch '^[0-9a-f]{64}$') { throw 'Canonicalized diagnostic shipping-input identity is malformed.' }
-    if ($crlfOnlyMaterialization -and $currentShippingInputIdentity -cne $candidateComputedIdentity) { throw 'EOL-only normalization did not reproduce the candidate Git-object shipping identity.' }
-    Add-Tree (Join-Path $Workspace 'automation\release-e2e') (Join-Path $automationStage 'release-e2e') 'automation/release-e2e'
-    Add-Tree (Join-Path $Workspace 'tools') $toolingStage 'release-tooling'
-    # Carry the installed release-control contract and its durable Markdown
-    # memory as review context. These files are not promotion authority and do
-    # not enter the shipping-source inventory below.
-    $releaseControlStage = Join-Path $stage 'release-control'
-    Add-Tree (Join-Path $Workspace 'docs\ai\devfleet-release') (Join-Path $releaseControlStage 'workflow') 'release-control/workflow'
-    Add-CompactFile (Join-Path $Workspace '.agents\skills\devfleet-release-control\SKILL.md') (Join-Path $releaseControlStage 'installed-skill\SKILL.md') | Out-Null
-    # Include only the reviewed audit-convergence skill closure. It is advisory
-    # review evidence, not a second release authority or a source of runtime grants.
-    $auditSkillRoot = Join-Path $Workspace '.agents/skills/devfleet-audit-convergence'
-    if (Test-Path -LiteralPath $auditSkillRoot -PathType Container) {
-        $auditSkillFiles = @(
-            'SKILL.md', 'agents/openai.yaml', 'scripts/audit_io.py',
-            'scripts/audit_convergence.py', 'scripts/native_runner.py',
-            'references/completion-contract.md', 'tests/test_audit_convergence.py',
-            'tests/Test-AuditSkillPackaging.ps1'
-        )
-        foreach ($skillRelative in $auditSkillFiles) {
-            $inputRelative = '.agents/skills/devfleet-audit-convergence/' + $skillRelative
-            $checkedPath = $Workspace
-            foreach ($component in $inputRelative.Split('/')) {
-                $checkedPath = Join-Path $checkedPath $component
-                $item = Get-Item -LiteralPath $checkedPath -Force -ErrorAction Stop
-                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-                    throw 'Audit skill packaging rejects reparse-point inputs.'
-                }
-            }
-            if (-not (Test-Path -LiteralPath $checkedPath -PathType Leaf)) {
-                throw "Required audit skill file is missing: $skillRelative"
-            }
-            $beforeHash = Get-Hash $checkedPath
-            $destination = Join-Path $releaseControlStage ('audit-convergence-skill/' + $skillRelative)
-            if (-not (Add-CompactFile $checkedPath $destination)) {
-                throw "Audit skill staging failed: $skillRelative"
-            }
-            if ((Get-Hash $destination) -cne $beforeHash -or (Get-Hash $checkedPath) -cne $beforeHash) {
-                throw "Audit skill changed during staging: $skillRelative"
-            }
-        }
-    }
-    $agentMemoryRoot = Join-Path $Workspace 'audit\agent-memory'
-    if (Test-Path -LiteralPath $agentMemoryRoot -PathType Container) {
-        foreach ($memoryFile in @(Get-ChildItem -LiteralPath $agentMemoryRoot -Recurse -File -Filter '*.md')) {
-            $relativeMemory = $memoryFile.FullName.Substring($agentMemoryRoot.Length).TrimStart('\','/')
-            Add-CompactFile $memoryFile.FullName (Join-Path $auditStage (Join-Path 'agent-memory' $relativeMemory)) | Out-Null
-        }
-    }
-    if ($historicalDiagnosticTuple) {
-        # Include exact old-candidate bytes for every indepe
+        $candidateCommit -eq '21752fc0e50

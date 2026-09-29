@@ -1,10 +1,86 @@
 # DevFleet source part 020
 
 Full-source UTF-8 byte interval [883500, 930000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: d7d96c2feaa5cee28c89563d234c69cabc101a5f41698661913a03e1df03f5cb
+Payload SHA-256: 139a7162afe2cafc8b9addf455a667bf074d14c9a2979c04c571283b7f01491c
 
 <!-- BEGIN SOURCE SLICE -->
-ing]$acquisition.packageId-cne[string]$ExpectedPlan.dependencies.powershell7.wingetPackageId-or[bool]$acquisition.productLifecycleStarted-or[bool]$acquisition.stageMarkerWritten){throw 'PowerShell acquisition evidence violates the candidate/product boundary.'}
+PASS'){$state.primaryError="M1 $Operation returned $([string]$raw.outcome).";return $null}
+        if(-not[bool]$raw.outputComplete){$state.primaryError="M1 $Operation returned incomplete output.";return $null}
+        return $raw
+    }.GetNewClosure()
+    $launchArguments=@('launch',$UbuntuImage,'--name',$InstanceName,'--cpus',[string]$Resources.cpus,'--memory',[string]$Resources.memory,'--disk',[string]$Resources.disk)
+    if($CloudInitPath){$launchArguments+=@('--cloud-init',$CloudInitPath)}
+    $launch=&$invoke 'launch' $launchArguments 900
+    if($launch){$progress.launchAccepted=$true}
+    $info=$null
+    if($launch){$info=&$invoke 'info-running' @('info',$InstanceName,'--format','json') 60}
+    if($info){
+        try{$parsed=[string]$info.stdout|ConvertFrom-Json -ErrorAction Stop;$properties=@($parsed.info.PSObject.Properties|Where-Object{[string]$_.Name-ceq$InstanceName});if($properties.Count-ne1){throw 'exact instance key missing'};$row=$properties[0].Value;if([string]$row.state-cne'Running'){throw 'instance not Running'};$addresses=@($row.ipv4|Where-Object{[string]$_-match'^\d{1,3}(?:\.\d{1,3}){3}$'});if($addresses.Count-lt1){throw 'IPv4 absent'};$progress.instanceRunning=$true;$progress.ipObserved=$true}catch{$state.primaryError="M1 info-running response was malformed: $(ConvertTo-DevFleetDiagnosticSafeText $_.Exception.Message)"}
+    }
+    $ssh=$null;if($progress.instanceRunning){$ssh=&$invoke 'ssh-ready' @('exec',$InstanceName,'--','true') 120;if($ssh){$progress.sshReady=$true}}
+    $cloud=$null;if($progress.sshReady){$cloud=&$invoke 'cloud-init' @('exec',$InstanceName,'--','cloud-init','status','--wait') 300;if($cloud){if([string]$cloud.stdout-notmatch'(?im)^status:\s*done\s*$'){$state.primaryError='M1 cloud-init did not report done.'}else{$progress.cloudInitDone=$true}}}
+    $finalInfo=$null;if($progress.cloudInitDone){$finalInfo=&$invoke 'info-final' @('info',$InstanceName,'--format','json') 60;if($finalInfo){try{$parsed=[string]$finalInfo.stdout|ConvertFrom-Json -ErrorAction Stop;$properties=@($parsed.info.PSObject.Properties|Where-Object{[string]$_.Name-ceq$InstanceName});if($properties.Count-ne1-or[string]$properties[0].Value.state-cne'Running'){throw 'final exact Running state missing'}}catch{$state.primaryError="M1 final info response was malformed: $(ConvertTo-DevFleetDiagnosticSafeText $_.Exception.Message)"}}}
+    $finished=&$now
+    [pscustomobject][ordered]@{schemaVersion=1;kind='DEVFLEET_CAMPAIGN_E_M1_SEQUENCE';status=if($progress.launchAccepted-and$progress.instanceRunning-and$progress.ipObserved-and$progress.sshReady-and$progress.cloudInitDone-and$finalInfo-and-not$state.primaryError){'PASS'}else{'BLOCKED'};runId=$RunId;instanceName=$InstanceName;ubuntuImage=$UbuntuImage;resources=[ordered]@{cpus=[int]$Resources.cpus;memory=[string]$Resources.memory;disk=[string]$Resources.disk;diagnosticDeviation=$true};startedAtUtc=$started.ToString('o');producedAtUtc=$finished.ToString('o');ownerDeadlineUtc=$owner.ToString('o');progress=$progress;observations=@($observations);primaryError=[string]$state.primaryError;productLifecycleStarted=$false;productProgressClaimed=$false}
+}
+
+function New-DevFleetCampaignEM1CleanupState {
+    param([Parameter(Mandatory)][ValidatePattern('^DevFleet-E2E-E-M1-[A-Za-z0-9._-]+$')][string]$InstanceName)
+    [ordered]@{status='UNVERIFIED';instanceName=$InstanceName;delete=$null;inventory=$null;finalInventoryCount=-1}
+}
+
+function Assert-DevFleetCampaignEM1Result {
+    param([Parameter(Mandatory)][psobject]$Result,[Parameter(Mandatory)][string]$ExpectedRunId,[Parameter(Mandatory)][guid]$ExpectedVmId,[Parameter(Mandatory)][string]$ExpectedInstanceName,[Parameter(Mandatory)][string]$ExpectedPayloadSha256,[hashtable]$ExpectedResources=@{cpus=2;memory='2G';disk='10G'})
+    if([int]$Result.schemaVersion-ne1-or[string]$Result.kind-cne'DEVFLEET_CAMPAIGN_E_M1_RESULT'-or[string]$Result.status-cnotin@('PASS_DIAGNOSTIC','BLOCKED')){throw 'Campaign E M1 result schema/status is invalid.'}
+    if([string]$Result.runId-cne$ExpectedRunId-or[guid][string]$Result.vmId-ne$ExpectedVmId-or[string]$Result.instanceName-cne$ExpectedInstanceName-or[string]$Result.payloadSha256-cne$ExpectedPayloadSha256){throw 'Campaign E M1 result identity mismatch.'}
+    $deadline=([datetime]$Result.ownerDeadlineUtc).ToUniversalTime();$produced=([datetime]$Result.producedAtUtc).ToUniversalTime();if($produced-gt$deadline){throw 'Campaign E M1 result was produced after cutoff.'}
+    if([string]$Result.multipassSha256-notmatch'^[0-9a-f]{64}$'-or[bool]$Result.productLifecycleStarted-or[bool]$Result.productProgressClaimed-or[bool]$Result.boundaryBefore.activeTransactionPresent-or[int]$Result.boundaryBefore.stageMarkerCount-ne0-or[bool]$Result.boundaryAfter.activeTransactionPresent-or[int]$Result.boundaryAfter.stageMarkerCount-ne0){throw 'Campaign E M1 fabricated or crossed the product boundary.'}
+    if([string]$Result.cleanup.status-cne'ABSENT_VERIFIED'-or[string]$Result.cleanup.instanceName-cne$ExpectedInstanceName-or[int]$Result.cleanup.finalInventoryCount-ne0){throw 'Campaign E M1 cleanup did not prove exact empty inventory.'}
+    if([string]$Result.status-ceq'PASS_DIAGNOSTIC'){
+        $sequence=$Result.sequence;$sequenceDeadline=([datetime]$sequence.ownerDeadlineUtc).ToUniversalTime();$sequenceStarted=([datetime]$sequence.startedAtUtc).ToUniversalTime();$sequenceProduced=([datetime]$sequence.producedAtUtc).ToUniversalTime()
+        if([string]$sequence.status-cne'PASS'-or[string]$sequence.runId-cne$ExpectedRunId-or[string]$sequence.instanceName-cne$ExpectedInstanceName-or$sequenceStarted-gt$sequenceDeadline-or$sequenceProduced-lt$sequenceStarted-or$sequenceProduced-gt$sequenceDeadline-or$sequenceDeadline-gt$deadline-or[bool]$sequence.productLifecycleStarted-or[bool]$sequence.productProgressClaimed-or-not[bool]$sequence.resources.diagnosticDeviation-or[int]$sequence.resources.cpus-ne[int]$ExpectedResources.cpus-or[string]$sequence.resources.memory-cne[string]$ExpectedResources.memory-or[string]$sequence.resources.disk-cne[string]$ExpectedResources.disk-or-not[bool]$sequence.progress.launchAccepted-or-not[bool]$sequence.progress.instanceRunning-or-not[bool]$sequence.progress.ipObserved-or-not[bool]$sequence.progress.sshReady-or-not[bool]$sequence.progress.cloudInitDone){throw 'Campaign E M1 PASS lacks required identity/deadline/readiness evidence.'}
+        $expected=@('launch','info-running','ssh-ready','cloud-init','info-final');$ops=@($sequence.observations);if($ops.Count-ne$expected.Count){throw 'Campaign E M1 PASS operation count is invalid.'};$previous=$sequenceStarted;for($i=0;$i-lt$expected.Count;$i++){$opStarted=([datetime]$ops[$i].startedAtUtc).ToUniversalTime();$opFinished=([datetime]$ops[$i].finishedAtUtc).ToUniversalTime();$opDeadline=([datetime]$ops[$i].deadlineUtc).ToUniversalTime();if([string]$ops[$i].operation-cne$expected[$i]-or[string]$ops[$i].outcome-cne'PASS'-or-not[bool]$ops[$i].outputComplete-or$opStarted-lt$previous-or$opFinished-lt$opStarted-or$opFinished-gt$sequenceProduced-or$opDeadline-gt$sequenceDeadline){throw 'Campaign E M1 PASS operation evidence is invalid.'};$previous=$opFinished}
+    }
+    $serialized=$Result|ConvertTo-Json -Depth 24 -Compress;if($serialized-match'(?i)\b(password|secret|token|authorization|hmac)\b\s*[:=]\s*(?!<redacted>|\\u003credacted\\u003e)[^,}\"]+'){throw 'Campaign E M1 result contains unredacted secret-shaped evidence.'}
+    return $true
+}
+
+function Get-DevFleetCampaignEDeadlinePartition {
+    param(
+        [Parameter(Mandatory)][datetime]$OwnerDeadlineUtc,
+        [ValidateRange(60,900)][int]$ReservedTerminalizationSeconds=300,
+        [scriptblock]$ClockProvider
+    )
+    $now=if($ClockProvider){([datetime](& $ClockProvider)).ToUniversalTime()}else{[datetime]::UtcNow}
+    $owner=$OwnerDeadlineUtc.ToUniversalTime()
+    $child=$owner.AddSeconds(-$ReservedTerminalizationSeconds)
+    if($child-le$now){throw 'Campaign E owner deadline cannot provide the required terminalization reserve.'}
+    [pscustomobject][ordered]@{observedAtUtc=$now.ToString('o');childDeadlineUtc=$child.ToString('o');ownerDeadlineUtc=$owner.ToString('o');terminalizationDeadlineUtc=$owner.AddSeconds($ReservedTerminalizationSeconds).ToString('o');reservedTerminalizationSeconds=$ReservedTerminalizationSeconds;childRemainingSeconds=[int][math]::Floor(($child-$now).TotalSeconds);ownerRemainingSeconds=[int][math]::Floor(($owner-$now).TotalSeconds)}
+}
+
+function Assert-DevFleetCampaignEPrerequisiteResult {
+    param(
+        [Parameter(Mandatory)][psobject]$Result,
+        [Parameter(Mandatory)][string]$ExpectedRunId,
+        [Parameter(Mandatory)][guid]$ExpectedVmId,
+        [Parameter(Mandatory)][string]$ExpectedPayloadSha256,
+        [Parameter(Mandatory)][psobject]$ExpectedPlan
+    )
+    if([int]$Result.schemaVersion-ne1-or[string]$Result.kind-cne'DEVFLEET_CAMPAIGN_E_PREREQUISITE_READY'){throw 'Prerequisite result schema identity is invalid.'}
+    if([string]$Result.runId-cne$ExpectedRunId-or[guid][string]$Result.vmId-ne$ExpectedVmId){throw 'Prerequisite result run/VM identity mismatch.'}
+    if([string]$Result.payloadSha256-cne$ExpectedPayloadSha256){throw 'Prerequisite result payload identity mismatch.'}
+    if([string]$Result.status-cne'PASS'){throw "Prerequisite result is not PASS: $([string]$Result.status)"}
+    $deadline=([datetime]$Result.ownerDeadlineUtc).ToUniversalTime();$started=([datetime]$Result.startedAtUtc).ToUniversalTime();$produced=([datetime]$Result.producedAtUtc).ToUniversalTime()
+    if($started-gt$deadline-or$produced-gt$deadline-or$produced-lt$started){throw 'Prerequisite result violates its immutable owner deadline.'}
+    if([string]$Result.role-cne[string]$ExpectedPlan.role-or[string]$Result.packageVersion-cne[string]$ExpectedPlan.packageVersion){throw 'Prerequisite result candidate role/version mismatch.'}
+    foreach($name in @('version','dependencies','config','bootstrap','install','common')){if([string]$Result.inputHashes.$name-cne[string]$ExpectedPlan.inputHashes.$name){throw "Prerequisite result candidate input hash mismatch: $name"}}
+    if([bool]$Result.systemPolicyChanged-or[bool]$Result.productLifecycleStarted-or[bool]$Result.activeTransactionPresent-or[int]$Result.stageMarkerCount-ne0-or[int]$Result.activeInstallProcessCount-ne0){throw 'Prerequisite result crossed a forbidden product/security boundary.'}
+    if([bool]$Result.pendingReboot){throw 'Prerequisite state requires a reboot and is not checkpoint-ready.'}
+    $powerShellVersion=[Version][string]$Result.powershell.version
+    if([string]$Result.powershell.status-cne'Compatible'-or$powerShellVersion-lt[Version][string]$ExpectedPlan.dependencies.powershell7.minimumSupportedVersion-or$powerShellVersion.Major-gt[int]$ExpectedPlan.dependencies.powershell7.maximumMajor-or[string]$Result.powershell.pathSha256-notmatch'^[0-9a-f]{64}$'){throw 'PowerShell did not reach the candidate compatibility policy.'}
+    $acquisition=$Result.powershellAcquisition
+    if($null-eq$acquisition-or[int]$acquisition.schemaVersion-ne1-or[string]$acquisition.kind-cne'DEVFLEET_CAMPAIGN_E_POWERSHELL_ACQUISITION'-or[string]$acquisition.status-cne'PASS'){throw 'PowerShell acquisition evidence is missing or malformed.'}
+    if([string]$acquisition.packageId-cne[string]$ExpectedPlan.dependencies.powershell7.wingetPackageId-or[bool]$acquisition.productLifecycleStarted-or[bool]$acquisition.stageMarkerWritten){throw 'PowerShell acquisition evidence violates the candidate/product boundary.'}
     $acquisitionStarted=([datetime]$acquisition.startedAtUtc).ToUniversalTime();$acquisitionFinished=([datetime]$acquisition.finishedAtUtc).ToUniversalTime();$acquisitionDeadline=([datetime]$acquisition.ownerDeadlineUtc).ToUniversalTime()
     if($acquisitionStarted-lt$started-or$acquisitionFinished-lt$acquisitionStarted-or$acquisitionFinished-gt$produced-or$acquisitionDeadline-ne$deadline){throw 'PowerShell acquisition evidence violates the prerequisite owner timeline.'}
     if([string]$acquisition.powershell.status-cne'Compatible'-or[string]$acquisition.powershell.version-cne[string]$Result.powershell.version-or[string]$acquisition.powershell.pathSha256-cne[string]$Result.powershell.pathSha256){throw 'PowerShell acquisition and final candidate compatibility evidence disagree.'}
@@ -378,220 +454,4 @@ SHA256: eb55dfbc1bb0e05213361eb8083072e5b8f215905df5ba93562c0ebd0112da53 | Bytes
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot 'Evidence.psm1')
-Import-Module (Join-Path $PSScriptRoot 'GuestSession.psm1') -Force
-
-$script:RealUseAcceptanceContract = 'devfleet-real-use-acceptance-v1'
-$script:RealUseAcceptancePhase = 'REAL-USE-ACCEPTANCE'
-$script:RealUseAcceptanceOwnerTimeoutSeconds = 36000
-$script:RealUseAcceptancePrepareTimeoutSeconds = 10800
-$script:RealUseAcceptanceCleanupReserveSeconds = 900
-$script:RealUsePairingCaptureContract = 'devfleet-real-use-primary-pairing-v1'
-$script:RealUseClusterJoinContract = 'devfleet-real-use-cluster-join-v1'
-$script:RealUseAcceptanceAssertions = [ordered]@{
-    U01 = @('authenticatedDashboard','templateCreated','identityBound','assetsPresent','credentialsNotLogged')
-    U02 = @('startCompleted','healthCompleted','testCompleted','smokeOutputObserved','uiBackendContainerAgree')
-    U03 = @('stopCompleted','restartCompleted','serviceRestartObserved','sameProjectAndData','noDuplicateWriter','noPendingOperations','healthRecovered')
-    U04 = @('immediateBackupVerified','vaultUploadVerified','backupBeforeQuarantine','quarantineReversible','foreignCollisionRejected','collisionPreserved','restoreCompleted','contentRecovered')
-    U05 = @('vaultCopyCompleted','copyIdentityBound','copyContentRecovered','originalUnchanged','copyStartRejected','securityStartRejected','foreignLeaseStartRejected','originalUsable','onlyIntendedOwnerStarts')
-}
-
-function Get-RealUseAcceptanceProperty {
-    param(
-        [AllowNull()][object]$Value,
-        [Parameter(Mandatory)][string]$Name,
-        [ref]$Found
-    )
-    $Found.Value = $false
-    if ($null -eq $Value) { return $null }
-    if ($Value -is [System.Collections.IDictionary]) {
-        foreach ($key in $Value.Keys) {
-            if ([string]$key -ieq $Name) { $Found.Value = $true; return $Value[$key] }
-        }
-        return $null
-    }
-    foreach ($property in @($Value.PSObject.Properties)) {
-        if ([string]$property.Name -ieq $Name) { $Found.Value = $true; return $property.Value }
-    }
-    return $null
-}
-
-function Get-RealUseAcceptancePropertyNames {
-    param([AllowNull()][object]$Value)
-    if ($null -eq $Value) { return @() }
-    if ($Value -is [System.Collections.IDictionary]) { return @($Value.Keys | ForEach-Object { [string]$_ }) }
-    return @($Value.PSObject.Properties | ForEach-Object { [string]$_.Name })
-}
-
-function Assert-RealUseAcceptanceKeys {
-    param(
-        [Parameter(Mandatory)][object]$Value,
-        [Parameter(Mandatory)][string[]]$Allowed,
-        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Required,
-        [Parameter(Mandatory)][string]$Label
-    )
-    $names = @(Get-RealUseAcceptancePropertyNames $Value)
-    $unknown = @($names | Where-Object { $_ -notin $Allowed })
-    $missing = @($Required | Where-Object { $_ -notin $names })
-    if ($unknown.Count -or $missing.Count) { throw "$Label has missing or unexpected fields." }
-    return $true
-}
-
-function Assert-RealUseAcceptanceRunId {
-    param([Parameter(Mandatory)][string]$RunId)
-    if ($RunId.Length -gt 128 -or $RunId -cnotmatch '\A(?:e2e|fullrelease)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\z') {
-        throw 'REAL-USE-ACCEPTANCE RunId failed ownership validation.'
-    }
-    return $true
-}
-
-function Assert-RealUseAcceptanceContainedPath {
-    param(
-        [Parameter(Mandatory)][string]$Root,
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$Label
-    )
-    $fullRoot = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-    $fullPath = [IO.Path]::GetFullPath($Path)
-    $prefix = $fullRoot + [IO.Path]::DirectorySeparatorChar
-    if (-not $fullPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw "$Label is outside the current FullRelease evidence directory." }
-    return $fullPath
-}
-
-function Assert-RealUseAcceptanceCanonicalEvidencePath {
-    param(
-        [Parameter(Mandatory)][string]$Root,
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$LeafName
-    )
-    $actual = Assert-RealUseAcceptanceContainedPath -Root $Root -Path $Path -Label "REAL-USE-ACCEPTANCE $LeafName evidence"
-    $expected = [IO.Path]::GetFullPath((Join-Path $Root $LeafName))
-    if (-not $actual.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) { throw "REAL-USE-ACCEPTANCE $LeafName evidence path is not canonical." }
-    return $actual
-}
-
-function Test-RealUseAcceptanceJsonEqual {
-    param([AllowNull()][object]$Left, [AllowNull()][object]$Right)
-    $leftNormalized = $Left | ConvertTo-Json -Depth 32 -Compress | ConvertFrom-Json | ConvertTo-Json -Depth 32 -Compress
-    $rightNormalized = $Right | ConvertTo-Json -Depth 32 -Compress | ConvertFrom-Json | ConvertTo-Json -Depth 32 -Compress
-    return ($leftNormalized -ceq $rightNormalized)
-}
-
-function Assert-RealUseAcceptanceSanitizedValue {
-    param(
-        [AllowNull()][object]$Value,
-        [string]$Path = 'report',
-        [int]$Depth = 0
-    )
-    if ($Depth -gt 16) { throw 'REAL-USE-ACCEPTANCE report exceeds the bounded evidence depth.' }
-    if ($null -eq $Value) { return $true }
-    if ($Value -is [string]) {
-        if ($Value.Length -gt 4096 -or $Value -match '[\x00-\x08\x0B\x0C\x0E-\x1F]') { throw 'REAL-USE-ACCEPTANCE report contains an unsafe string.' }
-        if ($Value -match '(?i)(?:authorization\s*:|bearer\s+[A-Za-z0-9._~+/=-]{8,}|basic\s+[A-Za-z0-9+/=]{8,}|tskey-[A-Za-z0-9-]+|DEVFLEET_ADMIN_(?:USER|PASSWORD)\s*=|(?:password|secret|token|cookie)\s*[:=])') {
-            throw 'REAL-USE-ACCEPTANCE report contains a forbidden secret-shaped value.'
-        }
-        return $true
-    }
-    if ($Value -is [bool] -or $Value -is [byte] -or $Value -is [int16] -or $Value -is [int32] -or $Value -is [int64] -or $Value -is [single] -or $Value -is [double] -or $Value -is [decimal] -or $Value -is [datetime]) { return $true }
-    if ($Value -is [System.Collections.IEnumerable] -and -not ($Value -is [System.Collections.IDictionary]) -and -not ($Value -is [pscustomobject])) {
-        $items = @($Value)
-        if ($items.Count -gt 512) { throw 'REAL-USE-ACCEPTANCE report contains an oversized collection.' }
-        for ($index = 0; $index -lt $items.Count; $index++) { Assert-RealUseAcceptanceSanitizedValue -Value $items[$index] -Path "$Path[$index]" -Depth ($Depth + 1) | Out-Null }
-        return $true
-    }
-    $names = @(Get-RealUseAcceptancePropertyNames $Value)
-    if ($names.Count -gt 128) { throw 'REAL-USE-ACCEPTANCE report contains an oversized object.' }
-    foreach ($name in $names) {
-        if ($name -notmatch '^[A-Za-z][A-Za-z0-9]*$' -or ($name -cne 'credentialsNotLogged' -and $name -match '(?i)(password|secret|token|cookie|authorization|credential|apiKey)')) {
-            throw 'REAL-USE-ACCEPTANCE report contains a forbidden evidence field.'
-        }
-        $found = $false
-        $child = Get-RealUseAcceptanceProperty $Value $name ([ref]$found)
-        Assert-RealUseAcceptanceSanitizedValue -Value $child -Path "$Path.$name" -Depth ($Depth + 1) | Out-Null
-    }
-    return $true
-}
-
-function Test-RealUseAcceptanceSameValue {
-    param([AllowNull()][object]$Expected, [AllowNull()][object]$Actual)
-    if ($null -eq $Expected -and $null -eq $Actual) { return $true }
-    if ($null -eq $Expected -or $null -eq $Actual) { return $false }
-    return ([string]$Expected -ceq [string]$Actual)
-}
-
-function Test-RealUseAcceptanceSameInstant {
-    param([AllowNull()][object]$Expected, [AllowNull()][object]$Actual)
-    try {
-        return (([datetimeoffset]$Expected).ToUniversalTime().Ticks -eq ([datetimeoffset]$Actual).ToUniversalTime().Ticks)
-    } catch {
-        return $false
-    }
-}
-
-function Get-RealUseAcceptanceCandidateTuple {
-    param([Parameter(Mandatory)][object]$Candidate)
-    return [pscustomobject][ordered]@{
-        repositoryHead = [string]$Candidate.repositoryHead
-        candidateCommit = [string]$Candidate.gitCommit
-        shippingInputIdentity = [string]$Candidate.shippingInputIdentity
-        releaseFingerprintId = [string]$Candidate.releaseFingerprintId
-        toolingFingerprintId = [string]$Candidate.toolingFingerprintId
-        exeSha256 = [string]$Candidate.candidate.sha256
-        tarSha256 = [string]$Candidate.tar.sha256
-    }
-}
-
-function Get-RealUseAcceptancePrivateRoot {
-    param([Parameter(Mandatory)][string]$RunId)
-    Assert-RealUseAcceptanceRunId -RunId $RunId | Out-Null
-    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or [string]::IsNullOrWhiteSpace($env:ProgramData)) { throw 'REAL-USE-ACCEPTANCE private pairing state requires Windows DPAPI.' }
-    $base = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'DevFleet-E2E\Private\RealUseAcceptance')).TrimEnd('\','/')
-    $path = [IO.Path]::GetFullPath((Join-Path $base $RunId))
-    if (-not $path.StartsWith($base + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($path) -cne $RunId) { throw 'REAL-USE-ACCEPTANCE private pairing root escaped its fixed L0 boundary.' }
-    return $path
-}
-
-function New-RealUseAcceptancePassphrase {
-    $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
-    $bytes = [byte[]]::new(48)
-    $secure = [Security.SecureString]::new()
-    try {
-        [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-        foreach ($value in $bytes) { $secure.AppendChar($alphabet[[int]$value -band 63]) }
-        $secure.MakeReadOnly()
-        return $secure
-    } catch {
-        $secure.Dispose()
-        throw
-    } finally {
-        [Array]::Clear($bytes,0,$bytes.Length)
-    }
-}
-
-function Protect-RealUseAcceptancePrivateRoot {
-    param([Parameter(Mandatory)][string]$Path)
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    if (-not $identity -or -not $identity.User) { throw 'REAL-USE-ACCEPTANCE cannot identify the DPAPI owner.' }
-    $acl = [Security.AccessControl.DirectorySecurity]::new()
-    $acl.SetAccessRuleProtection($true,$false)
-    foreach ($sid in @(
-        $identity.User,
-        [Security.Principal.SecurityIdentifier]::new([Security.Principal.WellKnownSidType]::LocalSystemSid,$null),
-        [Security.Principal.SecurityIdentifier]::new([Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid,$null)
-    )) {
-        $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid,[Security.AccessControl.FileSystemRights]::FullControl,[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow)
-        [void]$acl.AddAccessRule($rule)
-    }
-    Set-Acl -LiteralPath $Path -AclObject $acl -ErrorAction Stop
-}
-
-function New-RealUseAcceptancePrivateState {
-    param([Parameter(Mandatory)][string]$RunId)
-    $root = Get-RealUseAcceptancePrivateRoot -RunId $RunId
-    if (Test-Path -LiteralPath $root) { throw 'REAL-USE-ACCEPTANCE private pairing state collided with an existing run root.' }
-    $created=$false;$secure=$null
-    try {
-        [void][IO.Directory]::CreateDirectory($root);$created=$true
-        Protect-RealUseAcceptancePrivateRoot -Path $root
-        $secretPath = Join-Path $root 'pairing-passphrase.dpapi'
-        $bundlePath = Join-Path $root 'primary-pairing.dfe'
-        $secure = N
+Im

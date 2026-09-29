@@ -1,10 +1,170 @@
 # DevFleet source part 018
 
 Full-source UTF-8 byte interval [790500, 837000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 79bf34c8e3783375028664baf4698653b0b65918ffc4e6f0a46c7c6318026e87
+Payload SHA-256: f45016806c4eb8dfacbc27681e62fb56905e92ef9afc860ec0d6669ca46b4c4c
 
 <!-- BEGIN SOURCE SLICE -->
-s.'}
+sing or invalid."}}
+    if($Result.configurationPresent-isnot[bool]-or-not$Result.configurationPresent-or$Result.authenticatedTransport-isnot[bool]-or-not$Result.authenticatedTransport){throw 'Vault fixture lacks authenticated configuration.'}
+    if($Result.proofCredit-isnot[bool]-or$Result.proofCredit){throw 'Vault prerequisite cannot award proof credit.'}
+}
+
+function Get-MaintenanceVaultControlRoot {
+    param([Parameter(Mandatory)][string]$WorkspaceRoot)
+    $resolved=(Resolve-Path -LiteralPath $WorkspaceRoot).Path.ToLowerInvariant()
+    $sha=[Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($resolved))
+    $key=([Convert]::ToHexString($sha).ToLowerInvariant()).Substring(0,16)
+    return Join-Path $env:LOCALAPPDATA ("DevFleet\ReleaseRunner-v9\"+$key)
+}
+
+function Protect-MaintenanceVaultPrivateFailureBytes {
+    param(
+        [Parameter(Mandatory)][byte[]]$Plaintext,
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][guid]$VmId,
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][string]$RunDir,
+        [string]$ControlRoot=''
+    )
+    if($Plaintext.Length-le0){throw 'Private failure evidence is empty.'}
+    if(-not$ControlRoot){$ControlRoot=Get-MaintenanceVaultControlRoot -WorkspaceRoot $WorkspaceRoot}
+    Add-Type -AssemblyName System.Security
+    $entropy=[Text.Encoding]::UTF8.GetBytes("DevFleet exact failure evidence $RunId")
+    $encrypted=[Security.Cryptography.ProtectedData]::Protect($Plaintext,$entropy,[Security.Cryptography.DataProtectionScope]::CurrentUser)
+    $privateDir=Join-Path $ControlRoot ("private-evidence\"+$RunId)
+    [IO.Directory]::CreateDirectory($privateDir)|Out-Null
+    $encryptedPath=Join-Path $privateDir 'private-product-operations.log.dpapi'
+    [IO.File]::WriteAllBytes($encryptedPath,$encrypted)
+    $roundTrip=[Security.Cryptography.ProtectedData]::Unprotect($encrypted,$entropy,[Security.Cryptography.DataProtectionScope]::CurrentUser)
+    try{
+        $roundTripVerified=$roundTrip.Length-eq$Plaintext.Length
+        if($roundTripVerified){
+            for($i=0;$i-lt$Plaintext.Length;$i++){if($roundTrip[$i]-ne$Plaintext[$i]){$roundTripVerified=$false;break}}
+        }
+        if(-not$roundTripVerified){throw 'Private failure DPAPI round-trip verification failed.'}
+        $metadata=[ordered]@{
+            schemaVersion=1;runId=$RunId;classification='ENCRYPTED_PRIVATE_FAILURE_EVIDENCE_PRESERVATION'
+            sourceVmId=$VmId.ToString();sourcePath=$SourcePath;sourceBytes=$Plaintext.Length
+            encryptedLocalPath=$encryptedPath;encryptedSha256=(Get-FileHash -LiteralPath $encryptedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            encryption='Windows DPAPI CurrentUser';entropyDerivation='UTF8: DevFleet exact failure evidence plus space plus RunId'
+            roundTripVerified=$true;plaintextWrittenToHost=$false;plaintextIncludedInAudit=$false
+            sourceReadOnly=$true;runtimeRestarted=$false;observedAtUtc=[datetime]::UtcNow.ToString('o')
+        }
+        $metadataPath=Join-Path $RunDir 'private-failure-preservation.json'
+        [IO.File]::WriteAllText($metadataPath,(($metadata|ConvertTo-Json -Depth 6)+[Environment]::NewLine),[Text.UTF8Encoding]::new($false))
+        return [pscustomobject]$metadata
+    } finally {
+        if($roundTrip){[Array]::Clear($roundTrip,0,$roundTrip.Length)}
+        if($encrypted){[Array]::Clear($encrypted,0,$encrypted.Length)}
+        if($entropy){[Array]::Clear($entropy,0,$entropy.Length)}
+    }
+}
+
+function Save-MaintenanceVaultPrivateFailureEvidence {
+    param(
+        [Parameter(Mandatory)]$Session,
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][string]$RemoteRoot,
+        [Parameter(Mandatory)][string]$WorkspaceRoot,
+        [Parameter(Mandatory)][string]$RunDir,
+        [Parameter(Mandatory)][guid]$VmId
+    )
+    $sourcePath=Join-Path $RemoteRoot 'private-product-operations.log'
+    $record=Invoke-DevFleetBoundedGuestCommand -Session $Session -ScriptBlock {
+        param($Path)
+        if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return [pscustomobject]@{present=$false}}
+        $bytes=[IO.File]::ReadAllBytes($Path)
+        try{[pscustomobject]@{present=$true;length=$bytes.Length;base64=[Convert]::ToBase64String($bytes)}}finally{if($bytes){[Array]::Clear($bytes,0,$bytes.Length)}}
+    } -ArgumentList @($sourcePath) -TimeoutSeconds 30
+    if(-not[bool]$record.present){throw 'Private failure log was not present at the owned failure boundary.'}
+    $plain=[Convert]::FromBase64String([string]$record.base64)
+    $record.base64=$null
+    try{
+        if($plain.Length-ne[int]$record.length){throw 'Private failure log length changed during read-only preservation.'}
+        return Protect-MaintenanceVaultPrivateFailureBytes -Plaintext $plain -RunId $RunId -VmId $VmId -SourcePath $sourcePath -WorkspaceRoot $WorkspaceRoot -RunDir $RunDir
+    } finally {if($plain){[Array]::Clear($plain,0,$plain.Length)}}
+}
+
+function Write-MaintenanceVaultWindowsTailscaleSnapshot {
+    param(
+        [Parameter(Mandatory)]$Session,
+        [Parameter(Mandatory)][string]$ExpectedHostname,
+        [Parameter(Mandatory)][string]$RunDir
+    )
+    $snapshot=$null
+    try{
+        $snapshot=Invoke-DevFleetBoundedGuestCommand -Session $Session -ScriptBlock {
+            param($Expected)
+            $command=Get-Command tailscale.exe,tailscale -ErrorAction SilentlyContinue|Select-Object -First 1
+            if(-not$command){return [pscustomobject][ordered]@{schemaVersion=1;status='UNAVAILABLE';commandPresent=$false;expectedHostname=$Expected}}
+            $raw=& $command.Source status --json 2>$null
+            if($LASTEXITCODE-ne0-or-not$raw){return [pscustomobject][ordered]@{schemaVersion=1;status='UNAVAILABLE';commandPresent=$true;expectedHostname=$Expected}}
+            $status=$raw|ConvertFrom-Json
+            $self=$status.Self
+            $selfHostname=[string]$self.HostName
+            [pscustomobject][ordered]@{
+                schemaVersion=1;status='OBSERVED';commandPresent=$true;backendState=[string]$status.BackendState
+                selfOnline=[bool]$self.Online;selfHostName=$selfHostname;expectedHostname=$Expected
+                hostnameMatches=($selfHostname-ceq$Expected);tailscaleIpCount=@($status.TailscaleIPs).Count
+                healthCount=@($status.Health).Count;observedUtc=[datetime]::UtcNow.ToString('o')
+            }
+        } -ArgumentList @($ExpectedHostname) -TimeoutSeconds 30
+    } catch {
+        $snapshot=[pscustomobject][ordered]@{schemaVersion=1;status='UNAVAILABLE';commandPresent=$null;expectedHostname=$ExpectedHostname;reason='read-only Tailscale status probe failed';observedUtc=[datetime]::UtcNow.ToString('o')}
+    }
+    $path=Join-Path $RunDir 'maintenance-vault-windows-tailscale-preflight.json'
+    [IO.File]::WriteAllText($path,(($snapshot|ConvertTo-Json -Depth 6)+[Environment]::NewLine),[Text.UTF8Encoding]::new($false))
+    return $snapshot
+}
+
+function Invoke-MaintenanceVaultProvisioning {
+    param([Parameter(Mandatory)]$Request)
+    if([string]$Request.runId-cnotmatch '\Afullrelease-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\z'-or[string]$Request.payloadSha256-cnotmatch'^[a-f0-9]{64}$'){throw 'Vault fixture run/payload binding is invalid.'}
+    $state=[ordered]@{}
+    foreach($step in @('identity','launch','bootstrap','configure','verify')){
+        if([datetime]::UtcNow-ge([datetime]$Request.ownerDeadlineUtc).ToUniversalTime()){throw 'Vault prerequisite owner deadline expired.'}
+        $value=Invoke-MaintenanceVaultStep -Name $step -Request $Request -State $state
+        if($step-ceq'identity'){
+            if([string]$value.primaryRole-cne'primary'){throw 'Vault prerequisite requires the installed Primary role.'}
+            if($value.existingVault-isnot[bool]-or$value.existingVault){throw 'Refusing to adopt or refresh an existing Vault in the prerequisite.'}
+            $state.identity=$value
+        } elseif($step-ceq'launch'){$state.vault=$value}
+        elseif($step-ceq'verify'){Assert-MaintenanceVaultResult -Result $value -Request $Request;return $value}
+    }
+}
+
+function Invoke-MaintenanceVaultStep {
+    param([Parameter(Mandatory)][string]$Name,[Parameter(Mandatory)]$Request,[Parameter(Mandatory)]$State)
+    # This function runs only in an exact-L1, separately bounded PS7 process.
+    if($env:COMPUTERNAME-cne'DEVFLEET-E2E-01'-or$PSVersionTable.PSVersion.Major-lt7){throw 'Vault fixture is restricted to the approved disposable L1 PS7 runtime.'}
+    $package=[string]$Request.packageRoot
+    Import-Module (Join-Path $package 'windows/DevFleet.Common.psm1') -Scope Local -DisableNameChecking
+    $config=Get-DevFleetConfig;$mp=Get-MultipassExe
+    if([string]$config.Primary.InstanceName-cne[string]$Request.primaryName-or[string]$config.Vault.InstanceName-cne[string]$Request.vaultName){throw 'Installed configuration changed the approved fixture targets.'}
+    $deadline=([datetime]$Request.ownerDeadlineUtc).ToUniversalTime()
+    Set-DevFleetDeadlineContext -TransactionDeadlineUtc $deadline -StageName 'vault' -StageBudgetSeconds ([int]$Request.budgetSeconds)|Out-Null
+    switch($Name){
+        'identity' {
+            $identity=Get-Content -LiteralPath (Join-Path (Get-DevFleetStateRoot) 'node-identity.json') -Raw|ConvertFrom-Json
+            $primary=@(Get-VM -Name ([string]$Request.primaryName) -ErrorAction Stop)
+            if($primary.Count-ne1){throw 'Primary immutable VM identity is ambiguous.'}
+            $inventory=Invoke-External $mp @('list','--format','json') -Capture -TimeoutSeconds 60 -DeadlineUtc $deadline|ConvertFrom-Json
+            $unexpected=@($inventory.list|Where-Object{[string]$_.name-cne[string]$Request.primaryName})
+            $existing=@(Get-VM -ErrorAction Stop|Where-Object{$_.Id-ne$primary[0].Id})
+            if($unexpected.Count-gt0-or$existing.Count-gt0){throw 'Refusing an existing Vault or unexpected nested instance.'}
+            if(@($inventory.list|Where-Object{[string]$_.name-ceq[string]$Request.primaryName}).Count-ne1){throw 'Primary Multipass inventory is missing or ambiguous.'}
+            Assert-MultipassIsolation -InstanceNames @([string]$Request.primaryName)
+            return [pscustomobject]@{primaryRole=[string]$identity.node_role;primaryId=$primary[0].Id.ToString();deploymentId=[string]$identity.deployment_id;existingVault=$false}
+        }
+        'launch' {
+            $v=$config.Vault
+            $dependencyPolicy=Get-Content -LiteralPath (Join-Path $package 'linux/dependency-policy.json') -Raw|ConvertFrom-Json
+            $key=[string]$dependencyPolicy.tailscale.signingKeySha256Fingerprint
+            if($key-cnotmatch'^[A-F0-9]{40}$'){throw 'Candidate Vault cloud-init signing-key identity is invalid.'}
+            $cloud=Join-Path ([string]$Request.workRoot) 'vault-cloud-init.yaml'
+            $rendered=(Get-Content -LiteralPath (Join-Path $package 'cloud-init/vault.yaml') -Raw).Replace('__NODE_NAME__',(ConvertTo-YamlSingleQuotedScalar ([string]$Request.vaultName))).Replace('__TAILSCALE_SIGNING_FINGERPRINT__',$key)
+            if($rendered-match'__[A-Z0-9_]+__'){throw 'Vault cloud-init contains unresolved placeholders.'}
             [IO.File]::WriteAllText($cloud,$rendered,[Text.UTF8Encoding]::new($false))
             Invoke-MultipassLaunchWithReadinessRecovery -InstanceName ([string]$Request.vaultName) -LaunchArguments @('launch',[string]$v.UbuntuImage,'--name',[string]$Request.vaultName,'--cpus',[string]$v.Cpus,'--memory',[string]$v.Memory,'--disk',[string]$v.Disk,'--cloud-init',$cloud) -ReadinessTimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'multipassReadiness') -LaunchTimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'multipassLaunch') -DeadlineUtc $deadline|Out-Null
             $vm=@(Get-VM -Name ([string]$Request.vaultName) -ErrorAction Stop)
@@ -385,100 +545,4 @@ function Invoke-DevFleetCampaignEPowerShellAcquisition {
         $accepted=[string]$raw.outcome-ceq'PASS'
         if([bool]$specification.allowAlreadySatisfied-and[string]$raw.outcome-ceq'NONZERO'-and[int]$raw.exitCode-eq-1978335189){$accepted=$true}
         if(-not$accepted-or-not[bool]$raw.outputComplete){throw "Campaign E PowerShell acquisition operation failed: $([string]$specification.operation) / $([string]$raw.outcome) / $([string]$raw.exitCode)."}
-        if([string]$specification.operation-ceq'winget-version'-and[string]$raw.stdout-notmatch'(?<!\d)\d+\.\d+(?:\.\d+){0,2}'){throw 'Campaign E PowerShell acquisition could not parse the bounded WinGet version response.'}
-        if([bool]$specification.requirePackageId-and[string]$raw.stdout-notmatch[regex]::Escape([string]$Dependency.wingetPackageId)){throw 'Campaign E PowerShell acquisition search did not identify the exact manifest-approved package.'}
-        [void]$observations.Add([pscustomobject][ordered]@{operation=[string]$raw.operation;outcome=[string]$raw.outcome;exitCode=$raw.exitCode;startedAtUtc=[string]$raw.startedAtUtc;finishedAtUtc=[string]$raw.finishedAtUtc;deadlineUtc=[string]$raw.deadlineUtc;outputComplete=[bool]$raw.outputComplete;packageIdentityObserved=if([bool]$specification.requirePackageId){$true}else{$null}})
-        $lastFinished=$rawFinished
-    }
-    $final=&$PowerShellCompatibilityProvider $Dependency $owner
-    if(-not(&$validateCompatibility $final)){throw 'Campaign E PowerShell acquisition completed without a candidate-compatible PowerShell executable.'}
-    $finished=&$now
-    if($finished-gt$owner){throw 'Campaign E PowerShell acquisition completed after its immutable owner deadline.'}
-    return [pscustomobject][ordered]@{
-        schemaVersion=1;kind='DEVFLEET_CAMPAIGN_E_POWERSHELL_ACQUISITION';status='PASS';method='WINGET_MANIFEST_APPROVED_DIAGNOSTIC'
-        packageId=[string]$Dependency.wingetPackageId;startedAtUtc=$started.ToString('o');finishedAtUtc=$finished.ToString('o');ownerDeadlineUtc=$owner.ToString('o')
-        wingetPathSha256=$wingetHash;operations=@($observations);powershell=[pscustomobject]@{status='Compatible';version=[string]$final.version;pathSha256=[string]$final.pathSha256}
-        productLifecycleStarted=$false;stageMarkerWritten=$false
-    }
-}
-
-function Test-DevFleetCampaignEExactSignerSubject {
-    param([Parameter(Mandatory)][string]$Actual,[Parameter(Mandatory)][string[]]$Expected)
-    $normalize={param([string]$Value)try{(([Security.Cryptography.X509Certificates.X500DistinguishedName]::new($Value)).Format($false)-replace'\s','').ToUpperInvariant()}catch{($Value-replace'\s','').ToUpperInvariant()}}
-    $actualNormalized=&$normalize $Actual
-    return @($Expected|Where-Object{(&$normalize ([string]$_))-ceq$actualNormalized}).Count-eq1
-}
-
-function Save-DevFleetCampaignEAllowlistedHttpsDownload {
-    param(
-        [Parameter(Mandatory)][uri]$Uri,
-        [Parameter(Mandatory)][string[]]$AllowedHosts,
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][datetime]$OwnerDeadlineUtc,
-        [ValidateRange(60,1200)][int]$MaximumSeconds=900
-    )
-    $started=[datetime]::UtcNow;$owner=$OwnerDeadlineUtc.ToUniversalTime();$deadline=$started.AddSeconds($MaximumSeconds);if($deadline-gt$owner){$deadline=$owner}
-    if($deadline-le$started){throw 'Campaign E official download owner deadline expired before transfer.'}
-    if(Test-Path -LiteralPath $Path){throw 'Campaign E official download destination already exists.'}
-    $temporary="$Path.$([guid]::NewGuid().ToString('N')).tmp";$current=$Uri;$redirectHosts=[Collections.Generic.List[string]]::new()
-    Add-Type -AssemblyName System.Net.Http -ErrorAction Stop
-    $handler=[Net.Http.HttpClientHandler]::new();$handler.AllowAutoRedirect=$false;$client=[Net.Http.HttpClient]::new($handler);$client.Timeout=[Threading.Timeout]::InfiniteTimeSpan
-    try {
-        for($hop=0;$hop-le5;$hop++){
-            if($current.Scheme-cne'https'-or$current.UserInfo-or@($AllowedHosts)-cnotcontains$current.Host){throw 'Campaign E official download left the allowlisted HTTPS boundary.'}
-            [void]$redirectHosts.Add($current.Host)
-            $remaining=($deadline-[datetime]::UtcNow)
-            if($remaining.TotalMilliseconds-le0){throw 'Campaign E official download exceeded its inherited finite deadline.'}
-            $cts=[Threading.CancellationTokenSource]::new($remaining);$response=$null;$input=$null;$output=$null
-            try {
-                $response=$client.GetAsync($current,[Net.Http.HttpCompletionOption]::ResponseHeadersRead,$cts.Token).GetAwaiter().GetResult()
-                if([int]$response.StatusCode-ge300-and[int]$response.StatusCode-le399){$location=$response.Headers.Location;if(-not$location){throw 'Campaign E official download redirect omitted Location.'};$current=[uri]::new($current,$location);continue}
-                if(-not$response.IsSuccessStatusCode){throw "Campaign E official download failed with HTTP $([int]$response.StatusCode)."}
-                $input=$response.Content.ReadAsStreamAsync().GetAwaiter().GetResult();$output=[IO.File]::Open($temporary,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-                [void]$input.CopyToAsync($output,81920,$cts.Token).GetAwaiter().GetResult();$output.Flush($true);$output.Dispose();$output=$null
-                [IO.File]::Move($temporary,$Path)
-                $finished=[datetime]::UtcNow
-                return [pscustomobject][ordered]@{outcome='PASS';startedAtUtc=$started.ToString('o');finishedAtUtc=$finished.ToString('o');deadlineUtc=$deadline.ToString('o');finalHost=$current.Host;redirectHosts=@($redirectHosts);bytes=(Get-Item -LiteralPath $Path).Length;sha256=(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()}
-            } finally {if($output){$output.Dispose()};if($input){$input.Dispose()};if($response){$response.Dispose()};$cts.Dispose()}
-        }
-        throw 'Campaign E official download exceeded the redirect limit.'
-    } finally {$client.Dispose();$handler.Dispose();Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue}
-}
-
-function Get-DevFleetCampaignEOfficialPowerShellPayload {
-    param(
-        [Parameter(Mandatory)][psobject]$Dependency,
-        [Parameter(Mandatory)][string]$DestinationDirectory,
-        [Parameter(Mandatory)][datetime]$OwnerDeadlineUtc,
-        [scriptblock]$MetadataProvider,
-        [scriptblock]$DownloadProvider,
-        [scriptblock]$AuthenticityProvider,
-        [scriptblock]$ClockProvider
-    )
-    $now={if($ClockProvider){([datetime](& $ClockProvider)).ToUniversalTime()}else{[datetime]::UtcNow}};$started=&$now;$owner=$OwnerDeadlineUtc.ToUniversalTime()
-    if($owner-le$started){throw 'Campaign E official PowerShell acquisition owner deadline expired before metadata.'}
-    if([string]$Dependency.id-cne'powershell7'-or[string]$Dependency.wingetPackageId-cne'Microsoft.PowerShell'-or[string]$Dependency.directOfficialVendorResolver.type-cne'github-release'){throw 'Campaign E official PowerShell dependency identity/resolver is unsupported.'}
-    $resolver=$Dependency.directOfficialVendorResolver;$metadataUri=[uri][string]$resolver.metadataUri
-    if($metadataUri.Scheme-cne'https'-or$metadataUri.UserInfo-or$metadataUri.AbsolutePath-cne'/repos/PowerShell/PowerShell/releases/latest'-or@($resolver.allowedHosts)-cnotcontains$metadataUri.Host){throw 'Campaign E official PowerShell metadata identity is invalid.'}
-    $remaining=[int][math]::Floor(($owner-(&$now)).TotalSeconds);if($remaining-le0){throw 'Campaign E official PowerShell acquisition owner deadline expired before metadata request.'}
-    $metadata=if($MetadataProvider){&$MetadataProvider $metadataUri ([math]::Min(60,$remaining)) $owner}else{Invoke-RestMethod -UseBasicParsing -TimeoutSec ([math]::Min(60,$remaining)) -Uri $metadataUri -Headers @{'User-Agent'='DevFleet-Campaign-E/1.2.13'}}
-    $metadataFinished=&$now
-    if($metadataFinished-gt$owner){throw 'Campaign E official PowerShell metadata arrived after the immutable owner deadline.'}
-    if(-not$metadata-or[bool]$metadata.prerelease-or[bool]$metadata.draft-or[string]$metadata.tag_name-notmatch'^v7\.\d+\.\d+$'){throw 'Campaign E official PowerShell release metadata is unusable.'}
-    $releasePage=[uri][string]$metadata.html_url
-    if($releasePage.Scheme-cne'https'-or$releasePage.Host-cne'github.com'-or-not$releasePage.AbsolutePath.StartsWith('/PowerShell/PowerShell/releases/tag/',[StringComparison]::Ordinal)){throw 'Campaign E official PowerShell release repository identity mismatch.'}
-    $assets=@($metadata.assets|Where-Object{[string]$_.name-match[string]$resolver.assetRegex})
-    if($assets.Count-ne1){throw 'Campaign E official PowerShell release did not contain one canonical x64 MSI.'}
-    $asset=$assets[0];$assetName=[string]$asset.name;$assetUri=[uri][string]$asset.browser_download_url
-    $expectedPathPrefix="/PowerShell/PowerShell/releases/download/$([string]$metadata.tag_name)/"
-    if($assetUri.Scheme-cne'https'-or$assetUri.UserInfo-or@($resolver.allowedHosts)-cnotcontains$assetUri.Host-or-not$assetUri.AbsolutePath.StartsWith($expectedPathPrefix,[StringComparison]::Ordinal)-or[IO.Path]::GetFileName($assetUri.AbsolutePath)-cne$assetName-or[IO.Path]::GetExtension($assetName)-cne'.msi'){throw 'Campaign E official PowerShell asset identity is invalid.'}
-    $destinationRoot=[IO.Path]::GetFullPath($DestinationDirectory).TrimEnd('\');if(-not(Test-Path -LiteralPath $destinationRoot -PathType Container)){throw 'Campaign E official PowerShell destination root is absent.'}
-    $DestinationPath=Join-Path $destinationRoot $assetName
-    if(Test-Path -LiteralPath $DestinationPath){throw 'Campaign E official PowerShell destination already exists and will not be overwritten.'}
-    $download=if($DownloadProvider){&$DownloadProvider $assetUri @($resolver.allowedHosts) $DestinationPath $owner}else{Save-DevFleetCampaignEAllowlistedHttpsDownload -Uri $assetUri -AllowedHosts @($resolver.allowedHosts) -Path $DestinationPath -OwnerDeadlineUtc $owner}
-    if($null-eq$download-or[string]$download.outcome-cne'PASS'-or-not(Test-Path -LiteralPath $DestinationPath -PathType Leaf)-or[int64]$download.bytes-lt1-or[string]$download.sha256-notmatch'^[0-9a-f]{64}$'-or(Get-FileHash -LiteralPath $DestinationPath -Algorithm SHA256).Hash.ToLowerInvariant()-cne[string]$download.sha256){throw 'Campaign E official PowerShell download evidence is invalid.'}
-    $downloadStarted=([datetime]$download.startedAtUtc).ToUniversalTime();$downloadFinished=([datetime]$download.finishedAtUtc).ToUniversalTime();$downloadDeadline=([datetime]$download.deadlineUtc).ToUniversalTime();$redirectHosts=@($download.redirectHosts)
-    if($downloadStarted-lt$metadataFinished-or$downloadFinished-lt$downloadStarted-or$downloadFinished-gt$owner-or$downloadDeadline-gt$owner-or$redirectHosts.Count-lt1-or@($redirectHosts|Where-Object{@($resolver.allowedHosts)-cnotcontains[string]$_}).Count){throw 'Campaign E official PowerShell download deadline/redirect evidence is invalid.'}
-    $authenticity=if($AuthenticityProvider){&$AuthenticityProvider $DestinationPath $Dependency.installerAuthenticityPolicy}else{$signature=Get-AuthenticodeSignature -LiteralPath $DestinationPath;[pscustomobject]@{status=$signature.Status.ToString();signerSubject=if($signature.SignerCertificate){$signature.SignerCertificate.Subject}else{''}}}
-    if([string]$authenticity.status-cne'Valid'-or-not(Test-DevFleetCampaignEExactSignerSubject -Actual ([string]$authenticity.signerSubject) -Expected @($Dependency.installerAuthenticityPolicy.allowedSignerSubjectsExact))){throw 'Campaign E official PowerShell payload signer identity is invalid.'}
- 
+        if([string]$specificatio

@@ -1,10 +1,203 @@
 # DevFleet source part 059
 
 Full-source UTF-8 byte interval [2697000, 2743500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 017f3eed4c3db4b1096d2787556656bc60b9a422495439b94f2d509e629b04f4
+Payload SHA-256: b94a62d00be614278202fc0ee0e7ff058f915dfd615acd3af0df276aac642868
 
 <!-- BEGIN SOURCE SLICE -->
-ryByName.ContainsKey(name)) || entryByName.Keys.Any(name => !actualByName.ContainsKey(name)))
+, "--exact", "--source", "winget", "--accept-source-agreements", "--accept-package-agreements", "--download-directory", destinationRoot]);
+            if (result.ExitCode == 0)
+            {
+                var package = Directory.EnumerateFiles(destinationRoot, "*", SearchOption.AllDirectories).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
+                if (package is not null) return package;
+            }
+        }
+        return DownloadDirectOfficial(dependency, destinationRoot);
+    }
+
+    private string DownloadDirectOfficial(DependencyDefinition dependency, string destinationRoot)
+    {
+        if (dependency.DirectOfficialVendorResolver.Type.Equals("windows-capability", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"{dependency.Name} requires the supported Windows capability path; no executable vendor payload is applicable.");
+        var metadataUri = dependency.OfficialMetadata;
+        if (!dependency.DirectOfficialVendorResolver.AllowedHosts.Contains(metadataUri.Host, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidDataException($"Official metadata host is not allowlisted for {dependency.Name}: {metadataUri.Host}");
+        using var response = GetAllowlistedResponse(metadataUri, dependency.DirectOfficialVendorResolver.AllowedHosts, dependency.Name);
+        response.EnsureSuccessStatusCode();
+        var pattern = dependency.DirectOfficialVendorResolver.AssetRegex ?? throw new InvalidDataException($"No official asset rule for {dependency.Name}.");
+        string assetName;
+        Uri url;
+        string? expectedDigest = null;
+        if (dependency.DirectOfficialVendorResolver.Type.Equals("github-release", StringComparison.OrdinalIgnoreCase))
+        {
+            using var json = JsonDocument.Parse(response.Content.ReadAsStream());
+            var root = json.RootElement;
+            var tag = root.GetProperty("tag_name").GetString() ?? throw new InvalidDataException($"Official release tag is missing for {dependency.Name}.");
+            if (!string.IsNullOrWhiteSpace(dependency.DirectOfficialVendorResolver.ExpectedOwner) && root.GetProperty("author").GetProperty("login").GetString() != dependency.DirectOfficialVendorResolver.ExpectedOwner)
+                throw new InvalidDataException($"Official release owner mismatch for {dependency.Name}.");
+            if (!string.IsNullOrWhiteSpace(dependency.DirectOfficialVendorResolver.ExpectedRepository) && !(root.GetProperty("html_url").GetString() ?? "").Contains($"/{dependency.DirectOfficialVendorResolver.ExpectedOwner}/{dependency.DirectOfficialVendorResolver.ExpectedRepository}/releases/", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"Official release repository mismatch for {dependency.Name}.");
+            string? pageAssetName = null;
+            if (!string.IsNullOrWhiteSpace(dependency.DirectOfficialVendorResolver.OfficialPageUri))
+            {
+                using var pageResponse = GetAllowlistedResponse(new Uri(dependency.DirectOfficialVendorResolver.OfficialPageUri), dependency.DirectOfficialVendorResolver.AllowedHosts, dependency.Name);
+                var page = pageResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                var pagePattern = dependency.DirectOfficialVendorResolver.OfficialPageAssetRegex ?? pattern;
+                foreach (Match match in Regex.Matches(page, "href\\s*=\\s*['\"](?<href>[^'\"]+)['\"]", RegexOptions.IgnoreCase))
+                {
+                    var href = match.Groups["href"].Value;
+                    if (Uri.TryCreate(href, UriKind.Absolute, out var pageUri) && Regex.IsMatch(Path.GetFileName(pageUri.AbsolutePath), pagePattern) && pageUri.AbsolutePath.Contains($"/releases/download/{tag}/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        pageAssetName = Path.GetFileName(pageUri.AbsolutePath);
+                        break;
+                    }
+                }
+                if (pageAssetName is null) throw new InvalidDataException($"Official download page did not identify a release asset matching tag {tag} for {dependency.Name}.");
+            }
+            var assets = root.GetProperty("assets").EnumerateArray().Where(x => Regex.IsMatch(x.GetProperty("name").GetString() ?? "", pattern) && (pageAssetName is null || x.GetProperty("name").GetString() == pageAssetName)).ToArray();
+            if (assets.Length != 1) throw new InvalidDataException($"Expected exactly one official x64 asset for {dependency.Name}, found {assets.Length}.");
+            var asset = assets[0];
+            assetName = asset.GetProperty("name").GetString()!;
+            url = new Uri(asset.GetProperty("browser_download_url").GetString() ?? "");
+            if (!url.AbsolutePath.Contains($"/{dependency.DirectOfficialVendorResolver.ExpectedOwner}/{dependency.DirectOfficialVendorResolver.ExpectedRepository}/releases/download/{tag}/", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException($"Official release asset path/tag mismatch for {dependency.Name}.");
+            if (asset.TryGetProperty("digest", out var digestElement)) expectedDigest = digestElement.GetString();
+        }
+        else if (dependency.DirectOfficialVendorResolver.Type.Equals("official-download-page", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.IsNullOrWhiteSpace(dependency.DirectOfficialVendorResolver.DirectUri))
+            {
+                var directUri = new Uri(dependency.DirectOfficialVendorResolver.DirectUri);
+                if (!dependency.DirectOfficialVendorResolver.AllowedHosts.Contains(directUri.Host, StringComparer.OrdinalIgnoreCase)) throw new InvalidDataException($"Official direct URI host is not allowlisted for {dependency.Name}: {directUri.Host}");
+                using var directResponse = GetAllowlistedResponse(directUri, dependency.DirectOfficialVendorResolver.AllowedHosts, dependency.Name);
+                url = directResponse.RequestMessage?.RequestUri ?? directUri;
+                assetName = Path.GetFileName(url.AbsolutePath);
+                if (string.IsNullOrWhiteSpace(assetName) || !Regex.IsMatch(assetName, pattern)) throw new InvalidDataException($"Official direct URI resolved to an unexpected asset for {dependency.Name}: {assetName}");
+            }
+            else
+            {
+                var html = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                var links = Regex.Matches(html, @"href\s*=\s*[""'](?<href>[^""']+)[""']", RegexOptions.IgnoreCase).Select(x => x.Groups["href"].Value);
+                var selected = links.Select(x => Uri.TryCreate(metadataUri, x, out var candidate) ? candidate : null).Where(x => x is not null && dependency.DirectOfficialVendorResolver.AllowedHosts.Contains(x.Host, StringComparer.OrdinalIgnoreCase) && Regex.IsMatch(Path.GetFileName(x.AbsolutePath), pattern)).FirstOrDefault();
+                if (selected is null) throw new InvalidDataException($"No allowlisted official download-page asset matched for {dependency.Name}.");
+                url = selected;
+                assetName = Path.GetFileName(url.AbsolutePath);
+            }
+        }
+        else throw new InvalidOperationException($"Direct official resolver is not implemented for {dependency.Name}; refusing an unauthenticated fallback. Metadata: {dependency.OfficialMetadata}");
+        if (!dependency.DirectOfficialVendorResolver.AllowedHosts.Contains(url.Host, StringComparer.OrdinalIgnoreCase)) throw new InvalidDataException($"Official asset host is not allowlisted for {dependency.Name}: {url.Host}");
+        var path = Path.Combine(destinationRoot, assetName);
+        Exception? last = null;
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            try
+            {
+                using var downloadResponse = GetAllowlistedResponse(url, dependency.DirectOfficialVendorResolver.AllowedHosts, dependency.Name);
+                using var download = downloadResponse.Content.ReadAsStream();
+                using var output = File.Create(path);
+                download.CopyTo(output);
+                if (dependency.InstallerAuthenticityPolicy.Strategy is "VendorReleaseSha256" or "AuthenticodeOrVendorReleaseSha256")
+                {
+                    if (string.IsNullOrWhiteSpace(expectedDigest)) throw new InvalidDataException($"Official vendor release did not provide a SHA-256 digest for {dependency.Name}.");
+                    _verifiedVendorDigests[path] = VendorReleaseAuthenticity.NormalizeDigest(expectedDigest);
+                    VendorReleaseAuthenticity.VerifySha256(path, expectedDigest);
+                }
+                return path;
+            }
+            catch (Exception ex) when (attempt < 3) { last = ex; Thread.Sleep(TimeSpan.FromSeconds(attempt)); }
+        }
+        throw new IOException($"Official download failed after bounded retries for {dependency.Name}.", last);
+    }
+
+    public void VerifyInstaller(string installerPath, DependencyDefinition? dependency = null)
+    {
+        if (!File.Exists(installerPath)) throw new FileNotFoundException("Dependency installer is missing.", installerPath);
+        if (dependency?.InstallerAuthenticityPolicy.Strategy is "VendorReleaseSha256" or "AuthenticodeOrVendorReleaseSha256")
+        {
+            if (!_verifiedVendorDigests.TryGetValue(installerPath, out var digest)) throw new InvalidDataException($"No verified official vendor digest is bound to {Path.GetFileName(installerPath)}.");
+            VendorReleaseAuthenticity.VerifySha256(installerPath, digest);
+            return;
+        }
+        var escaped = installerPath.Replace("'", "''");
+        var result = _runner.Run(TrustedExecutableResolver.PowerShellPath(), ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", $"$s=Get-AuthenticodeSignature -LiteralPath '{escaped}'; if($s.Status -ne 'Valid'){{exit 9}}; $s.SignerCertificate.Subject"]);
+        if (result.ExitCode != 0 || !result.OutputComplete || string.IsNullOrWhiteSpace(result.StandardOutput)) throw new InvalidDataException($"Authenticode verification failed for {Path.GetFileName(installerPath)}{(result.OutputComplete ? "." : ": redirected signer output was incomplete.")}");
+        if (dependency is not null && dependency.InstallerAuthenticityPolicy.AllowedSignerSubjectsExact.Length > 0)
+        {
+            var subject = result.StandardOutput.Trim();
+            if (!SignerIdentity.MatchesExact(subject, dependency.InstallerAuthenticityPolicy.AllowedSignerSubjectsExact))
+                throw new InvalidDataException($"Authenticode signer is not allowlisted for {dependency.Name}: {subject}");
+        }
+        else if (dependency is not null && dependency.InstallerAuthenticityPolicy.AllowedSignerPatterns.Length > 0)
+            throw new InvalidDataException($"Legacy substring signer policy is rejected for {dependency.Name}; release policy must provide AllowedSignerSubjectsExact.");
+    }
+
+    private HttpResponseMessage GetAllowlistedResponse(Uri initialUri, IReadOnlyCollection<string> allowedHosts, string dependencyName)
+    {
+        var uri = initialUri;
+        for (var hop = 0; hop <= 5; hop++)
+        {
+            if (!uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(uri.Host) || !string.IsNullOrEmpty(uri.UserInfo))
+                throw new InvalidDataException($"Official download redirect is not an allowlisted HTTPS URI for {dependencyName}: {uri}");
+            if (!allowedHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase))
+                throw new InvalidDataException($"Official download host is not allowlisted for {dependencyName}: {uri.Host}");
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.UserAgent.ParseAdd($"DevFleet-Setup/{PayloadManifest.InstallerVersion}");
+            var response = _http.Send(request);
+            if ((int)response.StatusCode is >= 300 and <= 399)
+            {
+                var location = response.Headers.Location;
+                response.Dispose();
+                if (location is null) throw new InvalidDataException($"Official download redirect omitted Location for {dependencyName}.");
+                uri = new Uri(uri, location);
+                continue;
+            }
+            response.EnsureSuccessStatusCode();
+            return response;
+        }
+        throw new InvalidDataException($"Official download exceeded the redirect limit for {dependencyName}.");
+    }
+
+    public DependencyResult Install(DependencyDefinition dependency, string installerPath)
+    {
+        VerifyInstaller(installerPath, dependency);
+        var args = dependency.SilentInstallArguments.Length == 0 ? ["/quiet", "/norestart"] : dependency.SilentInstallArguments;
+        ProcessResult result = Path.GetExtension(installerPath).Equals(".msi", StringComparison.OrdinalIgnoreCase)
+            ? _runner.Run(TrustedExecutableResolver.SystemExecutable("msiexec.exe"), ["/i", installerPath, .. args])
+            : _runner.Run(installerPath, args);
+        if (result.ExitCode is not (0 or 3010)) throw new InvalidOperationException($"{dependency.Name} installation failed ({result.ExitCode}): {result.StandardError}");
+        var detected = Detect(dependency);
+        if (!detected.Compatible) throw new InvalidOperationException($"{dependency.Name} completed but a compatible executable was not discovered.");
+        return new(true, true, result.ExitCode == 3010, $"{dependency.Name} {detected.Version} at {detected.ExecutablePath}");
+    }
+
+    public IReadOnlyList<DependencyDetection> DetectAll() => Catalog.Select(Detect).ToArray();
+    public DependencyResult VerifyLocalPayload(string dependencyRoot)
+    {
+        if (!Directory.Exists(dependencyRoot)) return new(false, false, false, "Offline prerequisite payload directory is absent.");
+        var manifestPath = Path.Combine(dependencyRoot, "OFFLINE-DEPENDENCIES.json");
+        if (!File.Exists(manifestPath)) return new(false, false, false, "Release-bound offline dependency manifest is absent.");
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
+            var root = document.RootElement;
+            if (root.GetProperty("schemaVersion").GetInt32() != 2 || root.GetProperty("devfleetVersion").GetString() != PayloadManifest.DevFleetVersion || !root.TryGetProperty("releaseBinding", out _))
+                return new(false, false, false, "Offline dependency manifest is not bound to this release.");
+            if (!root.TryGetProperty("payloads", out var payloads) || payloads.ValueKind != JsonValueKind.Array)
+                return new(false, false, false, "Release-bound offline payload entries are absent.");
+            var entries = payloads.EnumerateArray().ToArray();
+            var entryByName = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in entries)
+            {
+                var fileName = entry.GetProperty("filename").GetString() ?? "";
+                var dependencyId = entry.GetProperty("dependencyId").GetString() ?? "";
+                var expectedSha = entry.GetProperty("sha256").GetString() ?? "";
+                var expectedSize = entry.GetProperty("sizeBytes").GetInt64();
+                if (string.IsNullOrWhiteSpace(dependencyId) || string.IsNullOrWhiteSpace(fileName) || Path.IsPathRooted(fileName) || fileName.Contains("..", StringComparison.Ordinal) || !Regex.IsMatch(expectedSha, "^[0-9a-fA-F]{64}$") || expectedSize < 0 || !entryByName.TryAdd(fileName, entry))
+                    return new(false, false, false, "Offline payload manifest contains an invalid or duplicate entry.");
+            }
+            var files = Directory.EnumerateFiles(dependencyRoot, "*", SearchOption.AllDirectories)
+                .Where(path => !path.Equals(manifestPath, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            var actualByName = files.ToDictionary(path => Path.GetRelativePath(dependencyRoot, path), StringComparer.OrdinalIgnoreCase);
+            if (actualByName.Keys.Any(name => !entryByName.ContainsKey(name)) || entryByName.Keys.Any(name => !actualByName.ContainsKey(name)))
                 return new(false, false, false, "Offline payload files must match the release-bound manifest exactly.");
             foreach (var (fileName, entry) in entryByName)
             {
@@ -414,211 +607,4 @@ public sealed class MultipassHostAgentProvider : IVmProvider
             throw new InvalidDataException("Host Agent fresh safety backup did not return a verified identity-bound backup reference.");
         if (!root.TryGetProperty("backup_reference", out var reference) || reference.ValueKind != JsonValueKind.Object)
             throw new InvalidDataException("Host Agent fresh safety backup omitted its opaque provider reference.");
-        var providerReference = new BackupReference(
-            reference.GetProperty("provider").GetString() ?? "",
-            reference.GetProperty("backup_id").GetString() ?? "",
-            reference.GetProperty("project_id").GetString() ?? "",
-            reference.GetProperty("slug").GetString() ?? "",
-            reference.GetProperty("runtime_id").GetString() ?? "",
-            reference.GetProperty("host_id").GetString() ?? "",
-            reference.GetProperty("archive_sha256").GetString() ?? "",
-            reference.GetProperty("archive_bytes").GetInt64(),
-            reference.GetProperty("manifest_sha256").GetString() ?? "",
-            reference.GetProperty("created_at").GetString() ?? "",
-            reference.GetProperty("consistency_level").GetString() ?? "");
-        if (!providerReference.Provider.Equals("multipass-host-agent", StringComparison.OrdinalIgnoreCase) || !providerReference.BackupId.Equals(id, StringComparison.OrdinalIgnoreCase) || !providerReference.ProjectId.Equals(vm.ProjectId, StringComparison.OrdinalIgnoreCase) || !providerReference.Slug.Equals(vm.Slug, StringComparison.OrdinalIgnoreCase) || !providerReference.RuntimeId.Equals(vm.RuntimeId, StringComparison.OrdinalIgnoreCase) || !providerReference.ArchiveSha256.Equals(sha, StringComparison.OrdinalIgnoreCase) || providerReference.ArchiveBytes < 0 || !Regex.IsMatch(providerReference.ManifestSha256, "^[0-9a-fA-F]{64}$"))
-            throw new InvalidDataException("Host Agent backup reference identity or hash binding is invalid.");
-        return new BackupVerification(vm.ProjectId, id, "", sha, sha, true, true, DateTime.UtcNow, providerReference);
-    }
-
-    public void DeleteExact(VmRecord vm)
-    {
-        if (!vm.Owned || string.IsNullOrWhiteSpace(vm.Slug) || string.IsNullOrWhiteSpace(vm.BackupId) || string.IsNullOrWhiteSpace(vm.BackupSha256))
-            throw new InvalidOperationException("Host Agent destruction requires an owned project, exact slug, and selected verified backup.");
-        var configPath = Path.Combine(_root, "config.json");
-        using var config = JsonDocument.Parse(File.ReadAllText(configPath));
-        var prefix = config.RootElement.TryGetProperty("ListenPrefix", out var lp) ? lp.GetString() : "http://127.0.0.1:8791/";
-        var tokenPath = config.RootElement.TryGetProperty("TokenPath", out var tp) ? tp.GetString() : null;
-        if (string.IsNullOrWhiteSpace(tokenPath) || !File.Exists(tokenPath)) throw new InvalidOperationException("Host Agent token path is unavailable; destruction is blocked.");
-        var destroyBody = JsonSerializer.SerializeToUtf8Bytes(new { operation = "destroy", slug = vm.Slug, project_id = vm.ProjectId, confirm_slug = vm.Slug, confirm_phrase = $"DESTROY {vm.Slug}", backup_verified = true, backup_id = vm.BackupId, backup_sha256 = vm.BackupSha256 });
-        using var request = new HttpRequestMessage(HttpMethod.Delete, new Uri(BuildHostAgentBaseUri(prefix), $"v1/project-vms/{Uri.EscapeDataString(vm.RuntimeId)}/destroy"));
-        request.Content = new ByteArrayContent(destroyBody);
-        request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
-        AddRequestAuthentication(request, destroyBody, File.ReadAllText(tokenPath).Trim(), config.RootElement.TryGetProperty("HostName", out var hostName) ? hostName.GetString() ?? "" : "");
-        using var response = _http.Send(request);
-        var bodyBytes = response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
-        VerifyResponseAuthentication(request, response, bodyBytes, File.ReadAllText(tokenPath).Trim(), config.RootElement.TryGetProperty("HostName", out var responseHostName) ? responseHostName.GetString() ?? "" : "");
-        var body = Encoding.UTF8.GetString(bodyBytes);
-        if (!response.IsSuccessStatusCode) throw new InvalidOperationException($"Host Agent rejected exact project destruction ({(int)response.StatusCode}): {body}");
-        if (!body.Contains("\"state\":\"destroyed\"", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Host Agent destruction response did not prove destroyed state.");
-    }
-
-    private static Uri BuildHostAgentBaseUri(string? configuredPrefix)
-    {
-        var prefix = string.IsNullOrWhiteSpace(configuredPrefix) ? "http://127.0.0.1:8791/" : configuredPrefix.Trim();
-        foreach (var scheme in new[] { "http://", "https://" })
-        foreach (var wildcard in new[] { "+", "*" })
-        {
-            var marker = scheme + wildcard + ":";
-            if (prefix.StartsWith(marker, StringComparison.OrdinalIgnoreCase))
-            {
-                prefix = scheme + "127.0.0.1:" + prefix[marker.Length..];
-                break;
-            }
-        }
-        if (!Uri.TryCreate(prefix.TrimEnd('/') + "/", UriKind.Absolute, out var uri) || uri is null || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) || !string.IsNullOrEmpty(uri.UserInfo))
-            throw new InvalidOperationException("Host Agent listen prefix is not a valid local HTTP endpoint.");
-        return uri;
-    }
-
-    private static void AddRequestAuthentication(HttpRequestMessage request, byte[] body, string key, string expectedHost)
-    {
-        if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(expectedHost)) throw new InvalidOperationException("Host Agent request authentication configuration is incomplete.");
-        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var nonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(18)).ToLowerInvariant();
-        var prefix = Encoding.UTF8.GetBytes($"{request.Method.Method.ToUpperInvariant()}\n{request.RequestUri!.AbsolutePath}\n{timestamp}\n{nonce}\n");
-        var suffix = Encoding.UTF8.GetBytes($"\n{expectedHost}");
-        var material = new byte[prefix.Length + body.Length + suffix.Length];
-        Buffer.BlockCopy(prefix, 0, material, 0, prefix.Length);
-        Buffer.BlockCopy(body, 0, material, prefix.Length, body.Length);
-        Buffer.BlockCopy(suffix, 0, material, prefix.Length + body.Length, suffix.Length);
-        var signature = Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(key), material)).ToLowerInvariant();
-        request.Headers.TryAddWithoutValidation("X-DevFleet-Host-Timestamp", timestamp);
-        request.Headers.TryAddWithoutValidation("X-DevFleet-Host-Nonce", nonce);
-        request.Headers.TryAddWithoutValidation("X-DevFleet-Host-Expected", expectedHost);
-        request.Headers.TryAddWithoutValidation("X-DevFleet-Host-Signature", signature);
-    }
-
-    private static void VerifyResponseAuthentication(HttpRequestMessage request, HttpResponseMessage response, byte[] body, string key, string expectedHost)
-    {
-        if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(expectedHost)) throw new InvalidOperationException("Host Agent response authentication configuration is incomplete.");
-        var timestamp = request.Headers.GetValues("X-DevFleet-Host-Timestamp").Single();
-        var nonce = request.Headers.GetValues("X-DevFleet-Host-Nonce").Single();
-        var provided = response.Headers.TryGetValues("X-DevFleet-Host-Response-Signature", out var values) ? values.SingleOrDefault() : null;
-        var material = BuildAuthMaterial(request.Method.Method, request.RequestUri!.AbsolutePath, timestamp, nonce, ((int)response.StatusCode).ToString(System.Globalization.CultureInfo.InvariantCulture), body, expectedHost);
-        var expected = Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(key), material)).ToLowerInvariant();
-        var left = Encoding.ASCII.GetBytes(expected); var right = Encoding.ASCII.GetBytes((provided ?? "").ToLowerInvariant());
-        if (left.Length != right.Length || !CryptographicOperations.FixedTimeEquals(left, right)) throw new InvalidDataException("Host Agent response authentication failed.");
-    }
-
-    private static byte[] BuildAuthMaterial(string method, string path, string timestamp, string nonce, string status, byte[] body, string expectedHost)
-    {
-        var parts = new[] { Encoding.UTF8.GetBytes(method.ToUpperInvariant()), Encoding.UTF8.GetBytes("\n"), Encoding.UTF8.GetBytes(path), Encoding.UTF8.GetBytes("\n"), Encoding.UTF8.GetBytes(timestamp), Encoding.UTF8.GetBytes("\n"), Encoding.UTF8.GetBytes(nonce), Encoding.UTF8.GetBytes("\n"), Encoding.UTF8.GetBytes(status), Encoding.UTF8.GetBytes("\n") , body, Encoding.UTF8.GetBytes("\n"), Encoding.UTF8.GetBytes(expectedHost) };
-        var length = parts.Sum(part => part.Length); var material = new byte[length]; var offset = 0;
-        foreach (var part in parts) { Buffer.BlockCopy(part, 0, material, offset, part.Length); offset += part.Length; }
-        return material;
-    }
-
-    private (string BackupId, string Sha256) FindLatestBackup(string projectId, string slug, string runtime)
-    {
-        var backupRoot = Path.Combine(_root, "backups");
-        foreach (var manifest in Directory.Exists(backupRoot) ? Directory.EnumerateFiles(backupRoot, "*.json").OrderByDescending(File.GetLastWriteTimeUtc) : Enumerable.Empty<string>())
-        {
-            try
-            {
-                using var doc = JsonDocument.Parse(File.ReadAllText(manifest)); var r = doc.RootElement;
-                if (r.TryGetProperty("project_id", out var pid) && pid.GetString() == projectId && r.TryGetProperty("slug", out var sl) && sl.GetString() == slug && r.TryGetProperty("runtime_id", out var rt) && rt.GetString() == runtime)
-                    return (r.TryGetProperty("backup_id", out var bid) ? bid.GetString() ?? "" : Path.GetFileNameWithoutExtension(manifest), r.TryGetProperty("archive_sha256", out var sh) ? sh.GetString() ?? "" : "");
-            }
-            catch (JsonException) { }
-        }
-        return ("", "");
-    }
-}
-
-public sealed class VmOwnershipService
-{
-    private readonly IVmProvider _provider;
-    public VmOwnershipService(IVmProvider provider) => _provider = provider;
-    public void DeleteOwnedExact(string projectId, string runtimeId, Action<string>? progress = null)
-        => DeleteOwnedExact(projectId, runtimeId, null, progress);
-    public void DeleteOwnedExact(string projectId, string runtimeId, BackupVerification? selectedBackup, Action<string>? progress = null)
-    {
-        var before = _provider.Discover().ToArray();
-        var vm = before.SingleOrDefault(x => x.ProjectId.Equals(projectId, StringComparison.OrdinalIgnoreCase) && x.RuntimeId.Equals(runtimeId, StringComparison.OrdinalIgnoreCase));
-        if (vm is null || !vm.Owned) throw new InvalidOperationException($"No independently owned VM matched project={projectId}, runtime={runtimeId}.");
-        if (selectedBackup is not null)
-        {
-            if (!selectedBackup.IsVerified || !selectedBackup.ProjectId.Equals(projectId, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Exact selected backup binding is invalid.");
-            vm = vm with { BackupId = selectedBackup.BackupId, BackupSha256 = selectedBackup.ActualSha256 };
-            progress?.Invoke($"Exact selected backup bound: {selectedBackup.BackupId} sha256={selectedBackup.ActualSha256}");
-        }
-        _provider.DeleteExact(vm);
-        progress?.Invoke($"Provider-aware exact deletion verified: {vm.Provider} {vm.RuntimeId}");
-        var unrelated = before.Where(x => !x.RuntimeId.Equals(runtimeId, StringComparison.OrdinalIgnoreCase)).Select(x => x.RuntimeId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (_provider.Discover().Where(x => unrelated.Contains(x.RuntimeId)).Count() != unrelated.Count) throw new InvalidOperationException("Unrelated VM inventory changed during exact deletion.");
-    }
-
-    public BackupVerification CreateFreshSafetyBackup(DiscoveredProject project, Action<string>? progress = null)
-    {
-        var vm = _provider.Discover().SingleOrDefault(x => x.ProjectId.Equals(project.ProjectId, StringComparison.OrdinalIgnoreCase) && x.RuntimeId.Equals(project.RuntimeId, StringComparison.OrdinalIgnoreCase));
-        if (vm is null || !vm.Owned) throw new InvalidOperationException($"No independently owned VM matched project={project.ProjectId}, runtime={project.RuntimeId}.");
-        var backup = _provider.CreateFreshBackup(vm);
-        if (!backup.IsVerified || !backup.ProjectId.Equals(project.ProjectId, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Fresh safety backup identity verification failed.");
-        progress?.Invoke($"Fresh Factory Reset safety backup bound: {backup.BackupId} sha256={backup.ActualSha256}");
-        return backup;
-    }
-}
-
-public sealed class TransactionService
-{
-    private readonly Stack<(string Name, Action Rollback)> _rollback = new();
-    private readonly InstallerLogger _logger;
-    public TransactionService(InstallerLogger logger) => _logger = logger;
-    public void Execute(string name, Action action, Action rollback, Action<string>? progress = null)
-    {
-        _logger.Write($"step={name} state=planned"); progress?.Invoke($"Planned: {name}");
-        action(); _rollback.Push((name, rollback)); _logger.Write($"step={name} state=verified"); progress?.Invoke($"Verified: {name}");
-    }
-    public void Rollback(Action<string>? progress = null)
-    {
-        while (_rollback.Count > 0)
-        {
-            var step = _rollback.Pop();
-            try { step.Rollback(); _logger.Write($"step={step.Name} state=rolled-back"); progress?.Invoke($"Rolled back: {step.Name}"); }
-            catch (Exception ex) { _logger.Write($"step={step.Name} state=rollback-incomplete error={ex.Message}"); progress?.Invoke($"Rollback incomplete: {step.Name}"); }
-        }
-    }
-}
-
-public static class RebootCheckpointService
-{
-    // The supported Windows prerequisite graph has at most three legitimate
-    // reboot boundaries (PowerShell/servicing, Hyper-V, and final servicing).
-    // Keep this explicit and bounded: an unexpected fourth boundary fails
-    // closed instead of becoming an unbounded reboot loop.
-    public const int MaxRebootBoundaries = 3;
-    public static string Path => System.IO.Path.Combine(AppPaths.InstallerRoot, "resume-checkpoint.json");
-    private static string ConsumedPath(string transactionId) => System.IO.Path.Combine(AppPaths.InstallerRoot, "resume-consumed", $"{transactionId}.json");
-    private static string ScriptStateRoot => TestEnvironment.IsTestProcess
-        ? AppPaths.StateRoot
-        : System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "DevFleet");
-
-    private static bool IsSameScriptTransaction(JsonElement existing, InstallerPlan plan, string role)
-    {
-        var normalizedRole = role.Contains("Laptop", StringComparison.OrdinalIgnoreCase) ? "Laptop" : "Desktop";
-        return existing.TryGetProperty("transactionId", out var transactionId) &&
-               existing.TryGetProperty("payloadSha256", out var payloadSha256) &&
-               existing.TryGetProperty("action", out var action) &&
-               existing.TryGetProperty("role", out var existingRole) &&
-               existing.TryGetProperty("acknowledgeRootfulDocker", out var acknowledgement) &&
-               acknowledgement.ValueKind is JsonValueKind.True or JsonValueKind.False &&
-               transactionId.GetString() == plan.TransactionId &&
-               payloadSha256.GetString() == PayloadManifest.PayloadSha256 &&
-               action.GetString() == plan.Mode.ToString() &&
-               existingRole.GetString() == normalizedRole &&
-               acknowledgement.GetBoolean() == plan.AcknowledgeRootfulDocker;
-    }
-
-    private static void ClearStaleStageMarkers(string role, Action<string>? progress = null)
-    {
-        var roots = new[] { ScriptStateRoot, AppPaths.InstallerRoot }
-            .Select(System.IO.Path.GetFullPath)
-            .Distinct(StringComparer.OrdinalIgnoreCase);
-        foreach (var root in roots)
-        {
-            if (!Directory.Exists(root)) continue;
-            foreach (var marker in Directory.EnumerateFiles(root, "stage-*.complete", SearchOption.TopDirectoryOnly).ToArray())
-            {
-                var full = System.IO.Path.GetFullPath(marker);
-                if (!ful
+        var providerReference

@@ -1,10 +1,286 @@
 # DevFleet source part 053
 
 Full-source UTF-8 byte interval [2418000, 2464500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 5e43936e77dc5dc02c616ae5b2d37c0ebb1ed2dae16974a300b84f00146ff218
+Payload SHA-256: 307f522a9bdc727e8c727f4f8c670687b13c4d18eec2137ea9e9fbec60d2b7ba
 
 <!-- BEGIN SOURCE SLICE -->
-ces; push GitHub without a new
+rn on `-SyntheticResume`, `-KeepLab`, `-AllowRamPressure`, destructive operations,
+or alternate launch modes merely because a script exposes them. Existing script defaults
+are not permission to violate the safety fence. No blind `ResumeLast` onto historical evidence.
+
+## Candidate and packaging tools
+
+`tools/Finalize-CandidateEvidence.ps1` uses **`-Workspace`**, not `-WorkspaceRoot`.
+It regenerates authority and can clear validation/proof eligibility; use only when binding
+is actually required. It is not the normal command for every memory/status update.
+
+`tools/Update-CurrentReleaseAuthority.ps1`, `tools/Invoke-DevFleetFinalConvergence.ps1`,
+`tools/Build-AIAuditBundle.ps1`, and the native audit/release validators are existing tools.
+Inspect their live help/param/parser interface; use the correct DIAGNOSTIC or RELEASE mode.
+The uploaded ZIP remaps some native `tools/` files to `release-tooling/` for review: those
+archive paths do not supersede the live repository paths.
+
+The uploaded shipping identity code enumerates `source/` and `installer-source/`; its
+separate tooling fingerprint enumerates `tools/` and `automation/`. This package deliberately
+uses other locations. Verify the actual live rules, including dirty-file gates. Commit stable
+orchestration documents explicitly rather than weakening source-clean checks. Dynamic audit
+memory is not a reason to rebuild or run the finalizer repeatedly.
+
+## Observation fallback
+
+Use only an already available, supported read-only console/screenshot capability bound to
+the exact disposable L1. If unavailable, a concise request to Dylan for that VM window and
+last relevant non-secret log lines is the fallback. No new remote desktop service, global
+agent installation, whole-host screen capture or simulated computer-use evidence.
+
+````
+
+
+## FILE: docs/ai/devfleet-release/DONE.md
+
+SHA256: 6ac7bd826771941e6792d4efa16a135010b1f05ff9eb3a6337269330a3df2042 | Bytes: 4245 | Git mode: 100644
+
+```
+# Definition of done
+
+## D0 — scaffolding installed (administrative only)
+
+Root instruction discovery, this skill and memory paths are installed; existing instructions
+and memory preserved; stable additions classified and integrated. This earns no product,
+proof, FullRelease or promotion credit.
+
+## D1 — current blocker resolved
+
+S1 target-environment initial/resume launch acknowledgement passes, followed by a real
+exact signed installation that crosses required reboot boundaries and reaches matching
+durable completion, ownership and authenticated health. Correct reporting of a startup
+failure is useful regression evidence, not resolution of the whole product blocker.
+
+## D2 — PASS — INTERNAL RELEASE ELIGIBLE
+
+All following conditions hold for the same **current** candidate/shipping/release/material
+tooling identities and the required independent run lineage:
+
+- Coherent current signed candidate, actual required Authenticode identity, exact artifact
+  tuple; `candidateIsCurrent=true`, `sourceChangedSinceCandidate=false`, `rebuildRequired=false`.
+  Candidate build commit remains truthful even when repository HEAD contains newer tooling.
+- Proof #1 PASS and Proof #2 PASS, 2/2, independent RunIds/clean starts and required Desktop
+  and Laptop/Failover/Vault coverage. No smoke, ContractProbe, synthetic or manual-only substitute.
+- Maintenance/sentinels PASS; Repair, Clean Reinstall, Uninstall, Factory Reset and
+  Reboot/Resume each PASS, 5/5 under native acceptance semantics.
+- One coherent current FullRelease PASS, with Host Agent, real WPF/reboot, Linux, Windows
+  sentinels, ownership/recovery/destructive, Vault, surrogate and Tailscale gates resolved
+  in the form permitted by their actual contracts. No new waivers or historical stitching.
+- U01–U05 in TEST-PLAN have real evidence, or existing equivalent **current** runtime
+  evidence demonstrably covers the same supported behavior. Missing tests are not assumed passes.
+- Current RECONCILE PASS; durable CLEANUP PASS; positively established **L1 OFF / L2 ABSENT**;
+  no owned coordinator/worker/helper/build/proof execution left running.
+- New final `outputs/DevFleet-v1.2.13-AI-Audit-LATEST.zip` represents final state and exact
+  source/evidence; clean-extracted **RELEASE-mode** validation, source/artifact checks,
+  secret scan and bundle/live-state match PASS. SHA-256 sidecar produced after ZIP finalization.
+- Current machine authority truthfully reports `validationEvidenceCurrent=true`,
+  `fullReleasePassed=true`, `internalPromotionAllowed=true`, `publicPromotionAllowed=false`,
+  `publicPublisherTrust=false`.
+- `F-005 attempted: NO`, `formatter-only audit cleanup performed: NO`,
+  `F-005 structural refactoring performed: NO`. No safety violation hidden by a green test.
+
+Only native validators/generators may establish authority. These checkboxes and memory
+cannot set promotion flags. A validator/schema defect is fixed and tested separately;
+a forbidden manual PASS is never a workaround. Unknown, skipped, stale, dispatch-only,
+NOT_OBSERVED, NOT_RUN and BLOCKED are not PASS.
+
+## D3 — stable baseline ready for feature work
+
+After D2, record the verified stable source/tooling HEAD and original candidate build commit,
+artifact hashes/paths, exact passing RunIds, supported deployment/trust scope, recovery
+instructions and local immutable reference through the existing Git workflow. Do not move an
+existing release tag or alter signed bytes. Prepare FEATURE-HANDOFF with this identity.
+No GitHub push or automatic production installation is authorized.
+
+Astra features live on a separate feature branch/worktree, with no writes to release evidence
+or the certification lab. Before D2, only isolated design/prototype work is allowed, no merge
+into the release candidate. “Public stable release” would require a separately agreed scope;
+D2 is the user's private/internal milestone, not public publisher trust.
+
+## Blocked is an acceptable truthful closeout, not completion
+
+State the exact first failed boundary, last real observation, evidence, remaining gates,
+consumed authorization, what changed, safe terminal state and the next falsifiable action.
+Do not rename a good diagnostic archive or a valid signature as a release.
+
+```
+
+
+## FILE: docs/ai/devfleet-release/FEATURE-HANDOFF.md
+
+SHA256: ef5747b1322ad80a5a1e69ae07d6d1eead0a496d282b572dc95fb99d3f078c66 | Bytes: 3163 | Git mode: 100644
+
+```
+# Stable baseline and Astra feature track
+
+This file defines separation; it does not authorize adding a particular feature now or
+switching the active release root. Verify available model identifiers/capabilities when used.
+
+Before release: Astra can work on a separately requested specification/prototype in another
+feature worktree. It must not write the release worktree, artifacts, canonical evidence,
+shared runtime configuration, credentials or certification lab. Do not run concurrent heavy
+feature tests while the disposable release environment is using the host budget.
+
+After DONE/D2: Sol records the stable baseline below in a new evidence-backed handoff, preserves
+the signed candidate and known-good source/tooling reference with the native Git workflow,
+and leaves release artifacts untouched. Avoid moving tags, hard resets and pushes.
+
+## Handoff fields to populate only from proven release evidence
+
+- Release eligibility verdict and evidence time.
+- Stable source/tooling HEAD and original candidate build commit (not necessarily equal).
+- Shipping/release/tooling identities; signed EXE/TAR/portable/installer-source paths and hashes.
+- Two proof RunIds, role coverage, maintenance 5/5, FullRelease, real-use U01–U05 evidence.
+- RECONCILE/CLEANUP and final L1/L2 state; RELEASE-mode audit ZIP/sidecar.
+- Supported private/internal deployment scope and self-signed trust limitations.
+- Known nonblocking limitations with source; no unresolved release blocker hidden as a feature.
+- Exact read-only baseline/reference and separately chosen feature branch/worktree path.
+- Recovery/rollback instructions and baseline regression commands.
+
+No fields above are currently pre-populated with a release PASS.
+
+## One-feature acceptance contract
+
+Astra starts from the verified baseline and a single approved feature request. Define visible
+user behavior, non-goals, affected modules, data/config compatibility, failure behavior,
+security/ownership implications, tests and rollback before editing. Implement the smallest
+useful slice; keep unrelated installer, provisioning, reboot, Vault and ownership changes out
+unless that feature explicitly requires them. Do not rewrite the application to add one screen.
+
+Run existing impacted regressions and new feature acceptance. Before integration, compare
+shipping and tooling deltas and repeat the appropriate release qualification for the new
+version. Never carry v1.2.13's passing certification forward onto changed feature bytes.
+The stable baseline remains available even when the next version fails. Do not turn all future
+feature development into another unlimited audit campaign.
+
+## Release acceleration handoff
+
+The bounded future-release sequence and validation matrix are maintained in
+`audit/agent-memory/RELEASE-ACCELERATION.md`, `COMPONENT-MAP.md`, and
+`VALIDATION-MATRIX.md`. They are navigation only: Vault-broker restore,
+recovery-only identity/read boundaries, same-install REAL-USE U01-U05,
+standard-token immutable evidence, and immutable final RELEASE audit/acceptance
+remain required and currently unverified. Do not populate the release fields
+above from these planning documents.
+
+```
+
+
+## FILE: docs/ai/devfleet-release/MEMORY-PROTOCOL.md
+
+SHA256: 2d85fc7f367ea2702011623299830c3f8c6fce2b9acf76589619f95b4819695f | Bytes: 5093 | Git mode: 100644
+
+```
+# Durable Markdown memory — maintained by Codex
+
+Purpose: remember fixes, failures, decisions and next actions without re-reading giant
+transcripts or turning guesses into facts. This is an agent-maintained file workflow,
+not a database service, background daemon, automatic hook or guarantee of model compliance.
+No new subscriptions, MCP servers, embeddings or global Codex-memory edits are needed.
+
+## Where information belongs
+
+| Path relative to repo | Meaning / authority |
+|---|---|
+| `audit/agent-memory/CURRENT.md` | Short navigation snapshot; exact next action and pointers; never release authority |
+| `audit/agent-memory/INDEX.md` | Topic/keyword index into only relevant lessons |
+| `audit/agent-memory/EDGE-CASES.md` | Stable anti-regression invariants, scoped by evidence and condition |
+| `audit/agent-memory/DECISIONS.md` | Why an approach/policy was chosen and what would invalidate it |
+| `audit/agent-memory/ATTEMPTS.md` and `attempts/` | Historical ledger pointers and newly authorized reservations/results |
+| `audit/agent-memory/TEST-RESULTS.md` | Test IDs/inputs/outcome/evidence/limits; no inherited PASS without binding |
+| `audit/agent-memory/HELPERS.md` | Compact projection of the native shared helper allocation |
+| `audit/agent-memory/incidents/` | One durable record per meaningful failure class |
+| `audit/agent-memory/sessions/` | Compact pause/closeout notes, created only at meaningful boundaries |
+
+Use existing native JSON candidate/proof/release/attempt ledgers as the machine authority.
+If a native ledger schema lacks a field, a separate Markdown reservation can record policy
+accounting, but must not alter that schema or become a second release-authority generator.
+
+## Write triggers — no routine manual journaling by Dylan
+
+Sol updates memory in the same turn after: a test or live operation terminalizes; a cause is
+proven or a hypothesis falsified; a fix is validated; candidate/tooling changes; a reusable
+edge case is discovered; an authorized limit is consumed; or pause/blocker/release closeout.
+Before a risky/long operation write its reservation and next expected evidence. After it
+finishes reconcile result/counters before starting another. Do not add entries on every poll,
+command or unchanged observation. Helpers return findings; only Sol edits shared memory.
+
+A new fact record contains:
+`ID; observed UTC; status; scope/tuple; symptom; evidence path + SHA-256 or exact symbol;
+proven cause or hypothesis; action; regression; runtime validation level; invalidation trigger;
+next action/supersedes.` Use `templates/INCIDENT.md` and `templates/ATTEMPT.md`.
+
+Allowed labels: `HISTORICAL`, `HYPOTHESIS`, `PROVEN_SOURCE_DEFECT`, `FIX_IMPLEMENTED`,
+`LOCAL_TESTED`, `LIVE_VALIDATED`, `RELEASE_CERTIFIED`, `FALSIFIED`, `SUPERSEDED`, `UNKNOWN`.
+Do not flatten LOCAL_TESTED into LIVE_VALIDATED. The September 5 seed is offline and must
+remain explicitly identified as such until new observations exist.
+
+## Read and reuse rules
+
+At resume read CURRENT + INDEX, verify live tuple, then read only matched incident/edge sections.
+Before reopening a familiar issue, compare its exact symptom, validity scope and regression.
+Reopen only with a recorded current contradiction or missing qualifying evidence; missing
+release proof alone is not proof that every previously solved subproblem recurred.
+
+Reuse a passing test only when relevant production/test/dependency/environment inputs match
+its evidence. A recorded count without such provenance is informational, not certification.
+When source changes, mark dependent results stale with a reason; do not delete their history.
+A mutable summary cannot retroactively change the exact inputs of a completed proof.
+
+## Bounded maintenance and integrity
+
+Keep CURRENT approximately one screen (target <=150 lines) and INDEX <=100 lines. Put long
+explanations in incident files. When a topic file grows past about 250 lines, archive closed
+entries to a named incident/session and leave indexed summaries; do not lose provenance.
+These are readability targets, not a reason to truncate essential evidence.
+
+Write UTF-8 via temp file and atomic replace; Sol is the single writer. Preserve historical
+facts and append corrections with `supersedes`, rather than quietly rewriting a false claim.
+Use repo-relative links, UTC timestamps and explicit null/unknown values. No secrets, tokens,
+credential hashes, private keys, unrestricted dumps or unrelated personal information.
+Exclude installation backups/raw instructions from public or AI review bundles by default.
+
+Dynamic memory is under audit to avoid routine edits becoming shipping changes in the
+uploaded inventory model. Recheck live fingerprint rules. Freeze stable docs/skill/AGENTS
+before qualification. Do not commit/rebind after each memory sentence or modify fingerprint
+exclusions to hide material code changes. At closeout include sanitized relevant current
+memory in the canonical audit only using the existing validated packaging approach; add
+needed tooling coverage before certification if that builder does not already support it.
+
+```
+
+
+## FILE: docs/ai/devfleet-release/SAFETY-AND-AUTHORITY.md
+
+SHA256: 1c84b23f81d24c14a4590d182ceae85a55b39c774855396f89ac9d6a5bff42e9 | Bytes: 6519 | Git mode: 100644
+
+```
+# Safety, authority and working conditions
+
+This carries forward the user's original DEVFLEET-AI-OPERATING-RULES.md. The adopted
+workflow amends only model/delegation assignment and runtime-attempt authorization.
+It does not weaken safety, candidate binding, evidence standards, or release gates.
+Higher-priority platform instructions and actual authorization controls remain binding.
+
+## Sole operator and permitted environment
+
+Sol XHigh is the release coordinator, sole authoritative repository writer, committer,
+signing operator, Hyper-V mutator, proof owner and release decision maker. Continue the
+user-selected YOLO/default-tier/Fast-off session; these documents do not change CLI or
+Windows settings. YOLO is not an isolation boundary and grants no exception to this file.
+
+Use only `C:\Users\Dylan\Documents\Codex\2026-08-12\ex-2\work\DevFleet-v1.2.13-development`
+on MULATTOTECHBOX for the release campaign. Use existing repository-local runtimes.
+Do not install global tools or change host settings to make a test convenient.
+
+Never reboot/shut down MULATTOTECHBOX; change AMD/Radeon or BIOS/UEFI; touch
+MulattoTechSurface; mutate `devfleet-primary`, `devfleet-project-m-techlabs-job-finder`,
+`DevFleet-H10-Linux`, or other protected/foreign resources; push GitHub without a new
 explicit user request; export signing private keys; expose E2EAdmin plaintext/hash/DPAPI
 material or Host Agent token/HMAC; disable Defender/AMSI/security; weaken authentication,
 ownership or permissions; clear legitimate servicing state to green a test; adopt or
@@ -424,223 +700,4 @@ backend receipts/logs as corroboration. Keep the fixture small; no new host VM i
 | ID | Actual user journey | Observable pass condition |
 |---|---|---|
 | U01 | Authenticate to disposable dashboard; create a generic/Python/Node project using an existing supported template | Project directory and metadata are correct; expected .devcontainer/.devfleet/Compose assets exist; credentials not logged |
-| U02 | Start project, run its provided harmless smoke/health/test operation and inspect returned operation status/logs | Real workload starts and becomes healthy; operation ID reaches terminal success; UI result agrees with backend/container evidence |
-| U03 | Stop, restart, then reopen/reconnect to the dashboard after permitted service/guest restart in the disposable deployment | No duplicate writer/container; same project/data remains; health recovers and operation is not left permanently pending |
-| U04 | Write known fixture content, use supported immediate backup and Quarantine, then Restore; verify checksum/content | Backup precedes quarantine; quarantine is not permanent deletion; restore does not overwrite a foreign existing directory; known data recovered |
-| U05 | Use supported restore-copy-from-vault/recovery path in the authorized scenario; also exercise existing blocked-start/security/ownership regression fixtures | Restored copy contains the fixture without overwriting an existing project; unsafe/unowned operation is rejected; original remains usable; only intended owner can start |
-
-Do not test destructive policy by attacking a real user resource. Use existing safe fixtures
-for negative cases. Do not use docs' production-oriented sample commands literally; bind every
-instance target to the authorized disposable scenario. If U04/U05 need Vault services not yet
-available during Proof #1, run there during the supported Vault/maintenance scenario before
-teardown and before final acceptance. Missing backup/pairing is not permission to skip them
-silently. A bounded real-use test gap gets explicit evidence and an implementation action.
-
-## M — maintenance and safety coverage, 5/5
-
-| Operation | Required observable behavior |
-|---|---|
-| Repair | Repairs the supported disposable fault/owned integration without taking over foreign resources; authentic health restored |
-| Clean Reinstall | Runs its supported backup/plan/ownership path and produces coherent restored installation; no silent deletion outside owned scope |
-| Uninstall | Removes only owned integrations/resources per the actual supported uninstall contract; preserves promised user data/backups and foreign sentinels |
-| Factory Reset | Enforces actual backup/confirmation/ownership requirements; resets only the documented owned scope; rejection cases fail closed |
-| Reboot/Resume | Durable checkpoints survive required boundary; current transaction/payload resumes once; terminal receipt/install state/health verified |
-
-Do not invent data-preservation semantics: read the current operation contract before each
-scenario and assert those semantics. Use current focused Windows/safety sentinels, Host Agent,
-ownership/recovery/destructive, Linux, Vault, surrogate and Tailscale gates. A deferred pairing
-launch flag is not a universal waiver for the Tailscale release gate. Resolve it as the existing
-contract requires; external authorization gaps remain documented blockers.
-
-## Aggregate and non-VM prerequisites
-
-Reuse exact unchanged durable evidence; rerun affected suites once after material change:
-WPF boundary; lifecycle observer; interactive logon; release integrity; final convergence;
-Host Agent poison/security; relevant installer self-tests including standard-token behavior;
-PowerShell parse checks; `git diff --check`; relevant Linux/Bash checks. Actual test parameters
-and runtime context are in COMMAND-MAP. A test run under Administrator cannot prove a
-standard-token path. Add targeted Windows PowerShell versus PowerShell 7 coverage where used.
-
-Complete one coherent FullRelease, current RECONCILE, durable CLEANUP and final audit validation.
-Attach result provenance; report PASS, FAIL, BLOCKED, NOT_RUN, UNVERIFIED and legitimate
-contract-approved not-applicable outcomes distinctly. Never invent a new N/A waiver.
-
-## DF-STABLE-20260906-D role-bound observer qualification
-
-The pre-D production helper treated every lifecycle as Primary. The focused Laptop regression
-therefore failed before correction at `production caller derives candidate Failover identity for
-Laptop / Surrogate`; no VM or product process was used. Commit `8a34166` makes the production
-identity policy candidate-bound and role-aware, not caller-injected:
-
-| Boundary | Required and observed local result |
-|---|---|
-| Desktop production chain | Real lifecycle resolver/waiter/collector/completion path accepts exact Primary shipping stages and the bound Primary guest marker; Vault and cleanup names are not authorized |
-| Laptop production chain | Same production path derives and requires exact Failover plus Vault shipping identities; both bound guest markers are required for completion |
-| Negative evidence | Wrong role, cleanup name, unknown stage, stale time, wrong transaction/payload, malformed marker and nonmonotonic progress remain rejected |
-| Error normalization | Original collector errors and available rejected names survive; an absent historical name remains absent and is not reconstructed |
-| Cleanup summary | Only PASS run-owned exact-proof cleanup with complete Hyper-V and VirtualBox in-L1 inventories publishes derived L1/L2 summaries; CLI-only absence is rejected |
-
-Post-correction local results: lifecycle 164/164, WPF 46/46 and harness 112/112 PASS.
-These are tooling-only qualification and no proof credit. The exact signed candidate remains
-unchanged. D's first Proof #1 must use a new RunId, canonical CLEAN and fresh HOST-SAFETY after
-native tooling provenance is frozen. Its reserved retry conditions are defined in WORKFLOW.md.
-
-```
-
-
-## FILE: docs/ai/devfleet-release/WORKFLOW.md
-
-SHA256: 27f360ddc4f70be93ab23ab23808be08a456523453050347c624df0ce4e52c2e | Bytes: 15344 | Git mode: 100644
-
-```
-# Stabilization workflow and renewed runtime authorization
-
-Policy ID: **DF-STABLE-20260905-A**. This is a new user-adopted orchestration policy,
-not a finding about the old campaign. It explicitly authorizes validating the corrections
-already written after the earlier 2/2 diagnostic cap stopped execution.
-
-The original failures remain immutable history. Record this authorization as a continuation
-linked to `evidence/campaigns/wpf-no-report-20260905-ledger.json`, not a reset of that file.
-Do not amend immutable proof-start records or silently rewrite old attempt counts.
-
-## Milestones — continue automatically while prerequisites pass
-
-| ID | Objective | Exit condition / next action |
-|---|---|---|
-| S0 | Reconcile live state and sole ownership | Exact tuple, changed-file classification, active-run resolution, latest terminal states, test reuse and readiness gap are known |
-| S1 | Validate corrected launch plumbing | Local affected behavioral contracts valid; real target initial/resume ContractProbe acknowledgements and identity readback pass; no product launched |
-| S2 | Observe a real installation | Exact signed installer starts from canonical CLEAN, crosses required reboot boundaries, reaches genuine durable completion and authenticated health |
-| S3 | Prove repeatability and real use | Two independent current qualifying proofs with required role coverage; U01–U05 actual-use/recovery acceptance recorded |
-| S4 | Certify the frozen tuple | Current maintenance/sentinels, one coherent FullRelease, maintenance 5/5, all mandatory gates, RECONCILE and durable CLEANUP |
-| S5 | Preserve and hand off | Final RELEASE-mode audit validated; DONE satisfied; stable source/artifacts pinned; feature handoff prepared |
-
-At entry select the earliest milestone lacking **current valid evidence**. Skip none on
-memory assertions; repeat none merely because a chat changed. Do not rebuild existing
-launch code or add more observations before testing the corrected boundary unless source
-or failed local tests identify a specific remaining defect.
-
-For S1 use the existing diagnostic and real Windows PowerShell parser/interactive task path.
-Confirm both initial and elevated-resume vectors, actual task principal/SID/session, staged
-hashes and no product mutation. A successful ContractProbe satisfies S1 only.
-
-For S2, prefer a properly configured real Proof #1 that also supplies the first successful
-lifecycle observation. Do not add a redundant full-install smoke. Check the existing proof
-entrypoint's real role coverage: its title alone does not prove Desktop or Laptop coverage.
-If the entrypoint cannot represent a required role, minimally connect an existing supported
-role path before freezing; do not invent a command-line switch or weaken the requirement.
-
-S2 completion must establish actual checkpoint consumption, installed state, canonical
-ownership, expected services and authenticated health, not just window text or exit 0.
-Expected L1 reboot is observed by a changed boot identity; host reboot is forbidden.
-
-For S3 run the second proof with a new RunId and clean starting state under the same tuple,
-including prescribed Laptop/Failover/Vault and surrogate coverage. Only use the already
-sanctioned surrogate in the authorized lab; do not touch the real Surface or create extra
-host VMs. Attach real-use acceptance before the existing test teardown when supported.
-No manual console interaction or diagnostic checkpoint can silently earn clean automated
-certification. If a manual diagnostic was needed, disclose it and repeat the qualifying
-scenario cleanly after correction.
-
-For S4 follow the existing native phase dependency order. Reuse evidence across adjacent
-checks only when the native contract explicitly permits it. One coherent successful
-FullRelease is required; failed or historical runs cannot be stitched together.
-
-## New bounded allowance — startup is not a full-install attempt
-
-These are proposed controls adopted by the user's continuation prompt, not historical facts.
-Counters persist across pauses, compaction, new RunIds and model changes.
-
-**Readiness allowance: at most THREE new top-level launcher-readiness invocations.**
-One invocation can test initial and resume modes in the same bounded run. The first tests
-the existing correction. Up to two further invocations require a distinct evidenced,
-corrected defect with focused local validation. No identical blind rerun. The previous two
-attempts remain recorded as historical 2/2 and do not consume this explicitly renewed allowance.
-Pure local tests and read-only HOST-SAFETY checks are not live invocations, but do not loop
-over failed prerequisites. Count a readiness invocation before it mutates/starts the lab;
-record failures before product launch accurately. If the product unexpectedly launches,
-classify conservatively as real product execution as well; do not hide it as a cheap probe.
-
-**Product/certification allowance: required first executions plus at most TWO corrective
-replays in total.** The baseline executions are Proof #1, Proof #2, prescribed focused
-maintenance/sentinels and one FullRelease, with native deduplication where permitted.
-This is not two attempts per phase, per model or per failure class. Any replacement/replay
-of a product, proof, maintenance or FullRelease invocation consumes the shared replay pool,
-including failures before launch after entry into that product invocation. A changed candidate
-or tooling tuple does not reset the pool. Each invocation is reserved before start; capture
-actual productStarted as true/false/unknown in its result. Required phases not yet attempted
-are not replays. Successful first executions do not consume corrective replays.
-
-A replay requires a narrow proven cause, a correction, a relevant test demonstrating the
-behavior, and fresh safety/coherence. Proofs invalidated by material changes must be
-requalified honestly; this can consume remaining replays. If the remaining pool cannot
-finish current qualification, stop with the precise gap instead of using stale passes.
-The point is to permit testing a demonstrated correction, not to authorize serial guesses.
-
-Stop speculative runtime before exhaustion if the same unexplained failure recurs, evidence
-remains blind, a substantial new shipping defect emerges, or ownership/security is uncertain.
-After exhausted readiness/replay allowance, produce a focused current diagnostic closeout;
-source-only analysis does not grant more VM attempts. Additional runtime needs new explicit
-user authorization. No renamed campaign, hidden retries or changing limits inside the ledger.
-
-## Before every real operation
-
-Write a compact attempt entry with RunId; class; policy/counter reservation; question;
-exact candidate/shipping/release/tooling identities; actual entrypoint/parameters/script
-hash; expected semantic observations; operation and enclosing deadlines; cleanup owner;
-HOST-SAFETY evidence; and protected-resource fence. Reuse the existing native ledger when
-appropriate; otherwise use `audit/agent-memory/attempts/` records, not another promotion engine.
-
-Derive finite deadlines from live owners, not guessed campaign length. Preserve
-`operation < stage < role transaction < observer absolute < release watchdog` and a
-separate semantic no-progress watchdog. Child calls consume remaining owner budget.
-A small acknowledgement deadline is not a limit on the whole valid installer lifecycle.
-Fail an invalid parent/child budget before VM mutation, not by clipping a valid child.
-Do not extend absolute deadlines because CPU, PID or UI activity changes.
-
-## When observation fails
-
-Require the last durable boundary, exact launch/product identity, raw error, elapsed/remaining
-owner budget, valid product progress and process exit information. Write primary failure
-before optional UIA diagnostics. A UIA call that hangs must not block its supervisor's
-terminal report or steal ownership of legitimate installer descendants.
-
-If the observer still cannot explain the state, use a supported, exact-L1-bound console
-observation plus product logs before another broad source search. Avoid the same stuck UIA
-call for this fallback. Capture only that disposable VM, not the host desktop or unrelated
-applications. Do not capture credentials. If no safe supported console capability exists,
-request one targeted observation from Dylan; do not claim computer-use capability or mutate
-the host to obtain it. Preserve/terminalize the bounded operation safely rather than wait forever.
-A manual observation diagnoses; it does not replace the mandatory automated proof.
-
-## Freeze and execute
-
-Land focused fixes, tests and stable orchestration inputs before certification. Freeze material
-shipping and harness code across successful qualifying runs. Markdown runtime memory can update
-under its non-shipping audit path; verify actual inventory rules and never exclude real product
-or harness inputs to avoid invalidation. Do not rerun candidate finalization just to capture a
-memory edit. Do not edit acceptance criteria to match an observed failure.
-
-Local harnesses own long waits. Use long supported waits or sparse batched state-change checks;
-no continuous model polling, helper waves or side work on the same lab. Continue until a true
-release, concrete blocker, or user pause—not until a plan or documentation update is written.
-
-## Adopted supplement — DF-STABLE-20260906-B
-
-The user explicitly adopted **DF-STABLE-20260906-B** after DF-STABLE-20260905-A was
-exhausted. It does not reset or relabel any prior attempt. Historical diagnostics remain
-2/2, readiness remains 3/3, and shared corrective product replays remain 2/2.
-
-This supplement authorizes exactly **one additional exact Proof #1 replay**. Reserve it
-before entry and use a new RunId. It is conditional on all of the following:
-
-- focused production-path regressions for durable product progress, immutable report
-  deadlines/identity, stuck UIA, and conservative L2 absence are passing;
-- the material tooling correction is committed and frozen;
-- live candidate, shipping, release, tooling and signed-artifact coherence is current,
-  with no shipping-input drift or rebuild requirement;
-- sole campaign ownership and the exact L1/CLEAN immutable identities are reverified;
-- fresh HOST-SAFETY passes at the prescribed boundary; and
-- the exact proof starts from canonical CLEAN. A missing Multipass CLI alone is never L2
-  absence: read-only in-L1 backend inventories must prove ABSENT or the result is UNVERIFIED.
-
-Do 
+| U02 | Start project, run its pr

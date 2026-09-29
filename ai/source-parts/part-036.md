@@ -1,10 +1,148 @@
 # DevFleet source part 036
 
 Full-source UTF-8 byte interval [1627500, 1674000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 278f84a6cf840a5387a6521051c0eb181c025df15b7e0fe1a8629eb4f9da2fb5
+Payload SHA-256: 8b31d1cef30dbcbe91ffc4a8cf8888ee366a2a206f306be74568e937dfbe5ca6
 
 <!-- BEGIN SOURCE SLICE -->
-ption.Message}
+tTo-WpfUtcInstant (Get-WpfContractValue $Report 'deadlineUtc')
+        $expectedDeadline = ConvertTo-WpfUtcInstant (Get-WpfContractValue $Specification 'driverDeadlineUtc')
+        if ($reportDeadline.Ticks -ne $expectedDeadline.Ticks) { $Reason.Value = 'report deadline identity mismatch'; return $false }
+    } catch { $Reason.Value = 'report deadline identity is missing or malformed'; return $false }
+    $sequence = 0
+    if (-not [int]::TryParse([string](Get-WpfContractValue $Report 'sequence'), [ref]$sequence) -or $sequence -le $MinimumSequenceExclusive) { $Reason.Value = 'report sequence is missing or non-monotonic'; return $false }
+    $status = [string](Get-WpfContractValue $Report 'status')
+    if ($status -notin @('PASS','REBOOT_REQUIRED','DURABLE_PENDING','OBSERVER_HANDOFF','PRODUCT_FAILURE','FAIL','OBSERVER_FAILURE','CANCELLED')) { $Reason.Value = "report status is not terminal: $status"; return $false }
+    $completion = [bool](Get-WpfContractValue $Report 'completionVerified')
+    if ($status -eq 'PASS' -and -not $completion) { $Reason.Value = 'PASS omitted verified completion'; return $false }
+    if ($status -ne 'PASS' -and $completion) { $Reason.Value = "$status cannot assert verified completion"; return $false }
+    $cleanupDisposition = [string](Get-WpfContractValue $Report 'cleanupDisposition')
+    if ($status -eq 'PASS' -and $cleanupDisposition -cne 'CLEANUP_EXACT_CANDIDATE') { $Reason.Value = 'PASS omitted exact-candidate cleanup ownership'; return $false }
+    if ($status -eq 'REBOOT_REQUIRED' -and (-not [bool](Get-WpfContractValue $Report 'rebootRequired') -or $cleanupDisposition -cne 'RELINQUISH_VERIFIED_PENDING')) { $Reason.Value = 'REBOOT_REQUIRED omitted validated pending ownership'; return $false }
+    if ($status -eq 'DURABLE_PENDING') {
+        $basis = [string](Get-WpfContractValue $Report 'pendingBasis')
+        if (-not [bool](Get-WpfContractValue $Report 'durableCompletionPending') -or
+            -not [bool](Get-WpfContractValue $Report 'durableStateVerified') -or
+            -not [bool](Get-WpfContractValue $Report 'ownershipTransferVerified') -or
+            [bool](Get-WpfContractValue $Report 'productOutcomeClaimed') -or
+            $cleanupDisposition -cne 'RELINQUISH_VERIFIED_PENDING' -or
+            $basis -cne 'EXACT_TRANSACTION_DURABLE_STATE') {
+            $Reason.Value = 'DURABLE_PENDING omitted validated durable product identity and ownership transfer'; return $false
+        }
+        if ($expectedTransaction -notmatch '^[0-9a-fA-F]{32}$') { $Reason.Value = 'durable pending omitted exact transaction identity'; return $false }
+    }
+    if ($status -eq 'OBSERVER_HANDOFF') {
+        $basis = [string](Get-WpfContractValue $Report 'handoffBasis')
+        if (-not [bool](Get-WpfContractValue $Report 'ownershipTransferVerified') -or
+            [bool](Get-WpfContractValue $Report 'productOutcomeClaimed') -or
+            [bool](Get-WpfContractValue $Report 'durableCompletionPending') -or
+            [string](Get-WpfContractValue $Report 'observerContract') -cne 'Wait-DevFleetProductLifecycleTransition' -or
+            $cleanupDisposition -cne 'RELINQUISH_LIFECYCLE_OWNER' -or
+            $basis -notin @('GENERATION_ZERO_PRODUCT_OBSERVER_HANDOFF','EXACT_TRANSACTION_PRODUCT_OBSERVER_HANDOFF')) {
+            $Reason.Value = 'OBSERVER_HANDOFF omitted an exact no-outcome ownership transfer'; return $false
+        }
+        if ($basis -eq 'EXACT_TRANSACTION_PRODUCT_OBSERVER_HANDOFF' -and $expectedTransaction -notmatch '^[0-9a-fA-F]{32}$') { $Reason.Value = 'transaction-bound handoff omitted exact transaction identity'; return $false }
+        if ($basis -eq 'GENERATION_ZERO_PRODUCT_OBSERVER_HANDOFF' -and $expectedTransaction) { $Reason.Value = 'generation-zero handoff contradicted an existing transaction identity'; return $false }
+    }
+    return $true
+}
+
+function Resolve-WpfProviderObservation {
+    param([AllowNull()][object]$ProviderValue,[Parameter(Mandatory)][ValidateSet('TERMINAL','PROGRESS')][string]$Kind,[Parameter(Mandatory)][datetime]$Now)
+    if ($null -eq $ProviderValue) { return [pscustomobject]@{value=$null;establishedAtUtc=$Now;metadataValid=$true;reason=''} }
+    if ([string](Get-WpfContractValue $ProviderValue 'contract') -cne 'devfleet-wpf-file-observation-v1') {
+        return [pscustomobject]@{value=$ProviderValue;establishedAtUtc=$Now;metadataValid=$true;reason='collection time is the only establishment evidence'}
+    }
+    if ([string](Get-WpfContractValue $ProviderValue 'kind') -cne $Kind) {
+        return [pscustomobject]@{value=$null;establishedAtUtc=$Now;metadataValid=$false;reason='provider observation kind mismatch'}
+    }
+    try { $established = ConvertTo-WpfUtcInstant (Get-WpfContractValue $ProviderValue 'fileWriteUtc') }
+    catch { return [pscustomobject]@{value=$null;establishedAtUtc=$Now;metadataValid=$false;reason='provider observation fileWriteUtc is missing or malformed'} }
+    if ($established -gt $Now) { return [pscustomobject]@{value=$null;establishedAtUtc=$established;metadataValid=$false;reason='provider observation claims a future file write'} }
+    $value = Get-WpfContractValue $ProviderValue 'value'
+    if ($null -eq $value) { return [pscustomobject]@{value=$null;establishedAtUtc=$established;metadataValid=$false;reason='provider observation omitted its value'} }
+    return [pscustomobject]@{value=$value;establishedAtUtc=$established;metadataValid=$true;reason='atomic file write time'}
+}
+
+function Test-WpfBoundProgress {
+    param([AllowNull()][object]$Progress,[Parameter(Mandatory)][object]$Specification,[int]$MinimumSequenceExclusive,[int]$MinimumSemanticSequenceExclusive,[ref]$Sequence,[ref]$SemanticSequence,[ref]$Reason)
+    $Reason.Value='';$Sequence.Value=0;$SemanticSequence.Value=0
+    if($null -eq $Progress){$Reason.Value='progress absent';return $false}
+    if([string](Get-WpfContractValue $Progress 'contract') -cne 'devfleet-wpf-checkpoint-v2' -or [int](Get-WpfContractValue $Progress 'schemaVersion') -lt 2){$Reason.Value='progress contract is missing or stale';return $false}
+    foreach($name in @('runId','launchId','transactionId','payloadSha256','candidateSha256')){if([string](Get-WpfContractValue $Progress $name) -cne [string](Get-WpfContractValue $Specification $name)){$Reason.Value="progress $name mismatch";return $false}}
+    try{$progressDeadline=ConvertTo-WpfUtcInstant (Get-WpfContractValue $Progress 'deadlineUtc');$expectedDeadline=ConvertTo-WpfUtcInstant (Get-WpfContractValue $Specification 'driverDeadlineUtc');if($progressDeadline.Ticks-ne$expectedDeadline.Ticks){$Reason.Value='progress deadline identity mismatch';return $false}}catch{$Reason.Value='progress deadline identity is missing or malformed';return $false}
+    $sequenceValue=0;if(-not[int]::TryParse([string](Get-WpfContractValue $Progress 'sequence'),[ref]$sequenceValue)-or$sequenceValue-le$MinimumSequenceExclusive){$Reason.Value='progress sequence is missing or non-monotonic';return $false}
+    $Sequence.Value=$sequenceValue
+    $semanticValue=0;if(-not[int]::TryParse([string](Get-WpfContractValue $Progress 'semanticProgressSequence'),[ref]$semanticValue)-or$semanticValue-le$MinimumSemanticSequenceExclusive){$Reason.Value='progress semantic sequence is missing or non-monotonic';return $false}
+    $SemanticSequence.Value=$semanticValue
+    if([string](Get-WpfContractValue $Progress 'semanticProgressKind') -ne 'DURABLE_PRODUCT_PROGRESS' -or [string](Get-WpfContractValue $Progress 'progressSource') -ne 'DURABLE_PRODUCT_OBSERVER'){$Reason.Value='observer breadcrumb is not durable semantic product progress';return $false}
+    if([string](Get-WpfContractValue $Progress 'transactionId') -notmatch '^[0-9a-fA-F]{32}$'){$Reason.Value='durable semantic progress lacks an exact transaction identity';return $false}
+    return $true
+}
+
+function Get-WpfCleanupDisposition {
+    param([Parameter(Mandatory)][string]$Status, [switch]$CompletionVerified)
+    switch ($Status) {
+        'ALREADY_RUNNING' { return 'CONTINUE_OBSERVATION' }
+        'DURABLE_PENDING' { return 'RELINQUISH_VERIFIED_PENDING' }
+        'OBSERVER_HANDOFF' { return 'RELINQUISH_LIFECYCLE_OWNER' }
+        'REBOOT_REQUIRED' { return 'RELINQUISH_VERIFIED_PENDING' }
+        'OBSERVER_FAILURE' { return 'RELINQUISH_LIFECYCLE_OWNER' }
+        'CANCELLED' { return 'RELINQUISH_LIFECYCLE_OWNER' }
+        'PASS' { if ($CompletionVerified) { return 'CLEANUP_EXACT_CANDIDATE' }; return 'REJECT_INCOMPLETE_PASS' }
+        default { return 'CLEANUP_EXACT_CANDIDATE' }
+    }
+}
+
+function New-WpfSupervisorFailure {
+    param([Parameter(Mandatory)][object]$Specification, [Parameter(Mandatory)][string]$FailureClass, [Parameter(Mandatory)][string]$Error, [Parameter(Mandatory)][datetime]$Now, [int]$LastSequence = 0, [string]$LastDurableStep = 'LAUNCH_REQUESTED')
+    return [pscustomobject][ordered]@{
+        schemaVersion=2; contract='devfleet-wpf-terminal-v2'; status='OBSERVER_FAILURE'; terminal=$true; completionVerified=$false; failureClass=$FailureClass; error=$Error;
+        runId=[string](Get-WpfContractValue $Specification 'runId'); launchId=[string](Get-WpfContractValue $Specification 'launchId');
+        transactionId=[string](Get-WpfContractValue $Specification 'transactionId'); payloadSha256=[string](Get-WpfContractValue $Specification 'payloadSha256');
+        candidateSha256=[string](Get-WpfContractValue $Specification 'candidateSha256'); sequence=([Math]::Max(0,$LastSequence)+1); phase='SUPERVISOR'; lastDurableStep=$LastDurableStep; productStarted=$true;
+        deadlineUtc=[string](Get-WpfContractValue $Specification 'driverDeadlineUtc'); timestampUtc=$Now.ToString('o'); cleanupDisposition='RELINQUISH_LIFECYCLE_OWNER'
+    }
+}
+
+function Invoke-WpfBoundProviderCall {
+    param(
+        [Parameter(Mandatory)][scriptblock]$Provider,
+        [Parameter(Mandatory)][string]$Kind,
+        [Parameter(Mandatory)][ValidateRange(1,60)][int]$TimeoutSeconds
+    )
+    $runspace=$null
+    $pipeline=$null
+    $invocation=$null
+    $quarantined=$false
+    try {
+        $runspace=[runspacefactory]::CreateRunspace()
+        $runspace.Open()
+        $runspace.SessionStateProxy.SetVariable('DevFleetWpfBoundProvider',$Provider)
+        $pipeline=[powershell]::Create()
+        $pipeline.Runspace=$runspace
+        [void]$pipeline.AddScript('& $DevFleetWpfBoundProvider')
+        $invocation=$pipeline.BeginInvoke()
+        if (-not $invocation.AsyncWaitHandle.WaitOne([TimeSpan]::FromSeconds($TimeoutSeconds))) {
+            try {
+                $stopInvocation=$pipeline.BeginStop($null,$null)
+                [void]$stopInvocation.AsyncWaitHandle.WaitOne([TimeSpan]::FromSeconds(2))
+            } catch {}
+            [void]$script:WpfAbandonedProviderCalls.Add([pscustomobject]@{pipeline=$pipeline;runspace=$runspace;invocation=$invocation;kind=$Kind})
+            $quarantined=$true
+            return [pscustomobject]@{ok=$false;timedOut=$true;value=$null;error="$Kind did not return within its bounded $TimeoutSeconds-second call window."}
+        }
+        try {
+            $values=@($pipeline.EndInvoke($invocation))
+            if($pipeline.HadErrors){
+                $providerErrors=@($pipeline.Streams.Error)
+                $providerError=if($providerErrors.Count){[string]$providerErrors[0].Exception.Message}else{"$Kind failed without a preserved error record."}
+                return [pscustomobject]@{ok=$false;timedOut=$false;value=$null;error=$providerError}
+            }
+            $value=if($values.Count -eq 0){$null}elseif($values.Count -eq 1){$values[0]}else{$values}
+            return [pscustomobject]@{ok=$true;timedOut=$false;value=$value;error=''}
+        } catch {
+            $providerErrors=@($pipeline.Streams.Error)
+            $providerError=if($providerErrors.Count){[string]$providerErrors[0].Exception.Message}else{[string]$_.Exception.Message}
             return [pscustomobject]@{ok=$false;timedOut=$false;value=$null;error=$providerError}
         }
     } finally {
@@ -571,101 +709,4 @@ function Get-HarnessCandidateFingerprint([string]$Root) {
         if ($_.Exception.Message -ne 'Candidate evidence says the candidate is stale or requires rebuild.') { throw }
         $version=(Get-Content -LiteralPath (Join-Path $Root 'source\VERSION') -Raw).Trim()
         $outputs=Join-Path $Root 'outputs'
-        $exe=@(Get-ChildItem -LiteralPath $outputs -Filter "DevFleet-Setup-v$version-win-x64.exe" -File)
-        $portable=@(Get-ChildItem -LiteralPath $outputs -Filter "DevFleet-v$version-Portable*.zip" -File)
-        if($exe.Count -ne 1 -or $portable.Count -ne 1){throw 'Harness fixture artifact discovery is ambiguous.'}
-        $release=Get-Content -LiteralPath (Join-Path $outputs 'release-fingerprint.json') -Raw|ConvertFrom-Json
-        return [pscustomobject]@{
-            releaseVersion=$version
-            installerVersion=(Get-Content -LiteralPath (Join-Path $Root 'installer-source\INSTALLER_VERSION') -Raw).Trim()
-            gitCommit=(& git -C $Root rev-parse HEAD).Trim()
-            releaseFingerprintId=[string]$release.releaseFingerprintId
-            toolingFingerprintId=[string]$release.toolingFingerprint.toolingFingerprintId
-            candidate=Get-FileHashRecord -Path $exe[0].FullName
-            tar=Get-FileHashRecord -Path (Join-Path $outputs "devfleet-v$version.tar.gz")
-            portable=Get-FileHashRecord -Path $portable[0].FullName
-            installerSource=Get-FileHashRecord -Path (Join-Path $outputs "DevFleet-v$version-Installer-Source.zip")
-        }
-    }
-}
-$temp=Join-Path $env:TEMP "DevFleet-E2E-HarnessTests-$([guid]::NewGuid().ToString('N'))"; New-Item -ItemType Directory -Path $temp | Out-Null
-try {
-    $candidate=Get-HarnessCandidateFingerprint -Root $WorkspaceRoot
-    Assert-That ($candidate.releaseVersion -match '^\d+\.\d+\.\d+$') 'version parsing'
-    Assert-That ($candidate.candidate.sha256.Length -eq 64 -and $candidate.tar.sha256.Length -eq 64) 'artifact hashing'
-    Assert-That ((Test-CandidateFingerprint -Expected $candidate -Actual (Get-HarnessCandidateFingerprint -Root $WorkspaceRoot)) -eq $true) 'candidate fingerprint equality'
-
-    $unsafeProjection=Get-ProjectedHostMemorySafety -AvailableMemoryGiB 25.16 -ExpectedVmStartCostGiB 14.38 -InstalledUsableMemoryGiB 64 -CommitLimitGiB 64 -CommittedGiB 50
-    Assert-That (-not $unsafeProjection.startSafe) 'projected post-start memory rejects unsafe VM start'
-    Assert-That ($unsafeProjection.projectedPostStartAvailableMemoryGiB -eq 10.78) 'projected post-start memory records expected remainder'
-    $overrideBlocked=Apply-RamPressureOverride -Snapshot ([pscustomobject]@{startSafe=$false;resourceExhaustion=$false})
-    Assert-That (-not $overrideBlocked.effectiveE2EStartAuthorized -and -not $overrideBlocked.ramPressureOverrideAuthorized) 'RAM override defaults disabled'
-    $overrideAllowed=Apply-RamPressureOverride -Snapshot ([pscustomobject]@{startSafe=$false;resourceExhaustion=$false}) -AllowRamPressure
-    Assert-That ($overrideAllowed.effectiveE2EStartAuthorized -and -not $overrideAllowed.rawHostSafetyStartSafe -and $overrideAllowed.ramPressureOverrideAuthorized) 'RAM override authorizes memory-only failure and preserves raw result'
-    $overrideDenied=Apply-RamPressureOverride -Snapshot ([pscustomobject]@{startSafe=$false;resourceExhaustion=$true}) -AllowRamPressure
-    Assert-That (-not $overrideDenied.effectiveE2EStartAuthorized) 'RAM override cannot bypass resource exhaustion'
-    $safeProjection=Get-ProjectedHostMemorySafety -AvailableMemoryGiB 35 -ExpectedVmStartCostGiB 14.38 -InstalledUsableMemoryGiB 64 -CommitLimitGiB 64 -CommittedGiB 30
-    Assert-That $safeProjection.startSafe 'projected post-start memory accepts safe VM start'
-    $runningProjection=Get-ProjectedHostMemorySafety -AvailableMemoryGiB 21 -ExpectedVmStartCostGiB 14.38 -InstalledUsableMemoryGiB 64 -CommitLimitGiB 64 -CommittedGiB 30 -VmAlreadyRunning $true
-    Assert-That ($runningProjection.startSafe -and $runningProjection.expectedVmStartCostGiB -eq 0) 'running VM uses observed post-start memory'
-
-    $space=Join-Path $temp 'path with spaces'; New-Item -ItemType Directory -Path $space | Out-Null
-    $statePath=Join-Path $space 'run-state.json'; $obj=[pscustomobject]@{schemaVersion=1;candidate=$candidate.candidate.sha256}
-    Write-AtomicJson -Path $statePath -Value $obj; $read=Read-StrictJson -Path $statePath
-    Assert-That ($read.candidate -eq $candidate.candidate.sha256) 'atomic state write/read with spaces'
-    Set-Content -LiteralPath $statePath -Value '{bad json' -Encoding utf8
-    $invalidCaught=$false;try{Read-StrictJson -Path $statePath}catch{$invalidCaught=$true}; Assert-That $invalidCaught 'corrupted state rejection'
-    Write-AtomicJson -Path $statePath -Value $obj
-
-    $lockReady=Join-Path $space 'run-state-lock-ready.txt'
-    $locker=Start-Job -ArgumentList @($statePath,$lockReady) -ScriptBlock {
-        param([string]$Target,[string]$Ready)
-        $handle=[IO.File]::Open($Target,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
-        try {
-            [IO.File]::WriteAllText($Ready,'ready',[Text.UTF8Encoding]::new($false))
-            Start-Sleep -Milliseconds 500
-        } finally { $handle.Dispose() }
-    }
-    $lockDeadline=(Get-Date).AddSeconds(10)
-    while(-not(Test-Path -LiteralPath $lockReady) -and (Get-Date) -lt $lockDeadline){Start-Sleep -Milliseconds 25}
-    $replacement=[pscustomobject]@{schemaVersion=1;candidate='replacement-after-transient-contention'}
-    $replacementSucceeded=$false
-    try {
-        if(-not(Test-Path -LiteralPath $lockReady)){throw 'test locker did not acquire the run-state file'}
-        Write-AtomicJson -Path $statePath -Value $replacement
-        $replacementSucceeded=([string](Read-StrictJson -Path $statePath).candidate -ceq [string]$replacement.candidate)
-    } catch {
-        $replacementSucceeded=$false
-    } finally {
-        Wait-Job -Job $locker -Timeout 5 | Out-Null
-        Remove-Job -Job $locker -Force -ErrorAction SilentlyContinue
-    }
-    Assert-That $replacementSucceeded 'atomic state replace tolerates brief Windows destination contention'
-    Assert-That (@(Get-ChildItem -LiteralPath $space -Filter 'run-state.json.*.tmp' -File -ErrorAction SilentlyContinue).Count -eq 0) 'atomic state replace removes temporary files after contention'
-
-    $runState=[pscustomobject]@{candidateHashes=[pscustomobject]@{exe=$candidate.candidate.sha256;tar=$candidate.tar.sha256};vmId='expected'}
-    $mismatchCaught=$false;try{Assert-ResumeIdentity -State $runState -Fingerprint $candidate -Vm ([pscustomobject]@{Id=[guid]::NewGuid()})|Out-Null}catch{$mismatchCaught=$true}; Assert-That $mismatchCaught 'checkpoint/VM identity mismatch rejection'
-    $hashMismatch=[pscustomobject]@{candidateHashes=[pscustomobject]@{exe=('0'*64);tar=$candidate.tar.sha256}}
-    $candidateCaught=$false;try{Assert-ResumeIdentity -State $hashMismatch -Fingerprint $candidate}catch{$candidateCaught=$true}; Assert-That $candidateCaught 'candidate hash mismatch rejection'
-
-    $fakeVm=[pscustomobject]@{Name='DevFleet-E2E-Test';Id=([guid]::NewGuid())}; $manifest=New-CleanupManifest -Vm $fakeVm -RunId 'synthetic'; Assert-That (Test-CleanupManifest $manifest) 'cleanup manifest exact ownership'; Assert-That (-not (Assert-DisposableNameTest -Name 'devfleet-primary')) 'production name denied'
-    $summaryRoot=Join-Path $temp 'cleanup-summary';$summaryEvidence=Join-Path $summaryRoot 'evidence';$summaryRunDir=Join-Path $summaryRoot 'audit\automation-harness\runs\unit-cleanup';New-Item -ItemType Directory -Force -Path $summaryEvidence,$summaryRunDir|Out-Null
-    $summaryCleanupPath=Join-Path $summaryRunDir 'cleanup-state.json';$summaryCleanup=[ordered]@{runId='unit-cleanup';status='PASS';runOwnedOnly=$true;cleanupOwner='run-exact-candidate-proof.ps1';l1=[ordered]@{status='OFF';name='DevFleet-E2E-Win11-01';id='84b7d8b8-ee6c-4085-aa29-4b0adc316de2';observedUtc='2026-09-06T09:23:01.1613702Z'};l2=[ordered]@{status='ABSENT';expectedName='DevFleet-E2E-Linux-01';present=$false;exactMatchCount=0;verification='Multipass CLI absent; complete read-only inventories from every supported in-L1 virtualization backend';backendInventories=@([ordered]@{provider='Hyper-V';status='PASS';names=@();verification='bounded Hyper-V inventory'},[ordered]@{provider='VirtualBox';status='PASS';names=@();verification='bounded VirtualBox inventory'});observedUtc='2026-09-06T09:22:55.9889986Z'}}
-    Write-EvidenceJson -Path $summaryCleanupPath -Value $summaryCleanup;$published=Publish-DevFleetTerminalCleanupSummary -WorkspaceRoot $summaryRoot -CleanupEvidencePath $summaryCleanupPath;$publishedL2=Get-Content -LiteralPath (Join-Path $summaryEvidence 'l2-terminal-state.json') -Raw|ConvertFrom-Json
-    $publishedL2TimestampValue=$publishedL2.timestampUtc
-    $publishedL2Timestamp=if($publishedL2TimestampValue -is [datetime]){([datetime]$publishedL2TimestampValue).ToUniversalTime()}elseif($publishedL2TimestampValue -is [datetimeoffset]){([datetimeoffset]$publishedL2TimestampValue).UtcDateTime}else{[datetime]::ParseExact([string]$publishedL2TimestampValue,'o',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind)}
-    $publishedL2TimestampUtc=$publishedL2Timestamp.ToUniversalTime().ToString('o',[Globalization.CultureInfo]::InvariantCulture)
-    Assert-That ([string]$published.sourceRunId -ceq 'unit-cleanup' -and $publishedL2TimestampUtc -ceq '2026-09-06T09:22:55.9889986Z' -and -not [bool]$publishedL2.certifiedReleaseCleanup -and @($publishedL2.backendInventories).Count -eq 2) 'terminal cleanup summary preserves exact source provenance and complete backend evidence without claiming release CLEANUP'
-    $cliOnlyPath=Join-Path (New-Item -ItemType Directory -Force -Path (Join-Path $summaryRoot 'audit\automation-harness\runs\unit-cli-only')) 'cleanup-state.json';$cliOnly=$summaryCleanup|ConvertTo-Json -Depth 10|ConvertFrom-Json;$cliOnly.runId='unit-cli-only';$cliOnly.l2.backendInventories=@();$cliOnly.l2.verification='Multipass executable absent inside exact L1';Write-EvidenceJson -Path $cliOnlyPath -Value $cliOnly;$cliOnlyRejected=$false;try{Publish-DevFleetTerminalCleanupSummary -WorkspaceRoot $summaryRoot -CleanupEvidencePath $cliOnlyPath|Out-Null}catch{$cliOnlyRejected=$true};Assert-That $cliOnlyRejected 'terminal cleanup summary rejects CLI absence without complete in-L1 backend inventory'
-    function Test-TerminalCleanupSummaryRejects([string]$RunSuffix,[scriptblock]$Mutation){
-        $runId="unit-$RunSuffix";$runDir=Join-Path $script:summaryRoot (Join-Path 'audit\automation-harness\runs' $runId);New-Item -ItemType Directory -Force -Path $runDir|Out-Null
-        $record=$script:summaryCleanup|ConvertTo-Json -Depth 10|ConvertFrom-Json;$record.runId=$runId;&$Mutation $record
-        $path=Join-Path $runDir 'cleanup-state.json';Write-EvidenceJson -Path $path -Value $record
-        try{Publish-DevFleetTerminalCleanupSummary -WorkspaceRoot $script:summaryRoot -CleanupEvidencePath $path|Out-Null;$false}catch{$true}
-    }
-    Assert-That (Test-TerminalCleanupSummaryRejects 'missing-exact-count' {param($r)$r.l2.PSObject.Properties.Remove('exactMatchCount')}) 'terminal cleanup summary rejects a missing nested exact-match count'
-    Assert-That (Test-TerminalCleanupSummaryRejects 'boolean-exact-count' {param($r)$r.l2.exactMatchCount=$false}) 'terminal cleanup summary rejects a Boolean masquerading as nested exact-match count'
-    Assert-That (Test-TerminalCleanupSummaryRejects 'host-only-method' {param($r)$r.l2.verification='Get-VM -Name exact returned no VM'}) 'terminal cleanup summary rejects a host-only inventory method even with backend rows'
-    Assert-That (Test-TerminalCleanupSummaryRejects 'present-target' {param($r)$r.l2.backendInventories[0].names=@('DevFleet-E2E-Linux-01')}) 'terminal cleanup summary rejects a supported backend inventory containing the target L2'
-    $fixtureVm=[pscustomobject]@{Name='DevFleet-E2E-Test';Id=([guid]::NewGuid())}; $fixtureSnapshot=[pscustomobject]@{Name='DevFleet-E2E-MAINTENANCE-READY';Id=([guid]::NewGuid())}; $generation=([guid]::NewGuid()).ToString('D')
-    $fixtureProvenance=[pscustomobject]@{schemaVersion=1;contract='maintenance-ready-provenance-v1';vmName=$fixtureVm.Name;vmI
+        $exe=@(Get-ChildItem -LiteralPath $outputs -Filter "DevFleet-Setup-v$version-w

@@ -1,10 +1,112 @@
 # DevFleet source part 017
 
 Full-source UTF-8 byte interval [744000, 790500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 152170049d1c07693bd2019f525f6bd48063d20093f17894d8f50ecaca9083a9
+Payload SHA-256: e78b899b53c2906db8f9702a28a1972cd3db2f02f56ffb88f0f8a4249adeb1d9
 
 <!-- BEGIN SOURCE SLICE -->
-String)
+winlogonPath,$false)
+        try {
+            function Read-PolicyValue($Key,[string]$Name) {
+                $present=$false;$kind=$null;$raw=$null
+                if($Key -and @($Key.GetValueNames()) -contains $Name){$present=$true;$kind=[string]$Key.GetValueKind($Name);$raw=$Key.GetValue($Name,$null,[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)}
+                $text=if($present -and $null -ne $raw){[string]$raw}else{$null};$hash=$null
+                if($present){$bytes=[Text.Encoding]::Unicode.GetBytes([string]$text);$sha=[Security.Cryptography.SHA256]::Create();try{$hash=(($sha.ComputeHash($bytes)|ForEach-Object{$_.ToString('x2')})-join '')}finally{$sha.Dispose()}}
+                [ordered]@{present=$present;registryValueKind=$kind;utf16CodeUnitCount=if($present){$text.Length}else{$null};stringLength=if($present){$text.Length}else{$null};isZeroLength=if($present){$text.Length -eq 0}else{$null};isOnlyNulCharacters=if($present){$text.Length -gt 0 -and $text -notmatch '[^\x00]'}else{$null};isOnlyWhitespace=if($present){$text.Length -gt 0 -and $text -notmatch '\S'}else{$null};utf16leSha256=$hash;rawValue=$raw}
+            }
+            $caption=Read-PolicyValue $policyKey 'LegalNoticeCaption';$text=Read-PolicyValue $policyKey 'LegalNoticeText';$winlogonCaption=Read-PolicyValue $winlogonKey 'LegalNoticeCaption';$winlogonText=Read-PolicyValue $winlogonKey 'LegalNoticeText'
+            $source='unknown';$sourceEvidence=[ordered]@{localPolicyRegistryPath=($null -ne $policyKey);winlogonRegistryPath=($null -ne $winlogonKey);domainPolicyRegistryPath=$false;policyManagerPath=$false}
+            $domainKey=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SOFTWARE\Policies\Microsoft\Windows\System',$false);try{if($domainKey -and (@($domainKey.GetValueNames())|Where-Object{$_ -in @('LegalNoticeCaption','LegalNoticeText')}).Count -gt 0){$source='domain-or-mdm-policy-registry';$sourceEvidence.domainPolicyRegistryPath=$true}}finally{if($domainKey){$domainKey.Dispose()}}
+            [ordered]@{caption=$caption;text=$text;winlogonCaption=$winlogonCaption;winlogonText=$winlogonText;source=$source;sourceEvidence=$sourceEvidence}
+        } finally {if($policyKey){$policyKey.Dispose()};if($winlogonKey){$winlogonKey.Dispose()}}
+    }
+}
+
+function Get-DevFleetE2EPreLogonPolicyStructure {
+    param([Parameter(Mandatory)][psobject]$State)
+    function Get-PolicyMember($Node,[string]$Name) {
+        if($null -eq $Node) { return $null }
+        if($Node -is [System.Collections.IDictionary]) { return $Node[$Name] }
+        $property=$Node.PSObject.Properties[$Name]
+        if($property){ return $property.Value }
+        return $null
+    }
+    function Get-PolicyStructure($Node) {
+        [ordered]@{
+            present=[bool](Get-PolicyMember $Node 'present')
+            registryValueKind=[string](Get-PolicyMember $Node 'registryValueKind')
+            utf16CodeUnitCount=Get-PolicyMember $Node 'utf16CodeUnitCount'
+            stringLength=Get-PolicyMember $Node 'stringLength'
+            isZeroLength=Get-PolicyMember $Node 'isZeroLength'
+            isOnlyNulCharacters=Get-PolicyMember $Node 'isOnlyNulCharacters'
+            isOnlyWhitespace=Get-PolicyMember $Node 'isOnlyWhitespace'
+            utf16leSha256=[string](Get-PolicyMember $Node 'utf16leSha256')
+        }
+    }
+    [ordered]@{caption=Get-PolicyStructure (Get-PolicyMember $State 'caption');text=Get-PolicyStructure (Get-PolicyMember $State 'text');winlogonCaption=Get-PolicyStructure (Get-PolicyMember $State 'winlogonCaption');winlogonText=Get-PolicyStructure (Get-PolicyMember $State 'winlogonText');source=[string](Get-PolicyMember $State 'source');sourceEvidence=Get-PolicyMember $State 'sourceEvidence'}
+}
+
+function Remove-DevFleetE2EPreLogonPolicy {
+    param([Parameter(Mandatory)][System.Management.Automation.Runspaces.PSSession]$Session)
+    $mutation=Invoke-Command -Session $Session -ScriptBlock {
+        $entries=@([ordered]@{label='PoliciesSystem';path='SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'},[ordered]@{label='Winlogon';path='SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'})
+        $before=@{};$after=@{}
+        foreach($entry in $entries){
+            $key=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($entry.path,$true);if($null -eq $key){throw "Pre-logon policy mutation could not open allowlisted path $($entry.label)."}
+            try{foreach($name in @('LegalNoticeCaption','LegalNoticeText')){$was=@($key.GetValueNames()) -contains $name;$before["$($entry.label):$name"]=$was;$key.DeleteValue($name,$false);$after["$($entry.label):$name"]=(@($key.GetValueNames()) -contains $name);if($after["$($entry.label):$name"]){throw "Pre-logon policy mutation remained for $($entry.label):$name."}}}finally{$key.Dispose()}
+        }
+        $changed=@();foreach($entry in $entries){if([bool]$before["$($entry.label):LegalNoticeCaption"] -or [bool]$before["$($entry.label):LegalNoticeText"]){$changed+=$entry.label}}
+        [ordered]@{changedPathLabels=@($changed|Select-Object -Unique);captionPresent=[bool]$after['PoliciesSystem:LegalNoticeCaption'];textPresent=[bool]$after['PoliciesSystem:LegalNoticeText'];winlogonCaptionPresent=[bool]$after['Winlogon:LegalNoticeCaption'];winlogonTextPresent=[bool]$after['Winlogon:LegalNoticeText']}
+    }
+    $changed=@($mutation.changedPathLabels)
+    if($changed.Count -gt 0){
+        $barrier=Invoke-DevFleetE2ERegistryPersistenceBarrier -Session $Session -PathLabel $changed
+        $check=Get-DevFleetE2EPreLogonPolicyState -Session $Session
+        if([bool]$check.caption.present -or [bool]$check.text.present -or [bool]$check.winlogonCaption.present -or [bool]$check.winlogonText.present){throw 'Pre-logon policy suppression was not durable after registry persistence barrier.'}
+        [ordered]@{captionPresent=$false;textPresent=$false;winlogonCaptionPresent=$false;winlogonTextPresent=$false;changedPathLabels=$changed;registryPersistenceBarrier=$barrier;preLogonPolicySuppressed=$true;preLogonPolicySuppressionPersisted=$true}
+    }else{
+        [ordered]@{captionPresent=[bool]$mutation.captionPresent;textPresent=[bool]$mutation.textPresent;winlogonCaptionPresent=[bool]$mutation.winlogonCaptionPresent;winlogonTextPresent=[bool]$mutation.winlogonTextPresent;changedPathLabels=@();registryPersistenceBarrier=$false;preLogonPolicySuppressed=$false;preLogonPolicySuppressionPersisted=$false}
+    }
+}
+
+function Restore-DevFleetE2EPreLogonPolicy {
+    param([Parameter(Mandatory)][System.Management.Automation.Runspaces.PSSession]$Session,[Parameter(Mandatory)][psobject]$Baseline)
+    Invoke-Command -Session $Session -ScriptBlock {
+        param($saved)
+        function Get-Node($Root,[string]$Name){if($Root -is [System.Collections.IDictionary]){return $Root[$Name]};$property=$Root.PSObject.Properties[$Name];if($property){return $property.Value};return $null}
+        function Get-Field($Node,[string]$Name){if($Node -is [System.Collections.IDictionary]){return $Node[$Name]};$property=$Node.PSObject.Properties[$Name];if($property){return $property.Value};return $null}
+        $entries=@([ordered]@{path='SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System';node='caption';name='LegalNoticeCaption'},[ordered]@{path='SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System';node='text';name='LegalNoticeText'},[ordered]@{path='SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon';node='winlogonCaption';name='LegalNoticeCaption'},[ordered]@{path='SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon';node='winlogonText';name='LegalNoticeText'})
+        foreach($entry in $entries){$node=Get-Node $saved $entry.node;$key=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($entry.path,$true);if($null -eq $key){throw "Pre-logon policy restore could not open allowlisted path $($entry.path)."};try{$present=[bool](Get-Field $node 'present');if($present){$raw=Get-Field $node 'rawValue';$kind=[Microsoft.Win32.RegistryValueKind]::Parse([Microsoft.Win32.RegistryValueKind],[string](Get-Field $node 'registryValueKind'));$key.SetValue($entry.name,$raw,$kind)}else{$key.DeleteValue($entry.name,$false)};$actualPresent=@($key.GetValueNames()) -contains $entry.name;if($actualPresent -ne $present){throw "Pre-logon policy restore did not verify $($entry.name)."}}finally{$key.Dispose()}}
+        [pscustomobject]@{status='PASS'}
+    } -ArgumentList $Baseline | Out-Null
+    $barrier=Invoke-DevFleetE2ERegistryPersistenceBarrier -Session $Session -PathLabel @('PoliciesSystem','Winlogon')
+    $check=Get-DevFleetE2EPreLogonPolicyState -Session $Session
+    function Get-NodeMember($Node,[string]$Name){if($Node -is [System.Collections.IDictionary]){return $Node[$Name]};$property=$Node.PSObject.Properties[$Name];if($property){return $property.Value};return $null}
+    foreach($name in @('caption','text','winlogonCaption','winlogonText')){
+        $expected=Get-NodeMember $Baseline $name;$actual=Get-NodeMember $check $name;$expectedPresent=[bool](Get-NodeMember $expected 'present');$actualPresent=[bool](Get-NodeMember $actual 'present');$expectedKind=[string](Get-NodeMember $expected 'registryValueKind');$actualKind=[string](Get-NodeMember $actual 'registryValueKind');$expectedHash=[string](Get-NodeMember $expected 'utf16leSha256');$actualHash=[string](Get-NodeMember $actual 'utf16leSha256');$expectedLength=[int](Get-NodeMember $expected 'stringLength');$actualLength=[int](Get-NodeMember $actual 'stringLength')
+        if($expectedPresent -ne $actualPresent -or $expectedKind -cne $actualKind -or $expectedHash -cne $actualHash -or $expectedLength -ne $actualLength){throw "Pre-logon policy baseline was not restored for $name."}
+    }
+    $structure=Get-DevFleetE2EPreLogonPolicyStructure -State $check
+    $structure['registryPersistenceBarrier']=$barrier
+    $structure['preLogonPolicyRestorationPersisted']=$true
+    $structure
+}
+
+function Set-DevFleetE2EWinlogonAutologon {
+    param([Parameter(Mandatory)][System.Management.Automation.Runspaces.PSSession]$Session,[Parameter(Mandatory)][securestring]$CredentialPassword)
+    $writeResult=Invoke-Command -Session $Session -ScriptBlock {
+        param([securestring]$securePassword)
+        if ([string]$env:COMPUTERNAME -cne 'DEVFLEET-E2E-01') { throw 'Native Winlogon arm reached an unexpected guest computer.' }
+        $path='SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        $key=$null;$ptr=[IntPtr]::Zero; $plain=$null
+        try {
+            if ($null -eq $securePassword) { throw 'Native Winlogon arm received no in-memory canonical credential.' }
+            $ptr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
+            $plain=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
+            $key=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($path,$true)
+            if($null -eq $key){throw 'Native Winlogon arm could not open the allowlisted Winlogon key.'}
+            $key.SetValue('DefaultUserName','E2EAdmin',[Microsoft.Win32.RegistryValueKind]::String)
+            $key.SetValue('DefaultDomainName',[string]$env:COMPUTERNAME,[Microsoft.Win32.RegistryValueKind]::String)
+            $key.SetValue('AutoAdminLogon','1',[Microsoft.Win32.RegistryValueKind]::String)
             # The only direct native Winlogon success on this exact disposable
             # guest used a generous internal allowance. The safety boundary is
             # the host-side one-reboot/deadline contract, never this count.
@@ -313,164 +415,4 @@ function Assert-MaintenanceVaultResult {
     if([string]$Result.status-cne'PASS'){throw 'Configured Primary Vault prerequisite did not pass.'}
     if([string]$Result.payloadSha256-cne[string]$Request.payloadSha256){throw 'Vault fixture payload identity differs.'}
     if([string]$Result.primaryRole-cne'primary'-or[string]$Result.primaryName-cne[string]$Request.primaryName-or[string]$Result.vaultName-cne[string]$Request.vaultName){throw 'Vault fixture Primary/instance identity differs.'}
-    foreach($key in @('primaryId','vaultId','deploymentId')){$id=[guid]::Empty;if(-not[guid]::TryParse([string]$Result.$key,[ref]$id)-or$id-eq[guid]::Empty){throw "Vault fixture $key is missing or invalid."}}
-    if($Result.configurationPresent-isnot[bool]-or-not$Result.configurationPresent-or$Result.authenticatedTransport-isnot[bool]-or-not$Result.authenticatedTransport){throw 'Vault fixture lacks authenticated configuration.'}
-    if($Result.proofCredit-isnot[bool]-or$Result.proofCredit){throw 'Vault prerequisite cannot award proof credit.'}
-}
-
-function Get-MaintenanceVaultControlRoot {
-    param([Parameter(Mandatory)][string]$WorkspaceRoot)
-    $resolved=(Resolve-Path -LiteralPath $WorkspaceRoot).Path.ToLowerInvariant()
-    $sha=[Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($resolved))
-    $key=([Convert]::ToHexString($sha).ToLowerInvariant()).Substring(0,16)
-    return Join-Path $env:LOCALAPPDATA ("DevFleet\ReleaseRunner-v9\"+$key)
-}
-
-function Protect-MaintenanceVaultPrivateFailureBytes {
-    param(
-        [Parameter(Mandatory)][byte[]]$Plaintext,
-        [Parameter(Mandatory)][string]$RunId,
-        [Parameter(Mandatory)][guid]$VmId,
-        [Parameter(Mandatory)][string]$SourcePath,
-        [Parameter(Mandatory)][string]$WorkspaceRoot,
-        [Parameter(Mandatory)][string]$RunDir,
-        [string]$ControlRoot=''
-    )
-    if($Plaintext.Length-le0){throw 'Private failure evidence is empty.'}
-    if(-not$ControlRoot){$ControlRoot=Get-MaintenanceVaultControlRoot -WorkspaceRoot $WorkspaceRoot}
-    Add-Type -AssemblyName System.Security
-    $entropy=[Text.Encoding]::UTF8.GetBytes("DevFleet exact failure evidence $RunId")
-    $encrypted=[Security.Cryptography.ProtectedData]::Protect($Plaintext,$entropy,[Security.Cryptography.DataProtectionScope]::CurrentUser)
-    $privateDir=Join-Path $ControlRoot ("private-evidence\"+$RunId)
-    [IO.Directory]::CreateDirectory($privateDir)|Out-Null
-    $encryptedPath=Join-Path $privateDir 'private-product-operations.log.dpapi'
-    [IO.File]::WriteAllBytes($encryptedPath,$encrypted)
-    $roundTrip=[Security.Cryptography.ProtectedData]::Unprotect($encrypted,$entropy,[Security.Cryptography.DataProtectionScope]::CurrentUser)
-    try{
-        $roundTripVerified=$roundTrip.Length-eq$Plaintext.Length
-        if($roundTripVerified){
-            for($i=0;$i-lt$Plaintext.Length;$i++){if($roundTrip[$i]-ne$Plaintext[$i]){$roundTripVerified=$false;break}}
-        }
-        if(-not$roundTripVerified){throw 'Private failure DPAPI round-trip verification failed.'}
-        $metadata=[ordered]@{
-            schemaVersion=1;runId=$RunId;classification='ENCRYPTED_PRIVATE_FAILURE_EVIDENCE_PRESERVATION'
-            sourceVmId=$VmId.ToString();sourcePath=$SourcePath;sourceBytes=$Plaintext.Length
-            encryptedLocalPath=$encryptedPath;encryptedSha256=(Get-FileHash -LiteralPath $encryptedPath -Algorithm SHA256).Hash.ToLowerInvariant()
-            encryption='Windows DPAPI CurrentUser';entropyDerivation='UTF8: DevFleet exact failure evidence plus space plus RunId'
-            roundTripVerified=$true;plaintextWrittenToHost=$false;plaintextIncludedInAudit=$false
-            sourceReadOnly=$true;runtimeRestarted=$false;observedAtUtc=[datetime]::UtcNow.ToString('o')
-        }
-        $metadataPath=Join-Path $RunDir 'private-failure-preservation.json'
-        [IO.File]::WriteAllText($metadataPath,(($metadata|ConvertTo-Json -Depth 6)+[Environment]::NewLine),[Text.UTF8Encoding]::new($false))
-        return [pscustomobject]$metadata
-    } finally {
-        if($roundTrip){[Array]::Clear($roundTrip,0,$roundTrip.Length)}
-        if($encrypted){[Array]::Clear($encrypted,0,$encrypted.Length)}
-        if($entropy){[Array]::Clear($entropy,0,$entropy.Length)}
-    }
-}
-
-function Save-MaintenanceVaultPrivateFailureEvidence {
-    param(
-        [Parameter(Mandatory)]$Session,
-        [Parameter(Mandatory)][string]$RunId,
-        [Parameter(Mandatory)][string]$RemoteRoot,
-        [Parameter(Mandatory)][string]$WorkspaceRoot,
-        [Parameter(Mandatory)][string]$RunDir,
-        [Parameter(Mandatory)][guid]$VmId
-    )
-    $sourcePath=Join-Path $RemoteRoot 'private-product-operations.log'
-    $record=Invoke-DevFleetBoundedGuestCommand -Session $Session -ScriptBlock {
-        param($Path)
-        if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return [pscustomobject]@{present=$false}}
-        $bytes=[IO.File]::ReadAllBytes($Path)
-        try{[pscustomobject]@{present=$true;length=$bytes.Length;base64=[Convert]::ToBase64String($bytes)}}finally{if($bytes){[Array]::Clear($bytes,0,$bytes.Length)}}
-    } -ArgumentList @($sourcePath) -TimeoutSeconds 30
-    if(-not[bool]$record.present){throw 'Private failure log was not present at the owned failure boundary.'}
-    $plain=[Convert]::FromBase64String([string]$record.base64)
-    $record.base64=$null
-    try{
-        if($plain.Length-ne[int]$record.length){throw 'Private failure log length changed during read-only preservation.'}
-        return Protect-MaintenanceVaultPrivateFailureBytes -Plaintext $plain -RunId $RunId -VmId $VmId -SourcePath $sourcePath -WorkspaceRoot $WorkspaceRoot -RunDir $RunDir
-    } finally {if($plain){[Array]::Clear($plain,0,$plain.Length)}}
-}
-
-function Write-MaintenanceVaultWindowsTailscaleSnapshot {
-    param(
-        [Parameter(Mandatory)]$Session,
-        [Parameter(Mandatory)][string]$ExpectedHostname,
-        [Parameter(Mandatory)][string]$RunDir
-    )
-    $snapshot=$null
-    try{
-        $snapshot=Invoke-DevFleetBoundedGuestCommand -Session $Session -ScriptBlock {
-            param($Expected)
-            $command=Get-Command tailscale.exe,tailscale -ErrorAction SilentlyContinue|Select-Object -First 1
-            if(-not$command){return [pscustomobject][ordered]@{schemaVersion=1;status='UNAVAILABLE';commandPresent=$false;expectedHostname=$Expected}}
-            $raw=& $command.Source status --json 2>$null
-            if($LASTEXITCODE-ne0-or-not$raw){return [pscustomobject][ordered]@{schemaVersion=1;status='UNAVAILABLE';commandPresent=$true;expectedHostname=$Expected}}
-            $status=$raw|ConvertFrom-Json
-            $self=$status.Self
-            $selfHostname=[string]$self.HostName
-            [pscustomobject][ordered]@{
-                schemaVersion=1;status='OBSERVED';commandPresent=$true;backendState=[string]$status.BackendState
-                selfOnline=[bool]$self.Online;selfHostName=$selfHostname;expectedHostname=$Expected
-                hostnameMatches=($selfHostname-ceq$Expected);tailscaleIpCount=@($status.TailscaleIPs).Count
-                healthCount=@($status.Health).Count;observedUtc=[datetime]::UtcNow.ToString('o')
-            }
-        } -ArgumentList @($ExpectedHostname) -TimeoutSeconds 30
-    } catch {
-        $snapshot=[pscustomobject][ordered]@{schemaVersion=1;status='UNAVAILABLE';commandPresent=$null;expectedHostname=$ExpectedHostname;reason='read-only Tailscale status probe failed';observedUtc=[datetime]::UtcNow.ToString('o')}
-    }
-    $path=Join-Path $RunDir 'maintenance-vault-windows-tailscale-preflight.json'
-    [IO.File]::WriteAllText($path,(($snapshot|ConvertTo-Json -Depth 6)+[Environment]::NewLine),[Text.UTF8Encoding]::new($false))
-    return $snapshot
-}
-
-function Invoke-MaintenanceVaultProvisioning {
-    param([Parameter(Mandatory)]$Request)
-    if([string]$Request.runId-cnotmatch '\Afullrelease-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\z'-or[string]$Request.payloadSha256-cnotmatch'^[a-f0-9]{64}$'){throw 'Vault fixture run/payload binding is invalid.'}
-    $state=[ordered]@{}
-    foreach($step in @('identity','launch','bootstrap','configure','verify')){
-        if([datetime]::UtcNow-ge([datetime]$Request.ownerDeadlineUtc).ToUniversalTime()){throw 'Vault prerequisite owner deadline expired.'}
-        $value=Invoke-MaintenanceVaultStep -Name $step -Request $Request -State $state
-        if($step-ceq'identity'){
-            if([string]$value.primaryRole-cne'primary'){throw 'Vault prerequisite requires the installed Primary role.'}
-            if($value.existingVault-isnot[bool]-or$value.existingVault){throw 'Refusing to adopt or refresh an existing Vault in the prerequisite.'}
-            $state.identity=$value
-        } elseif($step-ceq'launch'){$state.vault=$value}
-        elseif($step-ceq'verify'){Assert-MaintenanceVaultResult -Result $value -Request $Request;return $value}
-    }
-}
-
-function Invoke-MaintenanceVaultStep {
-    param([Parameter(Mandatory)][string]$Name,[Parameter(Mandatory)]$Request,[Parameter(Mandatory)]$State)
-    # This function runs only in an exact-L1, separately bounded PS7 process.
-    if($env:COMPUTERNAME-cne'DEVFLEET-E2E-01'-or$PSVersionTable.PSVersion.Major-lt7){throw 'Vault fixture is restricted to the approved disposable L1 PS7 runtime.'}
-    $package=[string]$Request.packageRoot
-    Import-Module (Join-Path $package 'windows/DevFleet.Common.psm1') -Scope Local -DisableNameChecking
-    $config=Get-DevFleetConfig;$mp=Get-MultipassExe
-    if([string]$config.Primary.InstanceName-cne[string]$Request.primaryName-or[string]$config.Vault.InstanceName-cne[string]$Request.vaultName){throw 'Installed configuration changed the approved fixture targets.'}
-    $deadline=([datetime]$Request.ownerDeadlineUtc).ToUniversalTime()
-    Set-DevFleetDeadlineContext -TransactionDeadlineUtc $deadline -StageName 'vault' -StageBudgetSeconds ([int]$Request.budgetSeconds)|Out-Null
-    switch($Name){
-        'identity' {
-            $identity=Get-Content -LiteralPath (Join-Path (Get-DevFleetStateRoot) 'node-identity.json') -Raw|ConvertFrom-Json
-            $primary=@(Get-VM -Name ([string]$Request.primaryName) -ErrorAction Stop)
-            if($primary.Count-ne1){throw 'Primary immutable VM identity is ambiguous.'}
-            $inventory=Invoke-External $mp @('list','--format','json') -Capture -TimeoutSeconds 60 -DeadlineUtc $deadline|ConvertFrom-Json
-            $unexpected=@($inventory.list|Where-Object{[string]$_.name-cne[string]$Request.primaryName})
-            $existing=@(Get-VM -ErrorAction Stop|Where-Object{$_.Id-ne$primary[0].Id})
-            if($unexpected.Count-gt0-or$existing.Count-gt0){throw 'Refusing an existing Vault or unexpected nested instance.'}
-            if(@($inventory.list|Where-Object{[string]$_.name-ceq[string]$Request.primaryName}).Count-ne1){throw 'Primary Multipass inventory is missing or ambiguous.'}
-            Assert-MultipassIsolation -InstanceNames @([string]$Request.primaryName)
-            return [pscustomobject]@{primaryRole=[string]$identity.node_role;primaryId=$primary[0].Id.ToString();deploymentId=[string]$identity.deployment_id;existingVault=$false}
-        }
-        'launch' {
-            $v=$config.Vault
-            $dependencyPolicy=Get-Content -LiteralPath (Join-Path $package 'linux/dependency-policy.json') -Raw|ConvertFrom-Json
-            $key=[string]$dependencyPolicy.tailscale.signingKeySha256Fingerprint
-            if($key-cnotmatch'^[A-F0-9]{40}$'){throw 'Candidate Vault cloud-init signing-key identity is invalid.'}
-            $cloud=Join-Path ([string]$Request.workRoot) 'vault-cloud-init.yaml'
-            $rendered=(Get-Content -LiteralPath (Join-Path $package 'cloud-init/vault.yaml') -Raw).Replace('__NODE_NAME__',(ConvertTo-YamlSingleQuotedScalar ([string]$Request.vaultName))).Replace('__TAILSCALE_SIGNING_FINGERPRINT__',$key)
-            if($rendered-match'__[A-Z0-9_]+__'){throw 'Vault cloud-init contains unresolved placeholder
+    foreach($key in @('primaryId','vaultId','deploymentId')){$id=[guid]::Empty;if(-not[guid]::TryParse([string]$Result.$key,[ref]$id)-or$id-eq[guid]::Empty){throw "Vault fixture $key is mis

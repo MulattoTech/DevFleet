@@ -1,10 +1,158 @@
 # DevFleet source part 012
 
 Full-source UTF-8 byte interval [511500, 558000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 90d82366ea3f80513335e27aab167fe24287a9215fdd7f70d7c4fe112121e507
+Payload SHA-256: 0a55a823fe88a9fd8a21f4068069beec987b14f3708305fddef2595c164f98e2
 
 <!-- BEGIN SOURCE SLICE -->
-n') -Value $evidence
+{
+            [IO.File]::WriteAllText($tmp,(($finalCurrent|ConvertTo-Json -Depth 24)+[Environment]::NewLine),[Text.UTF8Encoding]::new($false))
+            Move-Item -LiteralPath $tmp -Destination $finalPath -Force
+        } finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+        & (Join-Path $WorkspaceRoot 'tools\Update-CurrentReleaseAuthority.ps1') -Workspace $WorkspaceRoot -FullReleaseRunId $runId | Out-Null
+        Show-Result 'FullRelease' 'PASS' 'all configured real product phases completed with durable evidence'
+        return
+    } catch {
+        $primaryFailure=$_
+        $failureCleanupRecord=[ordered]@{schemaVersion=1;runId=$runId;status='NOT_RUN';scope='failure-handler-only';certifiedReleaseCleanup=$false;primaryFailurePreserved=$true;boundary='policy';startedAt=(Get-Date).ToUniversalTime().ToString('o')}
+        if (-not $KeepLab -and $vm) {
+            try {
+                $failureCleanupRecord.boundary='manifest'
+                $failureCleanup=New-CleanupManifest -Vm $vm -RunId $runId
+                $failureCleanupRecord.boundary='exact-identity'
+                $failureVm=Get-AssertedDisposableVm -ExpectedVm $vm
+                $durable=$false
+                if([string]$failureVm.State -eq 'Off'){$durable=$true}else{
+                    $failureCleanupRecord.boundary='interactive-logon'
+                    $failureLogon=Clear-DevFleetE2EInteractiveLogonState -VmId ([guid][string]$vm.Id)
+                    $durable=([string]$failureLogon.status -eq 'PASS' -and [bool]$failureLogon.registryCleanupPersisted -and [bool]$failureLogon.temporaryDefaultPasswordRemovalPersisted -and -not [bool]$failureLogon.ordinaryDefaultPasswordPresent)
+                }
+                if(-not $durable){throw 'FullRelease failure cleanup did not establish durable interactive-login cleanup.'}
+                $failureCleanupRecord.boundary='stop-exact-vm'
+                Stop-ManifestVm -Manifest $failureCleanup
+                $failureCleanupRecord.boundary='terminal-evidence'
+                Write-TerminalVmEvidence -Vm $vm -RunDir $runDir -L2Name ([string]$config.NestedLinux.Name) | Out-Null
+                $failureCleanupRecord.status='COMPLETED'
+            } catch {
+                $failureCleanupRecord.status='FAIL'
+                # Exception messages can contain guest credentials; retain the typed boundary only.
+                $failureCleanupRecord.errorType=$_.Exception.GetType().FullName
+                Write-Warning "Failure cleanup did not complete at $($failureCleanupRecord.boundary); the primary FullRelease failure is preserved."
+            }
+        }
+        $failureCleanupRecord.completedAt=(Get-Date).ToUniversalTime().ToString('o')
+        try { Write-EvidenceJson -Path (Join-Path $runDir 'failure-cleanup.json') -Value $failureCleanupRecord }
+        catch { Write-Warning 'Could not persist failure-cleanup evidence; the primary FullRelease failure is preserved.' }
+        try { & (Join-Path $WorkspaceRoot 'tools\Update-CurrentReleaseAuthority.ps1') -Workspace $WorkspaceRoot -FullReleaseRunId $runId | Out-Null }
+        catch { Write-Warning 'Could not refresh failed FullRelease authority; the primary failure is preserved.' }
+        Show-Result 'FullRelease' 'BLOCKED' $primaryFailure.Exception.Message
+        throw $primaryFailure
+    }
+}
+
+if ($Mode -eq 'Closeout') {
+    $finalStatePath=Join-Path $WorkspaceRoot 'finalization-state.json'
+    $finalState=Read-StrictJson -Path $finalStatePath
+    $tailStatus=$null; $guestState=$null; $session=$null
+    try {
+        $session=Connect-DevFleetGuest -VmId $vm.Id
+        $guestState=Get-InteractiveGuestState -Session $session
+        $tailStatus=Get-TailscaleGuestStatus -Session $session -ExpectedNodePattern ([string]$config.Tailscale.ExpectedGuestNodePattern)
+    } catch { $tailStatus=[pscustomobject]@{status='UNVERIFIED';error=$_.Exception.Message;credentialsStoredInEvidence=$false} }
+    finally { if($session){Remove-PSSession $session} }
+    $cleanupManifest=New-CleanupManifest -Vm $vm -RunId $runId
+    $cleanupPath=Join-Path $runDir 'cleanup-manifest.json'; Write-EvidenceJson -Path $cleanupPath -Value $cleanupManifest
+    $tailGate = 'FAIL'
+    if($tailStatus -and (Test-TailscaleConnected $tailStatus)) { $tailGate = 'REAL E2E PASS' }
+    $cleanupGate = 'FAIL'
+    if(Test-CleanupManifest $cleanupManifest) { $cleanupGate = 'UNIT/INTEGRATION TESTED' }
+    $gateRecords=@(
+        (Gate 'candidate' 'REAL E2E PASS' $fingerprint.candidate.sha256),
+        (Gate 'accepted-final-state' 'REAL E2E PASS' ([string]$finalState.status)),
+        (Gate 'tailscale-connected-state' $tailGate 'read-only guest status plus bounded WPF state was independently verified'),
+        (Gate 'cleanup-manifest' $cleanupGate 'exact disposable VM identity; production deny list; no fuzzy deletion')
+    )
+    $closeout=[ordered]@{status=if(@($gateRecords|Where-Object status -eq 'FAIL').Count -eq 0){'PASS'}else{'FAIL'};candidate=$fingerprint;acceptedGates=$finalState.gates;guest=$guestState;tailscale=$tailStatus;gates=$gateRecords;cleanupManifest=$cleanupPath;destructiveActionsPerformed=$false}
+    Write-EvidenceJson -Path (Join-Path $runDir 'closeout.json') -Value $closeout
+    $state.currentPhase='Closeout'; $state.completedPhases=@($state.completedPhases)+@('Closeout'); $state.cleanupManifestPath=$cleanupPath; $state.finalStatus=$closeout.status; Save-State $state $statePath
+    Show-Result 'Closeout smoke' $closeout.status 'current candidate, accepted evidence, Tailscale state, and cleanup safety verified'
+}
+} catch {
+    $script:DevFleetFinalConvergencePrimaryBlocker = $_.Exception.Message
+    throw
+} finally {
+    # Every controlled entrypoint outcome, including early HOST-SAFETY and
+    # FullRelease failures, goes through the same fail-safe audit finalizer.
+    $finalizerFailure=$null
+    try {
+        $finalizer = Join-Path $WorkspaceRoot 'tools\Invoke-DevFleetFinalConvergence.ps1'
+        $finalizerArgs = @('-Workspace',$WorkspaceRoot,'-RunId',$runId,'-RunDirectory',$runDir)
+        if ($script:DevFleetFinalConvergencePrimaryBlocker) {
+            $finalizerArgs += @('-PrimaryBlocker',$script:DevFleetFinalConvergencePrimaryBlocker,'-PrimaryBlockerClassification','BLOCKED — RELEASE HARNESS / PLATFORM')
+        }
+        Invoke-RequiredReleaseFinalizer -PowerShellPath (Get-Command pwsh.exe -ErrorAction Stop).Source -FinalizerPath $finalizer -ArgumentList $finalizerArgs | Write-Output
+    } catch {
+        $finalizerFailure=$_.Exception.Message
+    }
+    if($finalizerFailure){
+        if($script:DevFleetFinalConvergencePrimaryBlocker){Write-Warning "Mandatory finalizer invocation failed after the primary release failure; original blocker remains primary. Finalizer: $finalizerFailure"}
+        else{throw "Mandatory finalizer invocation failed: $finalizerFailure"}
+    }
+}
+
+```
+
+
+## FILE: automation/release-e2e/Invoke-FocusedMaintenanceSentinels.ps1
+
+SHA256: 3ddd160b47a2c2e25b86f42f6b280fed370ab78261730e113b5194f5bdff2227 | Bytes: 4953 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param(
+    [string]$WorkspaceRoot,
+    [string]$Candidate,
+    [string]$ConfigPath,
+    [string]$RunId,
+    [switch]$AllowRamPressure
+)
+$ErrorActionPreference='Stop'
+$scriptRoot=$PSScriptRoot
+if(-not $WorkspaceRoot){$WorkspaceRoot=(Resolve-Path (Join-Path $scriptRoot '..\..')).Path}else{$WorkspaceRoot=(Resolve-Path $WorkspaceRoot).Path}
+if(-not $ConfigPath){$ConfigPath=Join-Path $scriptRoot 'config\devfleet-e2e.defaults.json'}
+$config=Get-Content -LiteralPath $ConfigPath -Raw|ConvertFrom-Json
+foreach($m in @('Candidate','HostSafety','ResumeState','Evidence','Cleanup','GuestSession','FullRelease')){Import-Module (Join-Path $scriptRoot "modules\$m.psm1") -Force}
+$script:evidenceModulePath=Join-Path $scriptRoot 'modules\Evidence.psm1'
+# The product lifecycle imports modules in nested scopes and can unload the
+# repository module by name. Rebind it by full path for every wrapper write.
+function Write-FocusedMaintenanceEvidence {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][object]$Value)
+    $module=Import-Module $script:evidenceModulePath -Force -PassThru
+    $command=$module.ExportedCommands['Write-EvidenceJson']
+    if(-not $command){throw 'Focused maintenance evidence writer export is unavailable.'}
+    & $command -Path $Path -Value $Value
+}
+$fingerprint=Get-CandidateFingerprint -WorkspaceRoot $WorkspaceRoot -CandidatePath $Candidate
+$runId=if($RunId){$RunId}else{"focused-maintenance-$((Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'))-$([guid]::NewGuid().ToString('N').Substring(0,8))"}
+$runDir=New-RunEvidenceDirectory -WorkspaceRoot $WorkspaceRoot -RunId $runId
+$vm=$null;$evidence=[ordered]@{status='BLOCKED';runId=$runId;phase='MAINTENANCE-READY/WINDOWS-SENTINELS';candidate=$fingerprint;runDir=$runDir;cleanup=$null}
+try{
+    $vm=Get-DisposableVm -Pattern ([string]$config.DisposableVmNamePattern);Assert-DisposableOwnership -Vm $vm|Out-Null
+    $hostSafety=Apply-RamPressureOverride -Snapshot (Get-HostSafetySnapshot -Vm $vm -ExpectedVmStartCostGiB ([double]$config.ExpectedVmStartCostGiB)) -AllowRamPressure:$AllowRamPressure
+    Write-FocusedMaintenanceEvidence -Path (Join-Path $runDir 'focused-host-safety.json') -Value $hostSafety
+    if(-not[bool]$hostSafety.effectiveE2EStartAuthorized){throw 'USER ACTION REQUIRED — fresh HOST-SAFETY startSafe=false.'}
+    $fixture=Ensure-MaintenanceReadyFixture -Vm $vm -Fingerprint $fingerprint -Config $config -WorkspaceRoot $WorkspaceRoot -RunId $runId -RunDir $runDir
+    Write-FocusedMaintenanceEvidence -Path (Join-Path $runDir 'maintenance-ready-provenance-evidence.json') -Value $fixture
+    $restored=Restore-MaintenanceReadyCheckpoint -Vm $vm -Fingerprint $fingerprint -WorkspaceRoot $WorkspaceRoot
+    $context=[ordered]@{runId=$runId;phaseId='WINDOWS-SENTINELS';label='WINDOWS FOREIGN SENTINELS';checkpoint='DevFleet-E2E-MAINTENANCE-READY';destructive=$true;candidate=$fingerprint;vmName=$vm.Name;vmId=$vm.Id.ToString();runDir=$runDir;config=$config}
+    $executor=Get-ExecutorPath -Config $config -PhaseId 'WINDOWS-SENTINELS' -WorkspaceRoot $WorkspaceRoot
+    if(-not $executor){throw 'WINDOWS-SENTINELS executor is not configured.'}
+    $sentinelEvidence=Invoke-ConfiguredExecutor -Path $executor -Context ([pscustomobject]$context)
+    if([string]$sentinelEvidence.status -notin @('PASS','REAL E2E PASS') -or [string]$sentinelEvidence.sentinels.status -ne 'PASS' -or -not[bool]$sentinelEvidence.sentinels.unchanged){throw 'WINDOWS-SENTINELS did not prove foreign resources survived.'}
+    Write-FocusedMaintenanceEvidence -Path (Join-Path $runDir 'windows-sentinels-focused-evidence.json') -Value ([ordered]@{status='PASS';runId=$runId;hostSafety=$hostSafety;fixture=$fixture;independentRestore=$restored;windowsSentinels=$sentinelEvidence;foreignResourcesMutated=$false})
+    $evidence.status='PASS';$evidence.hostSafety=$hostSafety;$evidence.fixture=$fixture;$evidence.independentRestore=$restored;$evidence.windowsSentinels=$sentinelEvidence;$evidence.foreignResourcesMutated=$false
+}catch{
+    $evidence.error=$_.Exception.Message
+    Write-FocusedMaintenanceEvidence -Path (Join-Path $runDir 'focused-maintenance-error.json') -Value $evidence
     throw
 }finally{
     if($vm){
@@ -288,7 +436,7 @@ SHA256: 8c6950ea31bc4e517f4c0ffc31f17ae6244fe9fe94df5646046fb1c6d07095b7 | Bytes
 
 ## FILE: automation/release-e2e/modules/BaselineLineage.psm1
 
-SHA256: d29e14c6be17a8a8e8604cbcbfcd15d7501d81cd00cb788175d535748b20af75 | Bytes: 9065 | Git mode: 100644
+SHA256: 624dacfae365be77fb7dbce76924b1628994eedbdc6576ef400e4bc8a6e74e96 | Bytes: 9067 | Git mode: 100644
 
 ```
 Set-StrictMode -Version Latest
@@ -320,7 +468,7 @@ function Get-DevFleetAcceptedBaseline {
     $pointerItem=Get-Item -LiteralPath $pointerPath -Force -ErrorAction Stop
     if(($pointerItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $pointerItem.Length -gt 1048576){throw 'Accepted baseline pointer is linked or oversized.'}
     $pointer=Get-Content -LiteralPath $pointerPath -Raw -ErrorAction Stop|ConvertFrom-Json -ErrorAction Stop
-    if([int]$pointer.generation -in @(2,3,4)){
+    if([int]$pointer.generation -in @(2,3,4,5)){
         # The rebound reader validates the complete archived pointer and
         # immutable receipt chain in the native strict-JSON transaction module.
         $expected=[ordered]@{
@@ -579,197 +727,4 @@ function Get-CandidateFingerprint {
         toolingFingerprintId = $toolingFingerprintId
         candidate = $observedCandidate
         tar = Get-FileHashRecord -Path $tar
-        portable = Get-FileHashRecord -Path $portable[0].FullName
-        installerSource = Get-FileHashRecord -Path $sourceZip
-        signingState = if($candidateManifest.PSObject.Properties['signingState']){[string]$candidateManifest.signingState}else{''}
-        privateSigningProfile = $privateSigningProfile
-        privateSigningCertificateThumbprint = $privateSigningThumbprint
-        publicPublisherTrust = $manifestPublicPublisherTrust
-        publicPromotionAllowed = $manifestPublicPromotionAllowed
-        publicCertificate = $publicCertificate
-        authenticode = $authenticode
-    }
-}
-
-function Invoke-CandidateSelfTest {
-    param(
-        [Parameter(Mandatory)][psobject]$Fingerprint,
-        [string]$ReportPath
-    )
-    $callerSuppliedReportPath = -not [string]::IsNullOrWhiteSpace($ReportPath)
-    if (-not $callerSuppliedReportPath) {
-        $selfTestName=if([string]$Fingerprint.privateSigningProfile -eq 'PRIVATE_SELF_SIGNED'){'signed-self-test.txt'}else{'unsigned-self-test.txt'}
-        $ReportPath = Join-Path (Split-Path -Parent $Fingerprint.candidate.path) $selfTestName
-    }
-    $reportPath = [IO.Path]::GetFullPath($ReportPath)
-    if (Test-Path -LiteralPath $reportPath) {
-        if ($callerSuppliedReportPath) { throw "Self-test report path already exists; a unique path is required: $reportPath" }
-        Remove-Item -LiteralPath $reportPath -Force -ErrorAction Stop
-    }
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $reportPath) | Out-Null
-    $psi = [Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = $Fingerprint.candidate.path
-    $psi.Arguments = '--self-test'
-    $psi.WorkingDirectory = Split-Path -Parent $Fingerprint.candidate.path
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.Environment['DEVFLEET_SELF_TEST_OUTPUT'] = $reportPath
-    $process = [Diagnostics.Process]::new()
-    $process.StartInfo = $psi
-    if (-not $process.Start()) { throw 'Unable to start candidate self-test.' }
-    if (-not $process.WaitForExit(120000)) { try { $process.Kill() } catch {}; throw 'Candidate self-test timed out.' }
-    $report = if (Test-Path -LiteralPath $reportPath) { Get-Content -LiteralPath $reportPath -Raw } else { '' }
-    $token = Get-WindowsTokenEvidence
-    [pscustomobject]@{
-        exitCode = $process.ExitCode
-        reportPath = $reportPath
-        result = if ($process.ExitCode -eq 0 -and $report -match '(?m)^PASS\s*$') { 'PASS' } else { 'FAIL' }
-        reportSha256 = if (Test-Path -LiteralPath $reportPath) { (Get-FileHash -LiteralPath $reportPath -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
-        reportContent = $report
-        token = $token
-        requiredChecks = [ordered]@{
-            devfleet = $report -match [regex]::Escape("devfleet_version=$($Fingerprint.releaseVersion)")
-            installer = $report -match [regex]::Escape("installer_version=$($Fingerprint.installerVersion)")
-            embeddedTarCount = $report -match '(?m)^embedded_tar_count=1\s*$'
-            payloadSha = $report -match [regex]::Escape("payload=$($Fingerprint.tar.sha256)")
-            extraction = $report -match '(?m)^payload_extraction=PASS\s*$'
-            bootstrap = $report -match '(?m)^bootstrap_entrypoint=PASS\s*$'
-            parameterContract = $report -match '(?m)^bootstrap_parameter_contract=PASS\s*$'
-            factoryResetBackupGate = $report -match '(?m)^factory_reset_backup_gate=PASS\s*$'
-            planSafety = $report -match '(?m)^plan_safety=PASS\s*$'
-        }
-    }
-}
-
-function Test-CandidateFingerprint {
-    param([Parameter(Mandatory)][psobject]$Expected,[Parameter(Mandatory)][psobject]$Actual)
-    foreach ($name in @('candidate','tar','portable','installerSource')) {
-        if ($Expected.$name.sha256 -ne $Actual.$name.sha256 -or $Expected.$name.bytes -ne $Actual.$name.bytes) { return $false }
-    }
-    foreach($name in @('releaseFingerprintId','toolingFingerprintId','gitCommit')){if([string]$Expected.$name -ne [string]$Actual.$name){return $false}}
-    return $true
-}
-
-Export-ModuleMember -Function Get-FileHashRecord,Get-WindowsTokenEvidence,Test-PrivateAuthenticodeSignature,Get-CandidateFingerprint,Invoke-CandidateSelfTest,Test-CandidateFingerprint
-
-```
-
-
-## FILE: automation/release-e2e/modules/Cleanup.psm1
-
-SHA256: c80888b620328f95bc63f55523c8a06ef10939106836dfe17a945d18729944e5 | Bytes: 19207 | Git mode: 100644
-
-```
-Set-StrictMode -Version Latest
-
-function New-CleanupManifest {
-    param([Parameter(Mandatory)][psobject]$Vm,[Parameter(Mandatory)][string]$RunId)
-    if ($Vm.Name -notlike 'DevFleet-E2E-*') { throw 'Cleanup manifest refused a non-disposable VM.' }
-    [pscustomobject]@{
-        schemaVersion=1; runId=$RunId; createdAt=(Get-Date).ToUniversalTime().ToString('o');
-        resources=@([pscustomobject]@{ kind='Hyper-V VM'; name=$Vm.Name; id=$Vm.Id.ToString(); ownership='exact recorded disposable identity'; destructiveAllowed=$true });
-        deniedNames=@('devfleet-primary','devfleet-project-m-techlabs-job-finder','MulattoTechSurface','MULATTOTECHBOX');
-        productionTouched=$false
-    }
-}
-
-function Test-CleanupManifest {
-    param([Parameter(Mandatory)][psobject]$Manifest)
-    foreach($r in @($Manifest.resources)) {
-        if ($r.name -notlike 'DevFleet-E2E-*' -or -not $r.id -or $r.destructiveAllowed -ne $true) { return $false }
-    }
-    if ($Manifest.productionTouched -ne $false) { return $false }
-    $true
-}
-
-function Get-OwnedManifestVm {
-    param([Parameter(Mandatory)][psobject]$Resource)
-    if ($Resource.name -notlike 'DevFleet-E2E-*' -or -not $Resource.id -or $Resource.destructiveAllowed -ne $true) {
-        throw 'Cleanup resource failed exact disposable identity validation.'
-    }
-    try { $expectedId = [guid][string]$Resource.id }
-    catch { throw "Cleanup resource has an invalid VM ID for $($Resource.name)." }
-    $vm = Get-VM -Id $expectedId -ErrorAction Stop
-    if ($vm.Id -ne $expectedId -or $vm.Name -cne [string]$Resource.name) {
-        throw "Cleanup identity mismatch for $($Resource.name)."
-    }
-    return $vm
-}
-
-function Get-DevFleetHostNameExclusion {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Name)
-    try {
-        $rows=@(Get-VM -Name $Name -ErrorAction Stop)
-        return [pscustomobject]@{
-            status=if($rows.Count){'PRESENT'}else{'ABSENT'}
-            present=($rows.Count -gt 0)
-            name=$Name
-            inventoryScope='host Hyper-V exact-name exclusion only'
-            verification='Get-VM -Name exact returned host inventory rows'
-            resources=@($rows|ForEach-Object{[ordered]@{name=[string]$_.Name;id=[string]$_.Id;state=[string]$_.State}})
-        }
-    } catch {
-        $expectedMessage='Hyper-V was unable to find a virtual machine with name "'+$Name+'".'
-        $isExactNotFound=([string]$_.FullyQualifiedErrorId -ceq 'InvalidParameter,Microsoft.HyperV.PowerShell.Commands.GetVM' -and $_.CategoryInfo.Category -eq [System.Management.Automation.ErrorCategory]::InvalidArgument -and [string]$_.TargetObject -ceq $Name -and [string]$_.Exception.Message -ceq $expectedMessage)
-        if(-not $isExactNotFound){throw}
-        return [pscustomobject]@{
-            status='ABSENT'
-            present=$false
-            name=$Name
-            inventoryScope='host Hyper-V exact-name exclusion only'
-            verification='Get-VM exact Hyper-V missing-name signature; not nested L2 evidence'
-            resources=@()
-        }
-    }
-}
-
-function Stop-ManifestVm {
-    param([Parameter(Mandatory)][psobject]$Manifest)
-    if (-not (Test-CleanupManifest $Manifest)) { throw 'Cleanup manifest failed validation.' }
-    foreach($r in @($Manifest.resources)) {
-        $vm = Get-OwnedManifestVm -Resource $r
-        if ($vm.State -ne 'Off') { Stop-VM -VM $vm -Force -Confirm:$false }
-    }
-}
-
-function Write-TerminalVmEvidence {
-    param(
-        [Parameter(Mandatory)][psobject]$Vm,
-        [Parameter(Mandatory)][string]$RunDir,
-        [Parameter(Mandatory)][string]$L2Name,
-        [string]$RunId,
-        [AllowNull()][psobject]$NestedL2Observation,
-        [AllowNull()][psobject]$Candidate,
-        [string]$EvidenceClass='run-owned safety cleanup'
-    )
-    if($Vm.Name -notlike 'DevFleet-E2E-*' -or -not $Vm.Id){throw 'Terminal evidence requires an exact disposable L1 identity.'}
-    if([string]::IsNullOrWhiteSpace($L2Name) -or $L2Name -notlike 'DevFleet-E2E-*' -or $L2Name -eq 'DevFleet-H10-Linux') { throw 'Terminal L2 evidence requires the configured exact disposable L2 name and explicitly protects DevFleet-H10-Linux.' }
-    $actual=Get-VM -Id ([guid][string]$Vm.Id) -ErrorAction Stop
-    if($actual.Name -cne [string]$Vm.Name -or $actual.Id.ToString() -cne $Vm.Id.ToString()){throw 'Terminal L1 identity changed while collecting evidence.'}
-    $timestamp=(Get-Date).ToUniversalTime().ToString('o')
-    $l1=[ordered]@{schemaVersion=1;name=$actual.Name;id=$actual.Id.ToString();state=[string]$actual.State;timestamp=$timestamp;timestampUtc=$timestamp;ownershipScope='exact disposable DevFleet-E2E VM identity';ownershipMethod='Get-VM -Id plus exact case-sensitive name';runId=(Split-Path -Leaf $RunDir)}
-    $runDirId=Split-Path -Leaf $RunDir
-    if([string]::IsNullOrWhiteSpace($RunId)){$RunId=$runDirId}
-    if([string]$RunId -cne [string]$runDirId){throw 'Terminal evidence RunId does not match its exact run directory.'}
-    $l2=[ordered]@{schemaVersion=2;expectedName=$L2Name;status='UNVERIFIED';present=$null;verificationMethod='No validated nested L1 inventory was supplied';ownershipScope='exact expected nested L2 name inside exact disposable L1';runId=$runId;evidenceClass=$EvidenceClass;certifiedReleaseCleanup=$false}
-    if($NestedL2Observation){
-        $observedText=[string]$NestedL2Observation.observedUtc
-        $observedInstant=[datetimeoffset]::MinValue
-        $parsed=[datetimeoffset]::TryParse($observedText,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind,[ref]$observedInstant)
-        $candidateTuple=$null
-        if($Candidate){
-            $candidateTuple=[ordered]@{
-                repositoryHead=[string]$Candidate.repositoryHead
-                candidateCommit=[string]$Candidate.gitCommit
-                shippingInputIdentity=[string]$Candidate.shippingInputIdentity
-                releaseFingerprintId=[string]$Candidate.releaseFingerprintId
-                toolingFingerprintId=[string]$Candidate.toolingFingerprintId
-            }
-        }
-        $tupleValid=$candidateTuple -and @($candidateTuple.Values|Where-Object{[string]::IsNullOrWhiteSpace([string]$_)}).Count -eq 0
-        $status=[string]$NestedL2Observation.status
-        $exactCountProperty=$NestedL2Observation.PSObject.Properties['exactMatchCount']
-        $exactCount=if($exactCountProperty){$exactCountProperty.Value}else{$null}
-        $countValid=($exactCountProperty -and ($exactCount -is [int] -or $exactCount -is [long]))
-        $observationValid=([string]$NestedL2Observation.expectedName -ceq $L2Name -and $status -in @('ABSENT','PRESENT') -and $NestedL2Observation.present -is [bool] -and (($status -ceq 'ABSENT' -and $NestedL2Observation.present -eq $false) -or ($status -ceq 'PRESENT' -and $NestedL2Observation.present -eq $true)) -and $parsed -and $observedIn
+        portable = Get-FileHashRecord -Path $portable[0].F

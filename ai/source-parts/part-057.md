@@ -1,10 +1,141 @@
 # DevFleet source part 057
 
 Full-source UTF-8 byte interval [2604000, 2650500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: ed43ee5e18c72f63ce4c763ca0a4489fc7d06a0f36af28b792975c39959cc073
+Payload SHA-256: 25535c02cdf0213a2687ee0286dfb37326926905485c5a183955b51612207144
 
 <!-- BEGIN SOURCE SLICE -->
-"DevFleet.Setup.App"
+", backup_id = "backup-demo", archive = backupArchive, sha256 = backupHash }));
+File.WriteAllText(Path.Combine(stateRoot, "projects.json"), System.Text.Json.JsonSerializer.Serialize(new[] { new { project_id = "project-demo", slug = "demo", runtime_id = "devfleet-project-demo", vm_name = "devfleet-project-demo", host_id = "test-node", managed_by = "devfleet", state = "stopped", backup_manifest = backupManifest } }));
+var projectManifest = new { project_id = "project-demo", backup_id = "backup-demo", archive = backupArchive, sha256 = backupHash, slug = "demo", runtime_id = "devfleet-project-demo", source_archive_sha256 = backupHash, host_archive_sha256 = backupHash };
+File.WriteAllText(backupManifest, System.Text.Json.JsonSerializer.Serialize(projectManifest));
+var verified = new BackupVerificationService().Verify(new DiscoveredProject("project-demo", "demo", "Multipass", "devfleet-project-demo", "HostAgent", backupManifest, true));
+Assert(verified.IsVerified, "Backup verification must hash the archive and validate identity/eligibility.");
+var selectedPlan = PlanService.Build(InstallerMode.FactoryReset, true, true, false, true, true, "DELETE DEVFLEET", "DELETE DEVFLEET PROJECT DATA", ["project-demo"]);
+Assert(selectedPlan.IsAllowed && selectedPlan.SelectedProjects.Count == 1, "Selected project plan must use the project-specific verified backup.");
+
+var vmProvider = new RecordingVmProvider([new VmRecord("Multipass", "devfleet-project-demo", "project-demo", true), new VmRecord("Multipass", "unrelated-vm", "other", false)]);
+new VmOwnershipService(vmProvider).DeleteOwnedExact("project-demo", "devfleet-project-demo", verified);
+Assert(vmProvider.DeletedRuntimeIds.SequenceEqual(["devfleet-project-demo"]), "Provider-aware deletion did not target the exact owned runtime.");
+Assert(vmProvider.Inventory.Single(x => x.RuntimeId == "devfleet-project-demo").BackupId == "", "Fixture inventory must remain immutable.");
+var wildcardBlocked = false;
+try { new VmOwnershipService(new RecordingVmProvider([new VmRecord("Multipass", "*", "project-demo", true)])).DeleteOwnedExact("project-demo", "*"); } catch (InvalidOperationException) { wildcardBlocked = true; }
+Assert(wildcardBlocked, "Wildcard provider deletion must be blocked.");
+var endpointBuilder = typeof(MultipassHostAgentProvider).GetMethod("BuildHostAgentBaseUri", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+var wildcardEndpoint = (Uri)endpointBuilder!.Invoke(null, ["http://+:8790/"])!;
+Assert(wildcardEndpoint.Host == "127.0.0.1" && wildcardEndpoint.Port == 8790, "Wildcard Host Agent listen prefix must normalize to the local endpoint for destruction requests.");
+
+Console.WriteLine("PASS installer stage, backup, provider, shortcut-contract tests");
+
+var auth = TailscaleAuthenticationService.ParseAuthenticationUri("To authenticate, visit: https://login.tailscale.com/a/abcDEF123");
+Assert(auth?.Host == "login.tailscale.com", "Official Tailscale authentication URL parser failed.");
+Assert(TailscaleAuthenticationService.ParseAuthenticationUri("https://evil.example/a/abc") is null, "Non-Tailscale authentication URL must be rejected.");
+var tailscaleRunner = new RecordingProcessRunner();
+tailscaleRunner.QueueResult(new ProcessResult(1, "", "To authenticate, visit: https://login.tailscale.com/a/abcDEF123"));
+var tailscaleBegin = TailscaleAuthenticationService.Begin(tailscaleRunner, "tailscale.exe");
+Assert(tailscaleRunner.Invocations.Single().Arguments.SequenceEqual(["up", "--timeout=30s"]), "Tailscale authentication must use a bounded CLI timeout.");
+Assert(tailscaleBegin.State == "Authentication required" && tailscaleBegin.AuthenticationUri?.Host == "login.tailscale.com", "Bounded Tailscale authentication must preserve the official URL result.");
+var incompleteTailscaleRunner = new RecordingProcessRunner();
+incompleteTailscaleRunner.QueueResult(new ProcessResult(1, "", "To authenticate, visit: https://login.tailscale.com/a/abcDEF123", OutputComplete: false));
+var incompleteTailscale = TailscaleAuthenticationService.Begin(incompleteTailscaleRunner, "tailscale.exe");
+Assert(incompleteTailscale.State == "Error" && incompleteTailscale.AuthenticationUri is null && incompleteTailscale.Detail.Contains("incomplete", StringComparison.OrdinalIgnoreCase), "Tailscale must reject a trusted URL parsed from incomplete output.");
+
+var deps = DependencyService.Catalog;
+Assert(deps.Any(d => d.Name == "PowerShell 7" && d.Required) && deps.Any(d => d.Name == "Multipass" && d.Required), "Core connected dependency catalog is incomplete.");
+Assert(deps.All(d => d.OfficialMetadata.Scheme == "https"), "Every dependency must use an HTTPS official metadata source.");
+var seven = deps.Single(d => d.Id == "sevenzip");
+var git = deps.Single(d => d.Id == "git");
+Assert(git.DirectOfficialVendorResolver.AllowedHosts.Contains("release-assets.githubusercontent.com"), "GitHub release assets must allow the official release-assets redirect host.");
+Assert(deps.Where(d => d.DirectOfficialVendorResolver.Type.Equals("github-release", StringComparison.OrdinalIgnoreCase)).All(d => d.DirectOfficialVendorResolver.AllowedHosts.Contains("release-assets.githubusercontent.com")), "Every GitHub release dependency must allow the official release-assets redirect host.");
+Assert(deps.Single(d => d.Id == "multipass").InstallerAuthenticityPolicy.AllowedSignerSubjectsExact.SequenceEqual(["CN=CANONICAL GROUP LIMITED, O=CANONICAL GROUP LIMITED, L=London, C=GB"]), "Multipass must use the exact currently published Canonical Group signer identity.");
+Assert(deps.Single(d => d.Id == "multipass").InstallerAuthenticityPolicy.InstalledExecutableTrust == "signed-installer-locked-path", "Multipass must bind unsigned installed binaries to a signed installer and locked machine path.");
+Assert(!seven.Required && seven.Classification == "OPTIONAL" && seven.Features.Contains("encrypted-transfer-bundle"), "7-Zip must be optional for core install and feature-scoped.");
+Assert(seven.InstallerAuthenticityPolicy.Strategy == "VendorReleaseSha256", "7-Zip must use the explicit vendor release digest strategy.");
+Assert(seven.DirectOfficialVendorResolver.ExpectedOwner == "ip7z" && seven.DirectOfficialVendorResolver.ExpectedRepository == "7zip", "7-Zip vendor identity must be narrowly bound to ip7z/7zip.");
+Assert(seven.DirectOfficialVendorResolver.AllowedHosts.Contains("api.github.com") && seven.DirectOfficialVendorResolver.AllowedHosts.Contains("github.com") && seven.DirectOfficialVendorResolver.AllowedHosts.Contains("release-assets.githubusercontent.com"), "7-Zip release hosts are incomplete.");
+Assert(deps.Where(d => d.Id != "sevenzip").Where(d => d.InstallerAuthenticityPolicy.Required).All(d => d.InstallerAuthenticityPolicy.Strategy == "Authenticode"), "Existing signed dependency policies must remain Authenticode-required.");
+var digestFixture = Path.Combine(stateRoot, "7z-fixture.bin");
+File.WriteAllBytes(digestFixture, [1, 2, 3, 4]);
+var digest = VendorReleaseAuthenticity.VerifySha256(digestFixture, "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a");
+Assert(digest.Length == 64, "Valid vendor digest was not accepted.");
+var digestBlocked = false;
+try { VendorReleaseAuthenticity.VerifySha256(digestFixture, "0000000000000000000000000000000000000000000000000000000000000000"); } catch (InvalidDataException) { digestBlocked = true; }
+Assert(digestBlocked, "Wrong vendor digest must fail closed.");
+var malformedBlocked = false;
+try { VendorReleaseAuthenticity.NormalizeDigest("not-a-sha256"); } catch (InvalidDataException) { malformedBlocked = true; }
+Assert(malformedBlocked, "Missing/malformed vendor digest must fail closed.");
+Assert(seven.DirectOfficialVendorResolver.OfficialPageUri == "https://www.7-zip.org/download.html", "7-Zip official page binding is missing.");
+Assert(seven.DirectOfficialVendorResolver.AssetRegex?.Contains("x64") == true, "7-Zip architecture restriction is missing.");
+Assert(seven.DirectOfficialVendorResolver.MetadataUri.Contains("api.github.com/repos/ip7z/7zip/releases", StringComparison.OrdinalIgnoreCase), "7-Zip release metadata must come from the official API.");
+Assert(seven.InstallerAuthenticityPolicy.Extensions.SequenceEqual([".exe"]), "7-Zip vendor digest policy must restrict the installer type.");
+Console.WriteLine("PASS authenticity strategy, vendor digest, release identity, host, architecture, and signed-policy preservation tests");
+
+var deferredRunner = new RecordingProcessRunner();
+new InstallService(deferredRunner).Run(installFixture, "Desktop", "FreshInstall", deferNetworkPairing: true, acknowledgeRootfulDocker: true);
+Assert(deferredRunner.Invocations.Single().Arguments.Contains("-DeferNetworkPairing"), "DeferNetworkPairing was not forwarded through the production install contract.");
+foreach (var mode in new[] { InstallerMode.FreshInstall, InstallerMode.Repair, InstallerMode.CleanReinstall, InstallerMode.LocalUpdate })
+{
+    var laptopDeferred = PlanService.Build(mode, true, true, false, false, false, "", "", deferNetworkPairing: true, role: "Laptop / Surrogate");
+    Assert(!laptopDeferred.IsAllowed && laptopDeferred.Blockers.Any(x => x.Contains("connected Tailscale pairing")), "A deferred Laptop plan must be blocked before mutation because Vault transport requires authentication.");
+    var laptopConnected = PlanService.Build(mode, true, true, false, false, false, "", "", deferNetworkPairing: false, role: "Laptop / Surrogate");
+    Assert(!laptopConnected.Blockers.Any(x => x.Contains("connected Tailscale pairing")), "Connected Laptop plan acquired an unrelated network-deferral blocker.");
+}
+Assert(deferredRunner.Invocations.Single().Arguments.Contains("-AcknowledgeRootfulDocker"), "Rootful Docker acknowledgement was not forwarded through the production install contract.");
+var elevatedArguments = InstallerLaunchContract.BuildElevatedResumeArguments("Primary / Desktop", InstallerMode.FreshInstall, deferNetworkPairing: true, acknowledgeRootfulDocker: true);
+var elevatedRequest = InstallerLaunchContract.Parse(elevatedArguments);
+Assert(elevatedRequest is { ElevatedResume: true, DeferNetworkPairing: true, AcknowledgeRootfulDocker: true, Action: InstallerMode.FreshInstall, Role: "Primary / Desktop" }, "UAC relaunch did not round-trip the exact reviewed action, role, network choice, and rootful Docker acknowledgement through the production parser contract.");
+var defaultElevatedRequest = InstallerLaunchContract.Parse(InstallerLaunchContract.BuildElevatedResumeArguments("Primary / Desktop", InstallerMode.Repair, deferNetworkPairing: false, acknowledgeRootfulDocker: false));
+Assert(!defaultElevatedRequest.DeferNetworkPairing && !defaultElevatedRequest.AcknowledgeRootfulDocker, "UAC relaunch fabricated optional reviewed choices that were not selected.");
+Console.WriteLine("PASS elevated relaunch reviewed-plan argument and parser contract");
+
+var incompleteSuccessRunner = new RecordingProcessRunner();
+incompleteSuccessRunner.QueueResult(new ProcessResult(0, "", "", OutputComplete: false));
+var incompleteSuccessReport = new InstallService(incompleteSuccessRunner).Run(installFixture, "Desktop", "FreshInstall");
+Assert(incompleteSuccessReport.ExitCode == 0 && incompleteSuccessReport.Detail.Contains("incomplete", StringComparison.OrdinalIgnoreCase), "Installer exit 0 must remain authoritative while incomplete diagnostics are explicit.");
+var incompleteRebootRunner = new RecordingProcessRunner();
+incompleteRebootRunner.QueueResult(new ProcessResult(3010, "", "", OutputComplete: false));
+var incompleteRebootReport = new InstallService(incompleteRebootRunner).Run(installFixture, "Desktop", "FreshInstall");
+Assert(incompleteRebootReport.ExitCode == 3010 && incompleteRebootReport.Detail.Contains("incomplete", StringComparison.OrdinalIgnoreCase), "Installer exit 3010 must remain authoritative while incomplete diagnostics are explicit.");
+
+var defaultInstallService = new InstallService();
+var installRunnerField = typeof(InstallService).GetField("_runner", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+var defaultInstallRunner = installRunnerField?.GetValue(defaultInstallService) as ProcessRunner;
+Assert(InstallService.ConnectedInstallTimeoutSeconds == DeadlinePolicy.DesktopTransactionSeconds, "Connected installation compatibility timeout must match the composed Desktop transaction policy.");
+Assert(defaultInstallRunner?.DefaultTimeoutSeconds == DeadlinePolicy.DesktopTransactionSeconds && !defaultInstallRunner.AllowEnvironmentOverride, "Default connected installation must use the composed role-aware transaction budget without the process-wide environment override.");
+Assert(DeadlinePolicy.LaptopTransactionSeconds > DeadlinePolicy.DesktopTransactionSeconds, "Laptop transaction must dominate its additional sequential compute, vault, and transport stages.");
+Assert(DeadlinePolicy.ComputeStageSeconds >= DeadlinePolicy.MultipassReadinessSeconds + DeadlinePolicy.GuestBootstrapSeconds, "Compute stage must contain both readiness and complete guest bootstrap allowances.");
+Assert(DeadlinePolicy.VaultStageSeconds > DeadlinePolicy.VaultBootstrapSeconds + DeadlinePolicy.SshAndMarkerSeconds, "Vault stage must contain its snapshot, transport, bounded Vault bootstrap, and SSH/marker allowances.");
+Assert(DeadlinePolicy.DesktopTransactionSeconds > DeadlinePolicy.ComputeStageSeconds, "Desktop transaction must dominate its compute stage and all surrounding stages.");
+Assert(DeadlinePolicy.LaptopTransactionSeconds > DeadlinePolicy.VaultStageSeconds + DeadlinePolicy.ComputeStageSeconds, "Laptop transaction must dominate both sequential provisioning stages.");
+Assert(DeadlinePolicy.PrerequisitesSeconds == DeadlinePolicy.PrerequisiteDependencyCount * (DeadlinePolicy.DependencyProbeSeconds + DeadlinePolicy.DependencyHealthSeconds + DeadlinePolicy.DependencyInstallSeconds + DeadlinePolicy.DependencyVerificationSeconds) + DeadlinePolicy.WindowsCapabilitySeconds + DeadlinePolicy.WindowsFeatureSeconds + (4 * DeadlinePolicy.MultipassConfigurationSeconds) + (3 * DeadlinePolicy.VsCodeExtensionSeconds), "Prerequisite stage must be derived from every finite sequential dependency/configuration operation.");
+Assert(new ProcessRunner().DefaultTimeoutSeconds == 900, "Ordinary process probes must retain their 900-second default bound.");
+
+var stress = new ProcessRunner().Run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$s='x'*200000;[Console]::Out.Write($s);[Console]::Error.Write($s)"]);
+Assert(stress.ExitCode == 0 && stress.OutputComplete && stress.StandardOutput.Length == 200000 && stress.StandardError.Length == 200000, "ProcessRunner stdout/stderr stress failed.");
+var ordinaryFailure = new ProcessRunner().Run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "[Console]::Out.Write('known-output');[Console]::Error.Write('known-error');exit 7"]);
+Assert(ordinaryFailure.ExitCode == 7 && ordinaryFailure.OutputComplete && ordinaryFailure.StandardOutput == "known-output" && ordinaryFailure.StandardError == "known-error", "ProcessRunner ordinary nonzero complete-output contract failed.");
+AssertInheritedPipeDescendant(23);
+AssertInheritedPipeDescendant(3010);
+var previousProcessTimeout = Environment.GetEnvironmentVariable("DEVFLEET_SETUP_PROCESS_TIMEOUT_SECONDS");
+try
+{
+    Environment.SetEnvironmentVariable("DEVFLEET_SETUP_PROCESS_TIMEOUT_SECONDS", "1");
+    var timeoutTimer = System.Diagnostics.Stopwatch.StartNew();
+    var directTimeout = new ProcessRunner(InstallService.ConnectedInstallTimeoutSeconds).Run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"]);
+    timeoutTimer.Stop();
+    Assert(directTimeout.ExitCode == -2 && timeoutTimer.Elapsed < TimeSpan.FromSeconds(10), "ProcessRunner direct-process timeout contract failed.");
+}
+finally { Environment.SetEnvironmentVariable("DEVFLEET_SETUP_PROCESS_TIMEOUT_SECONDS", previousProcessTimeout); }
+Console.WriteLine("PASS connected dependency, Tailscale, deferred pairing, and ProcessRunner tests");
+
+```
+
+
+## FILE: installer-source/DevFleet.Setup/App.xaml
+
+SHA256: 8bd96b935412a757a21e891815e4a153889803006b3d310d2291f4a7a54f2a66 | Bytes: 1712 | Git mode: 100644
+
+```
+<Application x:Class="DevFleet.Setup.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:DevFleet.Setup"
@@ -431,259 +562,4 @@ public partial class MainWindow : Window
         RebootCheckpointService.BindPlanIfPresent(_plan, RoleCombo.SelectedItem?.ToString() ?? "Primary / Desktop");
         PlanText.Text = PlanService.ToText(_plan);
         PlanStatus.Text = _plan.IsAllowed ? "PASS — plan is eligible for execution after final review." : "BLOCKED — resolve every blocker before execution.";
-        PlanStatus.Foreground = (System.Windows.Media.Brush)FindResource(_plan.IsAllowed ? "AccentBrush" : "DangerBrush");
-    }
-
-    private async void ExecuteButton_Click(object sender, RoutedEventArgs e)
-    {
-        await ExecuteReviewedPlanAsync(requireConfirmation: true, elevatedResume: false);
-    }
-
-    private async Task ExecuteReviewedPlanAsync(bool requireConfirmation, bool elevatedResume)
-    {
-        if (_executing) return;
-        BuildPlanAndShow();
-        if (_plan is null || !_plan.IsAllowed) { MessageBox.Show(this, PlanService.ToText(_plan ?? new InstallerPlan()), "Execution blocked", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
-        if (requireConfirmation && MessageBox.Show(this, "Execute the reviewed plan now? Diagnostics remains read-only; cleanup actions use only the displayed ownership scope.", "Confirm exact plan", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        if (!ElevationService.IsAdministrator && !TestEnvironment.IsTestProcess)
-        {
-            if (elevatedResume) throw new InvalidOperationException("The elevated resume continuation did not obtain an administrator token; refusing to relaunch recursively.");
-            // The unelevated UI may validate the plan, but it must not create
-            // protected staging. The elevated continuation reopens and
-            // independently verifies the embedded payload.
-            ElevationService.RelaunchVerified(RoleCombo.SelectedItem?.ToString() ?? "Primary / Desktop", CurrentMode, _deferNetworkPairing, _plan.AcknowledgeRootfulDocker);
-            Close();
-            return;
-        }
-            _executing = true; _progress = 0; _page = 6; RefreshPage(); ExecuteButton.IsEnabled = false; OperationLog.Clear();
-            try
-            {
-                var plan = _plan;
-                var role = RoleCombo.SelectedItem?.ToString() ?? "Standalone / unknown";
-                var result = await Task.Run(() => InstallerEngine.Execute(plan!, role, ReportProgress));
-            var rebootRequired = LifecycleEngine.LastExecution?.ExitCode == 3010 || File.Exists(RebootCheckpointService.Path);
-            if (rebootRequired)
-            {
-                ReportProgress("REBOOT REQUIRED: the verified checkpoint is preserved; restart this same candidate after Windows reboots.");
-                OperationStatus.Text = "Reboot required; checkpoint preserved";
-                OperationProgress.Value = 95;
-                _page = 6;
-                RefreshPage();
-                return;
-            }
-            ReportProgress($"VERIFIED COMPLETE: {result}"); OperationProgress.Value = 100; OperationStatus.Text = "Completed and verified"; _page = 7; RefreshPage();
-        }
-        catch (Exception ex)
-        {
-            ReportProgress($"FAILED — no unplanned continuation: {ex}"); OperationStatus.Text = "Failed; evidence preserved in the log"; OperationProgress.Value = 0;
-        }
-        finally { _executing = false; ExecuteButton.IsEnabled = true; BackButton.IsEnabled = true; }
-    }
-
-    private void ReportProgress(string message)
-    {
-        Dispatcher.Invoke(() => { _progress = Math.Min(95, _progress + 13); OperationProgress.Value = _progress; OperationStatus.Text = message; OperationLog.AppendText(message + Environment.NewLine); OperationLog.ScrollToEnd(); });
-    }
-
-    private void ExportButton_Click(object sender, RoutedEventArgs e)
-    {
-        var directory = Path.Combine(AppPaths.StateRoot, "Diagnostics"); Directory.CreateDirectory(directory); var stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
-        var json = Path.Combine(directory, $"preflight-{stamp}.json"); var text = Path.Combine(directory, $"preflight-{stamp}.txt"); StateStore.WriteJsonAtomically(json, _preflight); File.WriteAllText(text, PreflightService.ToText(_preflight));
-        MessageBox.Show(this, $"Preflight exported to:\n{text}\n{json}", "Read-only report exported", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
-
-    private void CopyButton_Click(object sender, RoutedEventArgs e)
-    {
-        var content = _page == 2 ? PreflightText.Text : _page == 5 ? PlanText.Text : OperationLog.Text; Clipboard.SetText(content); OperationStatus.Text = "Diagnostics copied to clipboard";
-    }
-
-    private async void TailscaleSignIn_Click(object sender, RoutedEventArgs e)
-    {
-        if (_tailscaleBusy) return;
-        _tailscaleBusy = true; _tailscaleCancellation = new CancellationTokenSource(); var sourceButton = sender as Button; if (sourceButton is not null) sourceButton.IsEnabled = false;
-        try
-        {
-        var dependency = DependencyService.Catalog.Single(x => x.Name == "Tailscale"); var detected = new DependencyService().Detect(dependency);
-        if (!detected.Compatible) { TailscaleStatusText.Text = "Tailscale is missing or outdated. The Dependencies stage will install/update it from the official source before pairing."; return; }
-        TailscaleStatusText.Text = "Starting bounded Tailscale authentication…";
-        var auth = await TailscaleAuthenticationService.BeginAsync(new ProcessRunner(), detected.ExecutablePath, _tailscaleCancellation.Token); _tailscaleAuthenticationUri = auth.AuthenticationUri; OpenTailscaleAuthButton.IsEnabled = _tailscaleAuthenticationUri is not null; TailscaleStatusText.Text = $"{auth.State}: {auth.Detail}";
-        }
-        catch (OperationCanceledException) { TailscaleStatusText.Text = "Tailscale authentication cancelled."; }
-        catch (Exception ex) { TailscaleStatusText.Text = $"Tailscale authentication failed: {ex.Message}"; }
-        finally { _tailscaleBusy = false; _tailscaleCancellation?.Dispose(); _tailscaleCancellation = null; if (sourceButton is not null) sourceButton.IsEnabled = true; }
-    }
-
-    private void OpenTailscaleAuth_Click(object sender, RoutedEventArgs e)
-    {
-        if (_tailscaleAuthenticationUri is null || !_tailscaleAuthenticationUri.Host.Equals("login.tailscale.com", StringComparison.OrdinalIgnoreCase)) return;
-        Process.Start(new ProcessStartInfo { FileName = _tailscaleAuthenticationUri.AbsoluteUri, UseShellExecute = true });
-    }
-
-    private async void CheckTailscale_Click(object sender, RoutedEventArgs e)
-    {
-        if (_tailscaleBusy) return;
-        _tailscaleBusy = true; _tailscaleCancellation = new CancellationTokenSource(); var sourceButton = sender as Button; if (sourceButton is not null) sourceButton.IsEnabled = false;
-        try
-        {
-        var dependency = DependencyService.Catalog.Single(x => x.Name == "Tailscale"); var detected = new DependencyService().Detect(dependency);
-        if (!detected.Found) { TailscaleStatusText.Text = "Not installed yet."; return; }
-        var result = await new ProcessRunner().RunAsync(detected.ExecutablePath, ["status", "--json"], cancellationToken: _tailscaleCancellation.Token); TailscaleStatusText.Text = result.ExitCode == 0 ? "Authenticated — Tailscale status returned successfully." : "Authentication required or Tailscale service unavailable.";
-        }
-        catch (OperationCanceledException) { TailscaleStatusText.Text = "Tailscale status check cancelled."; }
-        catch (Exception ex) { TailscaleStatusText.Text = $"Tailscale status failed: {ex.Message}"; }
-        finally { _tailscaleBusy = false; _tailscaleCancellation?.Dispose(); _tailscaleCancellation = null; if (sourceButton is not null) sourceButton.IsEnabled = true; }
-    }
-
-    private void CancelButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_tailscaleBusy) { _tailscaleCancellation?.Cancel(); return; }
-        if (_executing) { MessageBox.Show(this, "The current transaction is active. Wait for its bounded operation to finish; no forced reboot or blind cancellation is issued.", "Transaction in progress", MessageBoxButton.OK, MessageBoxImage.Information); return; }
-        Close();
-    }
-}
-
-```
-
-
-## FILE: installer-source/DevFleet.Setup/Payload/devfleet-v1.2.13.tar.gz
-
-SHA256: e3176c500f652d6023dcb611ccd580567ed9448da343a5fd4c3649214ca0b654 | Bytes: 530862 | Git mode: 100644
-
-Binary file: retrieve the actual repository file at this path. It is not encoded into this reading document.
-
-
-## FILE: installer-source/DevFleet.Setup/PayloadManifest.cs
-
-SHA256: 3d59d604bf39f55204d33e3135ac256b0c4322458afd2e153ad2b61308c56e1d | Bytes: 345 | Git mode: 100644
-
-```
-namespace DevFleet.Setup;
-
-internal static class PayloadManifest
-{
-    public const string DevFleetVersion = "1.2.13";
-    public const string InstallerVersion = "1.4.1";
-    public const string PayloadName = "devfleet-v1.2.13.tar.gz";
-    public const string PayloadSha256 = "e3176c500f652d6023dcb611ccd580567ed9448da343a5fd4c3649214ca0b654";
-}
-```
-
-
-## FILE: installer-source/DevFleet.Setup/Services/InstallerLifecycle.cs
-
-SHA256: c6963a43398085968288e4b76fea4137e5790264c0fa827efd6afd9a0d2f556c | Bytes: 141135 | Git mode: 100644
-
-```
-using System.Diagnostics;
-using System.IO;
-using System.Net.Http;
-using System.Net.Http.Json;
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
-using System.Security.AccessControl;
-using System.Security.Principal;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Text.Json;
-using System.Threading;
-using Microsoft.Win32;
-
-namespace DevFleet.Setup;
-
-public sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError, bool OutputComplete = true);
-public sealed record ProcessInvocation(string FileName, IReadOnlyList<string> Arguments, string? WorkingDirectory);
-
-public static class DeadlinePolicy
-{
-    public const string Version = "1.0.0";
-    public const int TransactionTerminalizationMarginSeconds = 600;
-    public const int BootstrapSeconds = 240;
-    public const int PreflightSeconds = 120;
-    public const int PrerequisiteDependencyCount = 6;
-    public const int DependencyProbeSeconds = 60;
-    public const int DependencyHealthSeconds = 180;
-    public const int DependencyInstallSeconds = 1800;
-    public const int DependencyVerificationSeconds = 60;
-    public const int WindowsCapabilitySeconds = 900;
-    public const int WindowsFeatureSeconds = 900;
-    public const int MultipassConfigurationSeconds = 600;
-    public const int VsCodeExtensionSeconds = 300;
-    public static int PrerequisitesSeconds => PrerequisiteDependencyCount * (DependencyProbeSeconds + DependencyHealthSeconds + DependencyInstallSeconds + DependencyVerificationSeconds) + WindowsCapabilitySeconds + WindowsFeatureSeconds + (4 * MultipassConfigurationSeconds) + (3 * VsCodeExtensionSeconds);
-    public const int WindowsTailscaleSeconds = 180;
-    public const int HostAgentSeconds = 300;
-    public const int MultipassLaunchSeconds = 900;
-    public const int MultipassReadinessSeconds = 1200;
-    public const int PayloadTransferSeconds = 900;
-    public const int GuestBootstrapPackagePrerequisitesSeconds = 900;
-    public const int GuestBootstrapDockerRepositoryAndInstallSeconds = 1200;
-    public const int GuestBootstrapTailscaleRepositoryAndInstallSeconds = 1200;
-    public const int GuestBootstrapRootlessRuntimeSeconds = 600;
-    public const int GuestBootstrapNodeToolchainSeconds = 600;
-    public const int GuestBootstrapPythonRuntimeSeconds = 1200;
-    public const int GuestBootstrapServiceAndFirewallFinalizationSeconds = 600;
-    public const int GuestBootstrapTerminalizationMarginSeconds = 300;
-    public static int GuestBootstrapSeconds => GuestBootstrapPackagePrerequisitesSeconds + GuestBootstrapDockerRepositoryAndInstallSeconds + GuestBootstrapTailscaleRepositoryAndInstallSeconds + GuestBootstrapRootlessRuntimeSeconds + GuestBootstrapNodeToolchainSeconds + GuestBootstrapPythonRuntimeSeconds + GuestBootstrapServiceAndFirewallFinalizationSeconds + GuestBootstrapTerminalizationMarginSeconds;
-    public const int VaultBootstrapPackagePrerequisitesSeconds = 900;
-    public const int VaultBootstrapRestServerSeconds = 1200;
-    public const int VaultBootstrapTailscaleSeconds = 600;
-    public const int VaultBootstrapServiceConfigurationSeconds = 600;
-    public const int VaultBootstrapFirewallFinalizationSeconds = 300;
-    public const int VaultBootstrapTerminalizationMarginSeconds = 300;
-    public static int VaultBootstrapSeconds => VaultBootstrapPackagePrerequisitesSeconds + VaultBootstrapRestServerSeconds + VaultBootstrapTailscaleSeconds + VaultBootstrapServiceConfigurationSeconds + VaultBootstrapFirewallFinalizationSeconds + VaultBootstrapTerminalizationMarginSeconds;
-    public const int SshAndMarkerSeconds = 300;
-    public const int VaultSnapshotSeconds = 300;
-    public const int TailscaleSeconds = 900;
-    public const int VaultClientSeconds = 300;
-    public const int ShortcutsSeconds = 180;
-    public const int ExportSeconds = 300;
-    public const int VerificationSeconds = 300;
-
-    public static int ComputeStageSeconds => MultipassLaunchSeconds + MultipassReadinessSeconds + PayloadTransferSeconds + GuestBootstrapSeconds + SshAndMarkerSeconds;
-    public static int VaultStageSeconds => VaultSnapshotSeconds + MultipassLaunchSeconds + MultipassReadinessSeconds + PayloadTransferSeconds + VaultBootstrapSeconds + SshAndMarkerSeconds;
-    public static int DesktopTransactionSeconds => BootstrapSeconds + PreflightSeconds + PrerequisitesSeconds + WindowsTailscaleSeconds + HostAgentSeconds + ComputeStageSeconds + TailscaleSeconds + ShortcutsSeconds + ExportSeconds + VerificationSeconds + TransactionTerminalizationMarginSeconds;
-    public static int LaptopTransactionSeconds => BootstrapSeconds + PreflightSeconds + PrerequisitesSeconds + WindowsTailscaleSeconds + HostAgentSeconds + ComputeStageSeconds + VaultStageSeconds + (TailscaleSeconds * 2) + VaultClientSeconds + ShortcutsSeconds + ExportSeconds + VerificationSeconds + TransactionTerminalizationMarginSeconds;
-
-    public static int GetConnectedTransactionBudgetSeconds(string role) => role.Contains("Laptop", StringComparison.OrdinalIgnoreCase) ? LaptopTransactionSeconds : DesktopTransactionSeconds;
-}
-
-public interface IProcessRunner
-{
-    ProcessResult Run(string fileName, IReadOnlyList<string> arguments, string? workingDirectory = null);
-    Task<ProcessResult> RunAsync(string fileName, IReadOnlyList<string> arguments, string? workingDirectory = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => Run(fileName, arguments, workingDirectory), cancellationToken);
-}
-
-public sealed class ProcessRunner : IProcessRunner
-{
-    public int DefaultTimeoutSeconds { get; }
-    public bool AllowEnvironmentOverride { get; }
-
-    public ProcessRunner(int defaultTimeoutSeconds = 900, bool allowEnvironmentOverride = true)
-    {
-        if (defaultTimeoutSeconds <= 0) throw new ArgumentOutOfRangeException(nameof(defaultTimeoutSeconds));
-        DefaultTimeoutSeconds = defaultTimeoutSeconds;
-        AllowEnvironmentOverride = allowEnvironmentOverride;
-    }
-
-    public ProcessResult Run(string fileName, IReadOnlyList<string> arguments, string? workingDirectory = null)
-        => RunAsync(fileName, arguments, workingDirectory).GetAwaiter().GetResult();
-
-    public async Task<ProcessResult> RunAsync(string fileName, IReadOnlyList<string> arguments, string? workingDirectory = null, CancellationToken cancellationToken = default)
-    {
-        using var process = new Process { StartInfo = new ProcessStartInfo
-        {
-            FileName = fileName,
-            WorkingDirectory = workingDirectory ?? Environment.CurrentDirectory,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        } };
-        foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
-        process.Start();
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-        var timeoutSeconds = AllowEnvironmentOverride && int.TryParse(Environment.GetEnvironmentVariable("DEVFLEET_SETUP_PROCESS_TIMEOUT_SECONDS"), out var configured) && configured > 0 ? configured : DefaultTimeoutSeconds;
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
-      
+        PlanStatus.Foreground = (System.

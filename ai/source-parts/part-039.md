@@ -1,10 +1,147 @@
 # DevFleet source part 039
 
 Full-source UTF-8 byte interval [1767000, 1813500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: b542d555de23be1ded093692d026345867f4833909957f2c9689a6b47c6174a9
+Payload SHA-256: 9fb95c08150b63e476579f70efbd418ec63f86df02bf3f608defb3ce0072e857
 
 <!-- BEGIN SOURCE SLICE -->
-time]::UtcNow.ToString('o');data=@{backend=@{status='PASS';foreignCount=0;owned=$owned};events=@()}}
+ ($case+'.pid');$value='two words "quoted" C:\path with spaces\'
+        $deadline=if($case-ceq'owner-expired'){[datetime]::UtcNow.AddSeconds(-1)}else{[datetime]::UtcNow.AddSeconds(10)}
+        $timer=[Diagnostics.Stopwatch]::StartNew()
+        $record=Invoke-DevFleetCampaignECandidateNativeLaunch -CandidateCommonModule $common -FilePath $engine -ArgumentList @('-NoProfile','-NonInteractive','-File',$probePath,'-Case',$case,'-Value',$value,'-PidPath',$pidPath) -MaximumSeconds 3 -OwnerDeadlineUtc $deadline
+        $timer.Stop();$pass=$record.adapter-ceq'CANDIDATE_COMMON_INVOKE_EXTERNAL'-and$null-eq$record.pid-and$record.nativeMaximumSeconds-eq3-and([datetime]$record.deadlineUtc).ToUniversalTime()-le$deadline
+        switch($case){
+            success {$pass=$pass-and$record.outcome-ceq'PASS'-and$record.exitCode-eq0-and$record.outputComplete-and$record.stdout-ceq$value}
+            nonzero {$pass=$pass-and$record.outcome-ceq'COMMAND_FAILED'-and$record.exitCode-eq7-and$record.outputComplete-and$record.stderr-match'controlled-native-failure'}
+            timeout {$pass=$pass-and$record.outcome-ceq'TIMEOUT'-and$null-eq$record.exitCode-and$timer.Elapsed.TotalSeconds-lt8-and(Test-Path $pidPath);if(Test-Path $pidPath){$childId=[int](Get-Content $pidPath -Raw);$pass=$pass-and-not(Get-Process -Id $childId -ErrorAction SilentlyContinue)}}
+            owner-expired {$pass=$pass-and$record.outcome-ceq'TIMEOUT'-and-not(Test-Path $pidPath)}
+        }
+        $results.Add([pscustomobject]@{case=$case;pass=[bool]$pass;outcome=$record.outcome;exitCode=$record.exitCode;elapsedSeconds=[math]::Round($timer.Elapsed.TotalSeconds,2);error=$record.stderr})
+    }
+}finally{
+    $env:ProgramData=$priorData
+    if([IO.Path]::GetDirectoryName($scratch)-ine[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')-or[IO.Path]::GetFileName($scratch)-notlike'astra-native-*'){throw 'Native regression cleanup escaped exact owned path.'}
+    if(Test-Path $scratch){Remove-Item -LiteralPath $scratch -Recurse -Force}
+}
+$results|ConvertTo-Json -Depth 3
+if(@($results|Where-Object{-not$_.pass}).Count){throw 'Actual candidate native launch regression failed.'}
+Write-Host "PASS $($results.Count)/$($results.Count) actual candidate Common native launch checks"
+
+```
+
+
+## FILE: automation/release-e2e/tests/Test-CampaignEM1Ownership.ps1
+
+SHA256: 2f098c01706ba97fe249a69d1b4cd81571b325a9cb7017f9e39f11f18355bc18 | Bytes: 5564 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([string]$ControllerPath)
+$ErrorActionPreference='Stop'
+Set-StrictMode -Version Latest
+$releaseRoot=Split-Path -Parent $PSScriptRoot
+if(-not$ControllerPath){$ControllerPath=Join-Path $releaseRoot 'Invoke-CampaignEMultipassM1.ps1'}
+Import-Module (Join-Path $releaseRoot 'modules/MultipassDiagnostic.psm1') -Force -DisableNameChecking
+$fixture=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetTempPath()) ('devfleet-m1-ownership-'+[guid]::NewGuid().ToString('N'))))
+$results=[Collections.Generic.List[object]]::new()
+$stub=@'
+$script:fixtureRoot=Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+$script:case=Get-Content (Join-Path $script:fixtureRoot 'case.txt') -Raw
+$script:vm=[pscustomobject]@{Name=if($script:case-ceq'wrong-name'){'Unexpected-L1'}else{'DevFleet-E2E-Win11-01'};Id=[guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2';State=if($script:case-cin@('running','wrong-name','ownership-rejected')){'Running'}else{'Off'}}
+function Record-Call($Value){[IO.File]::AppendAllText((Join-Path $script:fixtureRoot 'calls.txt'),$Value+[Environment]::NewLine)}
+function Get-VM {param($Id) $script:vm}
+function Assert-DisposableOwnership {param($Vm,$ExpectedId)if($script:case-ceq'ownership-rejected'){throw 'Fixture ownership rejected.'}}
+function Get-VMSnapshot {param($VM)[pscustomobject]@{Name='Fixture-Checkpoint';Id=[guid]'11111111-1111-1111-1111-111111111111';VMId=$script:vm.Id;ParentSnapshotId=[guid]'19865b76-4c3a-44f7-ba39-841e9d3c40c9'}}
+function Get-HostSafetySnapshot {param($Vm,$ExpectedVmStartCostGiB)[pscustomobject]@{startSafe=$true;availableMemoryGiB=30;projectedPostStartAvailableMemoryGiB=16}}
+function Get-CandidateFingerprint {param($WorkspaceRoot)[pscustomobject]@{gitCommit=('b'*40);shippingInputIdentity=('c'*64);releaseFingerprintId=('d'*64);toolingFingerprintId=('e'*64);tar=[pscustomobject]@{sha256=('a'*64)}}}
+function git {'fixture-head'}
+function Restore-ExactCheckpoint {param($Vm,$Name,[switch]$StartAfterRestore)Record-Call 'restore';$script:vm.State='Running';throw 'Fixture restore changed state before throwing.'}
+function Stop-VM {param($VM,[switch]$Force,[switch]$Confirm)Record-Call 'stop';$script:vm.State='Off'}
+function ConvertTo-DevFleetDiagnosticSafeText {param($Value,$MaximumLength) [string]$Value}
+function Write-EvidenceJson {param($Path,$Value)$Value|ConvertTo-Json -Depth 20|Set-Content -LiteralPath $Path}
+Export-ModuleMember -Function *
+'@
+try {
+    New-Item -ItemType Directory -Path $fixture|Out-Null
+    foreach($case in @('running','wrong-name','ownership-rejected','partial-restore')){
+        $caseRoot=Join-Path $fixture $case;$modules=Join-Path $caseRoot 'automation/release-e2e/modules'
+        New-Item -ItemType Directory -Path $modules|Out-Null
+        [IO.File]::WriteAllText((Join-Path $caseRoot 'case.txt'),$case)
+        foreach($name in @('Candidate','HostSafety','FullRelease','GuestSession','Evidence','MultipassDiagnostic')){
+            [IO.File]::WriteAllText((Join-Path $modules ($name+'.psm1')),$(if($name-ceq'MultipassDiagnostic'){$stub}else{'# No external access in this controller fixture.'}),[Text.UTF8Encoding]::new($false))
+        }
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot 'evidence')|Out-Null
+        @{candidateIsCurrent=$true;sourceChangedSinceCandidate=$false;rebuildRequired=$false;repositoryHead='fixture-head';shippingInputIdentity=('c'*64);releaseFingerprintId=('d'*64);toolingFingerprintId=('e'*64)}|ConvertTo-Json|Set-Content (Join-Path $caseRoot 'evidence/CURRENT-RELEASE-AUTHORITY.json')
+        $checkpoint=Join-Path $caseRoot 'checkpoint.json'
+        @{status='PASS_CHECKPOINT_READY';campaign='DF-STABLE-20260906-E';diagnosticCheckpoint=@{id='11111111-1111-1111-1111-111111111111';name='Fixture-Checkpoint';vmId='84b7d8b8-ee6c-4085-aa29-4b0adc316de2';parentSnapshotId='19865b76-4c3a-44f7-ba39-841e9d3c40c9';l1State='OFF';l2Status='ABSENT';payloadSha256=('a'*64)}}|ConvertTo-Json -Depth 4|Set-Content $checkpoint
+        $probe=Invoke-DevFleetBoundedNativeProbe -Operation "ownership-$case" -FilePath (Get-Process -Id $PID).Path -ArgumentList @('-NoProfile','-NonInteractive','-File',$ControllerPath,'-WorkspaceRoot',$caseRoot,'-RunId','fixture','-CheckpointEvidencePath',$checkpoint) -TimeoutSeconds 15 -OwnerDeadlineUtc ([datetime]::UtcNow.AddSeconds(20)) -ForceLegacyArgumentString
+        $record=Get-Content (Join-Path $caseRoot 'audit/automation-harness/runs/fixture/campaign-e-m1.json') -Raw|ConvertFrom-Json
+        $callPath=Join-Path $caseRoot 'calls.txt';$calls=@(if(Test-Path $callPath){Get-Content $callPath})
+        $expected=if($case-ceq'partial-restore'){'restore|stop'}else{''}
+        $passed=$probe.exitCode-eq1-and[string]$record.status-ceq'BLOCKED'-and($calls-join'|')-ceq$expected
+        $results.Add([pscustomobject]@{case=$case;pass=$passed;calls=($calls-join'|');exitCode=$probe.exitCode;error=[string]$record.primaryError})
+    }
+} finally {
+    $fence=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'
+    if(-not$fixture.StartsWith($fence,[StringComparison]::OrdinalIgnoreCase)-or[IO.Path]::GetFileName($fixture)-notlike'devfleet-m1-ownership-*'){throw 'Ownership fixture cleanup escaped its boundary.'}
+    if(Test-Path $fixture){Remove-Item -LiteralPath $fixture -Recurse -Force}
+}
+$results|ConvertTo-Json -Depth 3
+if(@($results|Where-Object{-not$_.pass}).Count){throw 'Campaign E M1 controller ownership regression failed.'}
+Write-Host "PASS $($results.Count)/$($results.Count) Campaign E M1 controller ownership checks ($($PSVersionTable.PSVersion))"
+
+```
+
+
+## FILE: automation/release-e2e/tests/Test-CampaignEM1WorkerBoundary.ps1
+
+SHA256: 3e877d7af1f603449ca25b942300610e55cf078c45eac2d59dbcb974e01b9ef8 | Bytes: 19638 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([string]$WorkerPath)
+$ErrorActionPreference='Stop'
+Set-StrictMode -Version Latest
+$releaseRoot=Split-Path -Parent $PSScriptRoot
+$modulePath=Join-Path $releaseRoot 'modules\MultipassDiagnostic.psm1'
+if(-not$WorkerPath){$workerPath=Join-Path $releaseRoot 'Invoke-CampaignEMultipassM1Worker.ps1'}
+Import-Module $modulePath -Force -DisableNameChecking
+$engine=(Get-Process -Id $PID).Path
+$run="astra-worker-$PID-$([guid]::NewGuid().ToString('N').Substring(0,8))"
+$fixtureParent=[IO.Path]::GetFullPath("C:\Users\Public\DevFleet-E2E\$run")
+$originalPrograms=$env:ProgramFiles;$originalProgramsX86=${env:ProgramFiles(x86)};$originalData=$env:ProgramData
+$results=[Collections.Generic.List[object]]::new()
+# The actual child script, request validation, sequence and cleanup run unchanged.
+# Only native I/O is replaced in a copied module; no VM/daemon or product is invoked.
+$nativeFixture=@'
+function Invoke-DevFleetBoundedNativeProbe {
+    param($Operation,$FilePath,$ArgumentList,$TimeoutSeconds,$OwnerDeadlineUtc,[switch]$ForceLegacyArgumentString,$MaxStdoutCharacters,$MaxStderrCharacters)
+    $now=[datetime]::UtcNow
+    $caseRoot=Split-Path -Parent $PSScriptRoot
+    [IO.File]::AppendAllText((Join-Path $caseRoot 'native-calls.txt'),$Operation+[Environment]::NewLine)
+    [IO.File]::WriteAllText((Join-Path $caseRoot 'runtime.txt'),$PSVersionTable.PSVersion.ToString())
+    $output='';$code=0
+    switch($Operation){
+        'baseline-inventory' {$output='{"list":[]}'}
+        'final-inventory' {
+            $output='{"list":[]}'
+            $custom=Join-Path $caseRoot 'final-response.txt';if(Test-Path $custom){$output=Get-Content $custom -Raw}
+            if(Test-Path (Join-Path $caseRoot 'throw-inventory')){throw 'fixture inventory provider failed'}
+        }
+        'delete-owned' {if(Test-Path (Join-Path $caseRoot 'throw-delete')){throw 'fixture delete provider failed'}}
+        'info-running' {$output=(@{info=@{([string]$ArgumentList[1])=@{state='Running';ipv4=@('10.0.0.2');image_hash=('a'*64);image_release='24.04'}};errors=@()}|ConvertTo-Json -Depth 5 -Compress)}
+        'info-final' {$output=(@{info=@{([string]$ArgumentList[1])=@{state='Running';ipv4=@('10.0.0.2');image_hash=('a'*64);image_release='24.04'}};errors=@()}|ConvertTo-Json -Depth 5 -Compress)}
+        'cloud-init' {$output='status: done'}
+        'launch' {[IO.File]::WriteAllText((Join-Path $caseRoot 'launch-arguments.json'),($ArgumentList|ConvertTo-Json -Compress));if(Test-Path (Join-Path $caseRoot 'fail-launch')){$code=7}}
+    }
+    [pscustomobject]@{operation=$Operation;outcome=if($code-eq0){'PASS'}else{'NONZERO'};exitCode=$code;pid=$PID;startedAtUtc=$now.ToString('o');finishedAtUtc=[datetime]::UtcNow.ToString('o');deadlineUtc=$OwnerDeadlineUtc.ToUniversalTime().ToString('o');stdout=$output;stderr=if($code){'fixture native failure'}else{''};outputComplete=$true;stdoutTruncated=$false;stderrTruncated=$false}
+}
+Export-ModuleMember -Function Invoke-DevFleetBoundedNativeProbe
+function Get-DevFleetCampaignEBackendSnapshot {
+    param($InstanceName,$SinceUtc,$OwnerDeadlineUtc)
+    $caseRoot=Split-Path -Parent $PSScriptRoot
+    [IO.File]::AppendAllText((Join-Path $caseRoot 'backend-calls.txt'),'backend'+[Environment]::NewLine)
+    $owned=@();if((Test-Path (Join-Path $caseRoot 'orphan-backend'))-and@(Get-Content (Join-Path $caseRoot 'backend-calls.txt')).Count-ge3){$owned=@(@{name=$InstanceName;state='Running'})}
+    [pscustomobject]@{status=if(Test-Path (Join-Path $caseRoot 'fail-backend')){'UNVERIFIED'}else{'COMPLETE'};instanceName=$InstanceName;startedAtUtc=[datetime]::UtcNow.ToString('o');producedAtUtc=[datetime]::UtcNow.ToString('o');data=@{backend=@{status='PASS';foreignCount=0;owned=$owned};events=@()}}
 }
 Export-ModuleMember -Function Get-DevFleetCampaignEBackendSnapshot
 $script:actualCandidateNativeLaunch=${function:Invoke-DevFleetCampaignECandidateNativeLaunch}
@@ -301,113 +438,4 @@ function Copy-DevFleetBoundedGuestFile {
 }
 function Invoke-DevFleetBoundedGuestProcess {
     param($Session,$FilePath,$ArgumentList,$OwnerDeadlineUtc)
-    $script:captures++;Record ('snapshot-'+$script:captures)
-    if($script:captures-eq2-and$script:case-ceq'terminal-transport'){throw 'fixture terminal transport unavailable'}
-    $encoded=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($ArgumentList[-1]));$requestText=[regex]::Match($encoded,"\} '([A-Za-z0-9+/=]+)'$").Groups[1].Value
-    $request=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($requestText))|ConvertFrom-Json
-    @{case=$script:case;capture=$script:captures}|ConvertTo-Json|Set-Content (Join-Path $request.path '.fixture.json')
-    $json=@{filePath=$FilePath;arguments=@($ArgumentList);deadlineUnixMilliseconds=[DateTimeOffset]::new($OwnerDeadlineUtc).ToUnixTimeMilliseconds()}|ConvertTo-Json -Compress
-    & (Get-DevFleetBoundedProcessScriptBlock) $json
-}
-function Invoke-DevFleetBoundedGuestCommand {
-    param($Session,$TimeoutSeconds,$ScriptBlock,$ArgumentList)
-    if($ScriptBlock.ToString()-match"ids=@"){
-        Record 'final-backend';return [pscustomobject]@{status='COMPLETE';count=if($script:case-ceq'final-orphan'){1}else{0};ids=@()}
-    }
-    $prior=$env:ProgramData;try{$env:ProgramData=Join-Path $script:fixtureRoot 'isolated-data';&$ScriptBlock @ArgumentList}finally{$env:ProgramData=$prior}
-}
-Export-ModuleMember -Function *
-'@
-$collectorFixture=@'
-function Get-DevFleetCampaignEBackendSnapshot {
-    param($InstanceName,$SinceUtc,$OwnerDeadlineUtc,$TimeoutSeconds,[switch]$ProductContext,$ExpectedPayloadSha256)
-    if($InstanceName-cne'devfleet-primary'-or-not$ProductContext-or$ExpectedPayloadSha256-cne('a'*64)){throw 'M4 collector product binding failed.'}
-    $fixture=Get-Content (Join-Path $PSScriptRoot '.fixture.json') -Raw|ConvertFrom-Json
-    $backend=if($fixture.capture-eq2-and$fixture.case-ceq'terminal-backend'){'UNVERIFIED'}else{'PASS'}
-    [pscustomobject]@{status=if($fixture.case-ceq'baseline-partial'-or($fixture.capture-eq2-and$fixture.case-ceq'terminal-partial')){'PARTIAL'}else{'COMPLETE'};data=@{backend=@{status=$backend;foreignCount=if($fixture.capture-eq2-and$fixture.case-ceq'foreign-terminal'){1}else{0};owned=@()};product=@{status='TRANSACTION_OBSERVED'}}}
-}
-Export-ModuleMember -Function *
-'@
-$productFixture=@'
-function Invoke-ProductFreshInstallLifecycle {
-    param($Context,$Role)
-    $root=Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)))
-    if($Context.phaseId-cne'CAMPAIGN-E-M4'-or$Role-cne'Primary / Desktop'-or$Context.vmId-cne'84b7d8b8-ee6c-4085-aa29-4b0adc316de2'-or-not$Context.diagnosticOnly-or$Context.certificationEligible){throw 'M4 product context identity/diagnostic boundary failed.'}
-    foreach($name in $Context.PSObject.Properties.Name){if($name-match'Provider|synthetic'){throw 'M4 supplied a forbidden product seam.'}}
-    [IO.File]::AppendAllText((Join-Path $root 'calls.txt'),'actual-child-entry'+[Environment]::NewLine)
-    $case=(Get-Content (Join-Path $root 'case.txt') -Raw).Trim()
-    $result=[ordered]@{status=if($case-ceq'product-failure'){'TERMINAL_FAILURE'}else{'REAL E2E PASS'};completionVerified=($case-cne'product-failure');transactionId=('f'*32);payloadSha256=('a'*64);evidencePath='fixture-native-evidence.json'}
-    if($case-ceq'product-failure'){$result.error='fixture launch failed token=private-fixture'}
-    [pscustomobject]$result
-}
-Export-ModuleMember -Function Invoke-ProductFreshInstallLifecycle
-'@
-try{
-    New-Item -ItemType Directory -Path $scratch|Out-Null
-    foreach($case in @('success','product-failure','terminal-backend','terminal-transport','already-running','unsafe','final-orphan','preexisting-run','collector-module-hash','collector-executable-hash','collector-nonce','foreign-terminal','baseline-partial','terminal-partial')){
-        $caseRoot=Join-Path $scratch $case;$run=$prefix+'-'+$case;$guest=[IO.Path]::GetFullPath("C:\Users\Public\DevFleet-E2E\$run");$owned.Add($guest)
-        $modules=Join-Path $caseRoot 'automation/release-e2e/modules';New-Item -ItemType Directory -Path $modules,(Join-Path $modules 'executors'),(Join-Path $caseRoot 'evidence'),(Join-Path $caseRoot 'automation/release-e2e/config')|Out-Null
-        [IO.File]::WriteAllText((Join-Path $caseRoot 'case.txt'),$case)
-        foreach($name in @('Candidate','HostSafety','FullRelease','GuestSession','Evidence','MultipassDiagnostic','HarnessBudget')){
-            $body=if($name-ceq'HarnessBudget'){[IO.File]::ReadAllText((Join-Path $release 'modules/HarnessBudget.psm1'))+[Environment]::NewLine+$fixture}elseif($name-ceq'MultipassDiagnostic'){[IO.File]::ReadAllText((Join-Path $release 'modules/MultipassDiagnostic.psm1'))+[Environment]::NewLine+$collectorFixture}else{'# Fixture only'}
-            [IO.File]::WriteAllText((Join-Path $modules ($name+'.psm1')),$body,[Text.UTF8Encoding]::new($false))
-        }
-        [IO.File]::WriteAllText((Join-Path $modules 'executors/Invoke-RealProductPhase.psm1'),$productFixture,[Text.UTF8Encoding]::new($false))
-        Copy-Item (Join-Path $release 'config/devfleet-e2e.defaults.json') (Join-Path $caseRoot 'automation/release-e2e/config/devfleet-e2e.defaults.json')
-        @{candidateIsCurrent=$true;sourceChangedSinceCandidate=$false;rebuildRequired=$false;repositoryHead='fixture-head';shippingInputIdentity=('c'*64);releaseFingerprintId=('d'*64);toolingFingerprintId=('e'*64)}|ConvertTo-Json|Set-Content (Join-Path $caseRoot 'evidence/CURRENT-RELEASE-AUTHORITY.json')
-        $checkpoint=Join-Path $caseRoot 'checkpoint.json';@{status='PASS_CHECKPOINT_READY';campaign='DF-STABLE-20260906-E';diagnosticCheckpoint=@{id='11111111-1111-1111-1111-111111111111';name='Fixture-Prerequisite';vmId='84b7d8b8-ee6c-4085-aa29-4b0adc316de2';parentSnapshotId='19865b76-4c3a-44f7-ba39-841e9d3c40c9';payloadSha256=('a'*64);powershell=@{pathSha256=(Get-FileHash (Join-Path $env:ProgramFiles 'PowerShell/7/pwsh.exe') -Algorithm SHA256).Hash.ToLowerInvariant()};l1State='OFF';l2Status='ABSENT'}}|ConvertTo-Json -Depth 5|Set-Content $checkpoint
-        if($case-ceq'collector-executable-hash'){$record=Get-Content $checkpoint -Raw|ConvertFrom-Json;$record.diagnosticCheckpoint.powershell.pathSha256='0'*64;$record|ConvertTo-Json -Depth 5|Set-Content $checkpoint}
-        $recordPath=Join-Path $caseRoot "audit/automation-harness/runs/$run/campaign-e-m4.json"
-        if($case-ceq'preexisting-run'){New-Item -ItemType Directory -Path (Split-Path -Parent $recordPath)|Out-Null;[IO.File]::WriteAllText($recordPath,'{"preserved":true}');$priorHash=(Get-FileHash $recordPath -Algorithm SHA256).Hash}
-        $probe=Invoke-DevFleetBoundedNativeProbe -Operation $case -FilePath (Get-Process -Id $PID).Path -ArgumentList @('-NoProfile','-NonInteractive','-File',(Join-Path $release 'Invoke-CampaignEProductM4.ps1'),'-WorkspaceRoot',$caseRoot,'-RunId',$run,'-CheckpointEvidencePath',$checkpoint) -TimeoutSeconds 18 -OwnerDeadlineUtc ([datetime]::UtcNow.AddSeconds(22)) -ForceLegacyArgumentString -MaxStdoutCharacters 32768
-        $record=Get-Content $recordPath -Raw|ConvertFrom-Json;$calls=@(if(Test-Path (Join-Path $caseRoot 'calls.txt')){Get-Content (Join-Path $caseRoot 'calls.txt')})
-        if($case-ceq'preexisting-run'){$pass=$probe.exitCode-eq1-and$calls.Count-eq0-and(Get-FileHash $recordPath -Algorithm SHA256).Hash-ceq$priorHash}
-        elseif($case-cin@('already-running','unsafe')){$pass=$probe.exitCode-eq1-and$calls.Count-eq0-and-not$record.cleanup.acquired-and$record.finalL1.state-ceq$(if($case-ceq'already-running'){'Running'}else{'Off'})}
-        elseif($case-like'collector-*'){
-            $first=Get-Content (Join-Path (Split-Path -Parent $recordPath) 'snapshot-0001-before-product.json') -Raw|ConvertFrom-Json
-            $pass=$probe.exitCode-eq1-and$calls-notcontains'actual-child-entry'-and$calls-notcontains'restore-2'-and$calls-contains'stop'-and$record.finalL1.state-ceq'Off'-and$first.status-ceq'UNAVAILABLE'-and$first.error-match'mismatch'-and(Test-Path (Join-Path $guest 'M4/.owner.json'))
-        }
-        elseif($case-ceq'baseline-partial'){$pass=$probe.exitCode-eq1-and$calls-notcontains'actual-child-entry'-and$calls-notcontains'restore-2'-and$record.finalL1.state-ceq'Off'}
-        else{
-            $pass=$record.experiment-ceq'M4'-and-not$record.proofCredit-and-not$record.certificationEligible-and$calls-contains'actual-child-entry'-and$calls-contains'stop'-and$record.finalL1.state-ceq'Off'
-            if($case-cin@('terminal-backend','terminal-transport','foreign-terminal','terminal-partial')){$pass=$pass-and$probe.exitCode-eq1-and$calls-notcontains'restore-2'-and(Test-Path (Join-Path $guest 'M4/.owner.json'))}
-            else{$pass=$pass-and$calls.IndexOf('snapshot-2')-lt$calls.IndexOf('restore-2')-and$calls-contains'final-backend';if($case-ceq'success'){$pass=$pass-and$probe.exitCode-eq0-and$record.status-ceq'PASS_DIAGNOSTIC'}else{$pass=$pass-and$probe.exitCode-eq1-and$record.status-ceq'BLOCKED'}}
-            $pass=$pass-and($record|ConvertTo-Json -Depth 12)-notmatch'private-fixture'
-            $first=Get-Content (Join-Path (Split-Path -Parent $recordPath) 'snapshot-0001-before-product.json') -Raw|ConvertFrom-Json
-            $pass=$pass-and$first.delivery.persistentPolicyUnchanged-and$first.delivery.processOnlyExecutionPolicy-ceq'Bypass'-and$first.delivery.powerShellVersion-like'7.*'
-        }
-        $results.Add([pscustomobject]@{case=$case;pass=[bool]$pass;exitCode=$probe.exitCode;calls=$calls;error=if($record.PSObject.Properties['primaryError']){$record.primaryError}else{''};stderr=$probe.stderr})
-    }
-}finally{
-    foreach($path in @($owned)+@($scratch)){if(($path-cne$scratch-and-not$path.StartsWith('C:\Users\Public\DevFleet-E2E\'+$prefix,[StringComparison]::Ordinal))-or[IO.Path]::GetFileName($path)-notlike($prefix+'*')){throw 'M4 fixture cleanup escaped exact ownership.'};if(Test-Path $path){Remove-Item -LiteralPath $path -Recurse -Force}}
-}
-$results|ConvertTo-Json -Depth 5
-if(@($results|Where-Object{-not$_.pass}).Count){throw 'Actual M4 controller regression failed.'}
-Write-Host "PASS $($results.Count)/$($results.Count) actual M4 controller checks"
-
-```
-
-
-## FILE: automation/release-e2e/tests/Test-CampaignEPrerequisiteCheckpoint.ps1
-
-SHA256: e7b6a7464791af8b7a6a7e445d78ac75d115df1c1d5cd1eadadd6122678b91d7 | Bytes: 49199 | Git mode: 100644
-
-```
-$ErrorActionPreference='Stop'
-Set-StrictMode -Version Latest
-
-$root=(Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
-$modulePath=Join-Path $root 'automation\release-e2e\modules\MultipassDiagnostic.psm1'
-Import-Module $modulePath -Force
-$count=0
-function Check([bool]$Condition,[string]$Message){if(-not$Condition){throw "FAIL: $Message"};$script:count++}
-function Rejected([scriptblock]$Action,[string]$Message){$failed=$false;try{&$Action|Out-Null}catch{$failed=$true};Check $failed $Message}
-function Clone($Value){$Value|ConvertTo-Json -Depth 24|ConvertFrom-Json}
-
-$plan=Get-DevFleetCampaignEPrerequisitePlan -PackageRoot (Join-Path $root 'source') -Role Desktop
-Check ([string]$plan.packageVersion-ceq'1.2.13') 'candidate package version was not selected'
-Check (@($plan.dependencyIds).Count-eq2-and@($plan.dependencyIds)-ccontains'powershell7'-and@($plan.dependencyIds)-ccontains'multipass') 'plan did not remain scoped to PowerShell 7 and Multipass'
-Check ([string]$plan.expectedBackend-ceq'hyperv'-and-not[bool]$plan.privilegedMounts) 'plan weakened the candidate backend/mount policy'
-Check (@($plan.candidateInstanceNames).Count-eq3) 'plan did not preserve candidate product identities'
-Check (@($plan.dependencies.powershell7.allowedSignerSubjectsExact).Count-eq1-and[string]$plan.dependencies.powershell7.allowedSignerSubjectsExact[0]-ceq'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US') 'plan did not preserve the candidate exact PowerShell signer policy'
-$policyProjection=Get-DevFleetSystemExecutionPolicyProjection -PolicyProvider {param($scope)"policy-$s
+    $script:captu

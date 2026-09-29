@@ -1,10 +1,149 @@
 # DevFleet source part 065
 
 Full-source UTF-8 byte interval [2976000, 3022500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 951c725c3c7b9f6e727d009d06e3f4c4f632dc920f0d2082b128f4a58f6ec10a
+Payload SHA-256: 37a783fb42f24093be161851c166fb1235ec44a3fc51928c3f29d91a8fc36c2c
 
 <!-- BEGIN SOURCE SLICE -->
-ts/Test-MultipassLaunchTimeoutEnvelope.ps1
+mplates/rust-service/.devcontainer/devcontainer.json
+c21570b7786f136f526a1b8e28b12dc3dcddaba3f759210e189a6aa2bce82345  templates/rust-service/.devfleet/bootstrap.sh
+18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b  templates/rust-service/.devfleet/codexpro-bootstrap.sh
+c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44  templates/rust-service/.devfleet/codexpro-profile.json
+86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30  templates/rust-service/.devfleet/codexpro.env.example
+04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311  templates/rust-service/.devfleet/health-check.sh
+af43eb1c4ffb2e84df818b021bbe26ef37278726ff9629c3e7ecd1f5c73b3b06  templates/rust-service/.devfleet/project-tools.json
+95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31  templates/rust-service/.devfleet/smoke-test.sh
+0120973b4d57154eb0159e12b9c5beea6a01a9278dd5bdb73c8bab63f153539a  templates/rust-service/.devfleet/template.json
+05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44  templates/rust-service/.editorconfig
+8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe  templates/rust-service/.gitignore
+3913040a9984df6c6832a8367fabbe9050fa0566bc3f83990ebcfddb6bb0e7d0  templates/rust-service/Cargo.toml
+45933ed40e10522eb584d621c872d91c8d9948327408205bdec2c1cf0b33e659  templates/rust-service/README.md
+8b474a2b349beec60e452b08e9b591a4f6bbf25eeee9088009fdfae1f6686906  templates/rust-service/compose.yaml
+c39677d76d0df844dc40cdd8a7b9b5c646bbc8da1dd76558397be7181d6e5e02  templates/rust-service/docs/architecture.md
+4480a18357cf852cd7e7454baa5a3cc73cc53e61c99d89a98cf1f3589d672874  templates/rust-service/src/main.rs
+ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f  templates/scientific-julia/.ai-bridge/chatgpt-memory.md
+95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/scientific-julia/.ai-bridge/codexpro-project-instructions.md
+7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb  templates/scientific-julia/.ai-bridge/current-plan.template.md
+d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135  templates/scientific-julia/.ai-bridge/prompts/broken-session-recovery.md
+a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02  templates/scientific-julia/.ai-bridge/prompts/handoff-template.md
+5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab  templates/scientific-julia/.ai-bridge/prompts/reconnect.md
+95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/scientific-julia/.ai-bridge/prompts/session-bootstrap.md
+31743d0b403e9a20eb3dffd87c5033c90bd0c28a0f522633bef1b18235b2c065  templates/scientific-julia/.devcontainer/devcontainer.json
+0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a  templates/scientific-julia/.devfleet/bootstrap.sh
+18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b  templates/scientific-julia/.devfleet/codexpro-bootstrap.sh
+c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44  templates/scientific-julia/.devfleet/codexpro-profile.json
+86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30  templates/scientific-julia/.devfleet/codexpro.env.example
+04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311  templates/scientific-julia/.devfleet/health-check.sh
+92c1c25136a67c50f0f24f32740b8667e02a1ec46f4672507a1ae3c306fd155d  templates/scientific-julia/.devfleet/project-tools.json
+95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31  templates/scientific-julia/.devfleet/smoke-test.sh
+9294da0f4419bf2cb12f561b896a3d411fa8350a59b9d876f3fa9d191c33f1d8  templates/scientific-julia/.devfleet/template.json
+05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44  templates/scientific-julia/.editorconfig
+8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe  templates/scientific-julia/.gitignore
+b0c4f2f64c3038b37635c68ce5cc7998574a804bd40b509f3b1d16d3cdac78d8  templates/scientific-julia/README.md
+f133b4199d18c28b29df897a03d182d6b2dac206e24ad4e2a9bc7dd0dd3381a2  templates/scientific-julia/compose.yaml
+92f1c73fe87ddb0748414935c2eb1643093ec6bef1dadcb2e73e2a67f49fb37f  templates/scientific-julia/docs/architecture.md
+ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f  templates/shell-automation/.ai-bridge/chatgpt-memory.md
+95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/shell-automation/.ai-bridge/codexpro-project-instructions.md
+7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb  templates/shell-automation/.ai-bridge/current-plan.template.md
+d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135  templates/shell-automation/.ai-bridge/prompts/broken-session-recovery.md
+a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02  templates/shell-automation/.ai-bridge/prompts/handoff-template.md
+5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab  templates/shell-automation/.ai-bridge/prompts/reconnect.md
+95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/shell-automation/.ai-bridge/prompts/session-bootstrap.md
+445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622  templates/shell-automation/.devcontainer/devcontainer.json
+0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a  templates/shell-automation/.devfleet/bootstrap.sh
+18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b  templates/shell-automation/.devfleet/codexpro-bootstrap.sh
+c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44  templates/shell-automation/.devfleet/codexpro-profile.json
+86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30  templates/shell-automation/.devfleet/codexpro.env.example
+04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311  templates/shell-automation/.devfleet/health-check.sh
+6d77fed1497db4e986303d1ee6eb936453acd4e76b1ae245a53a2207a5d6b3e2  templates/shell-automation/.devfleet/project-tools.json
+95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31  templates/shell-automation/.devfleet/smoke-test.sh
+9dd08d3e4b1438eb2601a1b1776216c0e0de1df8c6b5670ad8e3cac51704d79a  templates/shell-automation/.devfleet/template.json
+05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44  templates/shell-automation/.editorconfig
+8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe  templates/shell-automation/.gitignore
+305cf1f564905ae68ef5f3d238a0a74f8be6c39f63b0c1707f4db6b0ec31f3cc  templates/shell-automation/README.md
+e227e63586bddf735ae934ca51587e8f80bf861ab311ea8851486328b3fb84c2  templates/shell-automation/compose.yaml
+3de1095c5d566f3af270d9c22dd89b2e68ad7a7e92e682198e80c2363023f51a  templates/shell-automation/docs/architecture.md
+ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f  templates/sql-project/.ai-bridge/chatgpt-memory.md
+95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/sql-project/.ai-bridge/codexpro-project-instructions.md
+7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb  templates/sql-project/.ai-bridge/current-plan.template.md
+d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135  templates/sql-project/.ai-bridge/prompts/broken-session-recovery.md
+a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02  templates/sql-project/.ai-bridge/prompts/handoff-template.md
+5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab  templates/sql-project/.ai-bridge/prompts/reconnect.md
+95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/sql-project/.ai-bridge/prompts/session-bootstrap.md
+445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622  templates/sql-project/.devcontainer/devcontainer.json
+0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a  templates/sql-project/.devfleet/bootstrap.sh
+18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b  templates/sql-project/.devfleet/codexpro-bootstrap.sh
+c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44  templates/sql-project/.devfleet/codexpro-profile.json
+86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30  templates/sql-project/.devfleet/codexpro.env.example
+04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311  templates/sql-project/.devfleet/health-check.sh
+1b28716482aa11226702b7e84fc8d5ef3a53288f06994e918ebe946f4107f395  templates/sql-project/.devfleet/project-tools.json
+95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31  templates/sql-project/.devfleet/smoke-test.sh
+d7bb1c8471c22460d7c6b724e184f72d3ae4d4d3b74c4c821cf749e15fd84c49  templates/sql-project/.devfleet/template.json
+05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44  templates/sql-project/.editorconfig
+8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe  templates/sql-project/.gitignore
+ae14d31a8c1157b3ab4a2648cce48b2425b24712603c95af613968e07f569e6d  templates/sql-project/README.md
+e227e63586bddf735ae934ca51587e8f80bf861ab311ea8851486328b3fb84c2  templates/sql-project/compose.yaml
+f6673cfe04b589f72f7c23400c275e08bbd4371bef3b4c12433901e99b6bbd1e  templates/sql-project/docs/architecture.md
+ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f  templates/typescript-next/.ai-bridge/chatgpt-memory.md
+95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/typescript-next/.ai-bridge/codexpro-project-instructions.md
+7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb  templates/typescript-next/.ai-bridge/current-plan.template.md
+d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135  templates/typescript-next/.ai-bridge/prompts/broken-session-recovery.md
+a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02  templates/typescript-next/.ai-bridge/prompts/handoff-template.md
+5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab  templates/typescript-next/.ai-bridge/prompts/reconnect.md
+95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/typescript-next/.ai-bridge/prompts/session-bootstrap.md
+2e3f9099163de6f42887fb921741b6c9f0eabbf14c86fc7e4f3ae66123ab577f  templates/typescript-next/.devcontainer/devcontainer.json
+ab4fc5d4fbbb3c4a680f0ddc19ecf073186cd8a1fbd3599b12abdcb2036b3327  templates/typescript-next/.devfleet/bootstrap.sh
+18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b  templates/typescript-next/.devfleet/codexpro-bootstrap.sh
+c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44  templates/typescript-next/.devfleet/codexpro-profile.json
+86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30  templates/typescript-next/.devfleet/codexpro.env.example
+04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311  templates/typescript-next/.devfleet/health-check.sh
+c8b02582ba64ca5e2f2da5843f33f5617da6292c4383c3ffb53578df160a98d0  templates/typescript-next/.devfleet/project-tools.json
+95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31  templates/typescript-next/.devfleet/smoke-test.sh
+d9de6de26c1bbdf4792d7d120904639e038559247f8fbb6ad28bfdcc05da2e0d  templates/typescript-next/.devfleet/template.json
+05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44  templates/typescript-next/.editorconfig
+8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe  templates/typescript-next/.gitignore
+49723259d20bc66a9a10ed07a2c05cded4da74fc72745e592e6ca1cd20a9c14e  templates/typescript-next/README.md
+d98ac855ef79a037c60b7d7cf93c8cc25fedefbb9372eb40fbab42d7503c9027  templates/typescript-next/app/layout.tsx
+c088d85485b3cee9cd25f5ff1074f09a1fa51c1c173ae9059be58aca3269f117  templates/typescript-next/app/page.tsx
+d9658e7bc420d2dbd0221420035ca9237bddfd4b730560efc58cae0a4f919527  templates/typescript-next/compose.yaml
+c0dca68b485fe7ffcc73826ba017aae274acad4408251007c89f71fc4701c1b7  templates/typescript-next/docs/architecture.md
+5b4a58f8bce9ff938e6a155e6d7250d6ca6df23d084cac2f3de15d57100101a2  templates/typescript-next/package.json
+774d4a0d76ba5f506257f653647a1b1d79c693af6b87da1a3b3386c874288d05  templates/typescript-next/test/smoke.test.js
+47702d97e54a4acdb910682fce9e9ed9d00c8d4572971a503bb492b8b107a1cb  templates/typescript-next/tsconfig.json
+ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f  templates/typescript-node/.ai-bridge/chatgpt-memory.md
+95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/typescript-node/.ai-bridge/codexpro-project-instructions.md
+7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb  templates/typescript-node/.ai-bridge/current-plan.template.md
+d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135  templates/typescript-node/.ai-bridge/prompts/broken-session-recovery.md
+a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02  templates/typescript-node/.ai-bridge/prompts/handoff-template.md
+5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab  templates/typescript-node/.ai-bridge/prompts/reconnect.md
+95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/typescript-node/.ai-bridge/prompts/session-bootstrap.md
+2e3f9099163de6f42887fb921741b6c9f0eabbf14c86fc7e4f3ae66123ab577f  templates/typescript-node/.devcontainer/devcontainer.json
+ab4fc5d4fbbb3c4a680f0ddc19ecf073186cd8a1fbd3599b12abdcb2036b3327  templates/typescript-node/.devfleet/bootstrap.sh
+18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b  templates/typescript-node/.devfleet/codexpro-bootstrap.sh
+c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44  templates/typescript-node/.devfleet/codexpro-profile.json
+86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30  templates/typescript-node/.devfleet/codexpro.env.example
+04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311  templates/typescript-node/.devfleet/health-check.sh
+7b12f17c24430177affaa376d274e8b3ede5ef8223aaa996e7400bb4dab50127  templates/typescript-node/.devfleet/project-tools.json
+95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31  templates/typescript-node/.devfleet/smoke-test.sh
+fe937db59832ed05f16657353183b5eb5c424d59ecf3bb55de9b4bcd2ac05bad  templates/typescript-node/.devfleet/template.json
+05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44  templates/typescript-node/.editorconfig
+8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe  templates/typescript-node/.gitignore
+4b4b64b4e946e1eddd2cd6bba36396d82a4038da06c1df950dba31ca58b310ac  templates/typescript-node/README.md
+d9658e7bc420d2dbd0221420035ca9237bddfd4b730560efc58cae0a4f919527  templates/typescript-node/compose.yaml
+504af113699383a8990df7a65a37e6a467c2d5880217c9c109f0555fd9e8f4a4  templates/typescript-node/docs/architecture.md
+20d4fc59b923fa89378c9ad2e73e8480fb79fa1298e5c295728a21d1de81e853  templates/typescript-node/package.json
+237153ab53bd8d45207a0eb7e33f84a15db9aee697c166de579873c82cbb5a84  templates/typescript-node/src/index.ts
+9c2cdf677c2a6a83b26572eab35a5092fbafd765934dc94997433659908735ec  templates/typescript-node/test/index.test.ts
+c6489f4f0ed32be525819e1a567fbb936d8a1725edf98bf6853cb2c94214ecbd  templates/typescript-node/tsconfig.json
+a5eb67532f9c99ce38486b6eb5ecd2c03d158e7d882f304ae368c7f3470cd77c  tests/Test-BootstrapInputBoundary.ps1
+8c7a792717408ec8048e7941b0d54698402d8832bc91e9e2cfbcc644997a13c9  tests/Test-BootstrapTerminalReporting.ps1
+3f20ae26add6a6e9ac4e733debd795750d1ce3d9ecf73a2b880746c37ea2d50d  tests/Test-ComputePendingRebootHandoff.ps1
+5bc9343b93da6d7b99475b22475bd1dd9cbd9047052b5dae71f59b7dc6054a8e  tests/Test-DependencyProbeBoundary.ps1
+ee713cc06579ca475c5de829259f295c144484c88a39abf1504577828ceecd83  tests/Test-DependencyTrustedRoot.ps1
+ec2aada5cb00d6e5d1e52e1eb125157ef86ceb0679fdca7ef69df689aeb2a7ca  tests/Test-DevFleetHostAgentCurrent.ps1
+a25a97f7316a0c0d99bee1ecd3ca8da05cf74d20fce6dbf917f142a7240f1f27  tests/Test-EncryptedBundlePassphrase.ps1
+b4f3ddb532ed8d70ea694c63bdec8ded08bfc36747f5f79cbee54ba7bbc97a91  tests/Test-ExternalStandardInputBoundary.ps1
+8057414f92b8d1c4f9f68a64507737d4a1eac26b6a73051c774a86b0fa7f75ec  tests/Test-HostSecretRecovery.ps1
+01bec115b8ef4905b78b5391341c5c62a6ebc1955795a756ba19d9fbc6bfda97  tests/Test-MultipassLaunchTimeoutEnvelope.ps1
 919655da1d747a27c7e965502ade0de80ac42feeb9592df7b84effa7b79c2ae0  tests/Test-MultipassStandardInputTransport.ps1
 0dae89d672d2e5250c009b50f69f4b248e9315bd169cbb82a8828f72d7fff966  tests/Test-PendingReboot.ps1
 a553a80e8fbe8c2863faeacf3ccccf4261e7b7e636e819443a1f7410b44bbf1c  tests/Test-ProcessOutputDrain.ps1
@@ -472,351 +611,4 @@ No v1.0.0 file path was removed. The original v1.0.0 ZIP remains a separate arti
 - `templates/python-fastapi/compose.yaml`
 - `templates/python-fastapi/docs/architecture.md`
 - `templates/python-fastapi/pyproject.toml`
-- `templates/python-fastapi/src/app/__init__.py`
-- `templates/python-fastapi/src/app/main.py`
-- `templates/python-fastapi/tests/test_smoke.py`
-- `templates/python/.ai-bridge/chatgpt-memory.md`
-- `templates/python/.ai-bridge/codexpro-project-instructions.md`
-- `templates/python/.ai-bridge/current-plan.template.md`
-- `templates/python/.ai-bridge/prompts/broken-session-recovery.md`
-- `templates/python/.ai-bridge/prompts/handoff-template.md`
-- `templates/python/.ai-bridge/prompts/reconnect.md`
-- `templates/python/.ai-bridge/prompts/session-bootstrap.md`
-- `templates/python/.devfleet/bootstrap.sh`
-- `templates/python/.devfleet/codexpro-profile.json`
-- `templates/python/.devfleet/health-check.sh`
-- `templates/python/.devfleet/project-tools.json`
-- `templates/python/.devfleet/smoke-test.sh`
-- `templates/python/.devfleet/template.json`
-- `templates/python/.editorconfig`
-- `templates/python/docs/architecture.md`
-- `templates/python/src/app/main.py`
-- `templates/python/tests/test_smoke.py`
-- `templates/ruby-rails/.ai-bridge/chatgpt-memory.md`
-- `templates/ruby-rails/.ai-bridge/codexpro-project-instructions.md`
-- `templates/ruby-rails/.ai-bridge/current-plan.template.md`
-- `templates/ruby-rails/.ai-bridge/prompts/broken-session-recovery.md`
-- `templates/ruby-rails/.ai-bridge/prompts/handoff-template.md`
-- `templates/ruby-rails/.ai-bridge/prompts/reconnect.md`
-- `templates/ruby-rails/.ai-bridge/prompts/session-bootstrap.md`
-- `templates/ruby-rails/.devcontainer/devcontainer.json`
-- `templates/ruby-rails/.devfleet/bootstrap.sh`
-- `templates/ruby-rails/.devfleet/codexpro-bootstrap.sh`
-- `templates/ruby-rails/.devfleet/codexpro-profile.json`
-- `templates/ruby-rails/.devfleet/codexpro.env.example`
-- `templates/ruby-rails/.devfleet/health-check.sh`
-- `templates/ruby-rails/.devfleet/project-tools.json`
-- `templates/ruby-rails/.devfleet/smoke-test.sh`
-- `templates/ruby-rails/.devfleet/template.json`
-- `templates/ruby-rails/.editorconfig`
-- `templates/ruby-rails/.gitignore`
-- `templates/ruby-rails/README.md`
-- `templates/ruby-rails/compose.yaml`
-- `templates/ruby-rails/docs/architecture.md`
-- `templates/rust-service/.ai-bridge/chatgpt-memory.md`
-- `templates/rust-service/.ai-bridge/codexpro-project-instructions.md`
-- `templates/rust-service/.ai-bridge/current-plan.template.md`
-- `templates/rust-service/.ai-bridge/prompts/broken-session-recovery.md`
-- `templates/rust-service/.ai-bridge/prompts/handoff-template.md`
-- `templates/rust-service/.ai-bridge/prompts/reconnect.md`
-- `templates/rust-service/.ai-bridge/prompts/session-bootstrap.md`
-- `templates/rust-service/.devcontainer/devcontainer.json`
-- `templates/rust-service/.devfleet/bootstrap.sh`
-- `templates/rust-service/.devfleet/codexpro-bootstrap.sh`
-- `templates/rust-service/.devfleet/codexpro-profile.json`
-- `templates/rust-service/.devfleet/codexpro.env.example`
-- `templates/rust-service/.devfleet/health-check.sh`
-- `templates/rust-service/.devfleet/project-tools.json`
-- `templates/rust-service/.devfleet/smoke-test.sh`
-- `templates/rust-service/.devfleet/template.json`
-- `templates/rust-service/.editorconfig`
-- `templates/rust-service/.gitignore`
-- `templates/rust-service/Cargo.toml`
-- `templates/rust-service/README.md`
-- `templates/rust-service/compose.yaml`
-- `templates/rust-service/docs/architecture.md`
-- `templates/rust-service/src/main.rs`
-- `templates/scientific-julia/.ai-bridge/chatgpt-memory.md`
-- `templates/scientific-julia/.ai-bridge/codexpro-project-instructions.md`
-- `templates/scientific-julia/.ai-bridge/current-plan.template.md`
-- `templates/scientific-julia/.ai-bridge/prompts/broken-session-recovery.md`
-- `templates/scientific-julia/.ai-bridge/prompts/handoff-template.md`
-- `templates/scientific-julia/.ai-bridge/prompts/reconnect.md`
-- `templates/scientific-julia/.ai-bridge/prompts/session-bootstrap.md`
-- `templates/scientific-julia/.devcontainer/devcontainer.json`
-- `templates/scientific-julia/.devfleet/bootstrap.sh`
-- `templates/scientific-julia/.devfleet/codexpro-bootstrap.sh`
-- `templates/scientific-julia/.devfleet/codexpro-profile.json`
-- `templates/scientific-julia/.devfleet/codexpro.env.example`
-- `templates/scientific-julia/.devfleet/health-check.sh`
-- `templates/scientific-julia/.devfleet/project-tools.json`
-- `templates/scientific-julia/.devfleet/smoke-test.sh`
-- `templates/scientific-julia/.devfleet/template.json`
-- `templates/scientific-julia/.editorconfig`
-- `templates/scientific-julia/.gitignore`
-- `templates/scientific-julia/README.md`
-- `templates/scientific-julia/compose.yaml`
-- `templates/scientific-julia/docs/architecture.md`
-- `templates/shell-automation/.ai-bridge/chatgpt-memory.md`
-- `templates/shell-automation/.ai-bridge/codexpro-project-instructions.md`
-- `templates/shell-automation/.ai-bridge/current-plan.template.md`
-- `templates/shell-automation/.ai-bridge/prompts/broken-session-recovery.md`
-- `templates/shell-automation/.ai-bridge/prompts/handoff-template.md`
-- `templates/shell-automation/.ai-bridge/prompts/reconnect.md`
-- `templates/shell-automation/.ai-bridge/prompts/session-bootstrap.md`
-- `templates/shell-automation/.devcontainer/devcontainer.json`
-- `templates/shell-automation/.devfleet/bootstrap.sh`
-- `templates/shell-automation/.devfleet/codexpro-bootstrap.sh`
-- `templates/shell-automation/.devfleet/codexpro-profile.json`
-- `templates/shell-automation/.devfleet/codexpro.env.example`
-- `templates/shell-automation/.devfleet/health-check.sh`
-- `templates/shell-automation/.devfleet/project-tools.json`
-- `templates/shell-automation/.devfleet/smoke-test.sh`
-- `templates/shell-automation/.devfleet/template.json`
-- `templates/shell-automation/.editorconfig`
-- `templates/shell-automation/.gitignore`
-- `templates/shell-automation/README.md`
-- `templates/shell-automation/compose.yaml`
-- `templates/shell-automation/docs/architecture.md`
-- `templates/sql-project/.ai-bridge/chatgpt-memory.md`
-- `templates/sql-project/.ai-bridge/codexpro-project-instructions.md`
-- `templates/sql-project/.ai-bridge/current-plan.template.md`
-- `templates/sql-project/.ai-bridge/prompts/broken-session-recovery.md`
-- `templates/sql-project/.ai-bridge/prompts/handoff-template.md`
-- `templates/sql-project/.ai-bridge/prompts/reconnect.md`
-- `templates/sql-project/.ai-bridge/prompts/session-bootstrap.md`
-- `templates/sql-project/.devcontainer/devcontainer.json`
-- `templates/sql-project/.devfleet/bootstrap.sh`
-- `templates/sql-project/.devfleet/codexpro-bootstrap.sh`
-- `templates/sql-project/.devfleet/codexpro-profile.json`
-- `templates/sql-project/.devfleet/codexpro.env.example`
-- `templates/sql-project/.devfleet/health-check.sh`
-- `templates/sql-project/.devfleet/project-tools.json`
-- `templates/sql-project/.devfleet/smoke-test.sh`
-- `templates/sql-project/.devfleet/template.json`
-- `templates/sql-project/.editorconfig`
-- `templates/sql-project/.gitignore`
-- `templates/sql-project/README.md`
-- `templates/sql-project/compose.yaml`
-- `templates/sql-project/docs/architecture.md`
-- `templates/typescript-next/.ai-bridge/chatgpt-memory.md`
-- `templates/typescript-next/.ai-bridge/codexpro-project-instructions.md`
-- `templates/typescript-next/.ai-bridge/current-plan.template.md`
-- `templates/typescript-next/.ai-bridge/prompts/broken-session-recovery.md`
-- `templates/typescript-next/.ai-bridge/prompts/handoff-template.md`
-- `templates/typescript-next/.ai-bridge/prompts/reconnect.md`
-- `templates/typescript-next/.ai-bridge/prompts/session-bootstrap.md`
-- `templates/typescript-next/.devcontainer/devcontainer.json`
-- `templates/typescript-next/.devfleet/bootstrap.sh`
-- `templates/typescript-next/.devfleet/codexpro-bootstrap.sh`
-- `templates/typescript-next/.devfleet/codexpro-profile.json`
-- `templates/typescript-next/.devfleet/codexpro.env.example`
-- `templates/typescript-next/.devfleet/health-check.sh`
-- `templates/typescript-next/.devfleet/project-tools.json`
-- `templates/typescript-next/.devfleet/smoke-test.sh`
-- `templates/typescript-next/.devfleet/template.json`
-- `templates/typescript-next/.editorconfig`
-- `templates/typescript-next/.gitignore`
-- `templates/typescript-next/README.md`
-- `templates/typescript-next/app/layout.tsx`
-- `templates/typescript-next/app/page.tsx`
-- `templates/typescript-next/compose.yaml`
-- `templates/typescript-next/docs/architecture.md`
-- `templates/typescript-next/package.json`
-- `templates/typescript-next/test/smoke.test.js`
-- `templates/typescript-next/tsconfig.json`
-- `templates/typescript-node/.ai-bridge/chatgpt-memory.md`
-- `templates/typescript-node/.ai-bridge/codexpro-project-instructions.md`
-- `templates/typescript-node/.ai-bridge/current-plan.template.md`
-- `templates/typescript-node/.ai-bridge/prompts/broken-session-recovery.md`
-- `templates/typescript-node/.ai-bridge/prompts/handoff-template.md`
-- `templates/typescript-node/.ai-bridge/prompts/reconnect.md`
-- `templates/typescript-node/.ai-bridge/prompts/session-bootstrap.md`
-- `templates/typescript-node/.devcontainer/devcontainer.json`
-- `templates/typescript-node/.devfleet/bootstrap.sh`
-- `templates/typescript-node/.devfleet/codexpro-bootstrap.sh`
-- `templates/typescript-node/.devfleet/codexpro-profile.json`
-- `templates/typescript-node/.devfleet/codexpro.env.example`
-- `templates/typescript-node/.devfleet/health-check.sh`
-- `templates/typescript-node/.devfleet/project-tools.json`
-- `templates/typescript-node/.devfleet/smoke-test.sh`
-- `templates/typescript-node/.devfleet/template.json`
-- `templates/typescript-node/.editorconfig`
-- `templates/typescript-node/.gitignore`
-- `templates/typescript-node/README.md`
-- `templates/typescript-node/compose.yaml`
-- `templates/typescript-node/docs/architecture.md`
-- `templates/typescript-node/package.json`
-- `templates/typescript-node/src/index.ts`
-- `templates/typescript-node/test/index.test.ts`
-- `templates/typescript-node/tsconfig.json`
-- `tests/conftest.py`
-- `tests/test_analyzer_v11.py`
-- `tests/test_client_generation.py`
-- `tests/test_codexpro_hook.py`
-- `tests/test_configuration.py`
-- `tests/test_dashboard_v11.py`
-- `tests/test_docker_modes.py`
-- `tests/test_failover.py`
-- `tests/test_language_templates.py`
-- `tests/test_ollama.py`
-- `tests/test_operations_leases.py`
-- `tests/test_package_structure.py`
-- `tests/test_profiles.py`
-- `tests/test_project_safety.py`
-- `tests/test_upgrade_preservation.py`
-- `tests/test_worktrees_and_v1_restore.py`
-- `tools/migrate_config.py`
-- `windows/Configure-Ollama.ps1`
-- `windows/Migrate-Config.ps1`
-- `windows/Set-DevFleetDockerMode.ps1`
-- `windows/Test-Ollama.ps1`
-
-## Modified v1.0.0 files
-
-- `CHANGELOG.md`
-- `CHECKSUMS.sha256`
-- `INSTALL-CHECKLIST.txt`
-- `Install-DevFleet.ps1`
-- `README-FIRST.md`
-- `app/devfleet/analyzer.py`
-- `app/devfleet/core.py`
-- `app/devfleet/main.py`
-- `app/devfleet/projects.py`
-- `app/devfleet/status.py`
-- `app/static/style.css`
-- `app/systemd/devfleet.service`
-- `app/templates/index.html`
-- `config/devfleet.config.json`
-- `docs/00-HARD-STOPS-AND-ASSUMPTIONS.md`
-- `docs/01-ARCHITECTURE.md`
-- `docs/02-INSTALL-ORDER.md`
-- `docs/03-DAILY-USE.md`
-- `docs/04-RECOVERY.md`
-- `docs/05-SECURITY-MODEL.md`
-- `docs/06-CODEXPRO-INTEGRATION.md`
-- `docs/07-OFFICIAL-SOURCES.md`
-- `linux/bootstrap-compute.sh`
-- `linux/devfleet-repair`
-- `linux/devfleet-restore-project`
-- `linux/devfleet-safe-update`
-- `linux/devfleet-user-repair`
-- `templates/generic/.devcontainer/devcontainer.json`
-- `templates/generic/.devfleet/codexpro-bootstrap.sh`
-- `templates/generic/.devfleet/codexpro.env.example`
-- `templates/generic/.gitignore`
-- `templates/generic/README.md`
-- `templates/generic/compose.yaml`
-- `templates/node/.devcontainer/devcontainer.json`
-- `templates/node/.devfleet/codexpro-bootstrap.sh`
-- `templates/node/.devfleet/codexpro.env.example`
-- `templates/node/.gitignore`
-- `templates/node/README.md`
-- `templates/node/compose.yaml`
-- `templates/node/package.json`
-- `templates/python/.devcontainer/devcontainer.json`
-- `templates/python/.devfleet/codexpro-bootstrap.sh`
-- `templates/python/.devfleet/codexpro.env.example`
-- `templates/python/.gitignore`
-- `templates/python/README.md`
-- `templates/python/compose.yaml`
-- `templates/python/pyproject.toml`
-- `tools/Verify-Package.ps1`
-- `tools/verify_package.py`
-- `windows/02-Provision-ComputeNode.ps1`
-- `windows/03-Provision-Vault.ps1`
-- `windows/Complete-Cluster.ps1`
-- `windows/DevFleet.Common.psm1`
-- `windows/Repair-DevFleet.ps1`
-- `windows/Update-DevFleet.ps1`
-
-## Removed v1.0.0 files
-
-- None.
-
-## Unchanged v1.0.0 files
-
-- `Bootstrap-Install.ps1`
-- `SECURITY-NOTES.txt`
-- `START-HERE-DESKTOP.cmd`
-- `START-HERE-LAPTOP.cmd`
-- `app/devfleet/__init__.py`
-- `app/devfleet/auth.py`
-- `app/requirements.txt`
-- `app/systemd/devfleet-backup.service`
-- `app/systemd/devfleet-backup.timer`
-- `cloud-init/compute.yaml`
-- `cloud-init/vault.yaml`
-- `linux/bootstrap-vault.sh`
-- `linux/devfleet-backup`
-- `linux/devfleet-configure-backup`
-- `linux/devfleet-health`
-- `linux/devfleet-purge-quarantine`
-- `linux/devfleet-set-peer`
-- `linux/devfleet-vault-health`
-- `linux/devfleet-vault-maintenance`
-- `templates/python/src/app/__init__.py`
-- `tests/test_analyzer.py`
-- `windows/00-Preflight.ps1`
-- `windows/01-Install-Prerequisites.ps1`
-- `windows/04-Connect-Tailscale.ps1`
-- `windows/04a-Connect-WindowsTailscale.ps1`
-- `windows/05-Configure-LocalVaultClient.ps1`
-- `windows/06-Import-Laptop-Bootstrap.ps1`
-- `windows/08-Install-Shortcuts.ps1`
-- `windows/09-Export-Laptop-Bootstrap.ps1`
-- `windows/10-Export-Desktop-Pairing.ps1`
-- `windows/Configure-GitHub.ps1`
-- `windows/Export-Diagnostics.ps1`
-- `windows/Export-Vault-OfflineCopy.ps1`
-- `windows/Invoke-Quarantine-Maintenance.ps1`
-- `windows/Invoke-Vault-Maintenance.ps1`
-- `windows/Show-DevFleet-Credentials.ps1`
-- `windows/Start-DevFleet.ps1`
-- `windows/Stop-DevFleet.ps1`
-- `windows/Test-DevFleet.ps1`
-- `windows/Update-Vault.ps1`
-
-```
-
-
-## FILE: source/DevFleet-v1.1.0-MIGRATION.md
-
-SHA256: 28666495394ce7fa029bbf0c0d0949512333328d28181fb238bd901345af30f2 | Bytes: 1101 | Git mode: 100644
-
-````
-# DevFleet v1.0.0 to v1.1.0 migration
-
-Run the preview and then the upgrade from an elevated PowerShell 7 terminal:
-
-```powershell
-pwsh -File .\Upgrade-DevFleet.ps1 -FromVersion 1.0.0 -PreviewOnly
-pwsh -File .\Upgrade-DevFleet.ps1 -FromVersion 1.0.0
-```
-
-The entry point backs up `C:\ProgramData\DevFleet` configuration, secrets, exports, and package metadata; validates Multipass host-mount isolation; stops each local DevFleet VM; creates a named snapshot; restores the prior running state; previews schema 2; and refreshes only existing instances. It does not delete or recreate VMs, projects, Git repositories, Docker stores/volumes, backup credentials, restic snapshots, vault data, Tailscale identities, SSH keys, dashboard credentials, pairing data, quarantine, or custom values.
-
-A schema-1 baseline becomes Strict/rootless first. Rootless and rootful Docker have separate stores; optional switching requires a report, stopped projects, and explicit rootful acknowledgement. Re-running the v1.1 upgrade is safe and creates another recovery set rather than resetting the selected v1.1 profile.
-
-````
-
-
-## FILE: source/DevFleet-v1.1.0-VALIDATION.md
-
-SHA256: 9b3a513c9e8dc3a351bcb721eaf6ab05044f1d0583c61f2eaff41e1c88abcd38 | Bytes: 3068 | Git mode: 100644
-
-```
-# DevFleet v1.2.1 validation report
-
-## Offline validation completed
-
-The recovered package tree passed the following checks before final archive creation; the release version is 1.2.1.
-
-- **66 focused pytest tests** covering configuration migration, preservation, profiles, Docker-store detection/switching, analyzer policy/cache invalidation, project templates/language metadata, Git worktrees, ownership leases and interrupted transfer, operation progress, dashboard confirmation boundaries, CodexPro bootstrap states, Ollama checks, SSH/Docker-context generation, Windows-host mount prevention, traversal/symlink escapes, backup-before-quarantine, v1 project restoration, and package structure.
-- Python bytecode compilation for DevFleet application, tools, and tests.
-- Bash syntax checks for Linux helpers and every template hook.
-- JSON and JSONC parsing.
-- YAML parsing for cloud-init and generated Compose definitions.
-- Jinja template parsing.
-- FastAPI `/healthz` smoke test.
-- All 20 project templates materialized and ran their package-level smoke hook; all 10 core templ
+- `templates/python-fastapi/src/app/_

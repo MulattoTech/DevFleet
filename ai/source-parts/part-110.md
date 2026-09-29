@@ -1,10 +1,330 @@
 # DevFleet source part 110
 
 Full-source UTF-8 byte interval [5068500, 5115000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 1553f423e36c3205d56d374641f3daa006a47ccfcebdaf6935b11457b60b838c
+Payload SHA-256: 744ee8ac30f3fc29fd0310727dc042a38f7d4f91983a90b9791a882686560f8a
 
 <!-- BEGIN SOURCE SLICE -->
-nterfaceFilter[0] | Set-NetFirewallInterfaceFilter -InterfaceAlias ([string]$desired.InterfaceAlias) -ErrorAction Stop | Out-Null
+| Bytes: 5596 | Git mode: 100644
+
+```
+function ConvertFrom-DevFleetJsonc {
+    param([Parameter(Mandatory)][string]$Text)
+    $out = New-Object Text.StringBuilder
+    $inString = $false; $escape = $false; $lineComment = $false; $blockComment = $false
+    for ($i = 0; $i -lt $Text.Length; $i++) {
+        $c = $Text[$i]; $next = if ($i + 1 -lt $Text.Length) { $Text[$i + 1] } else { [char]0 }
+        if ($lineComment) { if ($c -eq "`r" -or $c -eq "`n") { $lineComment = $false; [void]$out.Append($c) }; continue }
+        if ($blockComment) { if ($c -eq '*' -and $next -eq '/') { $blockComment = $false; $i++ }; continue }
+        if ($inString) {
+            [void]$out.Append($c)
+            if ($escape) { $escape = $false } elseif ($c -eq '\') { $escape = $true } elseif ($c -eq '"') { $inString = $false }
+            continue
+        }
+        if ($c -eq '"') { $inString = $true; [void]$out.Append($c); continue }
+        if ($c -eq '/' -and $next -eq '/') { $lineComment = $true; $i++; continue }
+        if ($c -eq '/' -and $next -eq '*') { $blockComment = $true; $i++; continue }
+        [void]$out.Append($c)
+    }
+    return [regex]::Replace($out.ToString(), ',\s*([}\]])', '$1')
+}
+
+function Read-DevFleetVsCodeSettings {
+    param([Parameter(Mandatory)][string]$Path)
+    $raw = [IO.File]::ReadAllText($Path)
+    try { return [pscustomobject]@{Raw=$raw;Data=(ConvertFrom-DevFleetJsonc $raw | ConvertFrom-Json -AsHashtable)} }
+    catch {
+        # Preserve the evidence before reporting malformed user settings. No
+        # replacement is written when parsing fails.
+        $backup = "$Path.devfleet-backup-$([guid]::NewGuid().ToString('N')).jsonc"
+        [IO.File]::Copy($Path, $backup, $false)
+        throw "VS Code settings are not valid JSONC; preserved backup $backup"
+    }
+}
+
+function Write-DevFleetVsCodeSettings {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)]$Data)
+    $json = $Data | ConvertTo-Json -Depth 50
+    $backup = "$Path.devfleet-backup-$([guid]::NewGuid().ToString('N')).jsonc"
+    [IO.File]::Copy($Path, $backup, $false)
+    $tmp = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
+    try { [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false))); Move-Item -LiteralPath $tmp -Destination $Path -Force }
+    finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+    return $backup
+}
+
+function Set-DevFleetVsCodeRemotePlatform {
+    param([Parameter(Mandatory)][string[]]$Paths,[Parameter(Mandatory)][string]$Alias)
+    $updated = @(); $skipped = @()
+    foreach ($path in $Paths) {
+        if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { $skipped += $path; continue }
+        $settings = Read-DevFleetVsCodeSettings $path
+        $data = $settings.Data
+        if ($null -eq $data) { $data = @{} }
+        if (-not ($data -is [hashtable])) { throw "VS Code settings root must be an object: $path" }
+        $mapping = if ($data.ContainsKey('remote.SSH.remotePlatform') -and $data['remote.SSH.remotePlatform'] -is [hashtable]) { $data['remote.SSH.remotePlatform'] } else { @{} }
+        if ([string]$mapping[$Alias] -eq 'linux') { $skipped += $path; continue }
+        $mapping[$Alias] = 'linux'; $data['remote.SSH.remotePlatform'] = $mapping
+        $backup = Write-DevFleetVsCodeSettings $path $data
+        $updated += [ordered]@{path=$path;backup=$backup;alias=$Alias;platform='linux'}
+    }
+    return [ordered]@{ok=$true;status='updated';updated_paths=@($updated);skipped_paths=@($skipped);alias=$Alias;platform='linux'}
+}
+
+function Remove-DevFleetVsCodeRemotePlatform {
+    param([Parameter(Mandatory)][string[]]$Paths,[Parameter(Mandatory)][string]$Alias)
+    $removed = @(); $skipped = @()
+    foreach ($path in $Paths) {
+        if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { $skipped += $path; continue }
+        $settings = Read-DevFleetVsCodeSettings $path; $data = $settings.Data
+        if ($null -eq $data -or -not ($data -is [hashtable])) { throw "VS Code settings root must be an object: $path" }
+        $mapping = $data['remote.SSH.remotePlatform']
+        if ($mapping -isnot [hashtable] -or -not $mapping.ContainsKey($Alias)) { $skipped += $path; continue }
+        $mapping.Remove($Alias)
+        if ($mapping.Count -eq 0) { $data.Remove('remote.SSH.remotePlatform') }
+        $backup = Write-DevFleetVsCodeSettings $path $data
+        $removed += [ordered]@{path=$path;backup=$backup;alias=$Alias}
+    }
+    return [ordered]@{ok=$true;status='updated';removed_paths=@($removed);skipped_paths=@($skipped);alias=$Alias}
+}
+
+function Get-DevFleetVsCodeSettingsPaths {
+    $values = @($script:Config.VsCodeSettingsPaths)
+    return @($values | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+}
+
+function Sync-DevFleetVsCodeRemotePlatform {
+    param([Parameter(Mandatory)][string]$Alias)
+    $paths = @(Get-DevFleetVsCodeSettingsPaths)
+    $knownExecutables = @(
+        (Join-Path ${env:ProgramFiles} 'Microsoft VS Code\Code.exe'),
+        (Join-Path ${env:LOCALAPPDATA} 'Programs\Microsoft VS Code\Code.exe'),
+        (Join-Path ${env:ProgramFiles} 'Microsoft VS Code Insiders\Code - Insiders.exe'),
+        (Join-Path ${env:LOCALAPPDATA} 'Programs\Microsoft VS Code Insiders\Code - Insiders.exe')
+    )
+    if (-not ($knownExecutables | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })) { return [ordered]@{ok=$true;status='skipped';reason='VS Code is not installed.';updated_paths=@();alias=$Alias;platform='linux'} }
+    return Set-DevFleetVsCodeRemotePlatform $paths $Alias
+}
+
+```
+
+
+## FILE: source/windows/DevFleet-WindowsIntegrationOwnership.psm1
+
+SHA256: a05f3e85b4033d59e61d4ccdaa06bc8051befb711ae2b6fb26880f1ae89f1b0e | Bytes: 16444 | Git mode: 100644
+
+```
+Set-StrictMode -Version Latest
+
+function ConvertTo-DevFleetCanonicalPath {
+    param([Parameter(Mandatory)][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { throw 'Windows integration executable path is empty.' }
+    return [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($Path)).TrimEnd('\')
+}
+
+function ConvertTo-DevFleetCanonicalFirewallRemoteAddress {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+    $text = $Value.Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) { return $text }
+    $parts = $text -split '/', 2
+    if ($parts.Count -ne 2) { return $text }
+
+    $address = $null
+    if (-not [Net.IPAddress]::TryParse($parts[0].Trim(), [ref]$address) -or
+        $address.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { return $text }
+
+    $maskText = $parts[1].Trim()
+    $prefix = -1
+    if (-not [int]::TryParse($maskText, [ref]$prefix)) {
+        $maskAddress = $null
+        if (-not [Net.IPAddress]::TryParse($maskText, [ref]$maskAddress) -or
+            $maskAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { return $text }
+        $maskBytes = $maskAddress.GetAddressBytes()
+        $zeroSeen = $false
+        $prefix = 0
+        foreach ($maskByte in $maskBytes) {
+            for ($bit = 7; $bit -ge 0; $bit--) {
+                $set = (($maskByte -band (1 -shl $bit)) -ne 0)
+                if ($set) {
+                    if ($zeroSeen) { return $text }
+                    $prefix++
+                } else {
+                    $zeroSeen = $true
+                }
+            }
+        }
+    }
+    if ($prefix -lt 0 -or $prefix -gt 32) { return $text }
+
+    $addressBytes = $address.GetAddressBytes()
+    $canonicalMaskBytes = New-Object byte[] 4
+    $remaining = $prefix
+    for ($index = 0; $index -lt 4; $index++) {
+        if ($remaining -ge 8) {
+            $canonicalMaskBytes[$index] = 255
+            $remaining -= 8
+        } elseif ($remaining -le 0) {
+            $canonicalMaskBytes[$index] = 0
+        } else {
+            $canonicalMaskBytes[$index] = [byte](256 - (1 -shl (8 - $remaining)))
+            $remaining = 0
+        }
+    }
+
+    $networkBytes = New-Object byte[] 4
+    for ($index = 0; $index -lt 4; $index++) {
+        $networkBytes[$index] = [byte]($addressBytes[$index] -band $canonicalMaskBytes[$index])
+    }
+    $network = ([Net.IPAddress]::new($networkBytes)).ToString()
+    $canonicalMask = ([Net.IPAddress]::new($canonicalMaskBytes)).ToString()
+    return "$network/$canonicalMask"
+}
+
+function Assert-DevFleetExactFields {
+    param(
+        [Parameter(Mandatory)][string]$Kind,
+        [Parameter(Mandatory)][hashtable]$Expected,
+        [Parameter(Mandatory)][hashtable]$Actual,
+        [Parameter(Mandatory)][string[]]$Fields
+    )
+    foreach ($field in $Fields) {
+        $expectedValue = [string]$Expected[$field]
+        $actualValue = [string]$Actual[$field]
+        if ($field -eq 'RemoteAddress') {
+            $expectedValue = ConvertTo-DevFleetCanonicalFirewallRemoteAddress $expectedValue
+            $actualValue = ConvertTo-DevFleetCanonicalFirewallRemoteAddress $actualValue
+        }
+        $comparison = if ($field -in @('Arguments','Description')) { [StringComparison]::Ordinal } else { [StringComparison]::OrdinalIgnoreCase }
+        if (-not [string]::Equals($expectedValue,$actualValue,$comparison)) {
+            throw "WINDOWS INTEGRATION OWNERSHIP CONFLICT: $Kind field '$field' does not match the installation ownership ledger. Foreign resource preserved."
+        }
+    }
+    return $true
+}
+
+function Assert-DevFleetTaskBinding {
+    param([Parameter(Mandatory)][hashtable]$Expected,[Parameter(Mandatory)][hashtable]$Actual)
+    $Expected.Executable = ConvertTo-DevFleetCanonicalPath ([string]$Expected.Executable)
+    $Actual.Executable = ConvertTo-DevFleetCanonicalPath ([string]$Actual.Executable)
+    Assert-DevFleetExactFields 'scheduled task' $Expected $Actual @('Name','Executable','Arguments','Principal','LogonType','RunLevel','Description','Generation')
+}
+
+function Assert-DevFleetFirewallBinding {
+    param([Parameter(Mandatory)][hashtable]$Expected,[Parameter(Mandatory)][hashtable]$Actual)
+    Assert-DevFleetExactFields 'firewall rule' $Expected $Actual @('Name','DisplayName','Group','Description','Direction','Action','Protocol','LocalPort','InterfaceAlias','RemoteAddress','Profile','Generation')
+}
+
+function Assert-DevFleetFirewallRefreshIdentity {
+    param([Parameter(Mandatory)][hashtable]$Expected,[Parameter(Mandatory)][hashtable]$Actual)
+    # InterfaceAlias and RemoteAddress are provider-backed network state. They
+    # can legitimately change when a virtual adapter is recreated or its
+    # subnet is renumbered. Every other rule field remains an immutable
+    # ownership proof before a refresh is permitted.
+    Assert-DevFleetExactFields 'firewall refresh' $Expected $Actual @('Name','DisplayName','Group','Description','Direction','Action','Protocol','LocalPort','Profile','Generation')
+}
+
+function Get-DevFleetLiveFirewallBinding {
+    param([Parameter(Mandatory)]$Rule,[Parameter(Mandatory)][string]$Generation)
+    $portFilters = @($Rule | Get-NetFirewallPortFilter -ErrorAction Stop)
+    $addressFilters = @($Rule | Get-NetFirewallAddressFilter -ErrorAction Stop)
+    $interfaceFilters = @($Rule | Get-NetFirewallInterfaceFilter -ErrorAction Stop)
+    if ($portFilters.Count -ne 1 -or $addressFilters.Count -ne 1 -or $interfaceFilters.Count -ne 1) {
+        throw 'WINDOWS INTEGRATION OWNERSHIP CONFLICT: firewall rule filter identity is ambiguous. Foreign resource preserved.'
+    }
+    $port = $portFilters[0]
+    $address = $addressFilters[0]
+    $interface = $interfaceFilters[0]
+    return @{
+        Name = [string]$Rule.Name
+        DisplayName = [string]$Rule.DisplayName
+        Group = [string]$Rule.Group
+        Description = [string]$Rule.Description
+        Direction = [string]$Rule.Direction
+        Action = [string]$Rule.Action
+        Protocol = [string]$port.Protocol
+        LocalPort = [string]$port.LocalPort
+        InterfaceAlias = [string]$interface.InterfaceAlias
+        RemoteAddress = [string]$address.RemoteAddress
+        Profile = [string]$Rule.Profile
+        Generation = $Generation
+    }
+}
+
+function Invoke-DevFleetOwnedFirewallRefresh {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [ValidateRange(0,120)][int]$WaitSeconds = 0
+    )
+    $ledger = Read-DevFleetIntegrationOwnership -Path $Path -AllowMissing
+    if (-not $ledger) {
+        return [pscustomobject]@{ status = 'NO_LEDGER'; changed = 0; skipped = 0 }
+    }
+
+    $deadline = (Get-Date).AddSeconds($WaitSeconds)
+    $newBindings = @()
+    $changed = 0
+    $skipped = 0
+    foreach ($binding in @($ledger.FirewallRules)) {
+        $bindingName = [string]$binding.Name
+        $scope = if ($bindingName -match '-Multipass$') { 'Multipass' } elseif ($bindingName -match '-Tailscale$') { 'Tailscale' } else { $null }
+        if (-not $scope) {
+            throw "WINDOWS INTEGRATION OWNERSHIP CONFLICT: firewall binding '$bindingName' has no supported DevFleet interface scope. Foreign resource preserved."
+        }
+
+        $adapterName = if ($scope -eq 'Multipass') { 'vEthernet (Default Switch)' } else { 'Tailscale' }
+        $adapter = $null
+        $multipassAddress = $null
+        do {
+            $adapter = @(Get-NetAdapter -Name $adapterName -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $adapterName -and [string]$_.Status -eq 'Up' } | Select-Object -First 1)
+            if ($adapter.Count -eq 0) { $adapter = $null }
+            if ($adapter -and $scope -eq 'Multipass') {
+                $multipassAddress = @(Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1)
+                if ($multipassAddress.Count -eq 0) { $multipassAddress = $null }
+            }
+            if ($adapter -and ($scope -eq 'Tailscale' -or $multipassAddress)) { break }
+            if ((Get-Date) -ge $deadline) { break }
+            Start-Sleep -Seconds 1
+        } while ($true)
+
+        if (-not $adapter -or ($scope -eq 'Multipass' -and -not $multipassAddress)) {
+            # A deferred Tailscale installation legitimately has no Tailscale
+            # adapter yet. Preserve the ledger and rule until a later startup
+            # or explicit host-agent restart can reconcile it.
+            $skipped++
+            $newBindings += @{} + $binding
+            continue
+        }
+
+        $desired = @{}
+        foreach ($key in $binding.Keys) { $desired[$key] = $binding[$key] }
+        $desired.InterfaceAlias = [string]$adapter.Name
+        $desired.RemoteAddress = if ($scope -eq 'Multipass') {
+            ConvertTo-DevFleetCanonicalFirewallRemoteAddress "$($multipassAddress.IPAddress)/$($multipassAddress.PrefixLength)"
+        } else {
+            ConvertTo-DevFleetCanonicalFirewallRemoteAddress '100.64.0.0/10'
+        }
+
+        $liveRules = @(Get-NetFirewallRule -Name $bindingName -ErrorAction SilentlyContinue)
+        if ($liveRules.Count -eq 0) {
+            $newBindings += $desired
+            continue
+        }
+        if ($liveRules.Count -ne 1) {
+            throw "WINDOWS INTEGRATION OWNERSHIP CONFLICT: firewall identity '$bindingName' is ambiguous. Foreign resources preserved."
+        }
+
+        $live = $liveRules[0]
+        $actual = Get-DevFleetLiveFirewallBinding -Rule $live -Generation ([string]$binding.Generation)
+        Assert-DevFleetFirewallRefreshIdentity -Expected $binding -Actual $actual | Out-Null
+
+        $actualRemote = ConvertTo-DevFleetCanonicalFirewallRemoteAddress ([string]$actual.RemoteAddress)
+        $desiredRemote = ConvertTo-DevFleetCanonicalFirewallRemoteAddress ([string]$desired.RemoteAddress)
+        $interfaceChanged = -not [string]::Equals([string]$actual.InterfaceAlias,[string]$desired.InterfaceAlias,[StringComparison]::OrdinalIgnoreCase)
+        $addressChanged = -not [string]::Equals($actualRemote,$desiredRemote,[StringComparison]::OrdinalIgnoreCase)
+        if ($interfaceChanged) {
+            $interfaceFilter = @($live | Get-NetFirewallInterfaceFilter -ErrorAction Stop)
+            if ($interfaceFilter.Count -ne 1) { throw "WINDOWS INTEGRATION OWNERSHIP CONFLICT: firewall interface filter '$bindingName' is ambiguous. Foreign resource preserved." }
+            $interfaceFilter[0] | Set-NetFirewallInterfaceFilter -InterfaceAlias ([string]$desired.InterfaceAlias) -ErrorAction Stop | Out-Null
         }
         if ($addressChanged) {
             $addressFilter = @($live | Get-NetFirewallAddressFilter -ErrorAction Stop)
@@ -518,234 +838,4 @@ function Invoke-External {
         $exitCode=$process.ExitCode
         $outputComplete=$false
         try{$outputComplete=[Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($stdoutTask,$stderrTask)).Wait([TimeSpan]::FromSeconds(5))}catch{$outputComplete=$false}
-        $stdout=if($stdoutTask.Status -eq [Threading.Tasks.TaskStatus]::RanToCompletion){$stdoutTask.GetAwaiter().GetResult()}else{''}
-        $stderr=if($stderrTask.Status -eq [Threading.Tasks.TaskStatus]::RanToCompletion){$stderrTask.GetAwaiter().GetResult()}else{''}
-        $combined=($stdout+"`n"+$stderr).Trim()
-        if($logWriter){$logWriter.Write($combined);if(-not $outputComplete){$logWriter.Write("`n[DEVFLEET_OUTPUT_INCOMPLETE_AFTER_PROCESS_EXIT]")};$logWriter.Flush()}
-        $diagnostic=if($combined.Length -gt $MaxDiagnosticChars){$combined.Substring($combined.Length-$MaxDiagnosticChars)}else{$combined}
-        if(-not $outputComplete){
-            $message="External command exited with code $exitCode, but redirected output was incomplete after the bounded post-exit drain: $FilePath $($safeArguments -join ' ')"
-            if($Capture){throw $message}
-            if($exitCode -notin $AllowedExitCodes -and -not $IgnoreExitCode){throw "$message`n$diagnostic"}
-            Write-Warning $message
-            return
-        }
-        if($exitCode -notin $AllowedExitCodes -and -not $IgnoreExitCode){throw "$FilePath failed with exit code $exitCode`n$diagnostic"}
-        if($inputError){throw "External command input delivery failed: $FilePath $($safeArguments -join ' ')`n$inputError"}
-        if($Capture){return $combined}
-    } finally {if($logWriter){$logWriter.Dispose()};$process.Dispose()}
-}
-
-function Invoke-MultipassWithStandardInput {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$FilePath,
-        [Parameter(Mandatory)][string]$InstanceName,
-        [Parameter(Mandatory)][string[]]$CommandArgumentList,
-        [Parameter(Mandatory)][AllowEmptyString()][string]$StandardInputText,
-        [int]$TimeoutSeconds=900,
-        [datetime]$DeadlineUtc=[datetime]::MinValue,
-        [switch]$Capture,
-        [string]$ExpectedCompletionMarkerPattern=''
-    )
-    if($InstanceName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' -or -not $CommandArgumentList.Count){throw 'Multipass input command identity is malformed.'}
-    if([string]::IsNullOrEmpty($StandardInputText)){throw 'Multipass input delivery requires a nonempty byte stream.'}
-    $remoteCommand=(@($CommandArgumentList|ForEach-Object{ConvertTo-ShellSingleQuotedScalar $_}) -join ' ')
-    $ownerDeadline=[datetime]::UtcNow.AddSeconds($TimeoutSeconds)
-    if($DeadlineUtc -gt [datetime]::MinValue -and $DeadlineUtc.ToUniversalTime() -lt $ownerDeadline){$ownerDeadline=$DeadlineUtc.ToUniversalTime()}
-    $context=Get-DevFleetDeadlineContext
-    if($context -and ([datetime]$context.StageDeadlineUtc).ToUniversalTime() -lt $ownerDeadline){$ownerDeadline=([datetime]$context.StageDeadlineUtc).ToUniversalTime()}
-    # Reserve cleanup inside the existing owner; no command receives a fresh
-    # full timeout after staging or a slow transfer.
-    $workDeadline=$ownerDeadline.AddSeconds(-15)
-    $cleanupDeadline=$ownerDeadline.AddSeconds(-5)
-    if($workDeadline -le [datetime]::UtcNow){throw 'Insufficient owning deadline for Multipass input delivery and cleanup.'}
-    $directory='/run/devfleet-input-'+[guid]::NewGuid().ToString('N')
-    $inputPath="$directory/input"
-    $quotedDirectory=ConvertTo-ShellSingleQuotedScalar $directory
-    $quotedInput=ConvertTo-ShellSingleQuotedScalar $inputPath
-    # Windows Multipass exec reads console events, not redirected stdin.
-    # SFTP transfer '-' supports a byte stream. Create its destination first
-    # in a fresh private tmpfs directory, so no host plaintext file or secret
-    # argument is needed and SFTP cannot create a publicly reachable file.
-    $prepare=@'
-set -Eeuo pipefail; d=__DIRECTORY__; f=__INPUT__; created=0; trap 'rc=$?; if (( created )); then sudo rm -f -- "$f" || true; sudo rmdir -- "$d" || true; fi; exit "$rc"' EXIT; sudo mkdir -m 0700 -- "$d"; created=1; sudo chown "$(id -u):$(id -g)" -- "$d"; umask 077; : > "$f"; chmod 0600 -- "$f"; test ! -L "$d"; test "$(stat -c '%a:%u' -- "$d")" = "700:$(id -u)"; test ! -L "$f"; test "$(stat -c '%a:%u' -- "$f")" = "600:$(id -u)"; trap - EXIT
-'@
-    $consume=@'
-set -Eeuo pipefail; d=__DIRECTORY__; f=__INPUT__; test ! -L "$d"; test -d "$d"; test "$(stat -c '%a:%u' -- "$d")" = "700:$(id -u)"; test ! -L "$f"; test -f "$f"; test -s "$f"; test "$(stat -c '%a:%u' -- "$f")" = "600:$(id -u)"; exec 3< "$f"; rm -f -- "$f"; sudo rmdir -- "$d"; exec 0<&3; exec 3<&-; exec __COMMAND__
-'@
-    $cleanup=@'
-set -Eeuo pipefail; d=__DIRECTORY__; f=__INPUT__; if test -e "$d" || test -L "$d"; then test ! -L "$d"; test -d "$d"; test "$(stat -c '%a:%u' -- "$d")" = "700:$(id -u)"; if test -e "$f" || test -L "$f"; then test ! -L "$f"; test -f "$f"; test "$(stat -c '%u' -- "$f")" = "$(id -u)"; rm -f -- "$f"; fi; sudo rmdir -- "$d"; fi
-'@
-    $prepare=$prepare.Replace('__DIRECTORY__',$quotedDirectory).Replace('__INPUT__',$quotedInput)
-    $consume=$consume.Replace('__DIRECTORY__',$quotedDirectory).Replace('__INPUT__',$quotedInput).Replace('__COMMAND__',$remoteCommand)
-    $cleanup=$cleanup.Replace('__DIRECTORY__',$quotedDirectory).Replace('__INPUT__',$quotedInput)
-    $acquired=$false;$primaryError=$null;$cleanupError=$null;$output=$null
-    try {
-        Invoke-External $FilePath @('exec',$InstanceName,'--','bash','-lc',$prepare) -TimeoutSeconds 60 -DeadlineUtc $workDeadline
-        $acquired=$true
-        Invoke-External $FilePath @('transfer','-',"${InstanceName}:$inputPath") -TimeoutSeconds 60 -DeadlineUtc $workDeadline -StandardInputText $StandardInputText
-        if($ExpectedCompletionMarkerPattern){
-            if(-not $Capture){throw 'Expected Multipass completion-marker handling requires captured output.'}
-            # A guest command that changes its own network can finish the
-            # authenticated operation and emit its sentinel while the outer
-            # Multipass transport reports a nonzero status as its connection
-            # is torn down. Accept that status only for this explicit marker
-            # contract; preparation, transfer, cleanup, and all generic
-            # callers remain strict about external exit codes.
-            $output=Invoke-External $FilePath @('exec',$InstanceName,'--','bash','-lc',$consume) -TimeoutSeconds $TimeoutSeconds -DeadlineUtc $workDeadline -Capture -IgnoreExitCode
-            if(-not [regex]::IsMatch([string]$output,$ExpectedCompletionMarkerPattern,[Text.RegularExpressions.RegexOptions]::Multiline)){
-                throw 'Multipass input command returned without its expected completion marker.'
-            }
-        }else{
-            $output=Invoke-External $FilePath @('exec',$InstanceName,'--','bash','-lc',$consume) -TimeoutSeconds $TimeoutSeconds -DeadlineUtc $workDeadline -Capture:$Capture
-        }
-    } catch {$primaryError=$_}
-    finally {
-        # No secret is sent until preparation acknowledges a fresh private
-        # directory. Once acknowledged, cleanup is exact and non-recursive.
-        if($acquired){
-            try {Invoke-External $FilePath @('exec',$InstanceName,'--','bash','-lc',$cleanup) -TimeoutSeconds 10 -DeadlineUtc $cleanupDeadline}
-            catch {$cleanupError=$_}
-        }
-        $StandardInputText=$null
-    }
-    if($primaryError){
-        if($cleanupError){throw "Multipass input command failed: $($primaryError.Exception.Message)`nGuest input cleanup failed: $($cleanupError.Exception.Message)"}
-        $PSCmdlet.ThrowTerminatingError($primaryError)
-    }
-    if($cleanupError){$PSCmdlet.ThrowTerminatingError($cleanupError)}
-    if($Capture){return $output}
-}
-
-function New-DevFleetBootstrapBoundary {
-    param(
-        [Parameter(Mandatory)][ValidateSet('compute','vault')][string]$Kind,
-        [Parameter(Mandatory)][string]$InstanceName,
-        [Parameter(Mandatory)][string]$TransactionId,
-        [Parameter(Mandatory)][string]$PayloadSha256,
-        [Parameter(Mandatory)][int]$BootstrapMaxSeconds,
-        [Parameter(Mandatory)][string]$PackageVersion,
-        [Parameter(Mandatory)][string]$NodeRole
-    )
-    if($InstanceName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'){throw 'Bootstrap instance identity is malformed.'}
-    if($TransactionId -notmatch '^[0-9a-fA-F]{32}$' -or $PayloadSha256 -notmatch '^[0-9a-fA-F]{64}$'){throw 'Bootstrap transaction or payload identity is malformed.'}
-    if($BootstrapMaxSeconds -le 0){throw 'Bootstrap maximum must be a positive finite duration.'}
-    if($Kind -eq 'compute'){
-        if($PackageVersion -notmatch '^\d+\.\d+\.\d+$' -or $NodeRole -notin @('primary','surrogate')){throw 'Compute bootstrap version or role identity is malformed.'}
-        $extraction="set -Eeuo pipefail; sudo rm -rf /tmp/devfleet-payload; mkdir /tmp/devfleet-payload; if ! unzip -q /tmp/devfleet-payload.zip -d /tmp/devfleet-payload; then sudo rm -rf /tmp/devfleet-payload /tmp/devfleet-payload.zip; exit 70; fi; test -f /tmp/devfleet-payload/linux/bootstrap-compute.sh"
-        $bootstrap="set -Eeuo pipefail; trap 'sudo rm -rf /tmp/devfleet-payload /tmp/devfleet-payload.zip' EXIT; sudo bash /tmp/devfleet-payload/linux/bootstrap-compute.sh /tmp/devfleet-payload --secrets-stdin --transaction-id '$TransactionId' --payload-sha256 '$PayloadSha256' --bootstrap-max-seconds '$BootstrapMaxSeconds' --package-version '$PackageVersion' --node-role '$NodeRole'"
-        $prefix="compute-$InstanceName"
-    }else{
-        if($PackageVersion -cne 'vault' -or $NodeRole -cne 'vault'){throw 'Vault bootstrap version or role identity is malformed.'}
-        $extraction="set -Eeuo pipefail; sudo rm -rf /tmp/devfleet-vault-payload; mkdir /tmp/devfleet-vault-payload; if ! unzip -q /tmp/devfleet-vault-payload.zip -d /tmp/devfleet-vault-payload; then sudo rm -rf /tmp/devfleet-vault-payload /tmp/devfleet-vault-payload.zip; exit 70; fi; test -f /tmp/devfleet-vault-payload/linux/bootstrap-vault.sh"
-        $bootstrap="set -Eeuo pipefail; trap 'sudo rm -rf /tmp/devfleet-vault-payload /tmp/devfleet-vault-payload.zip' EXIT; sudo bash /tmp/devfleet-vault-payload/linux/bootstrap-vault.sh /tmp/devfleet-vault-payload --secrets-stdin --transaction-id '$TransactionId' --payload-sha256 '$PayloadSha256' --bootstrap-max-seconds '$BootstrapMaxSeconds' --package-version 'vault' --node-role 'vault'"
-        $prefix='vault'
-    }
-    [pscustomobject]@{
-        kind=$Kind
-        instanceName=$InstanceName
-        multipassResolvedStageName="$prefix-multipass-resolved"
-        isolationVerifiedStageName="$prefix-isolation-verified"
-        instancePresentStageName="$prefix-instance-present"
-        instanceAbsentStageName="$prefix-instance-absent"
-        instanceStartedStageName="$prefix-instance-started"
-        instanceLaunchedStageName="$prefix-instance-launched"
-        instanceReadyStageName="$prefix-instance-ready"
-        payloadTransferredStageName="$prefix-payload-transferred"
-        payloadExtractedStageName="$prefix-payload-extracted"
-        completionStageName=$prefix
-        extractionCommand=$extraction
-        bootstrapCommand=$bootstrap
-        remoteCommand="$extraction; $bootstrap"
-        bootstrapMaxSeconds=$BootstrapMaxSeconds
-    }
-}
-
-function Test-CommandExists { param([string]$Name) [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
-
-function Get-DevFleetPowerShell {
-    foreach($candidate in @(
-        (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'),
-        (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe')
-    )) { if($candidate -and (Test-TrustedExecutableCandidate $candidate)){return $candidate} }
-    throw 'No trusted machine PowerShell executable was found.'
-}
-
-function Get-CanonicalDependencyManifest {
-    param([Parameter(Mandatory)][string]$PackageRoot)
-    $path = Join-Path $PackageRoot 'dependencies.json'
-    if (-not (Test-Path -LiteralPath $path)) { throw "Canonical dependency manifest is missing: $path" }
-    $manifest = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-    if ($manifest.schemaVersion -ne 1 -or $manifest.manifestVersion -ne (Get-Content (Join-Path $PackageRoot 'VERSION') -Raw).Trim()) { throw 'Canonical dependency manifest schema/version mismatch.' }
-    if (-not $manifest.dependencies -or @($manifest.dependencies).Count -lt 1) { throw 'Canonical dependency manifest contains no dependency records.' }
-    return $manifest
-}
-
-function Expand-DependencyLocation {
-    param([Parameter(Mandatory)][string]$Path)
-    return [Environment]::ExpandEnvironmentVariables($Path)
-}
-
-function Resolve-DependencyExecutable {
-    param([Parameter(Mandatory)]$Dependency)
-    foreach ($candidate in (Get-TrustedDependencyCandidates $Dependency)) { return $candidate }
-    return $null
-}
-
-function Test-PrimitiveMutationRights {
-    param([Parameter(Mandatory)][Security.AccessControl.FileSystemRights]$Rights)
-    # Keep this mask primitive-only.  Modify and FullControl are composites;
-    # their primitive mutation bits still intersect the mask naturally.
-    $mutationMask = [Security.AccessControl.FileSystemRights]::WriteData -bor
-        [Security.AccessControl.FileSystemRights]::AppendData -bor
-        [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
-        [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
-        [Security.AccessControl.FileSystemRights]::Delete -bor
-        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
-        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
-        [Security.AccessControl.FileSystemRights]::TakeOwnership
-    return (($Rights -band $mutationMask) -ne 0)
-}
-
-function Test-BroadUntrustedPrincipal {
-    param([Parameter(Mandatory)][string]$Identity)
-    return $Identity.Equals('Everyone',[StringComparison]::OrdinalIgnoreCase) -or
-        $Identity.EndsWith('\Users',[StringComparison]::OrdinalIgnoreCase) -or
-        $Identity.Equals('NT AUTHORITY\Authenticated Users',[StringComparison]::OrdinalIgnoreCase)
-}
-
-function Get-TrustedSystemRootForExecutable {
-    param([Parameter(Mandatory)][string]$FullPath)
-    try {
-        $candidate = [IO.Path]::GetFullPath($FullPath).TrimEnd('\')
-        $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:WINDIR) |
-            Where-Object { $_ } |
-            ForEach-Object { [IO.Path]::GetFullPath([string]$_).TrimEnd('\') } |
-            Select-Object -Unique |
-            Where-Object { $candidate.StartsWith($_ + '\',[StringComparison]::OrdinalIgnoreCase) }
-        if (@($roots).Count -ne 1) { return $null }
-        return [string]@($roots)[0]
-    } catch { return $null }
-}
-
-function Get-TrustedWingetPackageCandidates {
-    $result = [Collections.Generic.List[object]]::new()
-    try {
-        $windowsApps = [IO.Path]::GetFullPath((Join-Path $env:ProgramFiles 'WindowsApps')).TrimEnd('\')
-        $windowsAppsInfo = Get-Item -LiteralPath $windowsApps -Force -ErrorAction Stop
-        if (($windowsAppsInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return @() }
-        foreach ($package in @(Get-AppxPackage -AllUsers -Name 'Microsoft.DesktopAppInstaller' -ErrorAction Stop)) {
-            $installLocation = [string]$package.InstallLocation
-            if ([string]::IsNullOrWhiteSpace($installLocation)) { continue }
-            $root = [IO.Path]::GetFullPath($installLocation).TrimEnd('\')
-            $rootInfo = Get-Item -LiteralPath $root -Force -ErrorAction Stop
-            $basename = [IO.Path]::GetFileName($root)
-            if (-not $package.Name.Equals('Microsoft.DesktopAppInstaller',[StringComparison]::OrdinalIgnoreCase) -or
-                -not ([string]$package.PublisherId).Equals('8wekyb3d8bbwe',[StringComparison]::OrdinalIgnoreCase) -or
-                -not ([IO.Path]::GetDirectoryName($root)).Equals($windowsApps,[StringComparison]::OrdinalIgnoreCase) -or
-                -not $basename.StartsWith('Microsoft.DesktopAppInstaller_',[StringComparison]::OrdinalIgnoreCase) -or
-                -not $basename.EndsWith('_x64__8wekyb3d8bbwe',[StringComparison]::OrdinalIgnoreCase) -or
-                ($rootInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
-            $version = $basename.Substring('Microsoft.DesktopAppInstaller_'.Length, $basename.Length - 'Microsoft.DesktopAppInstaller_'.Length - '_x64__8wekyb3d8bbwe'.Length)
-            if ([string]::IsNullOrWhiteSpace($version) -or @($version.Split('.') | Where-Object { $_ -
+        $stdout=if($stdoutTask.Status -eq [Threading.Tasks.

@@ -1,10 +1,422 @@
 # DevFleet source part 074
 
 Full-source UTF-8 byte interval [3394500, 3441000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 05af81a88c08a402523840fad4d90e3ad227eff479a0cdf08d2ac0e79e8b083e
+Payload SHA-256: 0dfd4607398f78df58a36f1aede81bef34fd95a91a3eea834edeab3c010b6deb
 
 <!-- BEGIN SOURCE SLICE -->
-    raise RuntimeError(
+: "",
+                    "lifecycle_status": "stopped",
+                    "runtime_status": "stopped",
+                    "health_status": "unknown",
+                    "health_scope": "not-checked-stopped",
+                    "workspace_provisioned": False,
+                    "ssh_host_key_pinned": False,
+                    "ssh_authenticated": False,
+                    "ssh_validation_passed": False,
+                    "updated_at": now_iso(),
+                }
+            )
+            _record_vm_readiness(
+                meta,
+                {
+                    "address": "",
+                    "ssh_alias": meta.get("ssh_alias", ""),
+                    "host_key_pinned": False,
+                    "authenticated_connection": False,
+                    "validated": False,
+                },
+                workspace_provisioned=False,
+            )
+            _write_project_metadata(project, meta)
+            update_lease(project, active=False, clean_shutdown=True)
+            return str(
+                project_result.get("output")
+                or result.get("message", "Dedicated project VM stopped.")
+            )
+        except Exception as exc:
+            meta.update(
+                {
+                    "lifecycle_status": "failed",
+                    "runtime_status": "failed",
+                    "last_error": str(exc)[-1000:],
+                    "updated_at": now_iso(),
+                }
+            )
+            _write_project_metadata(project, meta)
+            raise
+    cf = compose_file(project)
+    if cf:
+        r = run(
+            [*compose_args(project, cf), "down", "--remove-orphans"],
+            cwd=project,
+            timeout=600,
+        )
+        out = (r.stdout + r.stderr)[-4000:]
+    else:
+        ids = run(
+            [
+                "docker",
+                "ps",
+                "-aq",
+                "--filter",
+                f"label=devcontainer.local_folder={project}",
+            ],
+            check=False,
+        ).stdout.split()
+        if ids:
+            run(["docker", "stop", *ids], timeout=300)
+        out = "Stopped."
+    meta["lifecycle_status"] = "stopped"
+    meta["runtime_status"] = "stopped"
+    meta["updated_at"] = now_iso()
+    _write_project_metadata(project, meta)
+    update_lease(project, active=False, clean_shutdown=True)
+    return out
+
+
+def restart_project(slug: str) -> str:
+    project = safe_child(SETTINGS.workspaces, slug)
+    meta = load_authoritative_project_identity_for_mutation(project)
+    if provider_for(meta).is_vm:
+        meta.update(
+            {
+                "lifecycle_status": "restarting",
+                "runtime_status": "restarting",
+                "health_scope": "transition",
+                "workspace_provisioned": False,
+                "updated_at": now_iso(),
+            }
+        )
+        _write_project_metadata(project, meta)
+        try:
+            result = VmRuntimeOperations.restart(slug, meta)
+            meta.update(
+                runtime_metadata(
+                    provider_for(meta),
+                    status="restarting",
+                    runtime_id=result.get("runtime_id", meta.get("runtime_id", "")),
+                    runtime_address=result.get(
+                        "address", meta.get("runtime_address", "")
+                    ),
+                    health_status="unknown",
+                    health_scope="runtime-ready-not-app-healthy",
+                    lifecycle_status="restarting",
+                )
+            )
+            _record_vm_readiness(meta, result, workspace_provisioned=False)
+            project_result = VM_RUNTIME.command(
+                slug, meta, "project-start", command_key="start"
+            )
+            meta.update(
+                {
+                    "lifecycle_status": "running",
+                    "runtime_status": "running",
+                    "updated_at": now_iso(),
+                }
+            )
+            _record_vm_readiness(meta, result, workspace_provisioned=True)
+            _write_project_metadata(project, meta)
+            return str(
+                project_result.get("output")
+                or result.get(
+                    "message",
+                    "Dedicated project VM restarted and project services started.",
+                )
+            )
+        except Exception as exc:
+            meta.update(
+                {
+                    "lifecycle_status": "failed",
+                    "runtime_status": "failed",
+                    "last_error": str(exc)[-1000:],
+                    "updated_at": now_iso(),
+                }
+            )
+            _write_project_metadata(project, meta)
+            raise
+    stop_project(slug)
+    return start_project(slug)
+
+
+def inspect_runtime(slug: str) -> dict[str, Any]:
+    project = safe_child(SETTINGS.workspaces, slug)
+    meta = load_authoritative_project_identity_for_mutation(project)
+    if provider_for(meta).is_vm:
+        return VmRuntimeOperations.inspect(slug, meta)
+    return {
+        "ok": True,
+        "provider": provider_for(meta).name,
+        "runtime_type": "container",
+        "running": running(project),
+        "project_id": meta.get("project_id"),
+        "resource_limits": meta.get("resource_limits"),
+    }
+
+
+def runtime_health(slug: str) -> dict[str, Any]:
+    project = safe_child(SETTINGS.workspaces, slug)
+    meta = load_authoritative_project_identity_for_mutation(project)
+    if provider_for(meta).is_vm:
+        inspection = VmRuntimeOperations.inspect(slug, meta)
+        info = inspection.get("info") if isinstance(inspection, dict) else {}
+        state = str((info or {}).get("state") or "").lower()
+        if state != "running":
+            return {
+                "ok": True,
+                "provider": provider_for(meta).name,
+                "runtime_type": "vm",
+                "runtime_id": meta.get("runtime_id"),
+                "state": "stopped",
+                "healthy": False,
+                "runtime_health": "not-run-stopped",
+                "application_healthy": False,
+                "application_health": "not-run-stopped",
+                "health_scope": "runtime-only",
+                "guest_exec_performed": False,
+                "project_id": meta.get("project_id"),
+                "info": info or {},
+                "note": "The VM is stopped; health inspection did not execute a guest command.",
+            }
+        result = VmRuntimeOperations.health(slug, meta)
+        return {
+            **result,
+            "application_healthy": False,
+            "health_scope": "runtime-only",
+            "note": "Use the project health check for application health.",
+        }
+    is_running = running(project)
+    return {
+        "ok": True,
+        "provider": provider_for(meta).name,
+        "runtime_type": "container",
+        "healthy": is_running,
+        "application_healthy": is_running,
+        "health_scope": "container-runtime",
+        "project_id": meta.get("project_id"),
+    }
+
+
+def open_workspace(slug: str) -> dict[str, Any]:
+    project = safe_child(SETTINGS.workspaces, slug)
+    meta = load_authoritative_project_identity_for_mutation(project)
+    provider = provider_for(meta)
+    alias = str(meta.get("ssh_alias") or meta.get("runtime_id") or "devfleet-primary")
+    remote_path = str(
+        meta.get("workspace_path") or f"/home/devrunner/workspaces/{slug}"
+    )
+    if provider.is_vm:
+        inspection = VmRuntimeOperations.inspect(slug, meta)
+        info = inspection.get("info") if isinstance(inspection, dict) else {}
+        runtime_state = str((info or {}).get("state") or "").lower()
+        if runtime_state != "running":
+            readiness = workspace_readiness(
+                slug, {**meta, "lifecycle_status": runtime_state or "unknown"}
+            )
+            if runtime_state == "stopped":
+                error = "Project VM is stopped. Start it explicitly before opening the workspace."
+            else:
+                error = (
+                    readiness["reason"]
+                    or f'Project VM is {runtime_state or "not ready"}. Wait until it is running before opening the workspace.'
+                )
+            return {
+                "ok": False,
+                "provider": provider.name,
+                "state": runtime_state or readiness["state"],
+                "runtime_health": f'not-run-{runtime_state or "unknown"}',
+                "ssh_alias": alias,
+                "workspace_path": remote_path,
+                "launcher_uri": "",
+                "readiness": readiness,
+                "error": error,
+            }
+        meta.update({"lifecycle_status": "running", "runtime_status": "running"})
+        readiness = workspace_readiness(slug, meta)
+        if not readiness["ready"]:
+            refreshed = VmRuntimeOperations.refresh(slug, meta)
+            _record_vm_readiness(meta, refreshed, workspace_provisioned=True)
+            # A legacy agent that returns only an address supplies no trust
+            # proof. Preserve the address as diagnostic state, but leave the
+            # workspace blocked until a current agent or a real trusted SSH
+            # validation supplies all three proofs.
+            meta.update({"last_connection_refresh": now_iso(), "updated_at": now_iso()})
+            _write_project_metadata(project, meta)
+            readiness = workspace_readiness(slug, meta)
+            alias = str(meta.get("ssh_alias") or alias)
+        if not readiness["ready"]:
+            return {
+                "ok": False,
+                "provider": provider.name,
+                "state": readiness["state"],
+                "ssh_alias": alias,
+                "workspace_path": remote_path,
+                "launcher_uri": "",
+                "readiness": readiness,
+                "error": readiness["reason"] or "Workspace is not ready to open.",
+            }
+    else:
+        readiness = workspace_readiness(slug, meta)
+        alias = str(readiness.get("ssh_alias") or alias)
+        remote_path = str(readiness.get("workspace_path") or remote_path)
+        if not readiness["ready"]:
+            return {
+                "ok": False,
+                "provider": provider.name,
+                "state": readiness["state"],
+                "ssh_alias": alias,
+                "workspace_path": remote_path,
+                "launcher_uri": "",
+                "readiness": readiness,
+                "error": readiness["reason"] or "Workspace is not ready to open.",
+            }
+    return {
+        "ok": True,
+        "provider": provider.name,
+        "state": (
+            "running"
+            if provider.is_vm
+            else ("running" if running(project) else "stopped")
+        ),
+        "runtime_address": str(meta.get("runtime_address") or ""),
+        "ssh_alias": str(meta.get("ssh_alias") or alias),
+        "workspace_path": remote_path,
+        "readiness": readiness,
+        "launcher_uri": f'vscode://vscode-remote/ssh-remote+{quote(str(meta.get("ssh_alias") or alias),safe="")}/{quote(remote_path.lstrip("/"),safe="/")}',
+    }
+
+
+def _vault_request(
+    action: str,
+    slug: str = "",
+    project_id: str = "",
+    *,
+    timeout: int,
+    deployment_id: str = "",
+    source_host_id: str = "",
+) -> dict[str, Any]:
+    cmd = ["/usr/local/bin/devfleet-vault-request", action]
+    if slug:
+        cmd.extend([validate_slug(slug), validate_project_id(project_id)])
+    if action == "restore-transfer":
+        cmd.extend(
+            [
+                validate_project_id(deployment_id),
+                source_host_id,
+            ]
+        )
+    completed = run(cmd, timeout=timeout)
+    try:
+        receipt = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Vault broker returned an invalid receipt.") from exc
+    if not isinstance(receipt, dict) or receipt.get("ok") is not True:
+        raise RuntimeError("Vault broker did not return a verified receipt.")
+    if receipt.get("action") != action:
+        raise RuntimeError("Vault broker receipt action does not match the request.")
+    if slug and (
+        receipt.get("project") != slug or receipt.get("project_id") != project_id
+    ):
+        raise RuntimeError("Vault broker receipt project identity does not match the request.")
+    if action == "restore-transfer" and (
+        receipt.get("deployment_id") != deployment_id
+        or receipt.get("source_host_id") != source_host_id
+    ):
+        raise RuntimeError("Vault broker receipt transfer identity does not match the request.")
+    return receipt
+
+
+def _read_strict_project_json(project: Path, name: str) -> dict[str, Any]:
+    """Read one control record without accepting symlinks or special files."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name):
+        raise ValueError("Project control record name is invalid.")
+    project = Path(project)
+    metadata_dir = project / ".devfleet"
+    path = metadata_dir / name
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+    if os.name != "nt" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"):
+        project_fd = metadata_fd = record_fd = -1
+        try:
+            project_fd = os.open(
+                project,
+                flags | os.O_DIRECTORY | os.O_NOFOLLOW,
+            )
+            metadata_fd = os.open(
+                ".devfleet",
+                flags | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=project_fd,
+            )
+            record_fd = os.open(
+                name,
+                flags | os.O_NOFOLLOW,
+                dir_fd=metadata_fd,
+            )
+            record_stat = os.fstat(record_fd)
+            if not stat.S_ISREG(record_stat.st_mode) or record_stat.st_size > 1024 * 1024:
+                raise ValueError("Project control record is not a bounded regular file.")
+            chunks: list[bytes] = []
+            remaining = 1024 * 1024 + 1
+            while remaining:
+                chunk = os.read(record_fd, min(65536, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            if remaining == 0:
+                raise ValueError("Project control record is too large.")
+            raw = b"".join(chunks).decode("utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ValueError("Project control record is unreadable.") from exc
+        finally:
+            for fd in (record_fd, metadata_fd, project_fd):
+                if fd >= 0:
+                    os.close(fd)
+    else:
+        if (
+            not project.is_dir()
+            or project.is_symlink()
+            or not metadata_dir.is_dir()
+            or metadata_dir.is_symlink()
+            or not path.is_file()
+            or path.is_symlink()
+        ):
+            raise ValueError("Project control record is unavailable or unsafe.")
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ValueError("Project control record is unreadable.") from exc
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Project control record is malformed.") from exc
+    if not isinstance(value, dict):
+        raise ValueError("Project control record must be a JSON object.")
+    return value
+
+
+def _assert_no_running_project_containers(
+    project: Path, slug: str, project_id: str
+) -> None:
+    filters = (
+        f"io.devfleet.project-id={project_id}",
+        f"io.devfleet.project-slug={slug}",
+        f"io.devfleet.runtime-id={compose_name(slug)}",
+        f"com.docker.compose.project={compose_name(slug)}",
+        f"devcontainer.local_folder={project}",
+    )
+    running_ids: set[str] = set()
+    for label in filters:
+        result = run(
+            ["docker", "ps", "--quiet", "--filter", f"label={label}"],
+            check=False,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                "Canonical restore blocked: Docker quiescence probe failed."
+            )
+        running_ids.update(item for item in result.stdout.split() if item)
+    if running_ids:
+        raise RuntimeError(
             "Canonical restore blocked: an owned project runtime is still running."
         )
 
@@ -676,364 +1088,4 @@ def backup_project(
     slug: str,
     *,
     consistency_level: str = "live-best-effort",
-    destructive: bool = False,
-) -> str:
-    project = safe_child(SETTINGS.workspaces, slug)
-    if not project.is_dir():
-        raise FileNotFoundError(slug)
-    meta = load_authoritative_project_identity_for_mutation(project)
-    if provider_for(meta).is_vm:
-        if not str(meta.get("runtime_id") or ""):
-            if str(meta.get("lifecycle_status") or "") != "failed":
-                raise RuntimeError(
-                    "A VM project without a runtime id is not in a verified failed-provisioning state."
-                )
-            root = SETTINGS.runtime_root / "workspace-backups"
-            backup_id = f'{validate_slug(slug)}-{time.strftime("%Y%m%d-%H%M%S")}-{uuid.uuid4().hex[:8]}'
-            directory = root / backup_id
-            archive = directory / f"{validate_slug(slug)}.tar.gz"
-            result = create_workspace_archive(project, slug, archive, include_generated=destructive, consistency_level=consistency_level)
-            manifest = write_backup_manifest(
-                directory,
-                slug=slug,
-                project_id=str(meta.get("project_id") or ""),
-                runtime={"provider": "local-workspace-archive", "runtime_id": ""},
-                archive=result,
-                consistency_level=consistency_level,
-            )
-            meta.update(
-                {
-                    "backup_status": "verified",
-                    "backup_id": backup_id,
-                    "backup_path": str(archive),
-                    "backup_sha256": result["archive_sha256"],
-                    "backup_manifest": str(directory / "manifest.json"),
-                    "updated_at": now_iso(),
-                }
-            )
-            _write_project_metadata(project, meta)
-            return json.dumps(
-                {
-                    "ok": True,
-                    "provider": "local-workspace-archive",
-                    "backup_status": "verified",
-                    "backup_id": backup_id,
-                    "backup_path": str(archive),
-                    "backup_sha256": result["archive_sha256"],
-                    "manifest": manifest,
-                }
-            )
-        result = VmRuntimeOperations.backup(slug, meta, consistency_level=consistency_level, destructive=destructive)
-        if str(result.get("backup_status", "")).lower() != "verified":
-            raise RuntimeError(
-                "Host provider did not return a verified workspace backup artifact."
-            )
-        meta.update(
-            {
-                "backup_status": "verified",
-                "backup_id": result.get("backup_id", ""),
-                "backup_sha256": result.get("backup_sha256", ""),
-                "backup_manifest_sha256": result.get("manifest_sha256", ""),
-                "backup_reference": result.get("backup_reference"),
-                "updated_at": now_iso(),
-            }
-        )
-        _write_project_metadata(project, meta)
-        update_lease(project, backup_time=now_iso())
-        return json.dumps(
-            {
-                "ok": True,
-                "provider": "multipass-host-agent",
-                "backup_status": meta["backup_status"],
-                "runtime": result,
-            },
-            default=str,
-        )
-    root = SETTINGS.runtime_root / "workspace-backups"
-    backup_id = (
-        f'{validate_slug(slug)}-{time.strftime("%Y%m%d-%H%M%S")}-{uuid.uuid4().hex[:8]}'
-    )
-    directory = root / backup_id
-    archive = directory / f"{validate_slug(slug)}.tar.gz"
-    result = create_workspace_archive(project, slug, archive, include_generated=destructive, consistency_level=consistency_level)
-    manifest = write_backup_manifest(
-        directory,
-        slug=slug,
-        project_id=str(meta.get("project_id") or ""),
-        runtime={"provider": "docker-compose", "runtime_id": ""},
-        archive=result,
-        consistency_level=consistency_level,
-    )
-    vault = _vault_request("backup", timeout=1860)
-    if (
-        vault.get("local_backup_status") != "verified"
-        or vault.get("vault_upload_status") != "verified"
-        or vault.get("durability_level") != "vault"
-    ):
-        raise RuntimeError("Vault broker did not verify the encrypted backup upload.")
-    meta.update(
-        {
-            "backup_status": "verified",
-            "backup_id": backup_id,
-            "backup_path": str(archive),
-            "backup_sha256": result["archive_sha256"],
-            "backup_manifest": str(directory / "manifest.json"),
-            "updated_at": now_iso(),
-        }
-    )
-    _write_project_metadata(project, meta)
-    update_lease(project, backup_time=now_iso())
-    return json.dumps(
-        {
-            "ok": True,
-            "provider": "docker-compose",
-            "backup_status": "verified",
-            "backup_id": backup_id,
-            "backup_path": str(archive),
-            "backup_sha256": result["archive_sha256"],
-            "vault_exit_code": 0,
-            "vault_upload_status": "verified",
-            "durability_level": "vault",
-            "manifest": manifest,
-        },
-        default=str,
-    )
-
-
-def safety_backup_project(slug: str, _lock_held: bool = False) -> dict[str, Any]:
-    """Stop managed writers, create a fresh stable backup, and bind its identity."""
-    project = safe_child(SETTINGS.workspaces, slug)
-    if not project.is_dir() or project.is_symlink():
-        raise ValueError("Project workspace is not a safe directory.")
-    with contextlib.nullcontext() if _lock_held else _destructive_lock(slug):
-        meta = load_authoritative_project_identity_for_mutation(project)
-        transaction_id = f"destroy-{uuid.uuid4().hex}"
-        meta.update(
-            {
-                "lifecycle_status": "destructive-quiesce-pending",
-                "destructive_transaction_id": transaction_id,
-                "updated_at": now_iso(),
-            }
-        )
-        _write_project_metadata(project, meta)
-        stop_project(slug)
-        refreshed = load_authoritative_project_identity_for_mutation(project)
-        if provider_for(refreshed).is_vm:
-            if str(refreshed.get("lifecycle_status") or "").lower() == "running":
-                raise RuntimeError(
-                    "Destructive deletion blocked: owned VM is still running after quiesce."
-                )
-        elif running(project):
-            raise RuntimeError(
-                "Destructive deletion blocked: DevFleet-owned containers remain running after compose down."
-            )
-        meta = load_authoritative_project_identity_for_mutation(project)
-        meta.update(
-            {
-                "lifecycle_status": "destructive-quiesced",
-                "destructive_transaction_id": transaction_id,
-                "updated_at": now_iso(),
-            }
-        )
-        _write_project_metadata(project, meta)
-        # backup_project records its verified backup in ownership-lease.json.
-        # Exclude that one self-update only from the during-backup comparison;
-        # the final binding still includes the complete post-backup lease.
-        before = _source_state_fingerprint(
-            project, include_generated=True, exclude_ownership_lease=True
-        )
-        # Consistency is transaction-local and explicit.  The signature check
-        # keeps older focused test doubles compatible without reintroducing
-        # mutable module state.
-        import inspect
-        backup_signature = inspect.signature(backup_project)
-        if "consistency_level" in backup_signature.parameters:
-            result = json.loads(backup_project(slug, consistency_level="quiesced", destructive=True))
-        else:
-            result = json.loads(backup_project(slug))
-        result.setdefault("consistency_level", "quiesced")
-        meta = load_authoritative_project_identity_for_mutation(project)
-        after, bound_fingerprint = _source_state_fingerprint(
-            project,
-            include_generated=True,
-            exclude_ownership_lease=True,
-            return_full_lease_variant=True,
-        )
-        if before != after:
-            raise RuntimeError(
-                "Destructive deletion blocked: workspace changed during the safety backup; no deletion was performed."
-            )
-        backup_id, backup_sha, status = _safety_backup_fields(result, meta)
-        if (
-            status != "verified"
-            or not backup_id
-            or not re.fullmatch(r"[0-9a-f]{64}", backup_sha.lower())
-        ):
-            raise RuntimeError(
-                "Destructive deletion blocked: fresh safety backup was not cryptographically verified."
-            )
-        provider = provider_for(meta)
-        if provider.is_vm:
-            reference = result.get("backup_reference") or (result.get("runtime") or {}).get("backup_reference") or meta.get("backup_reference")
-            from .host_control import validate_backup_reference
-            checked_reference = validate_backup_reference(reference, project_id=str(meta.get("project_id") or ""), slug=slug, runtime_id=str(meta.get("runtime_id") or ""))
-            if checked_reference["archive_sha256"].lower() != backup_sha.lower():
-                raise RuntimeError("Destructive deletion blocked: provider backup reference hash changed after verification.")
-            meta["backup_reference"] = checked_reference
-        else:
-            archive = Path(str(result.get("backup_path") or meta.get("backup_path") or ""))
-            if not archive.is_file():
-                raise RuntimeError("Destructive deletion blocked: fresh safety backup archive is unavailable.")
-            verified = validate_archive(archive, slug)
-            if verified.get("archive_sha256", "").lower() != backup_sha.lower():
-                raise RuntimeError("Destructive deletion blocked: fresh safety backup hash changed after verification.")
-        binding = {
-            "transaction_id": transaction_id,
-            "project_id": str(meta.get("project_id") or ""),
-            "runtime_id": str(meta.get("runtime_id") or ""),
-            "backup_id": backup_id,
-            "backup_sha256": backup_sha.lower(),
-            "source_state_fingerprint": bound_fingerprint,
-            "fingerprint_policy": {
-                "schema_version": FINGERPRINT_POLICY_VERSION,
-                "algorithm": FINGERPRINT_ALGORITHM,
-                "include_generated": True,
-                "ignored_directories": [],
-                "result": "verified",
-            },
-            "created_at": now_iso(),
-        }
-        meta.update(
-            {
-                "lifecycle_status": "destructive-backup-verified",
-                "destructive_backup_binding": binding,
-                "updated_at": now_iso(),
-            }
-        )
-        _write_project_metadata(project, meta)
-        return {"result": result, "binding": binding, "meta": meta}
-
-
-def list_backups(slug: str) -> list[dict[str, Any]]:
-    slug = validate_slug(slug)
-    project = safe_child(SETTINGS.workspaces, slug)
-    meta = load_authoritative_project_identity_for_mutation(project)
-    project_id = str(meta.get("project_id") or "")
-    if provider_for(meta).is_vm and str(meta.get("runtime_id") or ""):
-        return VM_RUNTIME.list_backups(slug, meta)
-    root = SETTINGS.runtime_root / "workspace-backups"
-    items = []
-    if root.is_dir():
-        for directory in sorted(
-            (p for p in root.iterdir() if p.is_dir()), reverse=True
-        ):
-            manifest_file = directory / "manifest.json"
-            try:
-                manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            if manifest.get("slug") != slug or (
-                project_id and str(manifest.get("project_id") or "") != project_id
-            ):
-                continue
-            workspace = (
-                manifest.get("workspace")
-                if isinstance(manifest.get("workspace"), dict)
-                else {}
-            )
-            archive = Path(str(workspace.get("archive_path") or ""))
-            digest = str(workspace.get("archive_sha256") or "")
-            eligible = archive.is_file()
-            if eligible:
-                try:
-                    eligible = (
-                        validate_archive(archive, slug).get("archive_sha256") == digest
-                    )
-                except (OSError, ValueError, tarfile.TarError):
-                    eligible = False
-            items.append(
-                {
-                    "backup_id": directory.name,
-                    "created_at": manifest.get("created_at", ""),
-                    "project_id": manifest.get("project_id", ""),
-                    "provider": str(
-                        (manifest.get("runtime") or {}).get("provider")
-                        or "docker-compose"
-                    ),
-                    "runtime_id": str(
-                        (manifest.get("runtime") or {}).get("runtime_id") or ""
-                    ),
-                    "archive_path": str(archive),
-                    "archive_bytes": archive.stat().st_size if archive.is_file() else 0,
-                    "archive_sha256": digest,
-                    "sha_verified": eligible,
-                    "restore_eligible": eligible,
-                    "reason": (
-                        ""
-                        if eligible
-                        else "Archive is missing or failed SHA/path verification."
-                    ),
-                    "status": "eligible" if eligible else "invalid",
-                    "manifest_path": str(manifest_file),
-                }
-            )
-    return items
-
-
-def restore_backup(
-    slug: str,
-    backup_id: str,
-    confirm_restore: bool = False,
-    allow_overwrite: bool = False,
-) -> dict[str, Any]:
-    slug = validate_slug(slug)
-    if "/" in backup_id or "\\" in backup_id or backup_id in {".", ".."}:
-        raise ValueError("Invalid backup identifier.")
-    project = safe_child(SETTINGS.workspaces, slug)
-    meta = load_authoritative_project_identity_for_mutation(project)
-    project_id = str(meta.get("project_id") or "")
-    if provider_for(meta).is_vm and str(meta.get("runtime_id") or ""):
-        if not confirm_restore:
-            raise ValueError("Backup restore requires explicit confirmation.")
-        if not allow_overwrite:
-            raise ValueError(
-                "VM backup restore replaces the current workspace and requires explicit overwrite confirmation."
-            )
-        result = VM_RUNTIME.restore_backup(slug, meta, backup_id, confirm_restore=True)
-        restored = {
-            **meta,
-            "backup_status": "verified",
-            "backup_id": backup_id,
-            "backup_sha256": str(result.get("backup_sha256") or ""),
-            "updated_at": now_iso(),
-            "last_restore_at": now_iso(),
-        }
-        _write_project_metadata(project, restored)
-        return {
-            "ok": True,
-            "provider": "multipass-host-agent",
-            "backup_id": backup_id,
-            "backup_sha256": restored["backup_sha256"],
-            "project": restored,
-            "restore": result,
-        }
-    directory = (SETTINGS.runtime_root / "workspace-backups" / backup_id).resolve()
-    root = (SETTINGS.runtime_root / "workspace-backups").resolve()
-    if directory.parent != root or not directory.is_dir():
-        raise FileNotFoundError(backup_id)
-    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
-    workspace = (
-        manifest.get("workspace") if isinstance(manifest.get("workspace"), dict) else {}
-    )
-    archive = Path(str(workspace.get("archive_path") or ""))
-    if (
-        manifest.get("slug") != slug
-        or str(manifest.get("project_id") or "") != project_id
-    ):
-        raise ValueError("Backup identity does not match this project.")
-    if not confirm_restore:
-        raise ValueError("Backup restore requires explicit confirmation.")
-    verified = validate_archive(archive, slug)
-    if verified.get("archive_sha256") != str(workspace.get("archive_sha256") or ""):
-        raise ValueError("Backup archive hash does not match its manifest.")
-    if project.exists() and any(p
+   

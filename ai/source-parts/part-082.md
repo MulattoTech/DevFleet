@@ -1,10 +1,251 @@
 # DevFleet source part 082
 
 Full-source UTF-8 byte interval [3766500, 3813000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: c5982c9f6e19eb65653820ad207955be3f56c85302a88e4bfe72660c544e8e69
+Payload SHA-256: f521fd5295c5e93b2ceb42d5e4038cc8359e22eb80ac42e5e6f4ff84583b0eab
 
 <!-- BEGIN SOURCE SLICE -->
-sProbes": [],
+rInstallLocations": ["%ProgramFiles%\\Git\\cmd\\git.exe", "%LocalAppData%\\Programs\\Git\\cmd\\git.exe"],
+      "wingetPackageId": "Git.Git",
+      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/git-for-windows/git/releases/latest", "allowedHosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"], "assetRegex": "^Git-[0-9.]+-64-bit\\.exe$" },
+      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Johannes Schindelin, O=Johannes Schindelin, L=Bruehl, C=DE"], "extensions": [".exe"] },
+      "silentInstallArguments": ["/VERYSILENT", "/NORESTART", "/MERGETASKS=!runcode"],
+      "rebootSemantics": "0-or-3010",
+      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
+      "postInstallExecutableDiscovery": "rediscover command, App Paths, registry and known locations",
+      "postInstallVersionVerification": "git --version >= minimum"
+    },
+    {
+      "id": "openssh-client",
+      "displayName": "OpenSSH Client",
+      "classification": "CORE_REQUIRED",
+      "required": true,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["ssh", "guest-bootstrap"],
+      "minimumSupportedVersion": "8.1.0",
+      "maximumMajor": null,
+      "executableProbes": ["ssh.exe"],
+      "registryProbes": [],
+      "appPathsProbes": ["ssh.exe"],
+      "knownVendorInstallLocations": ["%WINDIR%\\System32\\OpenSSH\\ssh.exe"],
+      "wingetPackageId": null,
+      "directOfficialVendorResolver": { "type": "windows-capability", "metadataUri": "https://learn.microsoft.com/windows-server/administration/openssh/openssh_install_firstuse", "allowedHosts": ["learn.microsoft.com"], "assetRegex": null },
+      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".exe"] },
+      "silentInstallArguments": [],
+      "rebootSemantics": "capability-dependent",
+      "versionProbe": { "arguments": ["-V"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
+      "postInstallExecutableDiscovery": "rediscover command, App Paths, capability and known location",
+      "postInstallVersionVerification": "ssh -V >= minimum"
+    },
+    {
+      "id": "multipass",
+      "displayName": "Multipass",
+      "classification": "CORE_REQUIRED",
+      "required": true,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["virtualization", "ubuntu-provisioning"],
+      "minimumSupportedVersion": "1.13.0",
+      "maximumMajor": 1,
+      "executableProbes": ["multipass.exe"],
+      "registryProbes": ["HKLM:\\SOFTWARE\\Canonical\\Multipass"],
+      "appPathsProbes": ["multipass.exe"],
+      "knownVendorInstallLocations": ["%ProgramFiles%\\Multipass\\bin\\multipass.exe", "%ProgramFiles(x86)%\\Multipass\\bin\\multipass.exe"],
+      "wingetPackageId": "Canonical.Multipass",
+      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/canonical/multipass/releases/latest", "allowedHosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"], "assetRegex": "(?i)^multipass.*win.*64.*\\.(msi|exe)$" },
+      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=CANONICAL GROUP LIMITED, O=CANONICAL GROUP LIMITED, L=London, C=GB"], "installedExecutableTrust": "signed-installer-locked-path", "extensions": [".msi", ".exe"] },
+      "silentInstallArguments": ["/quiet", "/norestart"],
+      "rebootSemantics": "0-or-3010",
+      "versionProbe": { "arguments": ["version"], "regex": "(?m)^multipass\\s+(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
+      "postInstallExecutableDiscovery": "rediscover command, App Paths, registry and known vendor locations",
+      "postInstallVersionVerification": "multipass version and multipass list both succeed"
+    },
+    {
+      "id": "virtualization-backend",
+      "displayName": "Virtualization backend",
+      "classification": "CORE_REQUIRED",
+      "required": true,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["multipass"],
+      "minimumSupportedVersion": "0.0.0",
+      "maximumMajor": null,
+      "executableProbes": ["systeminfo.exe"],
+      "registryProbes": [],
+      "appPathsProbes": [],
+      "knownVendorInstallLocations": [],
+      "wingetPackageId": null,
+      "directOfficialVendorResolver": { "type": "windows-feature-or-virtualbox", "metadataUri": "https://documentation.ubuntu.com/multipass/latest/how-to-guides/install-multipass", "allowedHosts": ["documentation.ubuntu.com"], "assetRegex": null },
+      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US", "CN=Oracle Corporation, O=Oracle Corporation, L=Redwood City, S=California, C=US"], "extensions": [] },
+      "silentInstallArguments": [],
+      "rebootSemantics": "feature-dependent",
+      "versionProbe": { "arguments": ["/FO", "LIST"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
+      "postInstallExecutableDiscovery": "verify Hyper-V capability or VirtualBox installation and Multipass driver",
+      "postInstallVersionVerification": "backend capability and selected driver are usable"
+    },
+    {
+      "id": "virtualbox",
+      "displayName": "Oracle VirtualBox",
+      "classification": "FEATURE_REQUIRED",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["multipass", "windows-home"],
+      "minimumSupportedVersion": "7.0.0",
+      "maximumMajor": null,
+      "executableProbes": ["VBoxManage.exe"],
+      "registryProbes": ["HKLM:\\SOFTWARE\\Oracle\\VirtualBox", "HKLM:\\SOFTWARE\\WOW6432Node\\Oracle\\VirtualBox"],
+      "appPathsProbes": ["VBoxManage.exe"],
+      "knownVendorInstallLocations": ["%ProgramFiles%\\Oracle\\VirtualBox\\VBoxManage.exe", "%ProgramFiles(x86)%\\Oracle\\VirtualBox\\VBoxManage.exe"],
+      "wingetPackageId": "Oracle.VirtualBox",
+      "directOfficialVendorResolver": { "type": "official-download-page", "metadataUri": "https://www.virtualbox.org/wiki/Downloads", "allowedHosts": ["www.virtualbox.org", "download.virtualbox.org"], "assetRegex": "(?i)^VirtualBox-[0-9.]+-Win\\.exe$" },
+      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Oracle Corporation, O=Oracle Corporation, L=Redwood City, S=California, C=US"], "extensions": [".exe"] },
+      "silentInstallArguments": ["--silent", "--msiparams", "REBOOT=ReallySuppress"],
+      "rebootSemantics": "0-or-3010",
+      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
+      "postInstallExecutableDiscovery": "rediscover VBoxManage from HKLM App Paths and canonical Oracle machine locations",
+      "postInstallVersionVerification": "VBoxManage --version >= minimum and Multipass virtualbox driver is selected"
+    },
+    {
+      "id": "tailscale",
+      "displayName": "Tailscale",
+      "classification": "ROLE_REQUIRED",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["network-pairing", "failover", "vault"],
+      "minimumSupportedVersion": "1.60.0",
+      "maximumMajor": 1,
+      "executableProbes": ["tailscale.exe"],
+      "registryProbes": ["HKLM:\\SOFTWARE\\Tailscale"],
+      "appPathsProbes": ["tailscale.exe"],
+      "knownVendorInstallLocations": ["%ProgramFiles%\\Tailscale\\tailscale.exe", "%ProgramFiles(x86)%\\Tailscale\\tailscale.exe"],
+      "wingetPackageId": "Tailscale.Tailscale",
+      "directOfficialVendorResolver": { "type": "official-download-page", "metadataUri": "https://tailscale.com/download/windows", "allowedHosts": ["tailscale.com", "pkgs.tailscale.com"], "assetRegex": "(?i)^tailscale-setup-latest\\.(exe|msi)$" },
+      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Tailscale Inc., O=Tailscale Inc., L=Toronto, S=Ontario, C=CA, SERIALNUMBER=1131559-5, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.3=CA"], "extensions": [".exe", ".msi"] },
+      "silentInstallArguments": ["/quiet"],
+      "rebootSemantics": "0-or-3010",
+      "versionProbe": { "arguments": ["version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
+      "postInstallExecutableDiscovery": "rediscover command, App Paths, registry and known locations",
+      "postInstallVersionVerification": "tailscale version succeeds; auth remains explicit/deferred"
+    },
+    {
+      "id": "vscode",
+      "displayName": "VS Code",
+      "classification": "RECOMMENDED",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["editor", "remote-development"],
+      "minimumSupportedVersion": "1.90.0",
+      "maximumMajor": null,
+      "executableProbes": ["code.cmd", "code.exe"],
+      "registryProbes": ["HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"],
+      "appPathsProbes": ["code.exe"],
+      "knownVendorInstallLocations": ["%ProgramFiles%\\Microsoft VS Code\\bin\\code.cmd", "%LocalAppData%\\Programs\\Microsoft VS Code\\bin\\code.cmd"],
+      "wingetPackageId": "Microsoft.VisualStudioCode",
+      "directOfficialVendorResolver": { "type": "official-download-page", "metadataUri": "https://code.visualstudio.com/Download", "directUri": "https://update.code.visualstudio.com/latest/win32-x64/stable", "allowedHosts": ["code.visualstudio.com", "update.code.visualstudio.com", "vscode.download.prss.microsoft.com"], "assetRegex": "(?i)^VSCodeSetup-x64-[0-9.]+\\.exe$" },
+      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".exe"] },
+      "silentInstallArguments": ["/VERYSILENT", "/NORESTART"],
+      "rebootSemantics": "0-or-3010",
+      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
+      "postInstallExecutableDiscovery": "rediscover code.cmd/code.exe via PATH, registry and known locations",
+      "postInstallVersionVerification": "code --version >= minimum"
+    },
+    {
+      "id": "github-cli",
+      "displayName": "GitHub CLI",
+      "classification": "RECOMMENDED",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["GitHub integration"],
+      "minimumSupportedVersion": "2.40.0",
+      "maximumMajor": null,
+      "executableProbes": ["gh.exe"],
+      "registryProbes": [],
+      "appPathsProbes": ["gh.exe"],
+      "knownVendorInstallLocations": ["%ProgramFiles%\\GitHub CLI\\gh.exe", "%LocalAppData%\\Programs\\GitHub CLI\\gh.exe"],
+      "wingetPackageId": "GitHub.cli",
+      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/cli/cli/releases/latest", "allowedHosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"], "assetRegex": "(?i)^gh_.*_windows_amd64\\.msi$" },
+      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=GitHub, Inc., O=GitHub, Inc., L=San Francisco, S=California, C=US"], "extensions": [".msi"] },
+      "silentInstallArguments": ["/qn", "/norestart"],
+      "rebootSemantics": "0-or-3010",
+      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
+      "postInstallExecutableDiscovery": "rediscover command, App Paths and known locations",
+      "postInstallVersionVerification": "gh --version >= minimum"
+    },
+    {
+      "id": "sevenzip",
+      "displayName": "7-Zip",
+      "classification": "OPTIONAL",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["encrypted-transfer-bundle"],
+      "minimumSupportedVersion": "23.0.0",
+      "maximumMajor": null,
+      "executableProbes": ["7z.exe"],
+      "registryProbes": ["HKLM:\\SOFTWARE\\7-Zip", "HKLM:\\SOFTWARE\\WOW6432Node\\7-Zip"],
+      "appPathsProbes": ["7z.exe"],
+      "knownVendorInstallLocations": ["%ProgramFiles%\\7-Zip\\7z.exe", "%ProgramFiles(x86)%\\7-Zip\\7z.exe"],
+      "wingetPackageId": "7zip.7zip",
+      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/ip7z/7zip/releases/latest", "officialPageUri": "https://www.7-zip.org/download.html", "expectedOwner": "ip7z", "expectedRepository": "7zip", "allowedHosts": ["api.github.com", "github.com", "release-assets.githubusercontent.com"], "assetRegex": "(?i)^7z\\d+-x64\\.exe$", "officialPageAssetRegex": "(?i)^7z\\d+-x64\\.exe$" },
+      "installerAuthenticityPolicy": { "strategy": "VendorReleaseSha256", "required": true, "allowedSignerSubjectsExact": ["CN=Igor Pavlov"], "extensions": [".exe"] },
+      "silentInstallArguments": ["/S"],
+      "rebootSemantics": "0",
+      "versionProbe": { "arguments": [], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
+      "postInstallExecutableDiscovery": "rediscover command, registry and known locations",
+      "postInstallVersionVerification": "7z executable is present and responds"
+    },
+    {
+      "id": "remote-ssh-extension",
+      "displayName": "Remote SSH extension",
+      "classification": "FEATURE_REQUIRED",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["remote-development"],
+      "minimumSupportedVersion": "0.0.0",
+      "maximumMajor": null,
+      "executableProbes": ["code.cmd"],
+      "registryProbes": [],
+      "appPathsProbes": [],
+      "knownVendorInstallLocations": [],
+      "wingetPackageId": null,
+      "directOfficialVendorResolver": { "type": "vscode-extension", "metadataUri": "https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-ssh", "allowedHosts": ["marketplace.visualstudio.com"], "assetRegex": null },
+      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".vsix"] },
+      "silentInstallArguments": ["--install-extension", "ms-vscode-remote.remote-ssh", "--force"],
+      "rebootSemantics": "0",
+      "versionProbe": { "arguments": [], "regex": null },
+      "postInstallExecutableDiscovery": "resolve VS Code CLI and inspect extension list",
+      "postInstallVersionVerification": "code --list-extensions contains ms-vscode-remote.remote-ssh"
+    },
+    {
+      "id": "remote-explorer-extension",
+      "displayName": "Remote Explorer extension",
+      "classification": "FEATURE_REQUIRED",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["remote-development"],
+      "minimumSupportedVersion": "0.0.0",
+      "maximumMajor": null,
+      "executableProbes": ["code.cmd"],
+      "registryProbes": [],
+      "appPathsProbes": [],
+      "knownVendorInstallLocations": [],
+      "wingetPackageId": null,
+      "directOfficialVendorResolver": { "type": "vscode-extension", "metadataUri": "https://marketplace.visualstudio.com/items?itemName=ms-vscode.remote-explorer", "allowedHosts": ["marketplace.visualstudio.com"], "assetRegex": null },
+      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".vsix"] },
+      "silentInstallArguments": ["--install-extension", "ms-vscode.remote-explorer", "--force"],
+      "rebootSemantics": "0",
+      "versionProbe": { "arguments": [], "regex": null },
+      "postInstallExecutableDiscovery": "resolve VS Code CLI and inspect extension list",
+      "postInstallVersionVerification": "code --list-extensions contains ms-vscode.remote-explorer"
+    },
+    {
+      "id": "dev-containers-extension",
+      "displayName": "Dev Containers extension",
+      "classification": "FEATURE_REQUIRED",
+      "required": false,
+      "roles": ["Desktop", "Laptop"],
+      "features": ["remote-development", "containers"],
+      "minimumSupportedVersion": "0.0.0",
+      "maximumMajor": null,
+      "executableProbes": ["code.cmd"],
+      "registryProbes": [],
+      "appPathsProbes": [],
       "knownVendorInstallLocations": [],
       "wingetPackageId": null,
       "directOfficialVendorResolver": { "type": "vscode-extension", "metadataUri": "https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers", "allowedHosts": ["marketplace.visualstudio.com"], "assetRegex": null },
@@ -607,262 +848,4 @@ SHA256: 1c62c6d556381f532b86eb7fe737d9e39a5726a4a457127e1adfe4a8404d9992 | Bytes
 
 Keep Ollama on MulattoTechBox Windows unless real testing proves a better supported path. Do not assume Hyper-V/Multipass GPU passthrough. DevFleet prefers the desktop's authenticated Tailscale address and retains `http://192.168.1.243:11434/v1` as fallback. The one authoritative endpoint lives in installed schema-2 configuration and is propagated during project generation.
 
-Profiles: Stable Interactive (low latency, 1–2 requests), Large Context (one primary analysis task), Parallel Agents (more concurrency with smaller contexts). `Configure-Ollama.ps1` uses documented `OLLAMA_HOST`, `OLLAMA_CONTEXT_LENGTH`, `OLLAMA_NUM_PARALLEL`, `OLLAMA_MAX_LOADED_MODELS`, `OLLAMA_MAX_QUEUE`, and `OLLAMA_KEEP_ALIVE`. `Test-Ollama.ps1` checks `/v1/models`, expected model availability, optional chat completion, and `ollama ps` GPU/CPU observation when local.
-
-
-`Configure-Ollama.ps1` binds Ollama to the Windows host's Tailscale IPv4 address rather than a wildcard, creates a Windows Firewall rule limited to the tailnet CIDR, and records the MagicDNS name as the preferred client endpoint when Tailscale reports one. It does not add ROCm, HIP, Vulkan, or AMD-specific variables. After changing an installed endpoint, safely refresh each compute node so its generated service configuration receives the authoritative value.
-
-```
-
-
-## FILE: source/docs/11-REMOTE-VSCODE.md
-
-SHA256: adf463bf6333f1ff118433701d9bccb9038dc12c1c512a95f2932b46f5e3ad6b | Bytes: 1184 | Git mode: 100644
-
-````
-# Remote VS Code
-
-The laptop is the primary client and does not require Docker Desktop for main workloads. `Configure-SSH.ps1` creates `CodexDevVM` and failover aliases using the generated Ed25519 key and Tailscale IP. `Configure-DockerContext.ps1` creates Docker-over-SSH only; it never opens TCP 2375. `Configure-VSCode.ps1` installs real Remote SSH/Dev Containers and language extension groups and supplies exclusions for dependencies, caches, models, generated artifacts, and `.ai-bridge/local-agent`.
-
-Typical commands:
-
-```powershell
-ssh CodexDevVM
-code --remote ssh-remote+CodexDevVM /home/devrunner/workspaces/<project>
-docker --context Codexdevvm ps
-```
-
-
-## Extension placement
-
-Install Remote SSH and Remote Explorer on Windows. When VS Code opens `CodexDevVM`, allow language servers, linters, debuggers, and Dev Containers support to install in the remote environment when VS Code recommends it; UI-only extensions may remain local. The supplied extension lists are grouped so Python/web/enterprise/systems tooling can be added only for the projects that need it. The reference settings are copied for review rather than overwriting an existing personal `settings.json`.
-
-````
-
-
-## FILE: source/docs/12-UPGRADING-FROM-1.0.0.md
-
-SHA256: 28666495394ce7fa029bbf0c0d0949512333328d28181fb238bd901345af30f2 | Bytes: 1101 | Git mode: 100644
-
-````
-# DevFleet v1.0.0 to v1.1.0 migration
-
-Run the preview and then the upgrade from an elevated PowerShell 7 terminal:
-
-```powershell
-pwsh -File .\Upgrade-DevFleet.ps1 -FromVersion 1.0.0 -PreviewOnly
-pwsh -File .\Upgrade-DevFleet.ps1 -FromVersion 1.0.0
-```
-
-The entry point backs up `C:\ProgramData\DevFleet` configuration, secrets, exports, and package metadata; validates Multipass host-mount isolation; stops each local DevFleet VM; creates a named snapshot; restores the prior running state; previews schema 2; and refreshes only existing instances. It does not delete or recreate VMs, projects, Git repositories, Docker stores/volumes, backup credentials, restic snapshots, vault data, Tailscale identities, SSH keys, dashboard credentials, pairing data, quarantine, or custom values.
-
-A schema-1 baseline becomes Strict/rootless first. Rootless and rootful Docker have separate stores; optional switching requires a report, stopped projects, and explicit rootful acknowledgement. Re-running the v1.1 upgrade is safe and creates another recovery set rather than resetting the selected v1.1 profile.
-
-````
-
-
-## FILE: source/docs/13-PERFORMANCE-TUNING.md
-
-SHA256: 04264853da9e3a2d5baa1002ccf43018df4af3c2d79bbf8236909e262a44501f | Bytes: 2023 | Git mode: 100644
-
-```
-# Performance tuning and practical token efficiency
-
-DevFleet does not claim to alter ChatGPT/model quotas. It improves throughput with selective file loading, initial workspace opening without a full tree, search/read targeting, diff-oriented review, concise `.ai-bridge` handoffs, cached analyzer fingerprints, changed-file manifests, reusable dependency/BuildKit caches, one canonical checkout plus Git worktrees, and exclusions for dependencies/generated/model/cache/binary/runtime data.
-
-Control ownership:
-- ChatGPT controls the selected model, app/connector availability, memory/settings, and product usage limits.
-- CodexPro controls verified roots, auth, tool/write/bash/transcript modes, output limits, blocked globs, and exposed tools.
-- DevFleet controls VMs, Docker mode, lifecycle, leases, backups, analyzer, operations, peer transfer, and dashboard.
-- The project controls committed instructions, `.devfleet/project.json`, Compose/Dev Container files, tests, language metadata, and `.ai-bridge` handoffs.
-- Ollama controls the local endpoint, model availability, context/concurrency/queue settings, and observable GPU/CPU placement.
-- Hidden headers, connector-retention flags, model-routing overrides, context-cache bypasses, and rate-limit bypasses are not fabricated.
-
-Use the included session bootstrap/reconnect/broken-session/handoff prompts. Call `server_config` first, self-test only for fresh/broken/reconfigured sessions, open without a full tree, and verify tool reachability before long work.
-
-
-The DevFleet package verifier and file-change manifest prevent repeated broad inspection of unchanged package content. Per-project analyzer fingerprints cover Compose, Dev Container, Dockerfile, environment-file, metadata, symlink, and bind-target inputs and are invalidated when those inputs change. Docker BuildKit's daemon-local cache is reused within each selected Docker store; dependency-manager caches are mounted only through trusted generated overrides and never include source repositories.
-
-```
-
-
-## FILE: source/docs/RELEASE-FINGERPRINT-SCHEMA.md
-
-SHA256: 0e83ab1f2f01961b14ddc261a76128fa8f27ad35c04c63e732ef5824620ec80f | Bytes: 677 | Git mode: 100644
-
-```
-# Release fingerprint schema
-
-Schema 2 is the current DevFleet release identity format. It removes checkout-local
-absolute artifact paths and host filesystem permission bits from the hashed identity.
-Artifacts are identified by logical name, byte length, and SHA-256. Source file modes
-come from the same hook-mode contract used to write the canonical TAR and portable
-archive: contracted template hooks are `0755`, and every other shipping file is
-`0644`.
-
-Schema 1 records remain valid only as explicitly historical evidence. They must not
-be promoted as the identity of a current candidate because their IDs can vary by
-checkout location and host permission representation.
-
-```
-
-
-## FILE: source/docs/host-agent-portability.md
-
-SHA256: b7c8271409e747cc03a5214b7d082b9673e3e69131edd6a534db613bf6bb8faf | Bytes: 1504 | Git mode: 100644
-
-```
-# DevFleet host-agent portability
-
-The dashboard talks to a narrow authenticated host-agent contract rather than directly to Multipass. A second Windows host such as MulattoTechSurface only needs the same contract and a host-specific configuration file.
-
-Required configuration values are `HostId`, `HostName`, `ListenPrefix`, `TokenPath`, `MultipassPath`, `MultipassVersion`, `UbuntuImage`, `BootTimeoutSeconds`, `SshPublicKeyPath`, and `ResourcePolicy`. The resource policy must include host reserves, `MaximumVmCount`, `MaximumParallelProvisioning`, and project CPU, memory, and disk ceilings.
-
-Portability rules:
-
-- Keep the host identity unique and verify it on every authenticated response.
-- Discover Multipass and actual host capacity on the target; do not copy MulattoTechBox capacity values blindly.
-- Keep `gpu_enabled`, `gpu`, and `gpu_passthrough` false unless a separately reviewed provider is introduced.
-- Use the same deterministic project VM naming and ownership registry on every host.
-- Do not migrate or recreate an existing project automatically. Reconcile first, then require an explicit transfer operation.
-- Keep host-agent install, firewall scope, and scheduled-task settings in the host-specific installer; the dashboard and provider contract remain shared.
-
-The current package intentionally does not install or configure the Surface host. This document and the provider boundary are the preparation for a later one-package patch and a separately gated host-specific install.
-
-```
-
-
-## FILE: source/linux/bootstrap-compute.sh
-
-SHA256: 512bc920be2372e2211f897ba6b83dcfa72b4c5c8973f5f8f548363425880645 | Bytes: 26944 | Git mode: 100644
-
-```
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-PAYLOAD=${1:?payload path required}
-shift
-export DEBIAN_FRONTEND=noninteractive
-SECRETS_SOURCE=""
-SECRETS_STDIN_REQUESTED=0
-TRANSACTION_ID="${DEVFLEET_TRANSACTION_ID:-}"
-PAYLOAD_SHA256="${DEVFLEET_PAYLOAD_SHA256:-}"
-BOOTSTRAP_MAX_SECONDS="${DEVFLEET_BOOTSTRAP_MAX_SECONDS:-6600}"
-SECRETS_INPUT_MAX_SECONDS=60
-PACKAGE_VERSION=""
-NODE_ROLE=""
-while (($#)); do
-  case "$1" in
-    --secrets-stdin) SECRETS_STDIN_REQUESTED=1 ;;
-    --transaction-id) TRANSACTION_ID=${2:?transaction id required}; shift ;;
-    --payload-sha256) PAYLOAD_SHA256=${2:?payload sha256 required}; shift ;;
-    --bootstrap-max-seconds) BOOTSTRAP_MAX_SECONDS=${2:?bootstrap max seconds required}; shift ;;
-    --package-version) PACKAGE_VERSION=${2:?package version required}; shift ;;
-    --node-role) NODE_ROLE=${2:?node role required}; shift ;;
-    *) echo "unsupported bootstrap argument" >&2; exit 64 ;;
-  esac
-  shift
-done
-
-# Validate non-secret launch identity before creating files or waiting on stdin.
-if [[ "$SECRETS_STDIN_REQUESTED" -ne 1 ]]; then echo 'Refusing legacy plaintext node-secrets.json input; use --secrets-stdin.' >&2; exit 64; fi
-if [[ -z "$TRANSACTION_ID" || "$TRANSACTION_ID" =~ [^0-9a-fA-F] || ${#TRANSACTION_ID} -ne 32 ]]; then echo 'invalid transaction id' >&2; exit 64; fi
-if [[ -z "$PAYLOAD_SHA256" || "$PAYLOAD_SHA256" =~ [^0-9a-fA-F] || ${#PAYLOAD_SHA256} -ne 64 ]]; then echo 'invalid payload sha256' >&2; exit 64; fi
-if [[ ! "$BOOTSTRAP_MAX_SECONDS" =~ ^[0-9]+$ || "$BOOTSTRAP_MAX_SECONDS" -le 0 ]]; then echo 'invalid bootstrap owner deadline' >&2; exit 64; fi
-[[ "$PACKAGE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'invalid bound package version' >&2; exit 64; }
-[[ "$NODE_ROLE" =~ ^(primary|surrogate)$ ]] || { echo 'invalid bound node role' >&2; exit 64; }
-BOUND_PACKAGE_VERSION=$PACKAGE_VERSION
-BOUND_NODE_ROLE=$NODE_ROLE
-INPUT_HELPER="$PAYLOAD/linux/bootstrap-input.sh"
-[[ -f "$INPUT_HELPER" ]] || { echo 'missing bootstrap input helper' >&2; exit 4; }
-# shellcheck source=bootstrap-input.sh
-source "$INPUT_HELPER"
-
-# Component deadlines are absolute and subordinate to the bootstrap owner.
-BOOTSTRAP_STARTED_EPOCH=$(date +%s)
-BOOTSTRAP_DEADLINE_EPOCH=$((BOOTSTRAP_STARTED_EPOCH + BOOTSTRAP_MAX_SECONDS))
-PROGRESS_PATH=/var/lib/devfleet/bootstrap-progress.json
-install -d -o root -g root -m 0750 /var/lib/devfleet
-PROGRESS_SEQUENCE=0
-CURRENT_COMPONENT=''
-COMPONENT_DEADLINE_EPOCH=$BOOTSTRAP_DEADLINE_EPOCH
-COMPONENT_TERMINALIZED=0
-if [[ -f "$PROGRESS_PATH" ]] && jq -e --arg tx "$TRANSACTION_ID" --arg payload "$PAYLOAD_SHA256" '.transactionId==$tx and .payloadSha256==$payload and (.sequence|numbers)' "$PROGRESS_PATH" >/dev/null 2>&1; then
-  PROGRESS_SEQUENCE=$(jq -r --arg tx "$TRANSACTION_ID" --arg payload "$PAYLOAD_SHA256" 'select(.transactionId==$tx and .payloadSha256==$payload) | .sequence' "$PROGRESS_PATH")
-fi
-write_progress() {
-  local component=$1 state=$2 tmp now
-  [[ "$component" =~ ^(secretsInput|packagePrerequisites|dockerRepositoryAndInstall|tailscaleRepositoryAndInstall|rootlessRuntime|nodeToolchain|pythonRuntime|serviceAndFirewallFinalization|bootstrap)$ ]] || return 1
-  [[ "$state" =~ ^(STARTED|COMPLETED|FAILED|TIMED_OUT)$ ]] || return 1
-  PROGRESS_SEQUENCE=$((PROGRESS_SEQUENCE + 1)); now=$(date -u +%Y-%m-%dT%H:%M:%SZ); tmp=$(mktemp /var/lib/devfleet/bootstrap-progress.XXXXXX)
-  jq -n --arg tx "$TRANSACTION_ID" --arg payload "$PAYLOAD_SHA256" --arg component "$component" --arg state "$state" --arg now "$now" --arg version "$PACKAGE_VERSION" --arg role "$NODE_ROLE" --argjson sequence "$PROGRESS_SEQUENCE" '{schemaVersion:1,transactionId:$tx,payloadSha256:$payload,sequence:$sequence,component:$component,state:$state,updatedUtc:$now,packageVersion:$version,nodeRole:$role}' > "$tmp"
-  chown root:root "$tmp"; chmod 0640 "$tmp"; sync -d "$tmp" 2>/dev/null || true; mv -f -- "$tmp" "$PROGRESS_PATH"; chown root:root "$PROGRESS_PATH"; chmod 0640 "$PROGRESS_PATH"
-}
-remaining_seconds() { echo $((COMPONENT_DEADLINE_EPOCH - $(date +%s))); }
-run_bounded() {
-  local remaining rc=0
-  remaining=$(remaining_seconds)
-  if (( remaining <= 0 )); then write_progress "$CURRENT_COMPONENT" TIMED_OUT || true; COMPONENT_TERMINALIZED=1; return 124; fi
-  timeout --foreground --kill-after=10s "${remaining}s" "$@" || rc=$?
-  if (( rc == 124 || rc == 137 )); then write_progress "$CURRENT_COMPONENT" TIMED_OUT || true; COMPONENT_TERMINALIZED=1; fi
-  return "$rc"
-}
-run_bounded_command() {
-  local command=$1; shift; local remaining; remaining=$(remaining_seconds)
-  if [[ "$command" == "/usr/bin/apt-get" ]]; then set -- -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 "$@"; fi
-  if [[ "$command" == "/usr/bin/curl" ]]; then set -- --connect-timeout 20 --max-time "$remaining" "$@"; fi
-  run_bounded "$command" "$@"
-}
-apt-get() { run_bounded_command /usr/bin/apt-get "$@"; }
-curl() { run_bounded_command /usr/bin/curl "$@"; }
-gpg() { run_bounded_command /usr/bin/gpg "$@"; }
-systemctl() { run_bounded_command /usr/bin/systemctl "$@"; }
-npm() { run_bounded_command /usr/bin/npm "$@"; }
-begin_component() { CURRENT_COMPONENT=$1; COMPONENT_TERMINALIZED=0; local max=$2 now; now=$(date +%s); COMPONENT_DEADLINE_EPOCH=$((now + max)); if (( COMPONENT_DEADLINE_EPOCH > BOOTSTRAP_DEADLINE_EPOCH )); then COMPONENT_DEADLINE_EPOCH=$BOOTSTRAP_DEADLINE_EPOCH; fi; write_progress "$CURRENT_COMPONENT" STARTED; }
-complete_component() { write_progress "$CURRENT_COMPONENT" COMPLETED; CURRENT_COMPONENT=''; COMPONENT_TERMINALIZED=0; }
-finish_bootstrap() {
-  local rc=$? cleanup_rc=0
-  trap - ERR EXIT
-  rm -f -- "${SECRETS_SOURCE-}" "${SECRETS_ENV_TMP-}" "${DOCKER_KEY-}" "${TAILSCALE_KEY-}" || cleanup_rc=$?
-  if [[ -n ${NPM_TMP-} ]]; then rm -rf -- "$NPM_TMP" || cleanup_rc=$?; fi
-  if (( rc == 0 )); then rc=$cleanup_rc; fi
-  if (( rc != 0 )) && [[ ${COMPONENT_TERMINALIZED:-0} -eq 0 ]]; then
-    write_progress "${CURRENT_COMPONENT:-bootstrap}" FAILED || true
-  fi
-  exit "$rc"
-}
-trap finish_bootstrap EXIT
-trap 'exit $?' ERR
-
-begin_component secretsInput "$SECRETS_INPUT_MAX_SECONDS"
-set +e
-SECRETS_SOURCE=$(devfleet_capture_json_stdin '/run/devfleet-node-secrets.XXXXXX' "$COMPONENT_DEADLINE_EPOCH")
-input_rc=$?
-set -e
-if (( input_rc != 0 )); then
-  if (( input_rc == 124 || input_rc == 137 )); then write_progress secretsInput TIMED_OUT || true; else write_progress secretsInput FAILED || true; fi
-  COMPONENT_TERMINALIZED=1
-  echo 'bounded secret input delivery failed' >&2
-  exit "$input_rc"
-fi
-fail_input() { local message=$1 code=${2:-2}; write_progress secretsInput FAILED || true; COMPONENT_TERMINALIZED=1; echo "$message" >&2; exit "$code"; }
-
-JQ() { jq -r "$1" "$SECRETS_SOURCE"; }
-NODE_NAME=$(JQ .NodeName); NODE_ROLE=$(JQ .NodeRole); FRIENDLY_NAME=$(JQ '.FriendlyName // .NodeName')
-PORT=$(JQ .PortalPort); ADMIN_USER=$(JQ .AdminUser); ADMIN_PASSWORD=$(JQ .AdminPassword); API_TOKEN=$(JQ .ApiToken)
-DEPLOYMENT_ID=$(JQ '.DeploymentId // ""'); NODE_ID=$(JQ .NodeId); COORDINATOR_NODE_ID=$(JQ '.CoordinatorNodeId // ""')
-PROTOCOL_VERSION=$(JQ '.ProtocolVersion // 1'); OLLAMA_BASE=$(JQ .OllamaBaseUrl); OLLAMA_MODEL=$(JQ .OllamaModel)
-OLLAMA_PROFILE=$(JQ '.OllamaProfile // "stable-interactive"'); DEVELOPMENT_PROFILE=$(JQ '.DevelopmentProfile // "strict"')
-DOCKER_MODE=$(JQ '.DockerMode // "rootless"'); SHARED_CACHES=$(JQ '.EnableSharedCaches // false')
-ANALYZER_CACHE=$(JQ '.EnableAnalyzerCache // true'); AUTO_CODEX=$(JQ '.AutoStartCodexPro // true')
-ALLOW_TAILNET=$(JQ '.AllowTailnetPorts // false'); BACKUP_REBUILD=$(JQ '.BackupBeforeRebuild // false')
-BACKUP_QUARANTINE=$(JQ '.BackupBeforeQuarantine // true'); BACKUP_INTERVAL=$(JQ '.BackupIntervalMinutes // 15')
-INPUT_PACKAGE_VERSION=$(JQ .PackageVersion)
-INPUT_NODE_ROLE=$NODE_ROLE
-[[ "$INPUT_PACKAGE_VERSION" == "$BOUND_PACKAGE_VERSION" ]] || fail_input 'secret input package identity mismatch'
-[[ "$INPUT_NODE_ROLE" == "$BOUND_NODE_ROLE" ]] || fail_input 'secret input node role mismatch'
-PACKAGE_VERSION=$INPUT_PACKAGE_VERSION
-[[ $PACKAGE_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail_input 'invalid PackageVersion'
-[[ -n "$NODE_ID" && "$NODE_ID" != 'null' ]] || fail_input 'missing node identity' 3
-[[ $DEVELOPMENT_PROFILE =~ ^(strict|balanced|fast)$ ]] || fail_input 'invalid development profile'
-[[ 
+Profiles: Stable Interactive (low latency, 1–2 requests), Large Context (one primary analysis task), Parallel Agents (more concurrency with smaller contexts). `Configure-Ollama.ps1` uses documented `OLLAMA_HOST`, `OLLAMA_CONTEXT_LENGTH`, `OLLAMA_NUM_PARALLEL`, `OLLAMA_MAX_LOADED_MODELS`, `OLLAMA_MAX_QUEUE`, and `OLLAMA_KEEP_ALIVE`. `Test-Ollama.ps1` checks `/v1/models`, expected model availability, optional chat completion, and `ollama ps` GPU/CPU o

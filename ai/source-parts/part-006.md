@@ -1,10 +1,174 @@
 # DevFleet source part 006
 
 Full-source UTF-8 byte interval [232500, 279000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: ae441beb77237bb3c7080297e63adfa4f3feab95d2dd92b12d50ffb7d8b2560b
+Payload SHA-256: 3e3108b847e83c822669c340029a73612507df22e2057dcf23d1af53f0677cbe
 
 <!-- BEGIN SOURCE SLICE -->
-f.repair, request['runId'], request['owner'], 2,
+_order(self):
+        status = self.initialize()
+        self.assertEqual(status['remaining'], {'standard-token': 1, 'laptop-proof': 1,
+                                               'desktop-proof': 1, 'fullrelease': 1,
+                                               'diagnostic': 1, 'maintenance': 0,
+                                               'build-sign': 0})
+        with self.assertRaises(ValueError):
+            self.journal.reserve(self.successor, self.request('diagnostic', 'out-of-order'), dry_run=True)
+        for index, (operation, result) in enumerate(self.journal.REPAIR5_SEQUENCE):
+            request = self.request(operation, f'repair5-{index}')
+            self.journal.reserve(self.successor, request)
+            self.journal.finish(self.successor, request['runId'], request['owner'], 0, result, [])
+        self.assertEqual(self.journal.status(self.successor)['attemptCount'], 5)
+
+    def test_parent_and_authorization_are_distinct_immutable_sources(self):
+        with self.assertRaises(ValueError):
+            self.journal.initialize(self.successor, self.snapshot,
+                                    [self.snapshot, self.live], self.journal.REPAIR5_ID)
+        with self.assertRaises(ValueError):
+            self.journal.initialize(self.successor, self.authorization,
+                                    [self.live, self.live], self.journal.REPAIR5_ID)
+        self.initialize()
+        self.snapshot.write_bytes(self.snapshot.read_bytes() + b' ')
+        with self.assertRaisesRegex(ValueError, 'predecessor changed'):
+            self.journal.status(self.successor)
+
+    def test_no_extra_repair4_attempt_can_be_laundered(self):
+        data = self.journal.strict_json(self.live)
+        data['attempts'].append(dict(data['attempts'][0], runId='extra-standard-token'))
+        self.live.write_text(json.dumps(data), encoding='utf-8')
+        self.snapshot.write_bytes(self.live.read_bytes())
+        with self.assertRaises(ValueError):
+            self.initialize()
+
+    def test_unrelated_qualified_tuple_cannot_replace_exact_repair4(self):
+        data = self.journal.strict_json(self.live)
+        data['attempts'][0]['tuple']['repositoryHead'] = 'f' * 40
+        self.live.write_text(json.dumps(data), encoding='utf-8')
+        self.snapshot.write_bytes(self.live.read_bytes())
+        with self.assertRaises(ValueError):
+            self.initialize()
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+```
+
+
+## FILE: .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair_successor.py
+
+SHA256: e4624eddff607aadd50ce32915a0bb55387ab3b7b73b2cff2dfdaf1aff54ca49 | Bytes: 6408 | Git mode: 100644
+
+```
+"""Fail-closed accounting for one proposed R2 repair successor; no lab access."""
+import importlib.util
+import pathlib
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+
+HERE = pathlib.Path(__file__).resolve().parent
+
+
+class RepairSuccessorTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('fresh_attempts', HERE / 'fresh_attempts.py')
+        self.journal = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.journal)
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = pathlib.Path(temp.name)
+        self.base_auth = self.root / 'base-authorization.md'
+        self.r2_auth = self.root / 'r2-authorization.md'
+        self.repair_auth = self.root / 'repair-authorization.md'
+        for path, content in ((self.base_auth, 'base owner authorization'),
+                              (self.r2_auth, 'R2 owner authorization'),
+                              (self.repair_auth, 'separate bounded repair authorization')):
+            path.write_text(content, encoding='utf-8')
+        self.base = self.root / 'base.json'
+        self.r2 = self.root / 'r2.json'
+        self.snapshot = self.root / 'r2-terminal-snapshot.json'
+        self.repair = self.root / 'r2-repair.json'
+        self.journal.initialize(self.base, self.base_auth, [])
+        self.journal.initialize(self.r2, self.r2_auth, [self.base], self.journal.POLICY_ID + '-R2')
+
+    def request(self, operation, run_id):
+        return {'runId': run_id, 'operation': operation,
+                'owner': {'pid': 1234, 'startUtc': datetime.now(timezone.utc).isoformat()},
+                'tuple': {'repositoryHead': 'a' * 40}, 'entrypoint': 'native-test.ps1',
+                'entrypointSha256': 'b' * 64, 'arguments': [],
+                'changedCondition': 'bounded repair successor behavioral test',
+                'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+
+    def initialize(self):
+        self.snapshot.write_bytes(self.r2.read_bytes())
+        return self.journal.initialize(self.repair, self.repair_auth,
+                                       [self.snapshot, self.r2], self.journal.REPAIR_ID)
+
+    def succeed(self, operation, number):
+        request = self.request(operation, f'repair-{number}')
+        self.journal.reserve(self.repair, request)
+        expected = dict(self.journal.REPAIR_SEQUENCE)[operation]
+        self.journal.finish(self.repair, request['runId'], request['owner'], 0,
+                            expected, [])
+
+    def test_exact_finite_limits_preserve_r2(self):
+        before = self.r2.read_bytes()
+        status = self.initialize()
+        self.assertEqual(self.r2.read_bytes(), before)
+        self.assertEqual(self.snapshot.read_bytes(), before)
+        self.assertEqual(status['remaining'], {'standard-token': 1, 'laptop-proof': 1,
+                                               'desktop-proof': 1, 'fullrelease': 1,
+                                               'diagnostic': 1, 'maintenance': 0,
+                                               'build-sign': 0})
+        for operation in ('maintenance', 'build-sign'):
+            with self.assertRaises(ValueError):
+                self.journal.reserve(self.repair, self.request(operation, operation), dry_run=True)
+        with self.assertRaises(ValueError):
+            self.journal.reserve(self.repair, self.request('diagnostic', 'out-of-order'), dry_run=True)
+        self.succeed('standard-token', 1)
+        self.journal.reserve(self.repair, self.request('diagnostic', 'repair-diagnostic'))
+        self.assertEqual(self.journal.status(self.repair)['remaining']['diagnostic'], 0)
+        self.assertIsNone(self.journal.status(self.r2)['active'])
+
+    def test_missing_or_reused_authorization_or_wrong_predecessors_rejected(self):
+        self.snapshot.write_bytes(self.r2.read_bytes())
+        for predecessors, authorization in (([self.snapshot], self.repair_auth),
+                                            ([self.r2, self.r2], self.repair_auth),
+                                            ([self.snapshot, self.r2], self.r2_auth)):
+            with self.assertRaises(ValueError):
+                self.journal.initialize(self.repair, authorization,
+                                        predecessors, self.journal.REPAIR_ID)
+
+    def test_snapshot_and_live_r2_must_match_and_remain_pinned(self):
+        self.snapshot.write_bytes(self.r2.read_bytes() + b' ')
+        with self.assertRaises(ValueError):
+            self.journal.initialize(self.repair, self.repair_auth,
+                                    [self.snapshot, self.r2], self.journal.REPAIR_ID)
+        self.initialize()
+        self.r2.write_bytes(self.r2.read_bytes() + b' ')
+        with self.assertRaisesRegex(ValueError, 'predecessor changed'):
+            self.journal.status(self.repair)
+
+    def test_existing_successor_cannot_reset_or_refund(self):
+        self.initialize()
+        for number, operation in enumerate(('standard-token', 'diagnostic',
+                                            'laptop-proof', 'desktop-proof')):
+            self.succeed(operation, number)
+        request = self.request('fullrelease', 'repair-fullrelease')
+        self.journal.reserve(self.repair, request)
+        self.journal.finish(self.repair, request['runId'], request['owner'], 2,
+                            'BLOCKED', [])
+        with self.assertRaises(ValueError):
+            self.journal.initialize(self.repair, self.repair_auth,
+                                    [self.snapshot, self.r2], self.journal.REPAIR_ID)
+        with self.assertRaises(ValueError):
+            self.journal.reserve(self.repair,
+                                 self.request('fullrelease', 'repair-second'), dry_run=True)
+
+    def test_failed_qualification_blocks_later_phases(self):
+        self.initialize()
+        request = self.request('standard-token', 'repair-standard-failed')
+        self.journal.reserve(self.repair, request)
+        self.journal.finish(self.repair, request['runId'], request['owner'], 2,
                             'STANDARD_TOKEN_BLOCKED', [])
         with self.assertRaises(ValueError):
             self.journal.reserve(self.repair,
@@ -218,7 +382,7 @@ try {
 
 ## FILE: .agents/skills/devfleet-e2e-fastlane/SKILL.md
 
-SHA256: 9d8a7a8abdca00013101e565c3e9f37b530b5b7db292992935f5019a6fa64318 | Bytes: 3417 | Git mode: 100644
+SHA256: f4c76aa1c783df6c9944ce48a2588425ee51ac4771e272c844d185254bd92372 | Bytes: 4062 | Git mode: 100644
 
 ````
 ---
@@ -255,6 +419,8 @@ Before a VM retry: preserve the actual failure, reproduce it with an existing ca
 
 A same-candidate checkpoint may accelerate a separately authorized diagnostic after exact native provenance verification. An old installed checkpoint cannot validate a newer payload. Final certification remains one coherent current FullRelease with actual install/reboot, backup/restore, U01–U05 and certified cleanup. No historical phase stitching.
 
+After a late FullRelease failure, use the failed phase and its prerequisite checkpoint to narrow diagnosis before another full attempt. Run the relevant VM-free production-path test first. If that cannot establish the cause, design one separately admitted, non-certifying live diagnostic from the exact same-candidate checkpoint, with current HostSafety, guest authentication, ownership, and terminal L1/L2 cleanup. Do not call the native `Resume` mode a phase continuation or run a phase executor directly outside its admitted context. Read [late-phase guidance](references/acceleration.md#late-phase-failures) before proposing this shortcut.
+
 Do not alter VM/host clocks, shrink real timeouts, pre-mark stages, replace real authentication/health with fixtures, turn partial backup into success, or suppress a verified security finding. A time simulation is not a VM simulation.
 
 See [checkpoint and timing guidance](references/acceleration.md). On closeout, record exact results, next falsifiable action and actual ownership/cleanup. Never claim the remaining runtime gates were tested by this fastlane.
@@ -277,7 +443,7 @@ interface:
 
 ## FILE: .agents/skills/devfleet-e2e-fastlane/references/acceleration.md
 
-SHA256: ca083695b17e83eb41dc6d7db0fac3c1be5c28c2c1da6bc19ad3bee453f0d177 | Bytes: 6634 | Git mode: 100644
+SHA256: 5163ce839f4b0038ffedf4060094a649878391b56f93c1d6426c2ff4d7ccd1f8 | Bytes: 8484 | Git mode: 100644
 
 ```
 # Faster diagnosis without counterfeit E2E evidence
@@ -325,6 +491,14 @@ A checkpoint name is not provenance. Before a diagnostic restore compare exact L
 The old MAINTENANCE-READY checkpoint can contain old software even when its name matches. A shipping change invalidates reuse for testing the replacement product; do not restore an old installation and copy new PASS labels. An unchanged candidate with verified current checkpoint provenance can support a bounded diagnostic, but it does not replace independent CLEAN-start proofs or the single coherent final FullRelease.
 
 Do not create/change canonical CLEAN to speed up the run. Standard snapshots retain VM memory, while production snapshots do not; restoring either affects state outside simple elapsed-time arithmetic. Never copy security tokens/SSH identity from a snapshot into unrelated machines. Do not share warmed test state between independent role proofs.
+
+## Late-phase failures
+
+When FullRelease passes early phases and blocks later, preserve that terminal RunId, phase records, checkpoint/provenance, and cleanup state. Diagnose the blocked phase with the narrowest production-path VM-free test. If the failure needs guest observation, a separately authorized diagnostic can use a checkpoint only after native validation of the exact current candidate, installation generation, checkpoint GUID, origin RunId, L1 identity, and safety/admission. The diagnostic may start near the failing scenario; it earns no FullRelease or earlier-phase credit and must leave the exact lab terminally safe.
+
+For example, `PERMANENT-DELETE` normally restores the run's `MAINTENANCE-READY` checkpoint before its executor. A dedicated admitted diagnostic could test its nested Primary readiness without repeating installation phases, provided that checkpoint still belongs to the current tuple. Do not execute the product phase directly in an ad hoc shell: its normal executor mutates guest/nested resources and needs an owned context and cleanup. A timeout that exposes only the last Multipass command calls for a mocked deadline/telemetry regression first, then a scoped guest diagnostic if the cause remains unresolved.
+
+The current `Invoke-FullReleaseRun` always starts at phase 1; top-level `Resume` only verifies identity. A failed RunId cannot be promoted by appending a later phase result. After the causal fix and required tuple qualification, a certifying attempt must rerun one coherent FullRelease, including phases previously observed as PASS. Building a true certifying resume would require a new native contract that binds an immutable checkpoint, phase state, product generation, candidate tuple, ownership, and validator acceptance to the same run; this skill does not authorize or simulate such a change.
 
 ## Immediate constraints in this campaign
 
@@ -506,158 +680,4 @@ def proof_view(repo,run_id,destination):
     final=read_json(checked_path(rd,'proof-final.json'));binding=final.get('proofBinding',{})
     phase=binding.get('phaseId');lineage=binding.get('checkpointLineageId')
     if ROLES.get(final.get('role'))!=phase or not re.fullmatch(r'[0-9a-f]{32}',str(lineage)):
-        raise ValueError('Proof lineage or role malformed')
-    if final.get('runId')!=run_id or final.get('status')!='PASS' or final.get('outcome')!='PASS':raise ValueError('Proof is not terminal PASS')
-    rows=binding.get('evidence');names=set();chosen=[]
-    if not isinstance(rows,list) or not rows:raise ValueError('Bound native proof evidence missing')
-    for row in rows:
-        n=row.get('file','');h=row.get('sha256','')
-        if n in names:raise ValueError('duplicate native evidence')
-        names.add(n)
-        if not re.fullmatch(r'product-lifecycle-(?:completion-authority|generation-[1-3])\.json',n) or not re.fullmatch(r'[0-9a-f]{64}',h):raise ValueError('Unexpected bound evidence')
-        canonical=checked_path(rd,n);nested=checked_path(rd,f'lifecycle-{phase}-{lineage}/{n}')
-        present=[p for p in (canonical,nested) if p.is_file()]
-        if not present:raise ValueError('Missing exact lineage-bound native evidence: '+n)
-        if any(digest(p)!=h for p in present):raise ValueError('Native evidence hash mismatch: '+n)
-        chosen.append((present[0],n,h))
-    if 'product-lifecycle-completion-authority.json' not in names:raise ValueError('Completion authority missing')
-    destination.mkdir(parents=True,exist_ok=False)
-    for n in ('proof-start.json','proof-final.json','cleanup-state.json'):
-        shutil.copyfile(checked_path(rd,n),destination/n)
-    for src,n,h in chosen:
-        shutil.copyfile(src,destination/n)
-        if digest(destination/n)!=h:raise ValueError('Evidence changed during copy')
-    return [{'file':n,'source':p.relative_to(rd).as_posix(),'sha256':h} for p,n,h in chosen]
-
-def select_suites(area):
-    if area=='all':return [row for rows in SUITES.values() for row in rows]
-    if area=='quick':return SUITES['clock']+[SUITES['observer'][1]]+SUITES['vault'][:2]+SUITES['acceptance'][:1]
-    if area not in SUITES:raise ValueError('Unknown test area; no arbitrary command execution')
-    return list(SUITES[area])
-
-def source_snapshot(repo):
-    rows={}
-    for folder in ('source','installer-source','tools','automation'):
-        base=repo/folder
-        for p in sorted(base.rglob('*')):
-            parts=p.relative_to(base).parts
-            if any(x in ('.git','__pycache__','.pytest_cache','bin','obj','outputs','.test-runtime','Payload') or x.startswith('.venv') for x in parts):continue
-            if p.is_file():
-                rel=p.relative_to(repo).as_posix();checked_path(repo,rel);rows[rel]=digest(p)
-    for n in ('CURRENT-CANDIDATE.json','evidence/CURRENT-RELEASE-AUTHORITY.json','evidence/CURRENT-STANDARD-TOKEN.json','finalization-state.json','outputs/final-artifact-hashes.json','audit/run-exact-candidate-proof.ps1'):
-        p=checked_path(repo,n)
-        if p.is_file():rows[n]=digest(p)
-    return rows
-
-def assert_authority(authority,expected):
-    for k in ('repositoryHead',*TUPLE):
-        if authority.get(k)!=expected.get(k):raise ValueError('Native authority tuple disagrees: '+k)
-    for k,value in (('candidateIsCurrent',True),('sourceChangedSinceCandidate',False),('rebuildRequired',False)):
-        if authority.get(k) is not value:raise ValueError('Native candidate flag is not current: '+k)
-
-def native_inspection(repo):
-    authority=read_json(checked_path(repo,'evidence/CURRENT-RELEASE-AUTHORITY.json'))
-    before=source_snapshot(repo)
-    sys.path.insert(0,str(repo/'tools'))
-    try:
-        spec=importlib.util.spec_from_file_location('fastlane_native_validator',checked_path(repo,'tools/validate_release_bundle.py'))
-        v=importlib.util.module_from_spec(spec);spec.loader.exec_module(v)
-        state=v.read_json(repo/'finalization-state.json');expected=v._tuple_from_state(state);artifacts=v._artifact_map(repo)
-        assert_authority(authority,expected)
-        v._validate_workspace_candidate(repo,expected,artifacts)
-        token=v._validate_standard_token(repo,expected,artifacts,'workspace')
-        selected=authority.get('proofs',{}).get('runs',[])
-        if len(selected)!=2 or len({r['runId'] for r in selected})!=2:raise ValueError('Current authority must select two independent proof RunIds')
-        source_paths={
-          'proofScriptSha256':'audit/run-exact-candidate-proof.ps1',
-          'invokeRealProductPhaseSha256':'automation/release-e2e/modules/executors/Invoke-RealProductPhase.psm1',
-          'invokeWpfUiAutomationSha256':'automation/release-e2e/modules/executors/Invoke-WpfUiAutomation.ps1',
-          'wpfLaunchContractSha256':'automation/release-e2e/modules/executors/WpfLaunchContract.psm1'}
-        sources={k:checked_path(repo,p) for k,p in source_paths.items()}
-        pe={k:expected[k] for k in ('repositoryHead','candidateCommit','shippingInputIdentity')};pe.update(releaseFingerprint=expected['releaseFingerprintId'],toolingFingerprint=expected['toolingFingerprintId'])
-        results=[]
-        with tempfile.TemporaryDirectory(prefix='devfleet-readonly-revalidation-') as td:
-            for row in selected:
-                name=row['runId'];view=Path(td)/name;copies=proof_view(repo,name,view)
-                tx,lineage,role=v.validate_native_proof(view,checked_path(repo,'source/config/devfleet.config.json'),sources,pe,{n:x['sha256'] for n,x in artifacts.items()})
-                start=read_json(view/'proof-start.json');cleanup=read_json(view/'cleanup-state.json')
-                results.append({'runId':name,'transactionId':tx,'lineageId':lineage,'role':role,'nativeValidation':'PASS','observedSecondsIncludingCleanup':elapsed(start.get('generatedAtUtc'),cleanup.get('completedAtUtc')),'cleanupSeconds':elapsed(cleanup.get('startedAtUtc'),cleanup.get('completedAtUtc')),'evidenceLayout':copies})
-        v.validate_proof_independence([x['runId'] for x in results],[x['transactionId'] for x in results],[x['lineageId'] for x in results],[x['role'] for x in results])
-        if before!=source_snapshot(repo):raise ValueError('Material/native inputs changed during revalidation')
-        return {'status':'PASS','scope':'READ_ONLY_REVALIDATION','authorityId':authority['authorityId'],
-          'candidate':{k:expected[k] for k in ('repositoryHead',*TUPLE)},'proofs':results,
-          'standardTokenRunId':token.get('runId'),'proofIndependence':'PASS','sourceSnapshotSha256':hashlib.sha256(json.dumps(before,sort_keys=True).encode()).hexdigest(),
-          'candidateRebuildRequired':authority.get('rebuildRequired'),'fullReleasePassed':authority.get('fullReleasePassed') is True,
-          'newProofsProduced':0,'runtimeAuthorizationGranted':False,'next':'Fresh native host/ownership admission, then current FullRelease under existing explicit authorization. Do not rerun these proofs for a new chat.'}
-    finally:sys.path.pop(0)
-
-def standalone_python_command(python,path):
-    # Embedded Windows Python ignores PYTHONPATH. Add only the trusted test's
-    # directory in this child process; do not edit ._pth or global config.
-    shim="import runpy,sys;from pathlib import Path;p=Path(sys.argv[1]).resolve();sys.path.insert(0,str(p.parent));sys.argv=[str(p)];runpy.run_path(str(p),run_name='__main__')"
-    return [str(python),'-B','-c',shim,str(path)]
-
-def tests(repo,area,out):
-    pwsh=shutil.which('pwsh.exe') or shutil.which('pwsh')
-    python=repo/'.venv-test/Scripts/python.exe'
-    if not python.is_file():python=Path(sys.executable)
-    before=source_snapshot(repo);results=[]
-    env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1','PYTHONPATH':os.pathsep.join(str(x) for x in (repo,repo/'tools',repo/'source/app')),'PYTHONIOENCODING':'utf-8'}
-    for label,kind,relative in select_suites(area):
-        path=checked_path(ROOT if kind=='skill' else repo,relative)
-        if kind=='pytest':cmd=[str(python),'-B','-m','pytest','-q','-p','no:cacheprovider',str(path)]
-        elif kind=='python':cmd=standalone_python_command(python,path)
-        else:
-            if not pwsh:raise ValueError('PowerShell 7 is required; no installation attempted')
-            cmd=[pwsh,'-NoLogo','-NoProfile','-NonInteractive','-File',str(path)]
-            if kind=='skill':cmd+=['-Repository',str(repo)]
-        t=time.monotonic();log=out/(label+'.log');source_hash=digest(path)
-        with log.open('w',encoding='utf-8') as f:
-            try:cp=subprocess.run(cmd,cwd=repo,env=env,stdout=f,stderr=subprocess.STDOUT,timeout=180)
-            except subprocess.TimeoutExpired:
-                results.append({'suite':label,'status':'TIMEOUT','seconds':round(time.monotonic()-t,3),'log':str(log),'cleanupMustBeChecked':True});break
-        results.append({'suite':label,'status':'PASS' if cp.returncode==0 else 'FAIL','exitCode':cp.returncode,'seconds':round(time.monotonic()-t,3),'log':str(log),'scriptSha256':source_hash})
-        if cp.returncode!=0:break
-    clean=before==source_snapshot(repo)
-    return {'status':'PASS' if len(results)==len(select_suites(area)) and all(x['status']=='PASS' for x in results) and clean else 'FAIL',
-            'scope':'VM_FREE_REGRESSION_ONLY','area':area,'suites':results,'materialAndNativeInputsUnchanged':clean,
-            'certificationCredit':False,'vmOperations':0,'note':'Mocks/injected clocks test harness decisions; not a simulated VM certification.'}
-
-def main():
-    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('command',choices=['inspect','test'])
-    ap.add_argument('--repo',required=True,type=Path);ap.add_argument('--area',choices=['quick','all',*SUITES],default='quick')
-    ap.add_argument('--out',type=Path,help='New diagnostic directory OUTSIDE the repository')
-    a=ap.parse_args();repo=a.repo.resolve(strict=True)
-    base=Path(os.environ.get('LOCALAPPDATA',tempfile.gettempdir()))/'DevFleet/Fastlane'
-    out=(a.out or base/dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S-%fZ')).resolve()
-    if out.is_relative_to(repo):ap.error('Diagnostic output must be outside the repository')
-    out.mkdir(parents=True,exist_ok=False);start=time.monotonic()
-    try:report=native_inspection(repo) if a.command=='inspect' else tests(repo,a.area,out)
-    except Exception as exc:
-        # Keep traceback locally, do not expose arbitrary file/credential contents.
-        import traceback
-        (out/'error.log').write_text(traceback.format_exc(),encoding='utf-8')
-        report={'status':'FAIL','scope':'DIAGNOSTIC_ONLY','errorType':type(exc).__name__,'details':str(out/'error.log'),'certificationCredit':False,'runtimeAuthorizationGranted':False}
-    report.update(observedUtc=utc(),elapsedSeconds=round(time.monotonic()-start,3),reportPath=str(out/'report.json'))
-    (out/'report.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8');print(json.dumps(report,indent=2))
-    return 0 if report['status']=='PASS' else 2
-if __name__=='__main__':raise SystemExit(main())
-
-```
-
-
-## FILE: .agents/skills/devfleet-e2e-fastlane/tests/test_fastlane.py
-
-SHA256: 3205f4695cf362414c5d97bada87326261c72e2315b628164367d5245c2e56c8 | Bytes: 8050 | Git mode: 100644
-
-```
-from __future__ import annotations
-import json, hashlib, sys, importlib.util
-from pathlib import Path
-import pytest
-ROOT=Path(__file__).resolve().parents[1]
-
-def impl():
-    p=ROOT/'scripts/fastlane.py'
-    assert p.is_file(), 'Missing safe preflight/replay implementation'
-    spec=importlib.util.spec_from_file_loca
+        raise ValueE

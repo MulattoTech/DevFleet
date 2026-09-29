@@ -1,10 +1,357 @@
 # DevFleet source part 097
 
 Full-source UTF-8 byte interval [4464000, 4510500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 8e310affa59c040858938f5feda862f1eb6b7aca2760fc51798cf4ce3b3337b9
+Payload SHA-256: 7f546be50508279a24f49223e6c042904ddd117f18d8e611023fc76ddb3eb78f
 
 <!-- BEGIN SOURCE SLICE -->
-ata_io.write_project_metadata_bytes(workspace, original.raw, expected=updated)
+OOT / "windows" / "DevFleet.Common.psm1").read_text(encoding="utf-8")
+    assert "Get-AuthenticodeSignature" in source
+    assert "while($cursor)" in source
+    assert "ReparsePoint" in source
+    assert "allowedSignerSubjectsExact" in source
+    assert "Legacy substring signer policy is rejected" in source
+    assert "Get-TrustedDependencyCandidates $Dependency" in source
+    assert "if($signature.Status -ne 'Valid' -and -not $allowUnsignedInstalled)" in source
+    assert "Get-Acl -LiteralPath $full" in source
+    assert "if(@($exact).Count -gt 0" in source
+    assert "$policy=if($null -ne $Dependency){$Dependency.installerAuthenticityPolicy}else{$null}" in source
+    assert "PSObject.Properties['installedExecutableTrust']" in source
+
+
+def test_canonical_dependency_policies_do_not_use_substring_signer_authority():
+    for relative in ("dependencies.json",):
+        for path in (ROOT / relative, ROOT.parent / "installer-source" / "DevFleet.Setup" / relative):
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            policies = [item["installerAuthenticityPolicy"] for item in manifest["dependencies"]]
+            assert all("allowedSignerPatterns" not in policy for policy in policies)
+            assert all(policy.get("strategy") == "VendorReleaseSha256" or policy.get("allowedSignerSubjectsExact") for policy in policies)
+            multipass = next(item for item in manifest["dependencies"] if item["id"] == "multipass")
+            assert multipass["installerAuthenticityPolicy"]["installedExecutableTrust"] == "signed-installer-locked-path"
+
+
+def test_multipass_runtime_resolution_reuses_canonical_dependency_policy():
+    source = (ROOT / "windows" / "DevFleet.Common.psm1").read_text(encoding="utf-8")
+    start = source.index("function Get-MultipassExe")
+    end = source.index("function Assert-MultipassIsolation", start)
+    resolver = source[start:end]
+    assert "Get-CanonicalDependencyManifest -PackageRoot $packageRoot" in resolver
+    assert "Where-Object id -eq 'multipass'" in resolver
+    assert "Wait-DevFleetDependencyStatus -Dependency $dependency" in resolver
+    assert "Test-TrustedExecutableCandidate ([string]$cached.Path) -Dependency $dependency" in resolver
+    assert "Get-FileHash -LiteralPath ([string]$cached.Path) -Algorithm SHA256" in resolver
+    assert "Status -eq 'Compatible'" in resolver
+    # The resolver must never fall back to the generic no-policy trust check.
+    assert "Test-TrustedExecutableCandidate $candidate" not in resolver
+
+
+def test_csharp_dependency_probe_authenticates_before_reading_version():
+    source = (ROOT.parent / "installer-source" / "DevFleet.Setup" / "Services" / "InstallerLifecycle.cs").read_text(encoding="utf-8")
+    assert "IsTrustedInstalledDependency(candidate, dependency)" in source
+    assert "ReadAuthenticodeSubject" in source
+    assert "AllowedSignerSubjectsExact" in source
+    assert "Legacy substring signer policy is rejected" in source
+    assert source.index("IsTrustedInstalledDependency(candidate, dependency)") < source.index("ReadVersion(candidate, dependency)")
+    assert "DirectoryInfo(Path.GetDirectoryName(full)!)" in source
+    assert "InstalledExecutableTrust" in source
+    assert "signed-installer-locked-path" in source
+    assert "Microsoft.DesktopAppInstaller" in source
+    assert "8wekyb3d8bbwe" in source
+
+
+def test_secret_bearing_archive_arguments_are_not_created():
+    source = (ROOT / "windows" / "DevFleet.Common.psm1").read_text(encoding="utf-8")
+    assert "-p$password" not in source
+    assert "New-EncryptedBundle" in source
+    assert "Expand-EncryptedBundle" in source
+    assert "DFENV001" in source
+    assert "AesGcm" in source
+
+
+def test_external_process_wrapper_has_timeout_tree_kill_and_bounded_diagnostics():
+    source = (ROOT / "windows" / "DevFleet.Common.psm1").read_text(encoding="utf-8")
+    assert "TimeoutSeconds" in source
+    assert "$process.Kill($true)" in source
+    assert "MaxDiagnosticChars" in source
+    assert "EvidenceLogPath" in source
+
+
+def test_windows_powershell_common_module_has_no_powershell_7_null_coalescing_operator():
+    source = (ROOT / "windows" / "DevFleet.Common.psm1").read_text(encoding="utf-8")
+    assert "??" not in source
+    assert "Add-Type -AssemblyName System.Net.Http" in source
+    assert "[System.Net.Http.HttpClientHandler]::new()" in source
+    assert "[System.Net.Http.HttpClient]::new($handler)" in source
+
+```
+
+
+## FILE: source/tests/test_installer_self_cleanup.py
+
+SHA256: 966731a830d6a62ca9fa6d366ae88252a4c8d60f28fbe645221e35dc6a10ce25 | Bytes: 648 | Git mode: 100644
+
+```
+from pathlib import Path
+
+
+ROOT = Path(__file__).parents[2]
+
+
+def test_installer_self_cleanup_uses_argument_bound_helper_without_cmd_shell():
+    source = (ROOT / "installer-source/DevFleet.Setup/Services/InstallerLifecycle.cs").read_text(encoding="utf-8")
+    method = source[source.index("private static void ScheduleSelfRemoval"):source.index("private static void RemoveExactRegistryEntry")]
+    assert ".cmd" not in method
+    assert "cmd.exe" not in method
+    assert "ArgumentList.Add" in method
+    assert "-LiteralPath $Target" in method
+    assert "ProcessWindowStyle.Hidden" in method
+    assert "Start-Sleep -Milliseconds 500" in method
+
+```
+
+
+## FILE: source/tests/test_language_templates.py
+
+SHA256: bf6448bdd5f7ee48208912fee44e08c99614c72f7ec036c9e4301a91d6cc60d7 | Bytes: 2062 | Git mode: 100644
+
+```
+import json
+from pathlib import Path
+from devfleet.language_policy import TEMPLATES,recommend_template
+from devfleet import analyzer, projects
+import yaml
+ROOT=Path(__file__).resolve().parents[1]
+CORE={'generic','python','python-fastapi','node','typescript-node','typescript-next','go-service','dotnet-service','java-spring','rust-service'}
+def test_legacy_and_new_templates_exist():
+ assert {'generic','python','node'}<=set(TEMPLATES);assert len(TEMPLATES)==20
+ for name in TEMPLATES:
+  d=ROOT/'templates'/name;assert (d/'compose.yaml').is_file();assert (d/'.devcontainer/devcontainer.json').is_file();assert (d/'.devfleet/codexpro-bootstrap.sh').is_file();assert (d/'README.md').is_file();assert (d/'docs/architecture.md').is_file()
+def test_core_metadata_commands():
+ for name in CORE:
+  data=json.loads((ROOT/'templates'/name/'.devfleet/template.json').read_text())
+  for key in ('bootstrap_command','format_command','lint_command','test_command','health_command'):assert data[key]
+def test_recommendations():assert recommend_template('python','fastapi')=='python-fastapi' and recommend_template('go')=='go-service'
+def test_language_metadata_documented():
+ for name in CORE:
+  assert 'Language:' in (ROOT/'templates'/name/'README.md').read_text();assert 'Rationale:' in (ROOT/'templates'/name/'docs/architecture.md').read_text()
+
+def test_generated_templates_satisfy_strict_security_contract(tmp_path,monkeypatch):
+ monkeypatch.setattr(projects,'TEMPLATE_ROOT',ROOT/'templates')
+ for name in TEMPLATES:
+  project=tmp_path/name
+  project.mkdir()
+  projects._copy_template(project,name)
+  compose=yaml.safe_load((project/'compose.yaml').read_text())
+  services=compose['services']
+  assert services
+  for service in services.values():
+   assert 'ALL' in [str(value).upper() for value in (service.get('cap_drop') or [])]
+   assert any('no-new-privileges:true' in str(value).lower() for value in (service.get('security_opt') or []))
+  findings=analyzer.analyze_project(project,'strict',force=True)
+  assert not analyzer.has_blockers(findings), (name, findings)
+
+```
+
+
+## FILE: source/tests/test_laptop_profile.py
+
+SHA256: a255b83381a5753c49b6029fdd6308ba0ac14d6a2a3774d0aa0dd2eaef0bcd3a | Bytes: 473 | Git mode: 100644
+
+```
+import pytest
+
+from devfleet.resource_profiles import LAPTOP_PROFILE_DEFAULT, laptop_surrogate_profile
+
+
+def test_laptop_default_is_conservative_5g_2g():
+    assert laptop_surrogate_profile() == LAPTOP_PROFILE_DEFAULT
+
+
+def test_laptop_lower_bound_fails_closed():
+    with pytest.raises(ValueError, match="below"):
+        laptop_surrogate_profile(failover_memory_gb=3)
+    with pytest.raises(ValueError, match="below"):
+        laptop_surrogate_profile(vault_memory_gb=1)
+
+```
+
+
+## FILE: source/tests/test_laptop_tailscale_bootstrap.py
+
+SHA256: 499afe9442a2d9944d4fe7fc1c363c3f28880c8702472d5c9d45c610aa1c509b | Bytes: 6219 | Git mode: 100644
+
+```
+"""Execute shipped shell boundaries with external services replaced by fixtures."""
+import json
+import re
+import subprocess
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+BASH = Path(r'C:\Program Files\Git\bin\bash.exe')
+
+
+def unix(path):
+    value = path.resolve().as_posix()
+    return '/' + value[0].lower() + value[2:] if value[1:3] == ':/' else value
+
+
+def cloud_client():
+    yaml = (ROOT / 'cloud-init/vault.yaml').read_text(encoding='utf-8-sig')
+    start = yaml.index('  - path: /usr/local/sbin/devfleet-install-vault-tailscale')
+    content = yaml.index('    content: |\n', start) + len('    content: |\n')
+    lines = []
+    for line in yaml[content:].splitlines():
+        if not line.startswith('      '):
+            break
+        lines.append(line[6:])
+    assert lines and lines[0] == '#!/usr/bin/env bash'
+    return '\n'.join(lines) + '\n'
+
+
+@pytest.mark.parametrize('case,expected', [('valid', 0), ('wrong-key', 4), ('extra-public-key', 4), ('download-failure', 22), ('apt-failure', 42), ('service-failure', 44)])
+def test_vault_client_installs_only_after_pinned_key_verification(tmp_path, case, expected):
+    assert BASH.is_file(), 'Use the existing Git for Windows Bash test runtime.'
+    fingerprint = json.loads((ROOT / 'linux/dependency-policy.json').read_text())['tailscale']['signingKeySha256Fingerprint']
+    assert re.fullmatch('[A-F0-9]{40}', fingerprint)
+    body = cloud_client().replace('__TAILSCALE_SIGNING_FINGERPRINT__', fingerprint)
+    paths = ['/etc/os-release', '/usr/share/keyrings/tailscale-archive-keyring.gpg', '/etc/apt/sources.list.d/tailscale.list']
+    for index, path in enumerate(paths):
+        body = body.replace(path, unix(tmp_path / str(index)))
+    (tmp_path / '0').write_text('ID=ubuntu\nVERSION_CODENAME=noble\n')
+    (tmp_path / 'tmp').mkdir()
+    preamble = r'''
+set -Eeuo pipefail
+cd "$1"
+export TMPDIR="$PWD/tmp"
+case_name="$2"
+fingerprint="$3"
+curl() { [[ "$case_name" != download-failure ]] || return 22; printf 'fixture public key' > "${@: -1}"; }
+gpg() { printf 'pub:::::::::\n'; if [[ "$case_name" == wrong-key ]]; then printf 'fpr:::::::::0000000000000000000000000000000000000000:\n'; else printf 'fpr:::::::::%s:\n' "$fingerprint"; fi; printf 'sub:::::::::\nfpr:::::::::1111111111111111111111111111111111111111:\n'; if [[ "$case_name" == extra-public-key ]]; then printf 'pub:::::::::\nfpr:::::::::2222222222222222222222222222222222222222:\n'; fi; }
+install() { printf 'verified-key-install\n' >> calls; cp -- "$3" "$4"; }
+apt-get() { printf 'apt %s\n' "$*" >> calls; [[ "$case_name" != apt-failure ]] || return 42; }
+systemctl() { printf 'service %s\n' "$*" >> calls; [[ "$case_name" != service-failure ]] || return 44; }
+'''
+    script = tmp_path / 'test.sh'
+    script.write_text(preamble + body, encoding='utf-8', newline='\n')
+    result = subprocess.run([str(BASH), '--noprofile', '--norc', unix(script), unix(tmp_path), case, fingerprint], capture_output=True, text=True, timeout=15)
+    assert result.returncode == expected, (result.returncode, result.stderr)
+    assert not list((tmp_path / 'tmp').iterdir()), 'Owned public-key temporary file was not cleaned.'
+    calls = (tmp_path / 'calls').read_text() if (tmp_path / 'calls').exists() else ''
+    if expected in (4, 22):
+        assert not calls and not (tmp_path / '1').exists() and not (tmp_path / '2').exists()
+    else:
+        assert calls.startswith('verified-key-install\napt update\n')
+    if expected == 0:
+        assert 'apt install -y tailscale\nservice enable --now tailscaled\n' in calls
+        assert 'signed-by=' in (tmp_path / '2').read_text()
+
+
+@pytest.mark.parametrize('address,authenticated', [('', False), ('100.64.1.2', True), ('100.127.255.255', True), ('100.1.1.2', False), ('100.128.1.2', False), ('100.64.256.1', False), ('192.168.1.2', False)])
+def test_vault_checks_start_daemon_before_authenticated_ip(tmp_path, address, authenticated):
+    text = (ROOT / 'linux/bootstrap-vault.sh').read_text()
+    start = text.index('begin_component tailscaleChecks ')
+    end = text.index('\ncomplete_component', start) + len('\ncomplete_component')
+    block = text[start:end]
+    preamble = r'''
+set -Eeuo pipefail
+cd "$1"
+address="$2"
+begin_component() { :; }
+complete_component() { printf completed > complete; }
+systemctl() { [[ "$*" == 'enable --now tailscaled' ]] || return 8; touch daemon; }
+run_bounded() { printf '%s\n' "$*" > bounded; "$@"; }
+tailscale() { test -f daemon || return 9; [[ -n "$address" ]] || return 1; printf '%s\n' "$address"; }
+'''
+    script = tmp_path / 'check.sh'
+    script.write_text(preamble + block + '\n', encoding='utf-8', newline='\n')
+    result = subprocess.run([str(BASH), '--noprofile', '--norc', unix(script), unix(tmp_path), address], capture_output=True, text=True, timeout=10)
+    assert (result.returncode == 0) == authenticated
+    assert (tmp_path / 'complete').exists() == authenticated
+    assert (tmp_path / 'daemon').exists()
+    assert (tmp_path / 'bounded').read_text().strip() == 'tailscale ip -4'
+
+
+def test_compute_and_vault_apply_the_same_single_primary_key_policy():
+    compute = (ROOT / 'linux/bootstrap-compute.sh').read_text()
+    pattern = r"awk -F: '(\$1==\"pub\"[^']+)'"
+    assert re.findall(pattern, compute) == re.findall(pattern, cloud_client())
+
+
+def test_cloud_init_and_provisioner_deliver_auth_before_vault_secret_bootstrap():
+    cloud = (ROOT / 'cloud-init/vault.yaml').read_text()
+    provisioner = (ROOT / 'windows/03-Provision-Vault.ps1').read_text()
+    assert '  - gnupg\n' in cloud
+    assert '[timeout, --signal=TERM, --kill-after=10s, 900s, /usr/local/sbin/devfleet-install-vault-tailscale]' in cloud
+    assert ".Replace('__TAILSCALE_SIGNING_FINGERPRINT__',$tailscaleFingerprint)" in provisioner
+    assert provisioner.index("'04-Connect-Tailscale.ps1'") < provisioner.index('$vaultSecrets=') < provisioner.index('Invoke-MultipassWithStandardInput')
+
+
+def test_deferred_laptop_rejects_before_loading_modules_or_initializing_state():
+    text = (ROOT / 'Install-DevFleet.ps1').read_text()
+    guard = text.index("if($Role-eq'Laptop'-and$DeferNetworkPairing)")
+    assert guard < text.index('Import-Module') < text.index('Initialize-DevFleetState')
+
+```
+
+
+## FILE: source/tests/test_metadata_io.py
+
+SHA256: f1bdba4aa4c2d6501bd193ed8d1a4f1ac9d3ea1988d57df5e7f55a0e69f626f9 | Bytes: 16739 | Git mode: 100644
+
+```
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+import pytest
+
+from devfleet import metadata_io
+
+
+POSIX_ONLY = pytest.mark.skipif(
+    not metadata_io.POSIX_FD_HARDENING,
+    reason="descriptor-relative no-follow primitives are unavailable",
+)
+PROJECT_ID = "12345678-1234-1234-1234-123456789abc"
+
+
+@pytest.fixture
+def workspace(tmp_path):
+    project = tmp_path / "metadata-project"
+    (project / ".devfleet").mkdir(parents=True)
+    value = {
+        "schema_version": 5,
+        "managed_by": "devfleet",
+        "slug": project.name,
+        "identity": project.name,
+        "project_id": PROJECT_ID,
+        "deployment_id": "deployment-one",
+        "host_id": "host-one",
+    }
+    (project / ".devfleet/project.json").write_bytes(
+        (json.dumps(value, indent=1) + "\n\n").encode("utf-8")
+    )
+    return project
+
+
+def test_read_write_and_exact_byte_rollback(workspace):
+    original = metadata_io.read_project_metadata(workspace)
+    assert original.value["project_id"] == PROJECT_ID
+    assert original.raw.endswith(b"\n\n")
+    assert original.binding.posix is metadata_io.POSIX_FD_HARDENING
+    changed = {**original.value, "lifecycle_status": "stopped"}
+    updated = metadata_io.write_project_metadata(workspace, changed, expected=original.binding)
+    assert updated.same_directory_lineage(original.binding)
+    assert updated.file_identity != original.binding.file_identity
+    assert metadata_io.read_project_metadata(workspace).value == changed
+    rolled_back = metadata_io.write_project_metadata_bytes(workspace, original.raw, expected=updated)
     assert rolled_back.same_directory_lineage(original.binding)
     assert metadata_io.read_project_metadata(workspace).raw == original.raw
     assert list((workspace / ".devfleet").glob(".project.json.*.tmp")) == []
@@ -727,383 +1074,4 @@ def test_desktop_export_forwards_securestring_and_retains_unconfigured_deferral(
 
 
 def test_complete_cluster_forwards_securestring_inside_existing_cleanup_scope():
-    source = (ROOT / "windows" / "Complete-Cluster.ps1").read_text(encoding="utf-8")
-    assert "[Security.SecureString]$BundlePassphrase" in source
-    assert re.search(r"try\s*\{\s*Expand-EncryptedBundle .* -Passphrase \$BundlePassphrase", source)
-    assert "Primary invitation metadata is incomplete." in source
-    assert "Vault legacy adoption identity does not match the exact local cluster/credential binding." in source
-    assert "finally {\n Remove-Item $dest" in source
-    assert "Convert-SecureStringToBundlePassword" not in source
-
-
-def test_authenticated_bundle_format_and_rejection_guards_are_unchanged():
-    create = bundle_function("New-EncryptedBundle")
-    expand = bundle_function("Expand-EncryptedBundle")
-    assert "$iterations = 600000" in create and "DFENV001" in create
-    assert "$aes.Encrypt($nonce, $plain, $cipher, $tag, $header)" in create
-    for message in (
-        "Encrypted bundle is truncated.",
-        "Unsupported encrypted bundle format.",
-        "Encrypted bundle KDF parameters are invalid.",
-        "Encrypted bundle ciphertext length is invalid.",
-    ):
-        assert message in expand
-    assert "$aes.Decrypt($nonce,$cipher,$tag,$plain,$header)" in expand
-    assert expand.index("$aes.Decrypt(") < expand.index("ExtractToDirectory")
-    assert "Remove-Item $zipPath -Force -ErrorAction SilentlyContinue" in create
-    assert "Remove-Item $zipPath -Force -ErrorAction SilentlyContinue" in expand
-
-```
-
-
-## FILE: source/tests/test_posix_zip_writer.py
-
-SHA256: 6462892dce04a296322461f1046aa5e87ed72923caff2fad024f04cbdb42fff2 | Bytes: 1182 | Git mode: 100644
-
-```
-import json
-import zipfile
-
-from source.tools.write_posix_zip import write_zip
-
-
-def test_zip_writer_marks_unix_origin_and_preserves_contract_modes(tmp_path):
-    stage = tmp_path / "stage"
-    (stage / "source" / "bin").mkdir(parents=True)
-    (stage / "source" / "bin" / "run.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-    (stage / "source" / "README.md").write_text("readme\n", encoding="utf-8")
-    modes = stage / "SOURCE-MODES.json"
-    modes.write_text(
-        json.dumps(
-            [
-                {"path": "source/README.md", "posixMode": 420},
-                {"path": "source/bin/run.sh", "posixMode": 493},
-            ]
-        ),
-        encoding="utf-8",
-    )
-    output = tmp_path / "audit.zip"
-    write_zip(stage, output, modes)
-
-    with zipfile.ZipFile(output) as archive:
-        entries = {item.filename: item for item in archive.infolist()}
-    assert entries["source/README.md"].create_system == 3
-    assert entries["source/README.md"].external_attr >> 16 & 0o777 == 0o644
-    assert entries["source/bin/run.sh"].create_system == 3
-    assert entries["source/bin/run.sh"].external_attr >> 16 & 0o777 == 0o755
-    assert "source/" not in entries
-
-```
-
-
-## FILE: source/tests/test_profiles.py
-
-SHA256: c2b6c38df7c926f5b7e7151be4f2089786a023849ffd9a0a5d5cc0de2e42156c | Bytes: 195 | Git mode: 100644
-
-```
-from devfleet.profiles import get_profile
-def test_profiles():
- assert get_profile('strict').block_hardening;assert get_profile('balanced').allow_tailnet;assert get_profile('fast').allow_devices
-
-```
-
-
-## FILE: source/tests/test_project_safety.py
-
-SHA256: eaa01b1294d8f5a0e4b4b4debc59a7cf540305716a90b71dbdfeb9e08fa41187 | Bytes: 673 | Git mode: 100644
-
-```
-from pathlib import Path
-ROOT=Path(__file__).resolve().parents[1]
-def test_backup_before_quarantine_code_order():
- t=(ROOT/'app/devfleet/projects.py').read_text();section=t[t.index('def quarantine_project'):t.index('def list_quarantine')];assert section.index('backup_project')<section.index('project.rename')
-def test_restore_canonical_quarantines_old_copy():
- t=(ROOT/'linux/devfleet-restore-project').read_text();assert 'transfer-replaced-' in t and '--canonical' in t
-def test_docker_switch_never_migrates_or_deletes_store():
- t=(ROOT/'linux/devfleet-switch-docker-mode').read_text();assert 'Stores were not migrated or deleted' in t and 'docker system prune' not in t
-
-```
-
-
-## FILE: source/tests/test_release_fingerprint.py
-
-SHA256: c828417c604b08df30002a8af2a26a1070fbdf112b1e7e80dfd8635c883c6dd3 | Bytes: 6392 | Git mode: 100644
-
-```
-import json
-import os
-from pathlib import Path
-import shutil
-
-from tools.release_fingerprint import build_fingerprint
-
-
-def test_shipping_fingerprint_changes_for_shipping_mutation(tmp_path: Path):
-    source = tmp_path / "source"
-    installer = tmp_path / "installer"
-    source.mkdir()
-    installer.mkdir()
-    (source / "VERSION").write_text("1.2.13\n", encoding="utf-8")
-    (source / "payload.sh").write_text("echo one\n", encoding="utf-8")
-    (installer / "INSTALLER_VERSION").write_text("1.4.1\n", encoding="utf-8")
-    first = build_fingerprint(source, installer)
-    (source / "payload.sh").write_text("echo two\n", encoding="utf-8")
-    second = build_fingerprint(source, installer)
-    assert first["releaseFingerprintId"] != second["releaseFingerprintId"]
-
-
-def test_nonshipping_harness_is_outside_shipping_fingerprint(tmp_path: Path):
-    source = tmp_path / "source"
-    installer = tmp_path / "installer"
-    automation = tmp_path / "automation"
-    source.mkdir()
-    installer.mkdir()
-    automation.mkdir()
-    (source / "VERSION").write_text("1.2.13\n", encoding="utf-8")
-    (installer / "INSTALLER_VERSION").write_text("1.4.1\n", encoding="utf-8")
-    first = build_fingerprint(source, installer)
-    (automation / "harness.ps1").write_text("Write-Output pass\n", encoding="utf-8")
-    second = build_fingerprint(source, installer)
-    assert first["releaseFingerprintId"] == second["releaseFingerprintId"]
-    assert first["toolingFingerprint"]["toolingFingerprintId"] != second["toolingFingerprint"]["toolingFingerprintId"]
-
-
-def test_fingerprint_json_is_machine_readable(tmp_path: Path):
-    source = tmp_path / "source"
-    installer = tmp_path / "installer"
-    source.mkdir()
-    installer.mkdir()
-    (source / "VERSION").write_text("1.2.13\n", encoding="utf-8")
-    (installer / "INSTALLER_VERSION").write_text("1.4.1\n", encoding="utf-8")
-    result = build_fingerprint(source, installer)
-    assert result["schemaVersion"] == 2
-    assert len(result["releaseFingerprintId"]) == 64
-    assert json.loads(json.dumps(result))["devfleetVersion"] == "1.2.13"
-
-
-def _tree(root: Path) -> tuple[Path, Path, Path]:
-    source = root / "source"
-    installer = root / "installer"
-    outputs = root / "outputs"
-    (source / "templates/demo/.devfleet").mkdir(parents=True)
-    installer.mkdir()
-    outputs.mkdir()
-    (source / "VERSION").write_text("1.2.13\n", encoding="utf-8")
-    (source / "payload.txt").write_text("same bytes\n", encoding="utf-8")
-    (source / "templates/demo/.devfleet/template.json").write_text('{"bootstrap_command":"./.devfleet/run.sh"}\n', encoding="utf-8")
-    (source / "templates/demo/.devfleet/run.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    (installer / "INSTALLER_VERSION").write_text("1.4.1\n", encoding="utf-8")
-    artifact = outputs / "candidate.bin"
-    artifact.write_bytes(b"candidate")
-    return source, installer, artifact
-
-
-def test_schema_v2_is_relocation_invariant_and_has_no_absolute_artifact_path(tmp_path: Path):
-    source_a, installer_a, artifact_a = _tree(tmp_path / "checkout-a")
-    shutil.copytree(tmp_path / "checkout-a", tmp_path / "different absolute checkout")
-    source_b = tmp_path / "different absolute checkout/source"
-    installer_b = tmp_path / "different absolute checkout/installer"
-    artifact_b = tmp_path / "different absolute checkout/outputs/candidate.bin"
-    first = build_fingerprint(source_a, installer_a, {"exe": artifact_a})
-    second = build_fingerprint(source_b, installer_b, {"exe": artifact_b})
-    assert first["releaseFingerprintId"] == second["releaseFingerprintId"]
-    assert first["artifacts"] == [{"name": "exe", "bytes": 9, "sha256": first["artifacts"][0]["sha256"]}]
-    assert "path" not in first["artifacts"][0]
-
-
-def test_checkout_mode_noise_does_not_change_canonical_shipping_identity(tmp_path: Path):
-    source, installer, artifact = _tree(tmp_path / "checkout")
-    first = build_fingerprint(source, installer, {"tar": artifact})
-    for path in (source / "payload.txt", source / "templates/demo/.devfleet/run.sh"):
-        os.chmod(path, 0o755 if not (path.stat().st_mode & 0o111) else 0o644)
-    second = build_fingerprint(source, installer, {"tar": artifact})
-    assert first["releaseFingerprintId"] == second["releaseFingerprintId"]
-
-
-def test_executable_contract_change_is_detected_but_non_executable_mode_noise_is_not(tmp_path: Path):
-    source, installer, _ = _tree(tmp_path / "checkout")
-    run = "templates/demo/.devfleet/run.sh"
-    contracted = build_fingerprint(source, installer, source_executable_paths={run})
-    non_executable = build_fingerprint(source, installer, source_executable_paths=set())
-    assert contracted["releaseFingerprintId"] != non_executable["releaseFingerprintId"]
-    run_entry = next(item for item in contracted["shippingInputs"] if item["root"] == "source" and item["path"] == run)
-    assert run_entry["mode"] == "0755"
-
-
-def test_artifact_byte_mutation_changes_release_id(tmp_path: Path):
-    source, installer, artifact = _tree(tmp_path / "checkout")
-    first = build_fingerprint(source, installer, {"exe": artifact})
-    artifact.write_bytes(b"changed candidate")
-    second = build_fingerprint(source, installer, {"exe": artifact})
-    assert first["releaseFingerprintId"] != second["releaseFingerprintId"]
-
-
-def test_release_pipeline_atomically_emits_current_tooling_schema_v2():
-    script = (Path(__file__).parents[2] / "installer-source/Build-Release.ps1").read_text(encoding="utf-8")
-    assert "releaseFingerprintSchemaVersion=2" in script
-    assert "tooling-fingerprint-current.json" in script
-    assert "Move-Item -LiteralPath $currentToolingTemporary" in script
-    assert "toolingInputs=$fingerprintObject.toolingFingerprint.toolingInputs" in script
-    assert "artifacts=$artifactRows" in script
-
-
-def test_release_pipeline_binds_shipping_identity_into_authority_metadata():
-    script = (Path(__file__).parents[2] / "installer-source/Build-Release.ps1").read_text(encoding="utf-8")
-    assert "shippingInputIdentity=$candidateIdentity.candidateShippingInputIdentity" in script
-    assert "candidateShippingInputIdentity=$candidateIdentity.candidateShippingInputIdentity" in script
-    assert "shipping_input_identity=$candidateIdentity.candidateShippingInputIdentity" in script
-    assert "candidate_shipping_input_identity=$candidateIdentity.candidateShippingInputIdentity" in script
-
-```
-
-
-## FILE: source/tests/test_release_reproducibility.py
-
-SHA256: f4af5c9897f923c4579ad5b5ede734d64067968ff58622b1bd25be24dccef66c | Bytes: 3256 | Git mode: 100644
-
-```
-from __future__ import annotations
-
-import hashlib
-import stat
-import subprocess
-import sys
-import tarfile
-import zipfile
-from pathlib import Path
-
-
-ROOT = Path(__file__).parents[1]
-BUILDER = ROOT / "tools" / "build_release.py"
-sys.path.insert(0, str(ROOT / "tools"))
-from build_release import files
-
-
-FIXTURE_FILES = {
-    "VERSION": b"1.2.13\n",
-    "Zeta.txt": b"upper\n",
-    "alpha.txt": b"lower\n",
-    "app/Cafe.txt": b"ascii\n",
-    "app/caf\u00e9.txt": b"unicode\n",
-}
-
-
-def _source(root: Path, names: list[str]) -> Path:
-    root.mkdir()
-    for name in names:
-        path = root / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(FIXTURE_FILES[name])
-    return root
-
-
-def _build(source: Path, old_portable: Path, output: Path, cwd: Path) -> tuple[Path, Path]:
-    output.mkdir()
-    subprocess.run(
-        [
-            sys.executable,
-            str(BUILDER),
-            "--source",
-            str(source),
-            "--old-portable",
-            str(old_portable),
-            "--output-dir",
-            str(output),
-        ],
-        cwd=cwd,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return (
-        output / "devfleet-v1.2.13.tar.gz",
-        output / "DevFleet-v1.2.13-Portable-Codebase-Verified-r1.zip",
-    )
-
-
-def test_files_use_canonical_utf8_posix_order_independent_of_creation_order(tmp_path: Path):
-    names = list(FIXTURE_FILES)
-    first = _source(tmp_path / "first", names)
-    second = _source(tmp_path / "second", list(reversed(names)))
-    expected = sorted(names, key=lambda name: name.encode("utf-8"))
-    assert [path.relative_to(first).as_posix() for path in files(first)] == expected
-    assert [path.relative_to(second).as_posix() for path in files(second)] == expected
-
-
-def test_two_clean_room_builds_are_byte_identical_with_normalized_metadata(tmp_path: Path):
-    names = list(FIXTURE_FILES)
-    first = _source(tmp_path / "source-one", names)
-    second = _source(tmp_path / "source-two", list(reversed(names)))
-    old_portable = tmp_path / "old-portable.zip"
-    with zipfile.ZipFile(old_portable, "w") as archive:
-        archive.writestr("historical-note.txt", b"preserved\n")
-
-    first_tar, first_zip = _build(first, old_portable, tmp_path / "output-one", tmp_path)
-    second_tar, second_zip = _build(second, old_portable, tmp_path / "output-two", tmp_path / "source-two")
-    assert first_tar.read_bytes() == second_tar.read_bytes()
-    assert first_zip.read_bytes() == second_zip.read_bytes()
-    assert hashlib.sha256(first_tar.read_bytes()).digest() == hashlib.sha256(second_tar.read_bytes()).digest()
-    assert hashlib.sha256(first_zip.read_bytes()).digest() == hashlib.sha256(second_zip.read_bytes()).digest()
-
-    with tarfile.open(first_tar, "r:gz") as archive:
-        for member in archive.getmembers():
-            assert member.mtime == 0
-            assert member.uid == member.gid == 0
-            assert member.mode in {0o644, 0o755}
-    with zipfile.ZipFile(first_zip) as archive:
-        for member in archive.infolist():
-            assert member.date_time == (1980, 1, 1, 0, 0, 0)
-            assert member.create_system == 3
-            assert stat.S_IMODE(member.external_attr >> 16) in {0o644, 0o755}
-
-```
-
-
-## FILE: source/tests/test_remediation_contract.py
-
-SHA256: de0445f35b1c084cd557e7edede914adf0282aa5931dc47fc6dcf86fc00bcdad | Bytes: 6905 | Git mode: 100644
-
-```
-from pathlib import Path
-from types import SimpleNamespace
-
-import pytest
-
-from devfleet.runtime import CONTAINER_PROVIDER, VM_PROVIDER, provider_for
-from devfleet import host_control, workspace_archives
-from devfleet.version import __version__
-from devfleet.workspace_archives import create_workspace_archive, inspect_workspace, validate_archive, write_backup_manifest, restore_workspace_archive
-
-
-def test_version_and_provider_contract():
-    root = Path(__file__).resolve().parents[1]
-    expected = (root / "VERSION").read_text(encoding="utf-8").strip()
-    assert expected == "1.2.13"
-    assert __version__ == expected
-    assert provider_for({}) == CONTAINER_PROVIDER
-    assert provider_for({"runtime_provider": "multipass"}) == VM_PROVIDER
-    assert provider_for({"runtime_isolation": "vm", "runtime_provider": "docker-compose"}) == VM_PROVIDER
-
-
-def test_workspace_archive_is_reopenable_and_identity_bound(tmp_path: Path):
-    workspace = tmp_path / "demo-project"
-    (workspace / ".devfleet").mkdir(parents=True)
-    (workspace / ".devfleet" / "project.json").write_text('{"project_id":"123"}\n', encoding="utf-8")
-    (workspace / "README.md").write_text("hello\n", encoding="utf-8")
-    inspection = inspect_workspace(workspace)
-    assert inspection["safe_for_archive"] is True
-    archive = tmp_path / "backups" / "demo-project.tar.gz"
-    result = create_workspace_archive(workspace, "demo-project", archive)
-    assert result["verified"] is True
-    assert validate_archive(archive, "demo-project")["archive_sha256"] == result["archive_sha256"]
-    manifest = write_backup_manifest(tmp_path / "backups" / "demo-project-1", slug="demo-project", project_id="123", runtime={"provider": "docker-compose"}, archive=result)
-    assert manifest["verification"]["status"] == "verified"
-
-
-def test_workspace_archive_rejects_symbolic_links_when_supported(tmp_path: Path):
-    workspace = tmp_path / "demo-project"
-    (workspace / ".devfleet").mkdir(parents=True)
-    (workspace / ".devfleet" / "project.json").write_text("{}\n", encoding="utf-8")
-    link = workspace / "link"
-    try:
-        link.symlink_to(workspace / ".devfleet" / "project.json")
+    source = (ROOT / "windows" / "Complete-Cluster.ps1").read_text(

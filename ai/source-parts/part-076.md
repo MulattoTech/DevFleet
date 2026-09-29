@@ -1,10 +1,387 @@
 # DevFleet source part 076
 
 Full-source UTF-8 byte interval [3487500, 3534000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 9203b62327662c722830228dd5408293306330fe6cb3750fc281d5fbec34de22
+Payload SHA-256: 4f657ac23707809c7c86efb384e8f381aeae3cc99bc549d9539641bdfafd9af3
 
 <!-- BEGIN SOURCE SLICE -->
-e.py
+if is_login else "declared request body exceeds limit"
+            message = "login form body exceeds the bounded limit" if is_login else "request body exceeds the bounded limit"
+            _reject_reason(scope, reason, declared=declared, observed=0, started=started)
+            await _send_rejection(send, 413, message)
+            return
+
+        if limit is not None:
+            # Read only the bounded body before invoking FastAPI.  The
+            # buffer can never exceed `limit`; an over-limit chunk is rejected
+            # without being retained, so parser work cannot start first and
+            # turn the admission failure into a generic 400 response.
+            buffered: list[dict[str, Any]] = []
+            observed = 0
+            while True:
+                message = await receive()
+                if message.get("type") != "http.request":
+                    buffered.append(message)
+                    break
+                body = message.get("body", b"") or b""
+                observed += len(body)
+                if observed > limit:
+                    reason = "observed login body exceeds limit" if is_login else "observed request body exceeds limit"
+                    message = "login form body exceeds the bounded limit" if is_login else "request body exceeds the bounded limit"
+                    _reject_reason(scope, reason, declared=declared, observed=observed, started=started)
+                    await _send_rejection(send, 413, message)
+                    return
+                buffered.append(message)
+                if not message.get("more_body", False):
+                    break
+            replay = iter(buffered)
+
+            async def bounded_receive() -> dict[str, Any]:
+                try:
+                    return next(replay)
+                except StopIteration:
+                    return {"type": "http.disconnect"}
+
+            await self.app(scope, bounded_receive, send)
+            return
+
+        await self.app(scope, receive, send)
+
+```
+
+
+## FILE: source/app/devfleet/resource_profiles.py
+
+SHA256: 9bec3c14f6019fe4439065f8419dd7f11cc2de01ed9e9bd15bbbc5bf94102eb1 | Bytes: 14021 | Git mode: 100644
+
+```
+"""Central resource profiles and host-safe allocation policy."""
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+import json
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from .core import atomic_text
+
+
+_RESOURCE_POLICY_DEFAULTS = {
+    "schemaVersion": 1,
+    "policyVersion": "1.0.0",
+    "physicalFloorMinGiB": 8.0,
+    "physicalFloorPercent": 0.10,
+    "commitHeadroomFloorMinGiB": 16.0,
+    "commitHeadroomPercent": 0.20,
+    "commitUsageLimitPercent": 80.0,
+}
+_RESOURCE_POLICY_PATH = Path(__file__).resolve().parents[2] / "config" / "resource-policy.json"
+try:
+    _RESOURCE_POLICY = {**_RESOURCE_POLICY_DEFAULTS, **json.loads(_RESOURCE_POLICY_PATH.read_text(encoding="utf-8"))}
+except (OSError, ValueError, TypeError):
+    _RESOURCE_POLICY = dict(_RESOURCE_POLICY_DEFAULTS)
+RESOURCE_POLICY_VERSION = str(_RESOURCE_POLICY["policyVersion"])
+
+
+@dataclass(frozen=True)
+class ResourceProfile:
+    name: str
+    label: str
+    cpus: float
+    memory: str
+    disk_gb: int
+    pids: int
+    rationale: str
+
+    @property
+    def vcpus(self) -> float:
+        return self.cpus
+
+    @property
+    def memory_gb(self) -> float:
+        return float(str(self.memory).lower().replace("gb", "").replace("g", "").strip())
+
+    def limits(self, runtime_type: str = "container") -> dict[str, Any]:
+        result = {
+            "cpus": self.cpus,
+            "memory": self.memory,
+            "memory_gb": self.memory_gb,
+            "disk_gb": self.disk_gb,
+            "pids": self.pids,
+        }
+        if runtime_type == "vm":
+            result["vcpus"] = self.vcpus
+        return result
+
+
+@dataclass(frozen=True)
+class HostResourcePolicy:
+    # Legacy fields remain for config compatibility; adaptive admission below
+    # is the authoritative host-memory rule and does not use fixed reserves.
+    minimum_free_memory_gb: float = 0.0
+    reserved_memory_gb: float = 0.0
+    reserved_logical_processors: float = 2.0
+    minimum_free_disk_gb: float = 50.0
+    maximum_vm_count: int = 4
+    maximum_parallel_provisioning: int = 1
+    max_project_cpus: float = 6.0
+    max_project_memory_gb: float = 12.0
+    max_project_disk_gb: float = 120.0
+
+
+@dataclass(frozen=True)
+class AdaptiveHostThresholds:
+    physical_floor_gb: float
+    commit_headroom_floor_gb: float
+    commit_usage_limit_percent: float = 80.0
+
+
+def adaptive_host_thresholds(usable_physical_gb: float, commit_limit_gb: float) -> AdaptiveHostThresholds:
+    """Return the versioned host-admission floors used by E2E and capacity UI."""
+    usable = float(usable_physical_gb)
+    commit_limit = float(commit_limit_gb)
+    if usable < 0 or commit_limit < 0:
+        raise ValueError("Host memory values must be non-negative.")
+    return AdaptiveHostThresholds(
+        physical_floor_gb=max(float(_RESOURCE_POLICY["physicalFloorMinGiB"]), usable * float(_RESOURCE_POLICY["physicalFloorPercent"])),
+        commit_headroom_floor_gb=max(float(_RESOURCE_POLICY["commitHeadroomFloorMinGiB"]), commit_limit * float(_RESOURCE_POLICY["commitHeadroomPercent"])),
+        commit_usage_limit_percent=float(_RESOURCE_POLICY["commitUsageLimitPercent"]),
+    )
+
+
+def evaluate_host_memory_admission(
+    *,
+    usable_physical_gb: float,
+    available_physical_gb: float,
+    commit_limit_gb: float,
+    committed_gb: float,
+    projected_allocation_gb: float,
+    resource_exhaustion: bool = False,
+) -> dict[str, Any]:
+    thresholds = adaptive_host_thresholds(usable_physical_gb, commit_limit_gb)
+    projected_available = float(available_physical_gb) - float(projected_allocation_gb)
+    projected_headroom = float(commit_limit_gb) - float(committed_gb) - float(projected_allocation_gb)
+    commit_percent = (float(committed_gb) / float(commit_limit_gb) * 100.0) if commit_limit_gb else 100.0
+    return {
+        "policy_version": RESOURCE_POLICY_VERSION,
+        "physical_floor_gb": round(thresholds.physical_floor_gb, 2),
+        "commit_headroom_floor_gb": round(thresholds.commit_headroom_floor_gb, 2),
+        "projected_available_physical_gb": round(projected_available, 2),
+        "projected_commit_headroom_gb": round(projected_headroom, 2),
+        "current_commit_usage_percent": round(commit_percent, 2),
+        "resource_exhaustion": bool(resource_exhaustion),
+        "start_safe": bool(
+            projected_available >= thresholds.physical_floor_gb
+            and projected_headroom >= thresholds.commit_headroom_floor_gb
+            and commit_percent < thresholds.commit_usage_limit_percent
+            and not resource_exhaustion
+        ),
+    }
+
+
+def resolved_resource_metadata(
+    profile_name: str,
+    runtime_type: str = "container",
+    *,
+    actual_runtime_resources: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Keep requested profile, resolved limits, and observed runtime separate."""
+    if profile_name == "custom":
+        requested = dict(actual_runtime_resources or {})
+    else:
+        requested = resource_metadata(profile_name, runtime_type)
+    resolved = dict(requested)
+    actual = dict(actual_runtime_resources or {})
+    drift = {
+        key: {"expected": resolved.get(key), "actual": actual.get(key)}
+        for key in ("cpus", "memory_gb", "disk_gb")
+        if key in actual and str(actual.get(key)) != str(resolved.get(key))
+    }
+    return {
+        "policy_version": RESOURCE_POLICY_VERSION,
+        "requested_profile": profile_name,
+        "requested_limits": requested,
+        "resolved_resources": resolved,
+        "actual_runtime_resources": actual,
+        "resource_drift": drift,
+        "resource_drift_status": "RESOURCE DRIFT" if drift else "MATCH",
+    }
+
+
+RESOURCE_PROFILES = {
+    "small": ResourceProfile("small", "Light", 1.0, "2g", 20, 512, "Lightweight prototype or automation workload."),
+    "standard": ResourceProfile("standard", "Standard", 2.0, "4g", 40, 768, "Normal web, API, CLI, or service development."),
+    "large": ResourceProfile("large", "Performance", 4.0, "8g", 80, 1536, "Multi-service, production-like, or data-heavy development."),
+    "xlarge": ResourceProfile("xlarge", "Intensive", 6.0, "12g", 120, 2048, "Heavy build or infrastructure workload; still GPU-free."),
+}
+
+RUNTIME_ISOLATIONS = {
+    "container": "Project-isolated containers on the shared DevFleet host",
+    "vm": "Dedicated Multipass VM (host-assisted provisioning; no GPU path)",
+}
+
+LAPTOP_PROFILE_DEFAULT = {"failover_memory_gb": 5.0, "vault_memory_gb": 2.0}
+LAPTOP_PROFILE_MINIMUM_TESTED = {"failover_memory_gb": 4.0, "vault_memory_gb": 2.0}
+
+
+def laptop_surrogate_profile(*, failover_memory_gb: float = 5.0, vault_memory_gb: float = 2.0) -> dict[str, float]:
+    """Return the conservative tested Laptop/Surrogate memory profile."""
+    failover = float(failover_memory_gb)
+    vault = float(vault_memory_gb)
+    if failover < LAPTOP_PROFILE_MINIMUM_TESTED["failover_memory_gb"] or vault < LAPTOP_PROFILE_MINIMUM_TESTED["vault_memory_gb"]:
+        raise ValueError("Laptop/Surrogate memory is below the lowest tested stable profile.")
+    return {"failover_memory_gb": failover, "vault_memory_gb": vault}
+
+
+def policy_from_config(values: dict[str, Any] | None = None) -> HostResourcePolicy:
+    values = values or {}
+    aliases = {
+        "minimum_free_memory": "minimum_free_memory_gb",
+        "reserved_memory": "reserved_memory_gb",
+        "reserved_logical_processors": "reserved_logical_processors",
+        "minimum_free_disk": "minimum_free_disk_gb",
+        "max_vm_count": "maximum_vm_count",
+        "maximum_vm_count": "maximum_vm_count",
+        "max_parallel_provisioning": "maximum_parallel_provisioning",
+    }
+    normalized = {aliases.get(k, k): v for k, v in values.items()}
+    defaults = asdict(HostResourcePolicy())
+    for key, default in defaults.items():
+        if key in normalized:
+            try:
+                defaults[key] = type(default)(normalized[key])
+            except (TypeError, ValueError):
+                raise ValueError(f"Invalid host resource policy value: {key}")
+    return HostResourcePolicy(**defaults)
+
+
+def get_resource_profile(name: str) -> ResourceProfile:
+    key = str(name or "").strip().lower()
+    if key not in RESOURCE_PROFILES:
+        raise ValueError(f"Unknown resource profile: {key}")
+    return RESOURCE_PROFILES[key]
+
+
+def custom_resource_metadata(values: dict[str, Any], *, runtime_type: str = "container") -> dict[str, Any]:
+    """Validate dashboard-supplied limits without allowing privileged PID mode."""
+    if str(values.get("pid_mode", "private") or "private").lower() != "private":
+        raise ValueError("Host PID namespace is not supported by the safe DevFleet runtime policy.")
+    return validate_resource_limits(values, runtime_type=runtime_type)
+
+
+def validate_resource_limits(values: dict[str, Any], *, runtime_type: str = "container", policy: HostResourcePolicy | None = None) -> dict[str, Any]:
+    policy = policy or HostResourcePolicy()
+    try:
+        cpus = float(values.get("cpus", values.get("vcpus")))
+        memory_gb = float(values.get("memory_gb", str(values.get("memory", "")).lower().replace("gb", "").replace("g", "")))
+        disk_gb = int(values.get("disk_gb"))
+        pids = int(values.get("pids", 0))
+    except (TypeError, ValueError):
+        raise ValueError("Resource limits must contain numeric CPU, memory, disk, and PID values.")
+    if cpus < 1 or cpus > policy.max_project_cpus:
+        raise ValueError("CPU allocation is outside the host-agent policy.")
+    if memory_gb < 2 or memory_gb > policy.max_project_memory_gb:
+        raise ValueError("Memory allocation is outside the host-agent policy.")
+    if disk_gb < 20 or disk_gb > policy.max_project_disk_gb:
+        raise ValueError("Disk allocation is outside the host-agent policy.")
+    if pids < 0 or pids > 4096:
+        raise ValueError("PID limit is outside the host-agent policy.")
+    return {
+        "cpus": cpus,
+        "vcpus": cpus,
+        "memory_gb": memory_gb,
+        "memory": f"{int(memory_gb) if memory_gb.is_integer() else memory_gb:g}g",
+        "disk_gb": disk_gb,
+        "pids": pids,
+        "runtime_type": runtime_type,
+    }
+
+
+def capacity_allows(capacity: dict[str, Any], limits: dict[str, Any]) -> tuple[bool, str]:
+    checks = (
+        ("allocatable_cpus", float(limits.get("cpus", limits.get("vcpus", 0))), "CPU"),
+        ("allocatable_memory_gb", float(limits.get("memory_gb", 0)), "memory"),
+        ("allocatable_disk_gb", float(limits.get("disk_gb", 0)), "disk"),
+    )
+    for key, requested, label in checks:
+        available = float(capacity.get(key, 0) or 0)
+        if requested > available:
+            return False, f"Host capacity is below the safe threshold for {label}: requested {requested:g}, available {available:g}."
+    return True, "Host capacity is sufficient."
+
+
+def recommend_resource_profile(*, scale: str = "", intent: str = "", project_kind: str = "", language: str = "", framework: str = "") -> ResourceProfile:
+    scale = str(scale or "").lower()
+    intent = str(intent or "").lower()
+    kind = str(project_kind or "").lower()
+    language = str(language or "").lower()
+    framework = str(framework or "").lower()
+    if scale == "large" or kind in {"infrastructure-service", "full-stack-web"} or "data" in kind or "spark" in framework:
+        return RESOURCE_PROFILES["large"]
+    if intent == "production" and (kind in {"web-frontend", "rapid-api", "full-stack-web"} or framework in {"next.js", "spring", "spring-boot", "fastapi"}):
+        return RESOURCE_PROFILES["large"]
+    if scale == "medium" or intent == "production" or language in {"java", "csharp", "c++", "cpp", "rust"}:
+        return RESOURCE_PROFILES["standard"]
+    return RESOURCE_PROFILES["small"]
+
+
+def recommend_runtime_isolation(*, scale: str = "", intent: str = "", project_kind: str = "") -> str:
+    if str(scale or "").lower() == "large" and str(intent or "").lower() == "production":
+        return "vm"
+    if str(project_kind or "").lower() == "infrastructure-service":
+        return "vm"
+    return "container"
+
+
+def resource_metadata(name: str, runtime_type: str = "container") -> dict[str, Any]:
+    profile = get_resource_profile(name)
+    return {**asdict(profile), **profile.limits(runtime_type)}
+
+
+def resource_override_path(project: Path) -> Path:
+    return project / ".devfleet" / "runtime-resources.yaml"
+
+
+def ownership_override_path(project: Path) -> Path:
+    return project / ".devfleet" / "runtime-ownership.yaml"
+
+
+def write_ownership_override(project: Path, compose_file: Path, labels: dict[str, str]) -> Path | None:
+    try:
+        document = yaml.safe_load(compose_file.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    services = document.get("services") if isinstance(document, dict) else None
+    if not isinstance(services, dict) or not services:
+        return None
+    override = {"services": {str(service): {"labels": dict(labels)} for service in services}}
+    destination = ownership_override_path(project)
+    atomic_text(destination, yaml.safe_dump(override, sort_keys=False))
+    return destination
+
+
+def write_resource_override(project: Path, compose_file: Path, profile_name: str | dict[str, Any]) -> Path | None:
+    if isinstance(profile_name, dict):
+        limits = custom_resource_metadata(profile_name, runtime_type="container")
+    else:
+        limits = get_resource_profile(profile_name).limits("container")
+    try:
+        document = yaml.safe_load(compose_file.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    services = document.get("services") if isinstance(document, dict) else None
+    if not isinstance(services, dict) or not services:
+        return None
+    override = {"services": {str(service): {"cpus": limits["cpus"], "mem_limit": limits["memory"], "pids_limit": limits["pids"]} for service in services}}
+    destination = resource_override_path(project)
+    atomic_text(destination, yaml.safe_dump(override, sort_keys=False))
+    return destination
+
+```
+
+
+## FILE: source/app/devfleet/runtime.py
 
 SHA256: 0fde1265ee3895e9dd1b0369256eca1e55fa51532ff1918982ad03ee4f5e4aad | Bytes: 11280 | Git mode: 100644
 
@@ -568,374 +945,4 @@ def _open_verified_root(root: Path) -> tuple[int, os.stat_result, Path]:
         raise ValueError("Workspace root could not be opened without following aliases.") from exc
     try:
         actual = os.fstat(fd)
-        if not _identity_matches(actual, _object_identity(observed)):
-            raise ValueError("Workspace root identity changed before it could be authorized.")
-        return fd, actual, lexical
-    except Exception:
-        os.close(fd)
-        raise
-
-
-@dataclass
-class _AuthorizedEntry:
-    name: str
-    kind: int
-    result: os.stat_result
-    fd: int | None
-
-
-def _scan_generated_fd(fd: int) -> tuple[int, int]:
-    count = 0
-    total = 0
-    for name in sorted(os.listdir(fd)):
-        result = os.stat(name, dir_fd=fd, follow_symlinks=False)
-        kind = stat.S_IFMT(result.st_mode)
-        if kind == stat.S_IFLNK:
-            continue
-        if kind == stat.S_IFDIR:
-            child_fd, _ = _open_verified_child(fd, name, stat.S_IFDIR)
-            try:
-                child_count, child_total = _scan_generated_fd(child_fd)
-                count += child_count
-                total += child_total
-            finally:
-                os.close(child_fd)
-        elif kind == stat.S_IFREG:
-            child_fd, child_result = _open_verified_child(fd, name, stat.S_IFREG)
-            os.close(child_fd)
-            count += 1
-            total += int(child_result.st_size)
-        else:
-            raise ValueError(f"Unsupported generated workspace entry: {name}")
-    return count, total
-
-
-def _capture_workspace_posix(root: Path, *, include_generated: bool) -> tuple[dict[str, Any], list[_AuthorizedEntry]]:
-    root_fd, root_result, lexical_root = _open_verified_root(root)
-    entries: list[_AuthorizedEntry] = [_AuthorizedEntry("", stat.S_IFDIR, root_result, root_fd)]
-    symlinks: list[str] = []
-    symlink_targets: dict[str, str] = {}
-    generated: list[str] = []
-    generated_details: list[dict[str, Any]] = []
-    files = 0
-    bytes_total = 0
-
-    def walk(parent_fd: int, prefix: str) -> None:
-        nonlocal files, bytes_total
-        for name in sorted(os.listdir(parent_fd)):
-            rel = f"{prefix}/{name}" if prefix else name
-            result = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-            kind = stat.S_IFMT(result.st_mode)
-            if kind == stat.S_IFLNK:
-                symlinks.append(rel)
-                symlink_targets[rel] = os.readlink(name, dir_fd=parent_fd)
-                continue
-            if kind == stat.S_IFDIR:
-                child_fd, child_result = _open_verified_child(parent_fd, name, stat.S_IFDIR)
-                if name in GENERATED_DIR_NAMES and not include_generated:
-                    try:
-                        excluded_files, excluded_bytes = _scan_generated_fd(child_fd)
-                    finally:
-                        os.close(child_fd)
-                    generated.append(rel)
-                    generated_details.append({"path": rel, "files": excluded_files, "bytes": excluded_bytes})
-                    continue
-                entries.append(_AuthorizedEntry(rel, kind, child_result, child_fd))
-                walk(child_fd, rel)
-                continue
-            if kind != stat.S_IFREG:
-                raise ValueError(f"Unsupported workspace entry: {rel}")
-            child_fd, child_result = _open_verified_child(parent_fd, name, stat.S_IFREG)
-            entries.append(_AuthorizedEntry(rel, kind, child_result, child_fd))
-            files += 1
-            bytes_total += int(child_result.st_size)
-
-    try:
-        walk(root_fd, "")
-        included_paths = len(entries) - 1
-        inspection = {
-            "workspace": str(lexical_root),
-            "files": files,
-            "bytes": bytes_total,
-            "symlinks": sorted(symlinks),
-            "symlink_targets": dict(sorted(symlink_targets.items())),
-            "generated_dirs": sorted(generated),
-            "generated_details": sorted(generated_details, key=lambda item: item["path"]),
-            "generated_bytes": sum(item["bytes"] for item in generated_details),
-            "estimated_archive_bytes": bytes_total + (files * 512),
-            "safe_for_archive": not symlinks,
-            "included_path_count": included_paths,
-            "included_file_count": files,
-            "included_byte_count": bytes_total,
-            "omitted_paths": sorted(generated),
-            "omission_policy_source": "routine-generated-directory-policy" if generated else "none",
-        }
-        return inspection, entries
-    except Exception:
-        for entry in reversed(entries):
-            if entry.fd is not None:
-                with contextlib.suppress(OSError):
-                    os.close(entry.fd)
-        raise
-
-
-def _close_authorized_entries(entries: list[_AuthorizedEntry]) -> None:
-    for entry in reversed(entries):
-        if entry.fd is not None:
-            with contextlib.suppress(OSError):
-                os.close(entry.fd)
-
-
-def _tarinfo_from_authorized(entry: _AuthorizedEntry, name: str) -> tarfile.TarInfo:
-    info = tarfile.TarInfo(name)
-    info.mode = stat.S_IMODE(entry.result.st_mode)
-    info.mtime = int(entry.result.st_mtime)
-    info.uid = int(entry.result.st_uid)
-    info.gid = int(entry.result.st_gid)
-    info.uname = ""
-    info.gname = ""
-    if entry.kind == stat.S_IFDIR:
-        info.type = tarfile.DIRTYPE
-    else:
-        info.type = tarfile.REGTYPE
-        info.size = int(entry.result.st_size)
-    return info
-
-
-def _write_authorized_tar(path: Path, slug: str, entries: list[_AuthorizedEntry]) -> None:
-    with tarfile.open(path, "w:gz", dereference=False) as archive:
-        for entry in entries:
-            name = slug if not entry.name else f"{slug}/{entry.name}"
-            info = _tarinfo_from_authorized(entry, name)
-            if entry.kind == stat.S_IFREG:
-                if entry.fd is None:
-                    raise ValueError(f"Authorized file has no stable descriptor: {name}")
-                current = os.fstat(entry.fd)
-                if not _identity_matches(current, _object_identity(entry.result)):
-                    raise ValueError(f"Authorized file identity changed before archive read: {name}")
-                with os.fdopen(os.dup(entry.fd), "rb") as stream:
-                    archive.addfile(info, stream)
-            else:
-                archive.addfile(info)
-
-
-def _relative_path(root: Path, candidate: Path) -> str:
-    try:
-        relative = candidate.resolve(strict=False).relative_to(root.resolve())
-    except ValueError as exc:
-        raise ValueError("Workspace entry escapes the workspace root.") from exc
-    text = relative.as_posix()
-    if not text or text == "." or text.startswith("../") or "/../" in f"/{text}":
-        raise ValueError("Workspace entry has an unsafe relative path.")
-    return text
-
-
-def inspect_workspace(root: Path, *, include_generated: bool = False) -> dict[str, Any]:
-    if POSIX_FD_HARDENING:
-        inspection, entries = _capture_workspace_posix(root, include_generated=include_generated)
-        _close_authorized_entries(entries)
-        return inspection
-    root = root.resolve()
-    if not root.is_dir() or root.is_symlink():
-        raise ValueError("Workspace must be a real directory.")
-    symlinks: list[str] = []
-    symlink_targets: dict[str, str] = {}
-    generated: list[str] = []
-    generated_details: list[dict[str, Any]] = []
-    generated_bytes = 0
-    files = 0
-    bytes_total = 0
-    included_paths = 0
-    for current, dirs, names in os.walk(root, topdown=True, followlinks=False):
-        current_path = Path(current)
-        kept_dirs: list[str] = []
-        for name in dirs:
-            path = current_path / name
-            rel = _relative_path(root, path)
-            if path.is_symlink():
-                symlinks.append(rel)
-                symlink_targets[rel] = os.readlink(path)
-                continue
-            if name in GENERATED_DIR_NAMES and not include_generated:
-                generated.append(rel)
-                excluded_files = 0
-                excluded_bytes = 0
-                for excluded_current, _, excluded_names in os.walk(path, topdown=True, followlinks=False):
-                    for excluded_name in excluded_names:
-                        excluded_path = Path(excluded_current) / excluded_name
-                        if excluded_path.is_symlink():
-                            continue
-                        if excluded_path.is_file():
-                            excluded_files += 1
-                            excluded_bytes += excluded_path.stat().st_size
-                generated_bytes += excluded_bytes
-                generated_details.append({"path": rel, "files": excluded_files, "bytes": excluded_bytes})
-                continue
-            kept_dirs.append(name)
-            included_paths += 1
-        dirs[:] = kept_dirs
-        for name in names:
-            path = current_path / name
-            rel = _relative_path(root, path)
-            if path.is_symlink():
-                symlinks.append(rel)
-                symlink_targets[rel] = os.readlink(path)
-                continue
-            if not path.is_file():
-                raise ValueError(f"Unsupported workspace entry: {rel}")
-            files += 1
-            bytes_total += path.stat().st_size
-    return {
-        "workspace": str(root),
-        "files": files,
-        "bytes": bytes_total,
-        "symlinks": sorted(symlinks),
-        "symlink_targets": dict(sorted(symlink_targets.items())),
-        "generated_dirs": sorted(generated),
-        "generated_details": sorted(generated_details, key=lambda item: item["path"]),
-        "generated_bytes": generated_bytes,
-        "estimated_archive_bytes": bytes_total + (files * 512),
-        "safe_for_archive": not symlinks,
-        "included_path_count": included_paths + files,
-        "included_file_count": files,
-        "included_byte_count": bytes_total,
-        "omitted_paths": sorted(generated),
-        "omission_policy_source": "routine-generated-directory-policy" if generated else "none",
-    }
-
-
-def _validate_members(archive: tarfile.TarFile, slug: str) -> list[str]:
-    names: list[str] = []
-    prefix = f"{slug}/"
-    for member in archive.getmembers():
-        name = member.name.replace("\\", "/")
-        parts = name.split("/")
-        if name.startswith("/") or name.startswith("../") or "/../" in f"/{name}" or "\x00" in name or any(part in {"", ".", ".."} for part in parts):
-            raise ValueError(f"Archive contains an unsafe path: {member.name}")
-        if not name.startswith(prefix) and name != slug:
-            raise ValueError("Archive must contain exactly one project-root directory.")
-        if member.issym() or member.islnk() or member.isdev() or not (member.isdir() or member.isfile()):
-            raise ValueError(f"Archive contains an unsupported entry type: {member.name}")
-        names.append(name)
-    if not any(name == slug for name in names):
-        raise ValueError("Archive is missing its project-root directory.")
-    return names
-
-
-def validate_archive(path: Path, slug: str) -> dict[str, Any]:
-    slug = validate_slug(slug)
-    digest = hashlib.sha256()
-    size = path.stat().st_size
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    with tarfile.open(path, "r:gz") as archive:
-        members = _validate_members(archive, slug)
-        if not any(name.startswith(f"{slug}/.devfleet/") for name in members):
-            raise ValueError("Archive is missing .devfleet metadata.")
-    return {"archive_sha256": digest.hexdigest(), "archive_bytes": size, "entries": len(members), "verified": True}
-
-
-def _assert_same_filesystem(staging: Path, destination_parent: Path) -> None:
-    """Require atomic rename topology before moving an existing workspace."""
-    try:
-        staging_device = os.stat(staging).st_dev
-        destination_device = os.stat(destination_parent).st_dev
-    except OSError as exc:
-        raise ValueError("Workspace restore cannot verify same-filesystem atomic promotion.") from exc
-    if staging_device != destination_device:
-        raise ValueError("Workspace restore refused: staging and destination are on different filesystems.")
-
-
-def _restore_journal_path(destination: Path) -> Path:
-    return destination.parent / f".{destination.name}.restore-transaction.json"
-
-
-RESTORE_JOURNAL_SCHEMA_VERSION = 1
-RESTORE_JOURNAL_PHASES = frozenset({
-    "PREPARED",
-    "OLD_MOVED_TO_ROLLBACK",
-    "NEW_PROMOTED",
-    "POSTCHECK_PASSED",
-    "COMMITTED",
-})
-
-
-@dataclass(frozen=True)
-class _RestoreJournal:
-    schema_version: int
-    slug: str
-    destination: Path
-    staging_root: Path
-    rollback: Path
-    phase: str
-
-
-def _is_reparse_point(path: Path) -> bool:
-    """Return true for symlinks and Windows junction/reparse objects."""
-    if path.is_symlink():
-        return True
-    try:
-        attributes = getattr(path.lstat(), "st_file_attributes", 0)
-    except OSError:
-        return False
-    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
-
-
-def _canonical_journal_path(value: Any, field: str) -> tuple[Path, Path]:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"Restore journal {field} must be a non-empty absolute path.")
-    raw = Path(value)
-    if not raw.is_absolute() or value.strip() in {".", ".."}:
-        raise ValueError(f"Restore journal {field} must be an absolute path.")
-    lexical = Path(os.path.abspath(os.fspath(raw)))
-    canonical = raw.resolve(strict=False)
-    if os.path.normcase(os.fspath(lexical)) != os.path.normcase(os.fspath(canonical)):
-        raise ValueError(f"Restore journal {field} uses a symlink, reparse point, or alias path.")
-    return lexical, canonical
-
-
-def _require_direct_safe_transaction_child(path: Path, parent: Path, field: str) -> None:
-    if path == parent or path.parent != parent:
-        raise ValueError(f"Restore journal {field} is not a direct transaction sibling.")
-    if path.exists() or path.is_symlink():
-        if _is_reparse_point(path):
-            raise ValueError(f"Restore journal {field} is a symlink or reparse point.")
-
-
-def _parse_restore_journal(journal: Any, requested_destination: Path) -> _RestoreJournal:
-    if not isinstance(journal, dict):
-        raise ValueError("Restore journal must be a JSON object.")
-    schema_version = journal.get("schema_version")
-    if type(schema_version) is not int or schema_version != RESTORE_JOURNAL_SCHEMA_VERSION:
-        raise ValueError("Restore journal schema version is unsupported.")
-
-    expected_slug = validate_slug(requested_destination.name)
-    slug = journal.get("slug")
-    if not isinstance(slug, str) or slug != expected_slug:
-        raise ValueError("Restore journal slug does not match the requested workspace.")
-
-    destination_lexical, destination = _canonical_journal_path(journal.get("destination"), "destination")
-    staging_lexical, staging_root = _canonical_journal_path(journal.get("staging_root"), "staging_root")
-    rollback_lexical, rollback = _canonical_journal_path(journal.get("rollback"), "rollback")
-    if destination != requested_destination or destination_lexical != requested_destination:
-        raise ValueError("Restore journal destination does not match the requested workspace.")
-
-    parent = requested_destination.parent
-    for path, field in ((staging_root, "staging_root"), (rollback, "rollback")):
-        if path in {requested_destination, parent}:
-            raise ValueError(f"Restore journal {field} aliases the destination or transaction parent.")
-        _require_direct_safe_transaction_child(path, parent, field)
-
-    stage_pattern = re.compile(rf"^\.{re.escape(expected_slug)}-restore-[A-Za-z0-9_-]{{6,64}}$")
-    rollback_pattern = re.compile(rf"^\.{re.escape(expected_slug)}\.rollback-[0-9a-f]{{32}}$")
-    if not stage_pattern.fullmatch(staging_lexical.name):
-        raise ValueError("Restore journal staging_root has an invalid transaction identity.")
-    if not rollback_pattern.fullmatch(rollback_lexical.name):
-        raise ValueError("Restore journal rollback has an invalid transaction identity.")
-    if staging_root == rollback:
-        raise ValueError("Restore journal staging and rollback identities overlap.")
-
-    phase = journal.get("phase")
-    if not isinstance(phase, str) or phase not in RESTORE_JOURNAL_PHASES:
-        raise ValueError("R
+        if

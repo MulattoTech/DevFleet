@@ -1,10 +1,255 @@
 # DevFleet source part 079
 
 Full-source UTF-8 byte interval [3627000, 3673500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 4bae6cc4082a906481da970253811bde936abcd34264d943d94ae948b4e0652f
+Payload SHA-256: 3cd6dd04f39444d1a641f2ad53ff7efd3903d45b56e5fcc08937f0e5074fb01f
 
 <!-- BEGIN SOURCE SLICE -->
- {
+58e087841aedb8031549fb41ced08f3db10aa6d2bf32dc042525b \
+    --hash=sha256:d73a585accffa5ae39c17264c36ec3166d2fad7000c780f5ef83b2722afb9dd2 \
+    --hash=sha256:dbd6c97045dad81227c8d040173da044c1de08de64a5ea8b555da4aee1d5fa22 \
+    --hash=sha256:e0618518f282c4ebff60f5e5b1247b6d91bb8b9f4476947563a1e74acc66f3c6 \
+    --hash=sha256:e140ed30ebde76796b686e67c182cff10ea2fbab186fafd1560f74bb5a473a6e \
+    --hash=sha256:e1cfd51e97e13ff3bd047c140764d277fc9b95b7cb5da59e46a47d167adab310 \
+    --hash=sha256:e2ca07fa7d89195ec0865d3d285666286740bfa83d83e5cee204043a31ecc165 \
+    --hash=sha256:e53a384f76b631c3ae5334ce6a52f0baa3a911eb94a4eac7f160079868b716d5 \
+    --hash=sha256:eb283ee99e21ad6443c8cdb06ac5b34b1308c329cbdf03fa02b445363714c799 \
+    --hash=sha256:eb72919d93e3a16fc451d3aa3d4b1698423daca1b382d3d959c9ac51297c12a8 \
+    --hash=sha256:ecb47f183a8025b2aa18b546725c3657e542112ae9c0613a2af79b4fa8d04ad7 \
+    --hash=sha256:f155b3a1b2a5fc89cdc70d47ee5d54e3b75e88efa34982028a35daef9ba00379 \
+    --hash=sha256:f22943b7770483f6ea0721c6b11d022947a98eb0acae14694de034f4d0d38925 \
+    --hash=sha256:f28b2725eb8cce327b9b3ab02415c853011dc55c95832fe90de6bc56f5315f72 \
+    --hash=sha256:f88af53d6ddaf72179ef613ddc905e6f4785f712b49b80b3bef9f3525e6194b4 \
+    --hash=sha256:faea288b6f0ab1902ef08f4ca6de005dccf856c4e0c4f21b8c5fce02d90a1b08 \
+    --hash=sha256:fff610d7bb2256a317bb1e96f0d7862c7aa8076733ee5df0fd41bbe76a24a4f4
+    # via uvicorn
+websockets==17.0.1 \
+    --hash=sha256:02ed63bf26dda9fa27df730a41f6664586c4ee05972c8fb667ce1725b3fd13d3 \
+    --hash=sha256:02f0b037a737d0cb0c33866c97bcd1a0b73170dfbf42d69d8fb86f51002fd5ae \
+    --hash=sha256:038cfad5d5417f8bb09295abe986029a26d22f34bda622ccc79b670efd4dab56 \
+    --hash=sha256:07abc3bd196a48af476a82fd47f3f79a6a3f70937a9f930cef703cfa0c9d83b6 \
+    --hash=sha256:07d78a509c3333f5908c83d7f78144ea68a6c9ec28110f5c54d81d8fcdc262c4 \
+    --hash=sha256:0b52c76b8a870b141b7ca0705289452183ce7a523101954ccfe29a25986a673f \
+    --hash=sha256:10b1587c599fa0f2c89154587c80e0fda98ade6c9fa8c0260a2823fb1800b685 \
+    --hash=sha256:10f461191125c63902ea7394ae9e752b1b5785641850c1d365bb30b0f88bc53f \
+    --hash=sha256:15920057a6b723f84734f0641403bca163a4b176e5af809ee4f0c4a1e75e9fed \
+    --hash=sha256:17ac37716c0244e82c9e384c41653c090b1864c6610224ca3857e7f7b58fce10 \
+    --hash=sha256:18ded646ce98cdd3c0235825b3252f1df55765ba49b616bb10282f758667b4d0 \
+    --hash=sha256:1b363bfd72a52c0658a3154a4cff219f15a474b35a235057d38853bf151acce7 \
+    --hash=sha256:1bdd8c4be420905dd732e00dcd669852d8128cc723efa585a0c0e51adb00a28a \
+    --hash=sha256:1d4cf7e8e5b8b1fa40758ac7524843a00237b124ab217e227542cafcfeb7a946 \
+    --hash=sha256:1df81d174c1561292de9e40b141cafc04f69077272f6c352afe1d743e20810df \
+    --hash=sha256:20a92f78ac8250984ed459faa9ca48c285adbfc0038ddc3fdac6046990a9c9ed \
+    --hash=sha256:22bd00f8bae2bccdb5dbe41e20f58ba44ca9fff0b4b561aaf39099c35da762ed \
+    --hash=sha256:2437d4ca208cc0f246d3a2297ae7474b4ba18261aaf5b9c79c84c031ecf348e1 \
+    --hash=sha256:246927ae9ae06ca0d42a483a4bdb80d4862e1ee5b4cab37c354a5e1ad8356448 \
+    --hash=sha256:2503c7e2a5049a12d5dac917a46d5d52591283a766165b8176bb167560421b38 \
+    --hash=sha256:2604de7228506b13a44a256a9d223943340c0e725af5d367dc068e192b027761 \
+    --hash=sha256:28012a54510fe8301bb893ef143cec30a2780a2d3bc20b7bbdf4379d7a63945d \
+    --hash=sha256:2a855b6dfe21c4d3420be265ae031829ba8ba0be0ea350d9f7c3ef30ae63ebe2 \
+    --hash=sha256:2abb1ba0a5133b7d2ef3c1c9f4b0c1e8a101012dce0b594ab2b2888d9a64820e \
+    --hash=sha256:2b3f3020171202b135ca078e20434977c6b2b02af647130d6980c9e39b9462e3 \
+    --hash=sha256:2bc14b481e05e331811108daa1aeb41a5e237a5564ef2f02ec5a356a0f102f78 \
+    --hash=sha256:2fa2cb465a131c347ba6717a78c887746e73edb1c131d01c982d6ef0d68b82e0 \
+    --hash=sha256:409d93efcaa14f7a99592c5baaef5ec6ca94fba0f5aec1a86f693977c69c9c1c \
+    --hash=sha256:41d6aa06b5ab832aee72fedf47a149535b121ac900b6bb4d3fe14712afac9a79 \
+    --hash=sha256:49266e4488309b38783257293a38298942b9a03aa106fcb45195377a77c0c1e2 \
+    --hash=sha256:4d1d99db29b5444e3982f1ce2ba8a833508ad44b2f1fbd0bd99e81d825c0b461 \
+    --hash=sha256:4d41c0a1d47a478bc432b3b9068097bee1ce0c5b19327ea6f75c2ab34ab1f2fb \
+    --hash=sha256:5033ffe6804dd53afafa7d08e8c3eef2d2431f34d58ca30507a8442dd04a033a \
+    --hash=sha256:53b90c00bc6201ab6695c7ff51a04d0e425514c37515e9eeecd2c1b978ac6c0e \
+    --hash=sha256:54cdcaa56f5d3eafd57058f0fa4a3de93a310b43a3c4699f06efc4c0bd054a5a \
+    --hash=sha256:5508f38c98ac29def9e747b87543b008a58b075df6da70b2cf2e0b47073d33bb \
+    --hash=sha256:55383d8177b3c99fd873ee5db0e0193f4c1dd4a3feaccf1a4a03c1b7cf539cac \
+    --hash=sha256:55b12e47dcee83673a40d07686cfb6f9d6dfc285976ade9463f61d2bef3fad22 \
+    --hash=sha256:5661f868ef191d33dfc6a0cc7c5b3d495f0cc8bb3f8b30d87bda8755c61c95f5 \
+    --hash=sha256:57d2ee9b24b404ce75f3814f92073c0ed88106c950148d2427fe8d25ca254d1f \
+    --hash=sha256:599b03beb77633bffc095334338fad79cafc2b01fbd58953838130a9ae967d7b \
+    --hash=sha256:5baa9bc0dfbae8c507e51c8cf1b6d4628086f7a87bbd3a9952bd5f035451f1cc \
+    --hash=sha256:5f33a649bfcb8312524173cc4bbafa7dbb236e18eee9aa31a1d324ca0ddda28c \
+    --hash=sha256:6740be6d1bab69f08ab52cb15b08f76c143b6fe61c580ba62bd929f3ab7a1d42 \
+    --hash=sha256:6a434e59962a4fb9016bea327e1d14d6cd67670ecfb8942b4f4a0c24036634ce \
+    --hash=sha256:6db9e5bf3649ab506c6ae8a3ac85a00fb1ae3816d75962771b2df8adbc5d40d2 \
+    --hash=sha256:6fd88365da261c53d3e943fb37e0d0721b9cde119f6b2e3fc84369b6ab234d63 \
+    --hash=sha256:7002d5f9e1c3ddd991cdfdbfee18cc8c8b196b2445022892badacd6cb338bbbc \
+    --hash=sha256:70d438268e49f1a4bd096b6b6f7010f3ab48b5db2574dbf7d8c864c46ce7a06a \
+    --hash=sha256:72d7f2a5aeb4e82daa4ee18f125b4277f427033359be5c745ad709608446cc2c \
+    --hash=sha256:733e3cc7171fa1b899edbe725ef9382d0e960657dc1fd933f3281ae910c01dab \
+    --hash=sha256:734d20364dc2cfe03674883cafcf580b6e431c5ce42b476312b9285310230cf9 \
+    --hash=sha256:759adeb5b0c5775b563254ec63b5b79089fc0045b479143a0b1b8c0ebaae1253 \
+    --hash=sha256:769ce7e2acfd9a89f2bed3a9c0da229459516bbc00bd4c9e2ca492c613ae4861 \
+    --hash=sha256:810cb3fb5fa6e447216f4e82d9a85cb8aed0929ae3538153ddfe8a6e3121a58d \
+    --hash=sha256:81ce19c6046ace11da7001781be7317bb1dc389f399af4b2ed962190f76f9add \
+    --hash=sha256:846a4a8b0833e3cad57523d9e3bd50ec8ea05ab9d06c582f82a1340ba096af5f \
+    --hash=sha256:872273e629ca7e3d35f16a2dc6ede84e1d5c831e616b8277de6e4f83114e7c58 \
+    --hash=sha256:8848c207049ad49d318e5f64a3d4d7bb189f8328d0d98e65647788f2a085785c \
+    --hash=sha256:884af729b8ab50486acd94d9768c2b60914bf39b579ebba0a5cb73bfdfd61fd2 \
+    --hash=sha256:8c07f145d0b9e90cbd96035f31fb79199aef4da1872854e36ebeb258e3d57594 \
+    --hash=sha256:8cd3369e42c0246afaf9d669cfc19797e3a49e8c0a639544459c57597108b966 \
+    --hash=sha256:8e387adb0c692c6b5571bdeafc8ac9d1901ea30f10309134780b16ecd35e6605 \
+    --hash=sha256:90246fa9e6cb192a778ce6ce024057ec54317a894db7899c922dcdc1f4cbf6a5 \
+    --hash=sha256:90973a3a00f23afdfd1c9b06fb84289bf0220f247ef8a62501a1967c7af54f7b \
+    --hash=sha256:9493314a99e599163c854fb5900ad7f7ea38c5cb9d9103aa30b3c6b8181c01fa \
+    --hash=sha256:9f7747d3daa41a11f25f7cca5dc988fc51da97b311bed4c9d843860f79779283 \
+    --hash=sha256:a39ce3a7b0e6059be093213d637963101380157bcbad355916738fafb490698d \
+    --hash=sha256:a60fa1a25cca1bcc2bf87b8d6be37a741f0a3239fb5e9cfb7a37173b68ffcf87 \
+    --hash=sha256:a68e604c6d1b0338e46652e2688cbce8096ad9c03548b075fda9e2ea19a9b7dd \
+    --hash=sha256:a8af570fc29cd998a921c7131c8ac81d9434466d6d25300cb12a690fb56a8a08 \
+    --hash=sha256:aadc298969ad229d8e3029fc5cc751fdad286696230f9cf014e90ff9cd8e6ea0 \
+    --hash=sha256:ab56439c9f74c52770690c7b2f616b3bf775cb3920453ee355ac765c032d8bbf \
+    --hash=sha256:ab9f962a5b64a5c3c845d556b7dc4e6fb683f7b67179f8205e814bb2e0213ffe \
+    --hash=sha256:afbce6e3f0fac32dc87c2a0d84869d1a706460d64f39f3889386413e6e4d3d26 \
+    --hash=sha256:b3ff0ad440ad52dda64138f16895f66403f40192365e39b1010e889f289746b0 \
+    --hash=sha256:b580794e926cab7ff42ee4371ef14e0b22cb2bb722a607f77769136468f49a3f \
+    --hash=sha256:b85b960a4507b0714c0a1246d031be9118d908ee974dc085257297a955205f1d \
+    --hash=sha256:b98860aefbd3d9bc8e3c7f0eefb83b11142b16110739c68cd33d3b4d6e84e536 \
+    --hash=sha256:bb31f42ea095ea826463c770829aa188a86c9a5c976b1467cbbf583c811de833 \
+    --hash=sha256:bc0bca48ba24c6c866847fd20478a51dd547fa0ad258dab9615c414ec534bbc0 \
+    --hash=sha256:bd1470d2c53fe53269bf5619da7725d30dd9b9693f1689f7a85eab8dea734442 \
+    --hash=sha256:c09e097d0e46e3c289bedab9a475ae344b70c30ff5646e46af22b4e6fdc97b21 \
+    --hash=sha256:c1bec5d6a19f5fbe87e4940739cfc65e7bb53d8b353e1029b8037a1653b321bc \
+    --hash=sha256:c1c118a6b0e25bfc9a6802075d748fa6321714ffbdf3c88d29d9a0e3c7386c75 \
+    --hash=sha256:c23e532c8a2325a1e7486de8763a60dc43e83f01bcaeca07e3ba79652c156db1 \
+    --hash=sha256:c356dbddab0a529ed7574f78f559d75a223735c321c28f6f587fbf02b11ed301 \
+    --hash=sha256:c38515cb54902f7e97d0239e81ef46c4444f9475f4807fb9bbdb789b4089abcf \
+    --hash=sha256:c395bda8e7d8f51a02e80261fb57127979e5c472675d9a96b2860619ad47da48 \
+    --hash=sha256:c6be9cba65c65cc76dfa3d4619e359ff02a4476c74e179b215236c11a0b32345 \
+    --hash=sha256:cd526c8228e759c1006c4b7c9ac71dc4e925ced1a6a6a5a8e94643709738f63e \
+    --hash=sha256:cddc675ec31bca65473321f9a9794e488b43b3b8de5d02c8ef4810c5d5792163 \
+    --hash=sha256:cffc84ddec6da7f447677266fee2a3c40ecc78172f00752aa1150b8a8d65df1d \
+    --hash=sha256:d41e9845514754a42d1d83b2fca9d27fee2ca7b3b0bee6843ba5a9bb2b6e25ac \
+    --hash=sha256:d69fd559f9f0e8a52d2fce6f04ee143f86e70df0a189cd95164eddac599e810f \
+    --hash=sha256:d7d72843691f50b91127c50688df10cb72ec6f4c4b1d7e2c11ab33b16acf8e51 \
+    --hash=sha256:d9aac6081513f02eac3f8caace800dbfc5c608b69e4a7bef69e414eabfc95aa1 \
+    --hash=sha256:dbfae8e75b342e31fc6fd1a8bbb393b7cbb91d6cfd581650300a94381e7b7e2b \
+    --hash=sha256:e8208f2729cba030ff872a92064c97584eeb9502f53d32a05a0f05d5a17ca6c6 \
+    --hash=sha256:e95e321d0d763f2b6633512605f6112ebd70d5746f3ce05c941909d4a25233f2 \
+    --hash=sha256:e98ec9ec61cce5bc4b8b218322ad090b0994eb060bb04da704c62ef0a3d864e6 \
+    --hash=sha256:eab6de8a98b9a7772cf686d00b4de439fc7efb8ab05ae106ef227291d06f87c5 \
+    --hash=sha256:efe0ae052a8d023b87198921e8a7ce1dc7768816bcd2fbc20df171ac73a04891 \
+    --hash=sha256:f11a398d8170b7ac5000baf7f258dcda579ef3ea744e0cc6a165e0dfbc0d3198 \
+    --hash=sha256:f3fd9a1f87f8f0f3f8e9f9bd0195f7516562d13f5b178db8c5784d1f60b60bed \
+    --hash=sha256:f47b0815af3948ec6a440b3afa02f05b18cc0939549e91b5c677b5d9c2c8472a \
+    --hash=sha256:f991247276797d0c61ab7770bc9791eadc16f683b4d83517f624932adc1a8bab \
+    --hash=sha256:ffad64ce7ad3703d652a3fd9af26238377d24ce52c6ad8ff35d26d82f61f493f
+    # via uvicorn
+
+```
+
+
+## FILE: source/app/requirements.txt
+
+SHA256: f9a988a58e9e3b9df6e7e78963ec1a074a5642b77fb6541f4463592f6eee6346 | Bytes: 124 | Git mode: 100644
+
+```
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+jinja2==3.1.6
+python-multipart==0.0.32
+PyYAML==6.0.2
+httpx==0.28.1
+psutil==7.0.0
+
+```
+
+
+## FILE: source/app/static/app.js
+
+SHA256: 8e100c7cc4c96993212aaabfc30e7ed1bbc1167b8f2eb5db840671aee6b0599a | Bytes: 35603 | Git mode: 100644
+
+```
+(() => {
+  const currentCsrf = () => document.getElementById('devfleet-csrf')?.dataset.token || '';
+  const fetchWithTimeout = async (url, options = {}, timeoutMs = 10000) => {
+    const controller = options.controller || new AbortController();
+    const timer = setTimeout(() => controller.abort('timeout'), timeoutMs);
+    try { return await fetch(url, { ...options, controller: undefined, signal: controller.signal }); }
+    finally { clearTimeout(timer); }
+  };
+  const cleanupProjectRequests = () => {
+    document.querySelectorAll('[data-project-logs]').forEach((node) => node._devfleetLogCleanup?.());
+    document.querySelectorAll('.operation-banner').forEach((node) => node._devfleetOperationCleanup?.());
+  };
+  // The UI endpoint is optional; the same-origin operation endpoint remains the source of truth.
+
+  // Navigation is deliberately limited to same-origin document links. Forms,
+  // API links, external links, downloads, and modified clicks keep browser semantics.
+  const main = document.querySelector('.app-main');
+  const viewCache = new Map();
+  let currentUrl = location.href;
+  const isDocumentLink = (link, event) => {
+    if (!link || !link.href || event.defaultPrevented || event.button !== 0 ||
+        event.metaKey || event.ctrlKey || event.shiftKey || event.altKey ||
+        link.target && link.target !== '_self' || link.hasAttribute('download') ||
+        link.closest('form') || link.href.startsWith(`${location.origin}/api/`)) return false;
+    const url = new URL(link.href, location.href);
+    return url.origin === location.origin && url.protocol === location.protocol &&
+      url.hash === '' || (url.origin === location.origin && url.protocol === location.protocol &&
+      url.hash !== '' && url.pathname + url.search !== location.pathname + location.search);
+  };
+  const cacheCurrentView = () => {
+    if (main) viewCache.set(currentUrl, { html: main.innerHTML, title: document.title, bodyClass: document.body.className });
+  };
+  const syncNavigation = () => {
+    const params = new URL(location.href).searchParams;
+    const view = params.get('view') || (location.pathname.startsWith('/projects/') ? 'project' : 'overview');
+    document.querySelectorAll('.primary-nav a').forEach((link) => {
+      const linkView = new URL(link.href, location.href).searchParams.get('view');
+      link.classList.toggle('active', linkView === view || (view === 'project' && linkView === 'projects'));
+    });
+  };
+  const applyDocument = (doc, url, replace = false) => {
+    if (!main) return;
+    cacheCurrentView();
+    const nextMain = doc.querySelector('.app-main');
+    if (!nextMain) { location.href = url; return; }
+    cleanupProjectRequests(); window.__devfleetStopInfrastructure?.();
+    main.replaceChildren(...Array.from(nextMain.childNodes).map((node) => node.cloneNode(true)));
+    document.title = doc.title;
+    document.body.className = doc.body.className;
+    const nextCsrf = doc.getElementById('devfleet-csrf')?.dataset.token;
+    if (nextCsrf !== undefined) document.getElementById('devfleet-csrf')?.setAttribute('data-token', nextCsrf);
+    if (replace) history.replaceState({}, '', url); else history.pushState({}, '', url);
+    currentUrl = location.href;
+    viewCache.set(currentUrl, { html: main.innerHTML, title: document.title, bodyClass: document.body.className });
+    initializeView();
+    requestAnimationFrame(() => { if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView(); });
+  };
+  const navigate = async (url, replace = false) => {
+    cacheCurrentView();
+    const cached = viewCache.get(url);
+    if (cached && main) {
+      cleanupProjectRequests(); window.__devfleetStopInfrastructure?.();
+      main.innerHTML = cached.html; document.title = cached.title; document.body.className = cached.bodyClass;
+      if (replace) history.replaceState({}, '', url); else history.pushState({}, '', url);
+      currentUrl = location.href; initializeView();
+      return;
+    }
+    try {
+      const response = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'text/html' } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      applyDocument(await response.text().then((html) => new DOMParser().parseFromString(html, 'text/html')), url, replace);
+    } catch (_) { location.href = url; }
+  };
+  document.addEventListener('click', (event) => {
+    const link = event.target.closest('a');
+    if (!isDocumentLink(link, event)) return;
+    const url = new URL(link.href, location.href);
+    if (url.href === location.href) return;
+    event.preventDefault(); navigate(url.href);
+  });
+  window.addEventListener('popstate', () => navigate(location.href, true));
+  syncNavigation();
+
+  document.querySelectorAll('form[method="post"]').forEach((form) => {
+    if (form.querySelector('input[name="csrf_token"]')) return;
+    const input = document.createElement('input');
+    input.type = 'hidden'; input.name = 'csrf_token'; input.value = currentCsrf();
+    form.prepend(input);
+  });
+
+  const name = document.querySelector('input[name="display_name"]');
+  const slug = document.querySelector('input[name="slug"]');
+  if (name && slug) {
     let slugLocked = Boolean(slug.value);
     let lastGenerated = slug.value;
     slug.addEventListener('input', () => { slugLocked = slug.value !== lastGenerated; });
@@ -412,25 +657,4 @@ Payload SHA-256: 4bae6cc4082a906481da970253811bde936abcd34264d943d94ae948b4e0652
   closeDetails?.addEventListener('click', () => { details.hidden = true; });
   renderNodes(); renderNodeFilter(); renderContainers();
   const shouldRefresh = new URL(location.href).searchParams.get('view') === 'infrastructure';
-  if (shouldRefresh) refreshCluster();
-  scheduleRefresh();
-  window.__devfleetStopInfrastructure = () => { if (timer) clearInterval(timer); timer = null; };
-  }
-
-  initializeView();
-})();
-
-```
-
-
-## FILE: source/app/static/style.css
-
-SHA256: 9e95e0103e58d5d59f47b099381beb3f0e9af60b34a9a30fe00c121c04833128 | Bytes: 20663 | Git mode: 100644
-
-```
-:root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0b1020;color:#f3f6ff;--bg:#0b1020;--surface:#131a2c;--surface-2:#18233a;--line:#2a3857;--muted:#8e9bb7;--text:#f3f6ff;--blue:#5b8cff;--blue-2:#2e63d2;--green:#35d49a;--yellow:#f0c96a;--red:#ed6b7a;--shadow:0 18px 50px rgba(0,0,0,.22)}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% -10%,#1c2b55 0,#0b1020 42%);color:var(--text)}a{color:#a9c5ff;text-decoration:none}a:hover{color:#d6e3ff}button,.button,input,select{font:inherit}button,.button{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid transparent;border-radius:9px;padding:10px 14px;background:var(--blue-2);color:#fff;cursor:pointer;font-weight:650;text-decoration:none;transition:.18s ease}button:hover,.button:hover{filter:brightness(1.12);transform:translateY(-1px)}button:disabled,.button.disabled{opacity:.45;cursor:not-allowed;transform:none;filter:none}.button.ghost,button.ghost{background:#172542;border-color:#3a4d74;color:#d9e5ff}.button.danger,button.danger{background:#8f3046;border-color:#c2576a}.icon-button{padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#172542;color:#a9c5ff}.app-shell{display:flex;min-height:100vh}.sidebar{position:sticky;top:0;width:248px;height:100vh;display:flex;flex-direction:column;padding:26px 16px;border-right:1px solid rgba(89,111,160,.24);background:rgba(10,16,32,.82);backdrop-filter:blur(16px)}.brand{display:flex;align-items:center;gap:11px;padding:0 10px 34px;color:var(--text)}.brand-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#709bff,#385fd0);font-weight:800;font-size:.8rem;box-shadow:0 8px 24px rgba(58,102,220,.35)}.brand strong,.brand small{display:block}.brand small{margin-top:3px;color:var(--muted);font-size:.68rem}.primary-nav{display:grid;gap:5px}.primary-nav a{display:flex;align-items:center;gap:12px;padding:12px 13px;border-radius:9px;color:#aebbd5;font-size:.91rem}.primary-nav a span{width:18px;text-align:center;color:#8295bc}.primary-nav a:hover,.primary-nav a.active{background:#1a2948;color:#fff}.primary-nav a.active span{color:#78a1ff}.sidebar-footer{margin-top:auto;display:grid;gap:16px;padding:15px 10px 0;border-top:1px solid rgba(89,111,160,.22)}.node-presence{display:flex;align-items:center;gap:8px}.node-presence strong,.node-presence small{display:block}.node-presence small{margin-top:3px;color:var(--muted);font-size:.68rem}.presence-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(53,212,154,.13)}.version-label{color:#63708b;font-size:.68rem}.app-main{width:min(100%,1460px);margin:0 auto;padding:0 42px 70px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:22px;padding:34px 0 30px}.topbar h1{margin:4px 0 0;font-size:1.85rem;letter-spacing:-.03em}.topbar-actions{display:flex;align-items:center;gap:12px}.connection-pill{display:flex;align-items:center;gap:8px;padding:9px 13px;border:1px solid #2b4866;border-radius:999px;background:rgba(24,40,68,.55);color:#c4d4f1;font-size:.78rem}.eyebrow{margin:0;color:#7296ed;font-size:.68rem;font-weight:800;letter-spacing:.13em}.muted{color:var(--muted)}.error{color:#ff9daa}.danger-text{color:#ff8796}.hero-grid,.content-grid,.stats-grid,.node-grid,.project-card-grid,.summary-grid,.details-grid{display:grid;gap:16px}.hero-grid{grid-template-columns:minmax(0,1.6fr) minmax(280px,.8fr)}.content-grid.two-thirds{grid-template-columns:minmax(0,1.35fr) minmax(280px,.8fr)}.stats-grid{grid-template-columns:repeat(4,minmax(0,1fr));margin:18px 0}.panel,.hero-card,.health-card,.project-card,.stat-card,.empty-state{border:1px solid var(--line);border-radius:15px;background:linear-gradient(145deg,rgba(22,31,53,.96),rgba(15,23,40,.96));box-shadow:var(--shadow)}.panel{padding:22px;margin:16px 0}.hero-card{min-height:250px;padding:34px;background:linear-gradient(130deg,#203c7a,#17294e 57%,#111b31)}.hero-card h2{max-width:580px;margin:12px 0 10px;font-size:2.25rem;line-height:1.08;letter-spacing:-.04em}.hero-card p{max-width:610px;color:#b8c9e8;line-height:1.6}.hero-actions,.quick-actions,.card-actions,.quick-links,.action-stack,.actions{display:flex;align-items:center;flex-wrap:wrap;gap:9px}.hero-actions{margin-top:28px}.health-card{padding:24px}.card-heading,.section-heading,.project-card-top,.project-hero-row{display:flex;align-items:center;justify-content:space-between;gap:14px}.icon-tile{display:grid;place-items:center;width:38px;height:38px;border-radius:11px;font-weight:800}.icon-tile.green{background:rgba(53,212,154,.14);color:var(--green)}.health-card .card-heading{justify-content:flex-start}.health-card h3{margin:0}.health-score{margin:34px 0 7px;color:var(--green);font-size:1.65rem;font-weight:750}.health-card a{display:block;margin-top:21px;font-weight:650}.stat-card{display:grid;gap:5px;padding:18px 20px}.stat-card strong{font-size:1.75rem;letter-spacing:-.03em}.stat-card small,.stat-label{color:var(--muted);font-size:.75rem}.stat-label{color:#9eb2d9;text-transform:uppercase;letter-spacing:.08em;font-weight:700}.section-heading{margin-bottom:18px}.section-heading h2,.page-intro h2,.panel h2{margin:4px 0 0;font-size:1.28rem;letter-spacing:-.025em}.project-list{display:grid}.project-row{display:flex;align-items:center;gap:12px;padding:13px 5px;border-bottom:1px solid rgba(67,87,127,.35)}.project-row:last-child{border-bottom:0}.project-avatar{display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:10px;background:#263a68;color:#bcd0ff;font-weight:800}.project-avatar.large{width:44px;height:44px;font-size:1.1rem}.project-avatar.huge{width:64px;height:64px;font-size:1.45rem}.project-row-copy{display:grid;gap:4px;min-width:0;flex:1}.project-row-copy strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.project-row-copy small{color:var(--muted);font-size:.76rem}.chevron{color:#8094be;font-size:1.35rem}.status-badge{display:inline-flex;align-items:center;width:max-content;border-radius:999px;padding:4px 9px;font-size:.68rem;font-weight:750;text-transform:capitalize;white-space:nowrap}.status-badge.ok{background:rgba(53,212,154,.14);color:#66e2b2}.status-badge.warn{background:rgba(240,201,106,.14);color:#f3d47e}.status-badge.bad{background:rgba(237,107,122,.14);color:#ff9aa6}.activity-row{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid rgba(67,87,127,.35)}.activity-row:last-child{border-bottom:0}.activity-row span:nth-child(2){display:grid;gap:3px;min-width:0;flex:1}.activity-row small,.activity-row time{color:var(--muted);font-size:.73rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.activity-row time{max-width:125px}.activity-dot{display:inline-block;width:8px;height:8px;flex:none;border-radius:50%}.activity-dot.ok{background:var(--green)}.activity-dot.warn{background:var(--yellow)}.activity-dot.bad{background:var(--red)}.page-intro{display:flex;align-items:end;justify-content:space-between;gap:20px;margin:8px 0 25px}.page-intro h2{font-size:2rem}.page-intro p{margin:9px 0 0}.project-card-grid{grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}.project-card{padding:20px}.project-card-top{align-items:flex-start}.project-card-top h3{margin:2px 0 4px}.project-card-top>div{flex:1}.project-facts,.environment-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:22px 0;padding:13px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.project-facts div,.environment-summary div,.summary-grid div{display:grid;gap:5px}.project-facts small,.environment-summary small,.summary-grid small{color:var(--muted);font-size:.7rem}.project-facts strong,.environment-summary strong,.summary-grid strong{font-size:.82rem}.project-summary{min-height:22px;font-size:.8rem}.wizard-panel{scroll-margin-top:20px}.wizard-form{display:grid;gap:23px}.form-step{display:grid;grid-template-columns:32px 1fr;gap:14px;padding-bottom:21px;border-bottom:1px solid var(--line)}.step-number{display:grid;place-items:center;width:27px;height:27px;border-radius:50%;background:#263e78;color:#c9d9ff;font-size:.76rem;font-weight:800}.form-step h3{margin:2px 0 13px;font-size:.96rem}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:13px}.form-grid label,.environment-form label,.danger-form label{display:grid;gap:6px;color:#b8c8e3;font-size:.78rem}.checkbox-label{display:flex!important;align-items:center;grid-template-columns:none!important}.checkbox-label input{width:auto}input,select{width:100%;padding:10px 11px;border:1px solid #3d4e73;border-radius:8px;background:#0e172a;color:#f4f7ff;outline:none}input:focus,select:focus{border-color:#70a0ff;box-shadow:0 0 0 3px rgba(91,140,255,.15)}.review-note{display:grid;gap:5px;padding:13px 15px;border:1px solid #3a4e78;border-radius:10px;background:rgba(28,48,88,.45);color:#c8d5ed;font-size:.78rem}.review-note span{color:var(--muted);line-height:1.5}.form-advanced{margin:0}.project-hero{margin:0 0 18px;padding:10px 0}.back-link{display:inline-block;margin-bottom:22px;color:#9bb8f7;font-size:.82rem}.project-hero-row{justify-content:flex-start}.project-hero-row>div:nth-child(2){flex:1}.project-hero h2{margin:4px 0;font-size:2rem;letter-spacing:-.04em}.hero-status{display:grid;justify-items:end;gap:8px}.hero-status small{color:var(--muted);font-size:.74rem}.quick-actions{margin-top:23px}.tabs{display:flex;gap:22px;margin:0 -2px 19px;border-bottom:1px solid var(--line)}.tabs a{padding:11px 3px;color:var(--muted);font-size:.82rem;font-weight:700;border-bottom:2px solid transparent}.tabs a.active,.tabs a:hover{color:#dce7ff;border-color:#6f9bff}.environment-form{display:grid;gap:15px;max-width:520px}.action-stack{display:grid;justify-items:start;align-items:start}.action-stack form{width:100%}.action-stack button{width:100%;justify-content:flex-start}.danger-panel{border-color:#6c3348;background:linear-gradient(145deg,rgba(56,27,47,.75),rgba(25,20,38,.95))}.danger-form{display:grid;gap:13px}.advanced{margin-top:14px;color:#a9bce0}.advanced summary{cursor:pointer;color:#8fa8d7;font-size:.76rem;font-weight:700}.advanced pre,pre{white-space:pre-wrap;word-break:break-word;max-height:430px;overflow:auto}.advanced pre{margin:10px 0 0;padding:13px;border:1px solid rgba(67,87,127,.5);border-radius:8px;background:#0a1222;color:#aebed9;font-size:.7rem}.summary-grid{grid-template-columns:repeat(4,1fr);margin:4px 0 2px}.node-grid{grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}.node-card{margin:0;padding:17px;border:1px solid var(--line);border-radius:12px;background:#111b30}.node-heading{display:flex;align-items:center;justify-content:space-between;gap:9px}.node-heading h3{margin:0;font-size:.96rem}.node-card .metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:15px 0}.metric{padding:9px;border-radius:7px;background:#0d1629}.metric-label{display:block;color:var(--muted);font-size:.68rem}.metric strong{font-size:.88rem}.node-runtime{margin:0;padding-top:10px;border-top:1px solid var(--line);color:#b7c8e7;font-size:.76rem}.container-panel{overflow:hidden}.monitor-controls{display:flex;align-items:end;gap:9px}.monitor-controls label{display:grid;gap:5px;color:var(--muted);font-size:.72rem}.monitor-controls select{padding:9px}.table-wrap{overflow:auto}.container-panel table{width:100%;min-width:950px;border-collapse:collapse}.container-panel th,.container-panel td{padding:11px 9px;border-bottom:1px solid rgba(67,87,127,.4);text-align:left;vertical-align:top;font-size:.75rem}.container-panel th{color:#96acd5;font-size:.67rem;letter-spacing:.08em;text-transform:uppercase}.container-actions{display:flex;flex-wrap:wrap;gap:5px}.container-actions button{padding:6px 8px;font-size:.68rem}.container-details{margin-top:18px}.details-grid{grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}.operation-banner{display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:13px;margin:0 0 18px;padding:14px 16px;border:1px solid #385da1;border-radius:12px;background:#15284d}.operation-banner.failed{border-color:#8d4054;background:#3a1e32}.operation-banner.complete{border-color:#2d8b6b;background:#163d39}.operation-icon{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#2d5ab0;font-weight:800}.operation-banner.failed .operation-icon{background:#9c3d55}.operation-banner.complete .operation-icon{background:#238568}.operation-copy{display:grid;gap:6px}.operation-copy span{color:#b8c9e8;font-size:.78rem}.operation-meta{text-align:right;color:#adbfdf;font-size:.72rem}.progress-track{height:5px;overflow:hidden;border-radius:99px;background:#0d172a}.progress-track span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#5688ff,#65d4bb)}.operation-details{margin:0}.operation-row{display:flex;align-items:flex-start;gap:13px;padding:16px 0;border-bottom:1px solid var(--line)}.operation-row:last-child{border-bottom:0}.operation-main{flex:1}.operation-main p{margin:5px 0 10px;color:var(--muted);font-size:.78rem}.operation-row .advanced{margin:0}.activity-panel{padding:22px}.empty-state{text-align:center;padding:45px 20px;color:var(--muted)}.empty-state h3{color:var(--text)}.code,code{padding:3px 6px;border-radius:5px;background:#0d1628;color:#b9d0ff;font-size:.78rem}
-@media(max-width:980px){.sidebar{width:205px}.app-main{padding:0 24px 60px}.hero-grid,.content-grid.two-thirds{grid-template-columns:1fr}.stats-grid{grid-template-columns:repeat(2,1fr)}.summary-grid{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:680px){.app-shell{display:block}.sidebar{position:relative;width:auto;height:auto;padding:15px 16px;border-right:0;border-bottom:1px solid rgba(89,111,160,.24)}.brand{padding:0 0 15px}.primary-nav{display:flex;overflow:auto}.primary-nav a{padding:9px 11px;white-space:nowrap}.sidebar-footer{display:none}.app-main{padding:0 15px 45px}.topbar{align-items:flex-start;flex-direction:column;padding:23px 0}.topbar-actions{width:100%;justify-content:space-between}.topbar h1{font-size:1.55rem}.hero-card{padding:25px 21px}.hero-card h2{font-size:1.8rem}.stats-grid{gap:9px}.stat-card{padding:14px}.stat-card strong{font-size:1.35rem}.project-card-grid{grid-template-columns:1fr}.project-facts,.environment-summary{grid-template-columns:1fr 1fr}.project-hero-row{align-items:flex-start;flex-wrap:wrap}.hero-status{margin-left:78px;justify-items:start}.quick-actions .button,.quick-actions form{flex:1 1 auto}.operation-banner{grid-template-columns:auto 1fr}.operation-meta{grid-column:2;text-align:left}.operation-details{grid-column:2}.page-intro{align-items:flex-start;flex-direction:column}.page-intro h2{font-size:1.65rem}.section-heading{align-items:flex-start;flex-direction:column}.monitor-controls{width:100%;align-items:stretch}.monitor-controls label{flex:1}.monitor-controls button{align-self:end}.form-step{grid-template-columns:25px 1fr}.summary-grid{grid-template-columns:1fr 1fr}.tabs{gap:14px;overflow:auto}.tabs a{white-space:nowrap}}
-/* 1.2.0 accessibility, advanced-mode, and runtime-state additions */
-.icon-sprite{position:absolute;width:0;height:0;overflow:hidden}.primary-nav a svg{width:18px;height:18px;flex:none;color:#8295bc}.primary-nav a:hover svg,.primary-nav a.active svg{color:#78a1ff}.status-badge.neutral{background:rgba(142,155,183,.16);color:#b6c1d6}.advanced{display:none}.advanced-mode .advanced{display:block}.preference-panel{display:flex;align-items:center;justify-content:space-between;gap:14px}.preference-toggle{color:#c8d5ed!important}.help-text{font-size:.72rem;margin:.35rem 0 0}.logs-panel .log-output{min-height:280px;margin:0;padding:16px;border:1px solid var(--line);border-radius:10px;background:#091120;color:#c7d7f3;font:12px/1.55 ui-monospace,SFMono-Regu
+  if

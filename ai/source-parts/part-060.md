@@ -1,10 +1,217 @@
 # DevFleet source part 060
 
 Full-source UTF-8 byte interval [2743500, 2790000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: c74141618360d21cc813a4baaddde80c6bf765012f7309f6b28f79aafb264147
+Payload SHA-256: ba4842fd648fab7f1e05208344be0bf802e4334627c4e893069c919ae45f0289
 
 <!-- BEGIN SOURCE SLICE -->
-l.StartsWith(root.TrimEnd(System.IO.Path.DirectorySeparatorChar) + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+ = new BackupReference(
+            reference.GetProperty("provider").GetString() ?? "",
+            reference.GetProperty("backup_id").GetString() ?? "",
+            reference.GetProperty("project_id").GetString() ?? "",
+            reference.GetProperty("slug").GetString() ?? "",
+            reference.GetProperty("runtime_id").GetString() ?? "",
+            reference.GetProperty("host_id").GetString() ?? "",
+            reference.GetProperty("archive_sha256").GetString() ?? "",
+            reference.GetProperty("archive_bytes").GetInt64(),
+            reference.GetProperty("manifest_sha256").GetString() ?? "",
+            reference.GetProperty("created_at").GetString() ?? "",
+            reference.GetProperty("consistency_level").GetString() ?? "");
+        if (!providerReference.Provider.Equals("multipass-host-agent", StringComparison.OrdinalIgnoreCase) || !providerReference.BackupId.Equals(id, StringComparison.OrdinalIgnoreCase) || !providerReference.ProjectId.Equals(vm.ProjectId, StringComparison.OrdinalIgnoreCase) || !providerReference.Slug.Equals(vm.Slug, StringComparison.OrdinalIgnoreCase) || !providerReference.RuntimeId.Equals(vm.RuntimeId, StringComparison.OrdinalIgnoreCase) || !providerReference.ArchiveSha256.Equals(sha, StringComparison.OrdinalIgnoreCase) || providerReference.ArchiveBytes < 0 || !Regex.IsMatch(providerReference.ManifestSha256, "^[0-9a-fA-F]{64}$"))
+            throw new InvalidDataException("Host Agent backup reference identity or hash binding is invalid.");
+        return new BackupVerification(vm.ProjectId, id, "", sha, sha, true, true, DateTime.UtcNow, providerReference);
+    }
+
+    public void DeleteExact(VmRecord vm)
+    {
+        if (!vm.Owned || string.IsNullOrWhiteSpace(vm.Slug) || string.IsNullOrWhiteSpace(vm.BackupId) || string.IsNullOrWhiteSpace(vm.BackupSha256))
+            throw new InvalidOperationException("Host Agent destruction requires an owned project, exact slug, and selected verified backup.");
+        var configPath = Path.Combine(_root, "config.json");
+        using var config = JsonDocument.Parse(File.ReadAllText(configPath));
+        var prefix = config.RootElement.TryGetProperty("ListenPrefix", out var lp) ? lp.GetString() : "http://127.0.0.1:8791/";
+        var tokenPath = config.RootElement.TryGetProperty("TokenPath", out var tp) ? tp.GetString() : null;
+        if (string.IsNullOrWhiteSpace(tokenPath) || !File.Exists(tokenPath)) throw new InvalidOperationException("Host Agent token path is unavailable; destruction is blocked.");
+        var destroyBody = JsonSerializer.SerializeToUtf8Bytes(new { operation = "destroy", slug = vm.Slug, project_id = vm.ProjectId, confirm_slug = vm.Slug, confirm_phrase = $"DESTROY {vm.Slug}", backup_verified = true, backup_id = vm.BackupId, backup_sha256 = vm.BackupSha256 });
+        using var request = new HttpRequestMessage(HttpMethod.Delete, new Uri(BuildHostAgentBaseUri(prefix), $"v1/project-vms/{Uri.EscapeDataString(vm.RuntimeId)}/destroy"));
+        request.Content = new ByteArrayContent(destroyBody);
+        request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        AddRequestAuthentication(request, destroyBody, File.ReadAllText(tokenPath).Trim(), config.RootElement.TryGetProperty("HostName", out var hostName) ? hostName.GetString() ?? "" : "");
+        using var response = _http.Send(request);
+        var bodyBytes = response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
+        VerifyResponseAuthentication(request, response, bodyBytes, File.ReadAllText(tokenPath).Trim(), config.RootElement.TryGetProperty("HostName", out var responseHostName) ? responseHostName.GetString() ?? "" : "");
+        var body = Encoding.UTF8.GetString(bodyBytes);
+        if (!response.IsSuccessStatusCode) throw new InvalidOperationException($"Host Agent rejected exact project destruction ({(int)response.StatusCode}): {body}");
+        if (!body.Contains("\"state\":\"destroyed\"", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Host Agent destruction response did not prove destroyed state.");
+    }
+
+    private static Uri BuildHostAgentBaseUri(string? configuredPrefix)
+    {
+        var prefix = string.IsNullOrWhiteSpace(configuredPrefix) ? "http://127.0.0.1:8791/" : configuredPrefix.Trim();
+        foreach (var scheme in new[] { "http://", "https://" })
+        foreach (var wildcard in new[] { "+", "*" })
+        {
+            var marker = scheme + wildcard + ":";
+            if (prefix.StartsWith(marker, StringComparison.OrdinalIgnoreCase))
+            {
+                prefix = scheme + "127.0.0.1:" + prefix[marker.Length..];
+                break;
+            }
+        }
+        if (!Uri.TryCreate(prefix.TrimEnd('/') + "/", UriKind.Absolute, out var uri) || uri is null || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) || !string.IsNullOrEmpty(uri.UserInfo))
+            throw new InvalidOperationException("Host Agent listen prefix is not a valid local HTTP endpoint.");
+        return uri;
+    }
+
+    private static void AddRequestAuthentication(HttpRequestMessage request, byte[] body, string key, string expectedHost)
+    {
+        if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(expectedHost)) throw new InvalidOperationException("Host Agent request authentication configuration is incomplete.");
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var nonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(18)).ToLowerInvariant();
+        var prefix = Encoding.UTF8.GetBytes($"{request.Method.Method.ToUpperInvariant()}\n{request.RequestUri!.AbsolutePath}\n{timestamp}\n{nonce}\n");
+        var suffix = Encoding.UTF8.GetBytes($"\n{expectedHost}");
+        var material = new byte[prefix.Length + body.Length + suffix.Length];
+        Buffer.BlockCopy(prefix, 0, material, 0, prefix.Length);
+        Buffer.BlockCopy(body, 0, material, prefix.Length, body.Length);
+        Buffer.BlockCopy(suffix, 0, material, prefix.Length + body.Length, suffix.Length);
+        var signature = Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(key), material)).ToLowerInvariant();
+        request.Headers.TryAddWithoutValidation("X-DevFleet-Host-Timestamp", timestamp);
+        request.Headers.TryAddWithoutValidation("X-DevFleet-Host-Nonce", nonce);
+        request.Headers.TryAddWithoutValidation("X-DevFleet-Host-Expected", expectedHost);
+        request.Headers.TryAddWithoutValidation("X-DevFleet-Host-Signature", signature);
+    }
+
+    private static void VerifyResponseAuthentication(HttpRequestMessage request, HttpResponseMessage response, byte[] body, string key, string expectedHost)
+    {
+        if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(expectedHost)) throw new InvalidOperationException("Host Agent response authentication configuration is incomplete.");
+        var timestamp = request.Headers.GetValues("X-DevFleet-Host-Timestamp").Single();
+        var nonce = request.Headers.GetValues("X-DevFleet-Host-Nonce").Single();
+        var provided = response.Headers.TryGetValues("X-DevFleet-Host-Response-Signature", out var values) ? values.SingleOrDefault() : null;
+        var material = BuildAuthMaterial(request.Method.Method, request.RequestUri!.AbsolutePath, timestamp, nonce, ((int)response.StatusCode).ToString(System.Globalization.CultureInfo.InvariantCulture), body, expectedHost);
+        var expected = Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(key), material)).ToLowerInvariant();
+        var left = Encoding.ASCII.GetBytes(expected); var right = Encoding.ASCII.GetBytes((provided ?? "").ToLowerInvariant());
+        if (left.Length != right.Length || !CryptographicOperations.FixedTimeEquals(left, right)) throw new InvalidDataException("Host Agent response authentication failed.");
+    }
+
+    private static byte[] BuildAuthMaterial(string method, string path, string timestamp, string nonce, string status, byte[] body, string expectedHost)
+    {
+        var parts = new[] { Encoding.UTF8.GetBytes(method.ToUpperInvariant()), Encoding.UTF8.GetBytes("\n"), Encoding.UTF8.GetBytes(path), Encoding.UTF8.GetBytes("\n"), Encoding.UTF8.GetBytes(timestamp), Encoding.UTF8.GetBytes("\n"), Encoding.UTF8.GetBytes(nonce), Encoding.UTF8.GetBytes("\n"), Encoding.UTF8.GetBytes(status), Encoding.UTF8.GetBytes("\n") , body, Encoding.UTF8.GetBytes("\n"), Encoding.UTF8.GetBytes(expectedHost) };
+        var length = parts.Sum(part => part.Length); var material = new byte[length]; var offset = 0;
+        foreach (var part in parts) { Buffer.BlockCopy(part, 0, material, offset, part.Length); offset += part.Length; }
+        return material;
+    }
+
+    private (string BackupId, string Sha256) FindLatestBackup(string projectId, string slug, string runtime)
+    {
+        var backupRoot = Path.Combine(_root, "backups");
+        foreach (var manifest in Directory.Exists(backupRoot) ? Directory.EnumerateFiles(backupRoot, "*.json").OrderByDescending(File.GetLastWriteTimeUtc) : Enumerable.Empty<string>())
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(manifest)); var r = doc.RootElement;
+                if (r.TryGetProperty("project_id", out var pid) && pid.GetString() == projectId && r.TryGetProperty("slug", out var sl) && sl.GetString() == slug && r.TryGetProperty("runtime_id", out var rt) && rt.GetString() == runtime)
+                    return (r.TryGetProperty("backup_id", out var bid) ? bid.GetString() ?? "" : Path.GetFileNameWithoutExtension(manifest), r.TryGetProperty("archive_sha256", out var sh) ? sh.GetString() ?? "" : "");
+            }
+            catch (JsonException) { }
+        }
+        return ("", "");
+    }
+}
+
+public sealed class VmOwnershipService
+{
+    private readonly IVmProvider _provider;
+    public VmOwnershipService(IVmProvider provider) => _provider = provider;
+    public void DeleteOwnedExact(string projectId, string runtimeId, Action<string>? progress = null)
+        => DeleteOwnedExact(projectId, runtimeId, null, progress);
+    public void DeleteOwnedExact(string projectId, string runtimeId, BackupVerification? selectedBackup, Action<string>? progress = null)
+    {
+        var before = _provider.Discover().ToArray();
+        var vm = before.SingleOrDefault(x => x.ProjectId.Equals(projectId, StringComparison.OrdinalIgnoreCase) && x.RuntimeId.Equals(runtimeId, StringComparison.OrdinalIgnoreCase));
+        if (vm is null || !vm.Owned) throw new InvalidOperationException($"No independently owned VM matched project={projectId}, runtime={runtimeId}.");
+        if (selectedBackup is not null)
+        {
+            if (!selectedBackup.IsVerified || !selectedBackup.ProjectId.Equals(projectId, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Exact selected backup binding is invalid.");
+            vm = vm with { BackupId = selectedBackup.BackupId, BackupSha256 = selectedBackup.ActualSha256 };
+            progress?.Invoke($"Exact selected backup bound: {selectedBackup.BackupId} sha256={selectedBackup.ActualSha256}");
+        }
+        _provider.DeleteExact(vm);
+        progress?.Invoke($"Provider-aware exact deletion verified: {vm.Provider} {vm.RuntimeId}");
+        var unrelated = before.Where(x => !x.RuntimeId.Equals(runtimeId, StringComparison.OrdinalIgnoreCase)).Select(x => x.RuntimeId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (_provider.Discover().Where(x => unrelated.Contains(x.RuntimeId)).Count() != unrelated.Count) throw new InvalidOperationException("Unrelated VM inventory changed during exact deletion.");
+    }
+
+    public BackupVerification CreateFreshSafetyBackup(DiscoveredProject project, Action<string>? progress = null)
+    {
+        var vm = _provider.Discover().SingleOrDefault(x => x.ProjectId.Equals(project.ProjectId, StringComparison.OrdinalIgnoreCase) && x.RuntimeId.Equals(project.RuntimeId, StringComparison.OrdinalIgnoreCase));
+        if (vm is null || !vm.Owned) throw new InvalidOperationException($"No independently owned VM matched project={project.ProjectId}, runtime={project.RuntimeId}.");
+        var backup = _provider.CreateFreshBackup(vm);
+        if (!backup.IsVerified || !backup.ProjectId.Equals(project.ProjectId, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Fresh safety backup identity verification failed.");
+        progress?.Invoke($"Fresh Factory Reset safety backup bound: {backup.BackupId} sha256={backup.ActualSha256}");
+        return backup;
+    }
+}
+
+public sealed class TransactionService
+{
+    private readonly Stack<(string Name, Action Rollback)> _rollback = new();
+    private readonly InstallerLogger _logger;
+    public TransactionService(InstallerLogger logger) => _logger = logger;
+    public void Execute(string name, Action action, Action rollback, Action<string>? progress = null)
+    {
+        _logger.Write($"step={name} state=planned"); progress?.Invoke($"Planned: {name}");
+        action(); _rollback.Push((name, rollback)); _logger.Write($"step={name} state=verified"); progress?.Invoke($"Verified: {name}");
+    }
+    public void Rollback(Action<string>? progress = null)
+    {
+        while (_rollback.Count > 0)
+        {
+            var step = _rollback.Pop();
+            try { step.Rollback(); _logger.Write($"step={step.Name} state=rolled-back"); progress?.Invoke($"Rolled back: {step.Name}"); }
+            catch (Exception ex) { _logger.Write($"step={step.Name} state=rollback-incomplete error={ex.Message}"); progress?.Invoke($"Rollback incomplete: {step.Name}"); }
+        }
+    }
+}
+
+public static class RebootCheckpointService
+{
+    // The supported Windows prerequisite graph has at most three legitimate
+    // reboot boundaries (PowerShell/servicing, Hyper-V, and final servicing).
+    // Keep this explicit and bounded: an unexpected fourth boundary fails
+    // closed instead of becoming an unbounded reboot loop.
+    public const int MaxRebootBoundaries = 3;
+    public static string Path => System.IO.Path.Combine(AppPaths.InstallerRoot, "resume-checkpoint.json");
+    private static string ConsumedPath(string transactionId) => System.IO.Path.Combine(AppPaths.InstallerRoot, "resume-consumed", $"{transactionId}.json");
+    private static string ScriptStateRoot => TestEnvironment.IsTestProcess
+        ? AppPaths.StateRoot
+        : System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "DevFleet");
+
+    private static bool IsSameScriptTransaction(JsonElement existing, InstallerPlan plan, string role)
+    {
+        var normalizedRole = role.Contains("Laptop", StringComparison.OrdinalIgnoreCase) ? "Laptop" : "Desktop";
+        return existing.TryGetProperty("transactionId", out var transactionId) &&
+               existing.TryGetProperty("payloadSha256", out var payloadSha256) &&
+               existing.TryGetProperty("action", out var action) &&
+               existing.TryGetProperty("role", out var existingRole) &&
+               existing.TryGetProperty("acknowledgeRootfulDocker", out var acknowledgement) &&
+               acknowledgement.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+               transactionId.GetString() == plan.TransactionId &&
+               payloadSha256.GetString() == PayloadManifest.PayloadSha256 &&
+               action.GetString() == plan.Mode.ToString() &&
+               existingRole.GetString() == normalizedRole &&
+               acknowledgement.GetBoolean() == plan.AcknowledgeRootfulDocker;
+    }
+
+    private static void ClearStaleStageMarkers(string role, Action<string>? progress = null)
+    {
+        var roots = new[] { ScriptStateRoot, AppPaths.InstallerRoot }
+            .Select(System.IO.Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in roots)
+        {
+            if (!Directory.Exists(root)) continue;
+            foreach (var marker in Directory.EnumerateFiles(root, "stage-*.complete", SearchOption.TopDirectoryOnly).ToArray())
+            {
+                var full = System.IO.Path.GetFullPath(marker);
+                if (!full.StartsWith(root.TrimEnd(System.IO.Path.DirectorySeparatorChar) + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException($"Refusing to remove a stage marker outside the canonical DevFleet state root: {full}");
                 File.Delete(full);
                 if (File.Exists(full)) throw new IOException($"Stale DevFleet stage marker remains after transaction reset: {full}");
@@ -387,263 +594,4 @@ public static class LifecycleEngine
             ledger.PreExistingPrerequisites.Add($"{dependency.Name} {dependency.Version}");
             ledger.ResolvedPrerequisitePaths.Add($"{dependency.Name}|{dependency.ExecutablePath}");
         }
-        ledger.ManagedSshMarkers.Add("# BEGIN DEVFLEET MANAGED|# END DEVFLEET MANAGED");
-        ledger.ManagedVsCodeFiles.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Code", "User", "devfleet-settings.reference.jsonc"));
-        ImportWindowsIntegrationOwnership(ledger);
-        OwnedPathSafety.ValidateLedger(ledger);
-        return ledger;
-    }
-
-    private static void RemoveOwnedControlPlane(InstallLedger ledger, Action<string>? progress)
-    {
-        new WindowsOwnedIntegrationCleanupService().Cleanup(ledger, progress);
-        RemoveManagedSshAndVsCode(ledger, progress);
-        ScheduleSelfRemoval(progress);
-        foreach (var file in ledger.FilesInstalled.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            var full = Path.GetFullPath(file);
-            if (OwnedPathSafety.IsUnderOwnedRoot(full, AppPaths.InstallRoot) && File.Exists(full)) { File.Delete(full); progress?.Invoke($"Removed proven-owned program file: {full}"); }
-        }
-        foreach (var shortcut in ledger.ShortcutsCreated.Where(File.Exists)) { File.Delete(shortcut); progress?.Invoke($"Removed DevFleet shortcut: {shortcut}"); }
-        var shortcutRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "DevFleet");
-        if (Directory.Exists(shortcutRoot) && !Directory.EnumerateFileSystemEntries(shortcutRoot).Any()) Directory.Delete(shortcutRoot);
-        foreach (var reg in ledger.RegistryEntriesCreated) RemoveExactRegistryEntry(reg, progress);
-    }
-
-    private static IReadOnlyList<(string Name, Action Action)> BuildMonotonicCleanupStages(InstallLedger ledger, Action<string>? progress)
-    {
-        return [
-            ("stop-and-remove-owned-integrations", () => new WindowsOwnedIntegrationCleanupService().Cleanup(ledger, progress)),
-            ("remove-managed-ssh-and-vscode-integrations", () => RemoveManagedSshAndVsCode(ledger, progress)),
-            ("schedule-owned-self-removal", () => ScheduleSelfRemoval(progress)),
-            ("remove-owned-program-files", () => InstallerEngine.RemoveLedgerFiles(ledger, progress)),
-            ("remove-owned-shortcuts", () => { foreach (var shortcut in ledger.ShortcutsCreated.Distinct(StringComparer.OrdinalIgnoreCase)) { if (File.Exists(shortcut)) File.Delete(shortcut); if (File.Exists(shortcut)) throw new IOException($"Owned shortcut remains after cleanup: {shortcut}"); progress?.Invoke($"Removed and verified DevFleet shortcut: {shortcut}"); } }),
-            ("remove-owned-registry-entries", () => { foreach (var reg in ledger.RegistryEntriesCreated.Distinct(StringComparer.OrdinalIgnoreCase)) RemoveExactRegistryEntry(reg, progress); })
-        ];
-    }
-
-    private static void RemoveManagedSshAndVsCode(InstallLedger ledger, Action<string>? progress)
-    {
-        var sshConfig = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "config");
-        if (File.Exists(sshConfig))
-        {
-            var text = File.ReadAllText(sshConfig);
-            foreach (var marker in ledger.ManagedSshMarkers)
-            {
-                var parts = marker.Split('|', 2); if (parts.Length != 2) continue;
-                var pattern = $@"(?ms)^\s*{Regex.Escape(parts[0])}\s*$.*?^\s*{Regex.Escape(parts[1])}\s*$\r?\n?";
-                text = Regex.Replace(text, pattern, "");
-            }
-            File.WriteAllText(sshConfig, text);
-            var remaining = File.ReadAllText(sshConfig);
-            foreach (var marker in ledger.ManagedSshMarkers)
-            {
-                var parts = marker.Split('|', 2); if (parts.Length != 2) continue;
-                if (remaining.Contains(parts[0], StringComparison.Ordinal) || remaining.Contains(parts[1], StringComparison.Ordinal))
-                    throw new IOException($"Managed SSH marker remains after cleanup: {sshConfig}");
-            }
-            progress?.Invoke($"Removed and verified only the DevFleet managed SSH block: {sshConfig}");
-        }
-        foreach (var file in ledger.ManagedVsCodeFiles)
-        {
-            var expectedRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Code", "User") + Path.DirectorySeparatorChar;
-            var full = Path.GetFullPath(file); if (OwnedPathSafety.IsUnderOwnedRoot(full, expectedRoot) && Path.GetFileName(full).Equals("devfleet-settings.reference.jsonc", StringComparison.OrdinalIgnoreCase))
-            {
-                if (File.Exists(full)) File.Delete(full);
-                if (File.Exists(full)) throw new IOException($"Managed VS Code file remains after cleanup: {full}");
-                progress?.Invoke($"Removed and verified exact DevFleet VS Code reference file: {full}");
-            }
-        }
-    }
-
-    private static void ScheduleSelfRemoval(Action<string>? progress)
-    {
-        var current = Environment.ProcessPath;
-        var target = Path.Combine(AppPaths.InstallRoot, "DevFleet.Setup.exe");
-        if (string.IsNullOrWhiteSpace(current) || !Path.GetFullPath(current).Equals(Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)) return;
-        var helperDirectory = Path.Combine(AppPaths.CacheRoot, "SelfRemoval");
-        SecureStagingService.EnsureDirectory(helperDirectory);
-        var helper = Path.Combine(helperDirectory, $"DevFleet-Setup-Remove-{Guid.NewGuid():N}.ps1");
-        using (var stream = new FileStream(helper, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
-        using (var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false)))
-        {
-            writer.Write("param([Parameter(Mandatory)][string]$Target,[Parameter(Mandatory)][string]$Helper)\n$ErrorActionPreference='Stop'\nStart-Sleep -Milliseconds 500\nif(Test-Path -LiteralPath $Target -PathType Leaf){Remove-Item -LiteralPath $Target -Force}\nif(Test-Path -LiteralPath $Helper -PathType Leaf){Remove-Item -LiteralPath $Helper -Force}\n");
-            writer.Flush();
-            stream.Flush(true);
-        }
-        var powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
-        if (!File.Exists(powershell)) throw new FileNotFoundException("Windows PowerShell self-removal helper is unavailable.", powershell);
-        var start = new ProcessStartInfo { FileName = powershell, UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden };
-        foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", helper, "-Target", target, "-Helper", helper }) start.ArgumentList.Add(argument);
-        if (Process.Start(start) is null) throw new InvalidOperationException("Unable to start the protected self-removal helper.");
-        progress?.Invoke("Immediate exact self-removal helper scheduled from protected installer state with argument-bound paths.");
-    }
-
-    private static void RemoveExactRegistryEntry(string key, Action<string>? progress)
-    {
-        const string prefix = "HKLM\\";
-        if (!key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) { progress?.Invoke($"Preserved non-machine registry entry outside owned scope: {key}"); return; }
-        var subkey = key[prefix.Length..];
-        using var root = Microsoft.Win32.Registry.LocalMachine;
-        try
-        {
-            root.DeleteSubKeyTree(subkey, throwOnMissingSubKey: false);
-            using var remaining = root.OpenSubKey(subkey);
-            if (remaining is not null) throw new IOException($"Owned registry entry remains after cleanup: {key}");
-            progress?.Invoke($"Removed and verified exact registry ownership: {key}");
-        }
-        catch (UnauthorizedAccessException ex) { throw new IOException($"Registry cleanup blocked by access policy: {key}", ex); }
-    }
-
-    private static void InstallStableLauncher(InstallLedger ledger, Action<string>? progress)
-    {
-        var current = Environment.ProcessPath; if (string.IsNullOrWhiteSpace(current) || !File.Exists(current)) return;
-        Directory.CreateDirectory(AppPaths.InstallRoot);
-        var target = Path.Combine(AppPaths.InstallRoot, "DevFleet.Setup.exe");
-        if (!Path.GetFullPath(current).Equals(Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)) File.Copy(current, target, true);
-        ledger.FilesInstalled.Add(target); ledger.OwnedResources.Add(new OwnedResource("launcher", "DevFleet Setup", "DevFleetLedger", target)); progress?.Invoke($"Stable launcher target verified: {target}");
-    }
-
-    private static void CreateInstalledAppEntry(InstallLedger ledger)
-    {
-        using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\DevFleet");
-        if (key is null) return;
-        var exe = Path.Combine(AppPaths.InstallRoot, "DevFleet.Setup.exe");
-        key.SetValue("DisplayName", "DevFleet"); key.SetValue("Publisher", "M-TechLabs"); key.SetValue("DisplayVersion", PayloadManifest.DevFleetVersion); key.SetValue("InstallLocation", AppPaths.InstallRoot); key.SetValue("UninstallString", $"\"{exe}\" --maintenance --action uninstall");
-        ledger.RegistryEntriesCreated.Add(@"HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\DevFleet");
-    }
-
-    private static void CreateShortcuts(InstallLedger ledger, Action<string>? progress)
-    {
-        var exe = Path.Combine(AppPaths.InstallRoot, "DevFleet.Setup.exe");
-        if (!File.Exists(exe)) return;
-        var start = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "DevFleet"); Directory.CreateDirectory(start);
-        foreach (var item in new[] { ("DevFleet", "--maintenance"), ("DevFleet Maintenance", "--maintenance") })
-        {
-            var path = Path.Combine(start, item.Item1 + ".lnk");
-            try
-            {
-                var type = Type.GetTypeFromProgID("WScript.Shell"); if (type is null) continue;
-                dynamic shell = Activator.CreateInstance(type)!; dynamic shortcut = shell.CreateShortcut(path); shortcut.TargetPath = exe; shortcut.Arguments = item.Item2; shortcut.WorkingDirectory = AppPaths.InstallRoot; shortcut.Description = "DevFleet installed launcher"; shortcut.Save(); ledger.ShortcutsCreated.Add(path); progress?.Invoke($"Shortcut target verified: {path} -> {exe} {item.Item2}");
-            }
-            catch { progress?.Invoke($"Shortcut COM creation unavailable in this environment: {path}"); }
-        }
-    }
-}
-
-```
-
-
-## FILE: installer-source/DevFleet.Setup/Services/InstallerServices.cs
-
-SHA256: 776f7362ad7aa5255cbcf6d8c44d2858193e2f00968bc342cffee45365e8a4f8 | Bytes: 44467 | Git mode: 100644
-
-```
-using System.Formats.Tar;
-using System.IO.Compression;
-using System.IO;
-using System.Diagnostics;
-using System.Security.Cryptography;
-using System.Security.AccessControl;
-using System.Security.Principal;
-using System.Text.Json;
-using Microsoft.Win32;
-
-namespace DevFleet.Setup;
-
-internal static class TestEnvironment
-{
-    private static bool _enabled;
-    private static string? _selfTestRoot;
-    public static bool IsTestProcess => _enabled;
-    internal static void EnableForTests() => _enabled = true;
-
-    internal static void EnableForSelfTest(string root)
-    {
-        var full = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var temp = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var prefix = "DevFleet-Setup-SelfTest-";
-        var leaf = Path.GetFileName(full);
-        var parent = Directory.GetParent(full)?.FullName?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (!string.Equals(parent, temp, StringComparison.OrdinalIgnoreCase) ||
-            !leaf.StartsWith(prefix, StringComparison.Ordinal) ||
-            !Guid.TryParseExact(leaf[prefix.Length..], "N", out _))
-            throw new InvalidDataException("Self-test root must be a fresh DevFleet GUID directory directly beneath the process temporary directory.");
-        _enabled = true;
-        _selfTestRoot = full;
-    }
-
-    internal static bool IsAuthorizedSelfTestPath(string path)
-    {
-        if (string.IsNullOrWhiteSpace(_selfTestRoot)) return false;
-        var full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        return full.Equals(_selfTestRoot, StringComparison.OrdinalIgnoreCase) ||
-               full.StartsWith(_selfTestRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
-    }
-
-    internal static void ClearSelfTestRoot() => _selfTestRoot = null;
-}
-
-public static class AppPaths
-{
-    private static string? _selfTestInstallRoot;
-    private static string? _selfTestStateRoot;
-    public static string InstallRoot => _selfTestInstallRoot ?? (TestEnvironment.IsTestProcess ? Environment.GetEnvironmentVariable("DEVFLEET_SETUP_INSTALL_ROOT") : null)
-        ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "M-TechLabs", "DevFleet");
-    public static string StateRoot => _selfTestStateRoot ?? (TestEnvironment.IsTestProcess ? Environment.GetEnvironmentVariable("DEVFLEET_SETUP_STATE_ROOT") : null)
-        ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "M-TechLabs", "DevFleet");
-    public static string InstallerRoot => Path.Combine(StateRoot, "Installer");
-    public static string CacheRoot => Path.Combine(StateRoot, "InstallerCache");
-    public static string LogsRoot => Path.Combine(StateRoot, "Logs");
-    public static string LedgerPath => Path.Combine(InstallerRoot, "install-state.json");
-
-    internal static void ConfigureSelfTestRoots(string installRoot, string stateRoot)
-    {
-        _selfTestInstallRoot = Path.GetFullPath(installRoot);
-        _selfTestStateRoot = Path.GetFullPath(stateRoot);
-    }
-}
-
-public sealed class InstallLedger
-{
-    public string InstallerVersion { get; set; } = PayloadManifest.InstallerVersion;
-    public string DevFleetVersion { get; set; } = PayloadManifest.DevFleetVersion;
-    public string InstallTimestampUtc { get; set; } = DateTime.UtcNow.ToString("O");
-    public string Role { get; set; } = "Standalone / unknown";
-    public string PackageSha256 { get; set; } = PayloadManifest.PayloadSha256;
-    public string InstallationGeneration { get; set; } = "";
-    public string WindowsIntegrationOwnershipPath { get; set; } = "";
-    public List<OwnedWindowsIntegration> WindowsIntegrations { get; set; } = [];
-    public List<string> FilesInstalled { get; set; } = [];
-    public List<string> ShortcutsCreated { get; set; } = [];
-    public List<string> RegistryEntriesCreated { get; set; } = [];
-    public List<OwnedResource> OwnedResources { get; set; } = [];
-    public List<string> PrerequisitesInstalledByDevFleet { get; set; } = [];
-    public List<string> PreExistingPrerequisites { get; set; } = [];
-    public List<string> ManagedSshMarkers { get; set; } = [];
-    public List<string> ManagedVsCodeFiles { get; set; } = [];
-    public List<string> ResolvedPrerequisitePaths { get; set; } = [];
-}
-
-public static class OwnedPathSafety
-{
-    // Only primitive rights which can mutate a directory are security-relevant
-    // here.  WriteData/CreateFiles and AppendData/CreateDirectories are enum
-    // aliases; each is represented once.  Composite Modify and FullControl are
-    // intentionally absent: their primitive mutation bits still intersect this
-    // mask and are therefore rejected, while read-only ACEs cannot be promoted.
-    public const FileSystemRights PrimitiveMutationRights =
-        FileSystemRights.WriteData |
-        FileSystemRights.AppendData |
-        FileSystemRights.WriteExtendedAttributes |
-        FileSystemRights.WriteAttributes |
-        FileSystemRights.Delete |
-        FileSystemRights.DeleteSubdirectoriesAndFiles |
-        FileSystemRights.ChangePermissions |
-        FileSystemRights.TakeOwnership;
-
-    public static bool HasPrimitiveMutationRights(FileSystemRights rights)
-        => (rights & PrimitiveMutationRights) != 0;
-
-    public static bool IsBroadUntrustedPrincipal(string identity)
-        => identity.Equals("Everyone", Strin
+        ledger.ManagedSshMarkers.Add("# BEGIN DEVFLEET MANAGED|# END DEVFL

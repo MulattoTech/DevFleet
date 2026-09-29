@@ -27,7 +27,7 @@ function Get-DevFleetAcceptedBaseline {
     $pointerItem=Get-Item -LiteralPath $pointerPath -Force -ErrorAction Stop
     if(($pointerItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $pointerItem.Length -gt 1048576){throw 'Accepted baseline pointer is linked or oversized.'}
     $pointer=Get-Content -LiteralPath $pointerPath -Raw -ErrorAction Stop|ConvertFrom-Json -ErrorAction Stop
-    if([int]$pointer.generation -in @(2,3,4)){
+    if([int]$pointer.generation -in @(2,3,4,5)){
         # The rebound reader validates the complete archived pointer and
         # immutable receipt chain in the native strict-JSON transaction module.
         $expected=[ordered]@{

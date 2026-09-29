@@ -1,10 +1,147 @@
 # DevFleet source part 035
 
 Full-source UTF-8 byte interval [1581000, 1627500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: b3425c54e93db01fffa565e6b6cb330318d2b6f7775b7b7059203063ab0fce05
+Payload SHA-256: 21dfed828ad75de0594eb77cd28213aa8f5fbac7702afe5aad51041101ed257c
 
 <!-- BEGIN SOURCE SLICE -->
-s.Id) -PageKicker $pageKicker -OperationStatus $operationStatus -NextEnabled ([bool]$nextControl) -ExecutePresent ([bool]$executeControl) -ExecuteEnabled ([bool]($executeControl -and $executeControl.Current.IsEnabled))
+didateArguments=@($candidateArguments);driverPath=$PSCommandPath;driverIdentity=(Get-ProcessIdentityEvidence $driverPid $driverSessionId)
+        }
+
+        Remove-Item -LiteralPath $WorkerResultPath -Force -ErrorAction SilentlyContinue
+        $workerTokens = @(
+            '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-STA','-File',$PSCommandPath,'-WorkerMode',
+            '-ExePath',$ExePath,'-CandidateProcessId',[string]$process.Id,'-ExpectedCandidateStartUtc',$processStartUtc,
+            '-Action',$Action,'-Role',$Role,'-OutputPath',$WorkerResultPath,'-CheckpointPath',$CheckpointPath,
+            '-LaunchRequestPath',$LaunchRequestPath,'-RunId',$RunId,'-LaunchId',$LaunchId,'-TransactionId',$TransactionId,
+            '-PayloadSha256',$PayloadSha256,'-LaunchMode',$LaunchMode,'-ObserverDeadlineUtc',$ObserverDeadlineUtc,
+            '-ExpectedInteractiveSessionId',[string]$ExpectedInteractiveSessionId
+        )
+        if ($AllowMutation) { $workerTokens += '-AllowMutation' }
+        if ($AllowRebootRequired) { $workerTokens += '-AllowRebootRequired' }
+        if ($UseDurableCompletionFallback) { $workerTokens += '-UseDurableCompletionFallback' }
+        if ($ElevatedResume) { $workerTokens += '-ElevatedResume' }
+        $worker = Start-Process -FilePath ([string]$specification.taskExecutable) -ArgumentList (ConvertTo-WpfCommandLine -Tokens $workerTokens) -PassThru
+        $terminal = Wait-WpfBoundReport -Specification $specification `
+            -ReportProvider { Read-ObservedJsonFile -Path $WorkerResultPath -Kind TERMINAL } `
+            -WorkerStateProvider { try { $worker.Refresh(); if ($worker.HasExited) { 'Exited' } else { 'Running' } } catch { 'Exited' } } `
+            -StopWorker { try { if (-not $worker.HasExited) { $worker.Kill() } } catch {} } `
+            -ProgressProvider { Read-ObservedJsonFile -Path $CheckpointPath -Kind PROGRESS } `
+            -TerminalWriter { param($value) Write-WpfAtomicJson -Path $OutputPath -Value $value }
+
+        $terminal | Add-Member -NotePropertyName driverPid -NotePropertyValue $driverPid -Force
+        $terminal | Add-Member -NotePropertyName driverSessionId -NotePropertyValue $driverSessionId -Force
+        $terminal | Add-Member -NotePropertyName driverIdentity -NotePropertyValue (Get-ProcessIdentityEvidence $driverPid $driverSessionId) -Force
+        $terminal | Add-Member -NotePropertyName candidateIdentity -NotePropertyValue $candidateIdentity -Force
+        $terminal | Add-Member -NotePropertyName processId -NotePropertyValue ([int]$process.Id) -Force
+        $terminal | Add-Member -NotePropertyName processStartTime -NotePropertyValue $processStartUtc -Force
+        $terminal | Add-Member -NotePropertyName launchAcknowledgement -NotePropertyValue $launchAck -Force
+        $cleanupDisposition = Get-WpfCleanupDisposition -Status ([string]$terminal.status) -CompletionVerified:([bool]$terminal.completionVerified)
+        $terminal | Add-Member -NotePropertyName cleanupDisposition -NotePropertyValue $cleanupDisposition -Force
+        Write-WpfAtomicJson -Path $OutputPath -Value $terminal
+        if ([string]$terminal.status -in @('OBSERVER_FAILURE','CANCELLED')) { exit 2 }
+        if ([string]$terminal.status -in @('PRODUCT_FAILURE','FAIL')) { exit 3 }
+        exit 0
+    } catch {
+        $primary = New-MinimalTerminal -Status 'OBSERVER_FAILURE' -FailureClass 'DRIVER_STARTUP_OR_SUPERVISION_FAILURE' -ErrorMessage $_.Exception.Message -LastStep $(if($sequence -ge 2){'LAUNCH_ACKNOWLEDGED'}elseif($sequence -ge 1){'DRIVER_BOUND'}else{'LAUNCH_REQUESTED'})
+        Write-WpfAtomicJson -Path $OutputPath -Value $primary
+        $cleanupDisposition = 'RELINQUISH_LIFECYCLE_OWNER'
+        try {
+            Write-WpfAtomicJson -Path ($OutputPath + '.diagnostic.json') -Value ([ordered]@{status='DIAGNOSTIC';primaryError=$_.Exception.Message;driverPid=$driverPid;driverSessionId=$driverSessionId;processId=if($process){$process.Id}else{$null};timestampUtc=(Get-Date).ToUniversalTime().ToString('o')})
+        } catch {}
+        exit 2
+    } finally {
+        if ($process -and $cleanupDisposition -eq 'CLEANUP_EXACT_CANDIDATE') {
+            try { $process.Refresh(); if (-not $process.HasExited) { $process.CloseMainWindow() | Out-Null; Start-Sleep -Seconds 1; $process.Refresh(); if (-not $process.HasExited) { $process.Kill() } } } catch {}
+        }
+    }
+}
+
+# UI Automation is intentionally isolated in this worker process. The parent
+# supervisor can terminate this exact worker and publish a primary terminal
+# report even if a synchronous COM/UIA call below never returns.
+$actions = @()
+$visible = @()
+$diagnostics = @()
+$postConfirmationState = $null
+$window = $null
+try {
+    $candidateHash = Get-WpfFileSha256 -Path $ExePath
+    $candidateArguments = @($specification.candidateArguments | ForEach-Object { [string]$_ })
+    if ($RunId -cne [string]$specification.runId -or $LaunchId -cne [string]$specification.launchId -or $PayloadSha256 -cne [string]$specification.payloadSha256 -or $candidateHash -cne [string]$specification.candidateSha256) { throw 'UIA worker launch identity did not match the immutable launch request.' }
+    if ($TransactionId -and $TransactionId -cne [string]$specification.transactionId) { throw 'UIA worker transaction identity did not match the launch request.' }
+    $process = Get-Process -Id $CandidateProcessId -ErrorAction Stop
+    $actualStartUtc = $process.StartTime.ToUniversalTime()
+    if ($actualStartUtc.Ticks -ne (ConvertTo-WpfUtcInstant $ExpectedCandidateStartUtc).Ticks -or $process.SessionId -ne $ExpectedInteractiveSessionId) { throw 'UIA worker candidate PID/start-time/session binding failed.' }
+    $sequence = 2
+    [void](Write-BoundaryCheckpoint -Phase 'UIA_LOADING' -Status 'STARTED' -Detail @{workerPid=$driverPid;candidatePid=$process.Id})
+    Add-Type -AssemblyName UIAutomationClient
+    Add-Type -AssemblyName UIAutomationTypes
+    if (-not ('DevFleetE2EWindowProbe' -as [type])) {
+        Add-Type @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class DevFleetE2EWindowProbe {
+    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+}
+'@
+    }
+    if (-not ('DevFleetE2EWin32' -as [type])) {
+        Add-Type @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class DevFleetE2EWin32 {
+    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr hWndParent, IntPtr hWndChildAfter, string lpszClass, string lpszWindow);
+    [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+    [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxCount);
+}
+'@
+    }
+    [void](Write-BoundaryCheckpoint -Phase 'UIA_READY' -Status 'PASS' -Detail @{workerPid=$driverPid})
+
+    function Get-UiElements { param([Parameter(Mandatory)]$Root) @($Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)) }
+    function Ensure-UiCheckbox {
+        param([Parameter(Mandatory)]$Root,[Parameter(Mandatory)][string]$Pattern)
+        $element=Get-UiElements $Root|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::CheckBox -and $_.Current.Name -match $Pattern}|Select-Object -First 1
+        if(-not $element){return $false};$toggle=$element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+        if($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On){$toggle.Toggle();Start-Sleep -Milliseconds 300};return $true
+    }
+    function Set-UiTextValue {
+        param([Parameter(Mandatory)]$Root,[Parameter(Mandatory)][string]$AutomationId,[Parameter(Mandatory)][string]$Value)
+        $element=Get-UiElements $Root|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -and $_.Current.AutomationId -eq $AutomationId}|Select-Object -First 1
+        if(-not $element){return $false}
+        $valuePattern=$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+        if([string]$valuePattern.Current.Value -cne $Value){$valuePattern.SetValue($Value);Start-Sleep -Milliseconds 300}
+        if([string]$valuePattern.Current.Value -cne $Value){throw "UI text control $AutomationId did not accept the exact reviewed value."}
+        return $true
+    }
+    function Get-UiDiagnosticValues {
+        param([Parameter(Mandatory)]$Root)
+        $values=@();foreach($edit in @(Get-UiElements $Root|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit})){try{$value=$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value;if($value){$values+=[string]$value}}catch{}};return $values
+    }
+
+    $windowDeadline = Get-MinDeadline ((Get-Date).ToUniversalTime().AddSeconds(90))
+    while((Get-Date).ToUniversalTime() -lt $windowDeadline -and -not $window){Start-Sleep -Milliseconds 500;$process.Refresh();if($process.MainWindowHandle -ne 0){try{$window=[System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)}catch{}}}
+    if(-not $window){throw "Exact candidate did not expose a WPF window for action $Action."}
+    [void](Write-BoundaryCheckpoint -Phase 'WINDOW_ACQUIRED' -Status 'PASS' -Detail @{candidatePid=$process.Id;windowTitle=[string]$window.Current.Name})
+    $all=Get-UiElements $window;$buttons=@($all|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button})
+    $actions=@([ordered]@{name='startup';result='PASS';window=$window.Current.Name})
+    $navigationReady=$null;$executionAlreadyStarted=$false;$factoryResetPhraseSet=$false;$navigationDeadline=Get-MinDeadline ((Get-Date).ToUniversalTime().AddSeconds(120))
+    while((Get-Date).ToUniversalTime() -lt $navigationDeadline -and -not $navigationReady -and -not $executionAlreadyStarted){
+        $all=Get-UiElements $window;$buttons=@($all|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button})
+        $nextControl=$buttons|Where-Object{$_.Current.IsEnabled -and $_.Current.Name -match '^(Next|Continue)$'}|Select-Object -First 1
+        $executeControl=$buttons|Where-Object{$_.Current.Name -eq 'Execute verified plan'}|Select-Object -First 1
+        $windowHandle=[IntPtr]$process.MainWindowHandle;$windowOwner=0;if($windowHandle -ne [IntPtr]::Zero){[void][DevFleetE2EWindowProbe]::GetWindowThreadProcessId($windowHandle,[ref]$windowOwner)}
+        $pageKickerElement=@($all|Where-Object{$_.Current.AutomationId -eq 'PageKicker'}|Select-Object -First 1);$statusElement=@($all|Where-Object{$_.Current.AutomationId -eq 'OperationStatus'}|Select-Object -First 1)
+        $pageKicker=if($pageKickerElement){[string]$pageKickerElement.Current.Name}else{''};$operationStatus=if($statusElement){[string]$statusElement.Current.Name}else{''}
+        $navigationDisposition=Get-WpfNavigationDisposition -LaunchMode $LaunchMode -ElevatedResume ([bool]$ElevatedResume) -WindowOwnerMatches ($windowOwner -eq [uint32]$process.Id) -PageKicker $pageKicker -OperationStatus $operationStatus -NextEnabled ([bool]$nextControl) -ExecutePresent ([bool]$executeControl) -ExecuteEnabled ([bool]($executeControl -and $executeControl.Current.IsEnabled))
         if($navigationDisposition -eq 'REJECT_OWNER_MISMATCH'){throw 'Candidate UI window ownership diverged after launch acknowledgement.'}
         if($navigationDisposition -eq 'REJECT_MODE_MISMATCH'){throw 'Resume navigation state diverged from the elevated-resume launch binding.'}
         if($navigationDisposition -eq 'NAVIGATE'){$navigationReady=$nextControl;break}
@@ -452,142 +589,4 @@ function Test-WpfTerminalReport {
     $expectedTransaction = [string](Get-WpfContractValue $Specification 'transactionId')
     if ([string](Get-WpfContractValue $Report 'transactionId') -cne $expectedTransaction) { $Reason.Value = 'report transactionId mismatch'; return $false }
     try {
-        $reportDeadline = ConvertTo-WpfUtcInstant (Get-WpfContractValue $Report 'deadlineUtc')
-        $expectedDeadline = ConvertTo-WpfUtcInstant (Get-WpfContractValue $Specification 'driverDeadlineUtc')
-        if ($reportDeadline.Ticks -ne $expectedDeadline.Ticks) { $Reason.Value = 'report deadline identity mismatch'; return $false }
-    } catch { $Reason.Value = 'report deadline identity is missing or malformed'; return $false }
-    $sequence = 0
-    if (-not [int]::TryParse([string](Get-WpfContractValue $Report 'sequence'), [ref]$sequence) -or $sequence -le $MinimumSequenceExclusive) { $Reason.Value = 'report sequence is missing or non-monotonic'; return $false }
-    $status = [string](Get-WpfContractValue $Report 'status')
-    if ($status -notin @('PASS','REBOOT_REQUIRED','DURABLE_PENDING','OBSERVER_HANDOFF','PRODUCT_FAILURE','FAIL','OBSERVER_FAILURE','CANCELLED')) { $Reason.Value = "report status is not terminal: $status"; return $false }
-    $completion = [bool](Get-WpfContractValue $Report 'completionVerified')
-    if ($status -eq 'PASS' -and -not $completion) { $Reason.Value = 'PASS omitted verified completion'; return $false }
-    if ($status -ne 'PASS' -and $completion) { $Reason.Value = "$status cannot assert verified completion"; return $false }
-    $cleanupDisposition = [string](Get-WpfContractValue $Report 'cleanupDisposition')
-    if ($status -eq 'PASS' -and $cleanupDisposition -cne 'CLEANUP_EXACT_CANDIDATE') { $Reason.Value = 'PASS omitted exact-candidate cleanup ownership'; return $false }
-    if ($status -eq 'REBOOT_REQUIRED' -and (-not [bool](Get-WpfContractValue $Report 'rebootRequired') -or $cleanupDisposition -cne 'RELINQUISH_VERIFIED_PENDING')) { $Reason.Value = 'REBOOT_REQUIRED omitted validated pending ownership'; return $false }
-    if ($status -eq 'DURABLE_PENDING') {
-        $basis = [string](Get-WpfContractValue $Report 'pendingBasis')
-        if (-not [bool](Get-WpfContractValue $Report 'durableCompletionPending') -or
-            -not [bool](Get-WpfContractValue $Report 'durableStateVerified') -or
-            -not [bool](Get-WpfContractValue $Report 'ownershipTransferVerified') -or
-            [bool](Get-WpfContractValue $Report 'productOutcomeClaimed') -or
-            $cleanupDisposition -cne 'RELINQUISH_VERIFIED_PENDING' -or
-            $basis -cne 'EXACT_TRANSACTION_DURABLE_STATE') {
-            $Reason.Value = 'DURABLE_PENDING omitted validated durable product identity and ownership transfer'; return $false
-        }
-        if ($expectedTransaction -notmatch '^[0-9a-fA-F]{32}$') { $Reason.Value = 'durable pending omitted exact transaction identity'; return $false }
-    }
-    if ($status -eq 'OBSERVER_HANDOFF') {
-        $basis = [string](Get-WpfContractValue $Report 'handoffBasis')
-        if (-not [bool](Get-WpfContractValue $Report 'ownershipTransferVerified') -or
-            [bool](Get-WpfContractValue $Report 'productOutcomeClaimed') -or
-            [bool](Get-WpfContractValue $Report 'durableCompletionPending') -or
-            [string](Get-WpfContractValue $Report 'observerContract') -cne 'Wait-DevFleetProductLifecycleTransition' -or
-            $cleanupDisposition -cne 'RELINQUISH_LIFECYCLE_OWNER' -or
-            $basis -notin @('GENERATION_ZERO_PRODUCT_OBSERVER_HANDOFF','EXACT_TRANSACTION_PRODUCT_OBSERVER_HANDOFF')) {
-            $Reason.Value = 'OBSERVER_HANDOFF omitted an exact no-outcome ownership transfer'; return $false
-        }
-        if ($basis -eq 'EXACT_TRANSACTION_PRODUCT_OBSERVER_HANDOFF' -and $expectedTransaction -notmatch '^[0-9a-fA-F]{32}$') { $Reason.Value = 'transaction-bound handoff omitted exact transaction identity'; return $false }
-        if ($basis -eq 'GENERATION_ZERO_PRODUCT_OBSERVER_HANDOFF' -and $expectedTransaction) { $Reason.Value = 'generation-zero handoff contradicted an existing transaction identity'; return $false }
-    }
-    return $true
-}
-
-function Resolve-WpfProviderObservation {
-    param([AllowNull()][object]$ProviderValue,[Parameter(Mandatory)][ValidateSet('TERMINAL','PROGRESS')][string]$Kind,[Parameter(Mandatory)][datetime]$Now)
-    if ($null -eq $ProviderValue) { return [pscustomobject]@{value=$null;establishedAtUtc=$Now;metadataValid=$true;reason=''} }
-    if ([string](Get-WpfContractValue $ProviderValue 'contract') -cne 'devfleet-wpf-file-observation-v1') {
-        return [pscustomobject]@{value=$ProviderValue;establishedAtUtc=$Now;metadataValid=$true;reason='collection time is the only establishment evidence'}
-    }
-    if ([string](Get-WpfContractValue $ProviderValue 'kind') -cne $Kind) {
-        return [pscustomobject]@{value=$null;establishedAtUtc=$Now;metadataValid=$false;reason='provider observation kind mismatch'}
-    }
-    try { $established = ConvertTo-WpfUtcInstant (Get-WpfContractValue $ProviderValue 'fileWriteUtc') }
-    catch { return [pscustomobject]@{value=$null;establishedAtUtc=$Now;metadataValid=$false;reason='provider observation fileWriteUtc is missing or malformed'} }
-    if ($established -gt $Now) { return [pscustomobject]@{value=$null;establishedAtUtc=$established;metadataValid=$false;reason='provider observation claims a future file write'} }
-    $value = Get-WpfContractValue $ProviderValue 'value'
-    if ($null -eq $value) { return [pscustomobject]@{value=$null;establishedAtUtc=$established;metadataValid=$false;reason='provider observation omitted its value'} }
-    return [pscustomobject]@{value=$value;establishedAtUtc=$established;metadataValid=$true;reason='atomic file write time'}
-}
-
-function Test-WpfBoundProgress {
-    param([AllowNull()][object]$Progress,[Parameter(Mandatory)][object]$Specification,[int]$MinimumSequenceExclusive,[int]$MinimumSemanticSequenceExclusive,[ref]$Sequence,[ref]$SemanticSequence,[ref]$Reason)
-    $Reason.Value='';$Sequence.Value=0;$SemanticSequence.Value=0
-    if($null -eq $Progress){$Reason.Value='progress absent';return $false}
-    if([string](Get-WpfContractValue $Progress 'contract') -cne 'devfleet-wpf-checkpoint-v2' -or [int](Get-WpfContractValue $Progress 'schemaVersion') -lt 2){$Reason.Value='progress contract is missing or stale';return $false}
-    foreach($name in @('runId','launchId','transactionId','payloadSha256','candidateSha256')){if([string](Get-WpfContractValue $Progress $name) -cne [string](Get-WpfContractValue $Specification $name)){$Reason.Value="progress $name mismatch";return $false}}
-    try{$progressDeadline=ConvertTo-WpfUtcInstant (Get-WpfContractValue $Progress 'deadlineUtc');$expectedDeadline=ConvertTo-WpfUtcInstant (Get-WpfContractValue $Specification 'driverDeadlineUtc');if($progressDeadline.Ticks-ne$expectedDeadline.Ticks){$Reason.Value='progress deadline identity mismatch';return $false}}catch{$Reason.Value='progress deadline identity is missing or malformed';return $false}
-    $sequenceValue=0;if(-not[int]::TryParse([string](Get-WpfContractValue $Progress 'sequence'),[ref]$sequenceValue)-or$sequenceValue-le$MinimumSequenceExclusive){$Reason.Value='progress sequence is missing or non-monotonic';return $false}
-    $Sequence.Value=$sequenceValue
-    $semanticValue=0;if(-not[int]::TryParse([string](Get-WpfContractValue $Progress 'semanticProgressSequence'),[ref]$semanticValue)-or$semanticValue-le$MinimumSemanticSequenceExclusive){$Reason.Value='progress semantic sequence is missing or non-monotonic';return $false}
-    $SemanticSequence.Value=$semanticValue
-    if([string](Get-WpfContractValue $Progress 'semanticProgressKind') -ne 'DURABLE_PRODUCT_PROGRESS' -or [string](Get-WpfContractValue $Progress 'progressSource') -ne 'DURABLE_PRODUCT_OBSERVER'){$Reason.Value='observer breadcrumb is not durable semantic product progress';return $false}
-    if([string](Get-WpfContractValue $Progress 'transactionId') -notmatch '^[0-9a-fA-F]{32}$'){$Reason.Value='durable semantic progress lacks an exact transaction identity';return $false}
-    return $true
-}
-
-function Get-WpfCleanupDisposition {
-    param([Parameter(Mandatory)][string]$Status, [switch]$CompletionVerified)
-    switch ($Status) {
-        'ALREADY_RUNNING' { return 'CONTINUE_OBSERVATION' }
-        'DURABLE_PENDING' { return 'RELINQUISH_VERIFIED_PENDING' }
-        'OBSERVER_HANDOFF' { return 'RELINQUISH_LIFECYCLE_OWNER' }
-        'REBOOT_REQUIRED' { return 'RELINQUISH_VERIFIED_PENDING' }
-        'OBSERVER_FAILURE' { return 'RELINQUISH_LIFECYCLE_OWNER' }
-        'CANCELLED' { return 'RELINQUISH_LIFECYCLE_OWNER' }
-        'PASS' { if ($CompletionVerified) { return 'CLEANUP_EXACT_CANDIDATE' }; return 'REJECT_INCOMPLETE_PASS' }
-        default { return 'CLEANUP_EXACT_CANDIDATE' }
-    }
-}
-
-function New-WpfSupervisorFailure {
-    param([Parameter(Mandatory)][object]$Specification, [Parameter(Mandatory)][string]$FailureClass, [Parameter(Mandatory)][string]$Error, [Parameter(Mandatory)][datetime]$Now, [int]$LastSequence = 0, [string]$LastDurableStep = 'LAUNCH_REQUESTED')
-    return [pscustomobject][ordered]@{
-        schemaVersion=2; contract='devfleet-wpf-terminal-v2'; status='OBSERVER_FAILURE'; terminal=$true; completionVerified=$false; failureClass=$FailureClass; error=$Error;
-        runId=[string](Get-WpfContractValue $Specification 'runId'); launchId=[string](Get-WpfContractValue $Specification 'launchId');
-        transactionId=[string](Get-WpfContractValue $Specification 'transactionId'); payloadSha256=[string](Get-WpfContractValue $Specification 'payloadSha256');
-        candidateSha256=[string](Get-WpfContractValue $Specification 'candidateSha256'); sequence=([Math]::Max(0,$LastSequence)+1); phase='SUPERVISOR'; lastDurableStep=$LastDurableStep; productStarted=$true;
-        deadlineUtc=[string](Get-WpfContractValue $Specification 'driverDeadlineUtc'); timestampUtc=$Now.ToString('o'); cleanupDisposition='RELINQUISH_LIFECYCLE_OWNER'
-    }
-}
-
-function Invoke-WpfBoundProviderCall {
-    param(
-        [Parameter(Mandatory)][scriptblock]$Provider,
-        [Parameter(Mandatory)][string]$Kind,
-        [Parameter(Mandatory)][ValidateRange(1,60)][int]$TimeoutSeconds
-    )
-    $runspace=$null
-    $pipeline=$null
-    $invocation=$null
-    $quarantined=$false
-    try {
-        $runspace=[runspacefactory]::CreateRunspace()
-        $runspace.Open()
-        $runspace.SessionStateProxy.SetVariable('DevFleetWpfBoundProvider',$Provider)
-        $pipeline=[powershell]::Create()
-        $pipeline.Runspace=$runspace
-        [void]$pipeline.AddScript('& $DevFleetWpfBoundProvider')
-        $invocation=$pipeline.BeginInvoke()
-        if (-not $invocation.AsyncWaitHandle.WaitOne([TimeSpan]::FromSeconds($TimeoutSeconds))) {
-            try {
-                $stopInvocation=$pipeline.BeginStop($null,$null)
-                [void]$stopInvocation.AsyncWaitHandle.WaitOne([TimeSpan]::FromSeconds(2))
-            } catch {}
-            [void]$script:WpfAbandonedProviderCalls.Add([pscustomobject]@{pipeline=$pipeline;runspace=$runspace;invocation=$invocation;kind=$Kind})
-            $quarantined=$true
-            return [pscustomobject]@{ok=$false;timedOut=$true;value=$null;error="$Kind did not return within its bounded $TimeoutSeconds-second call window."}
-        }
-        try {
-            $values=@($pipeline.EndInvoke($invocation))
-            if($pipeline.HadErrors){
-                $providerErrors=@($pipeline.Streams.Error)
-                $providerError=if($providerErrors.Count){[string]$providerErrors[0].Exception.Message}else{"$Kind failed without a preserved error record."}
-                return [pscustomobject]@{ok=$false;timedOut=$false;value=$null;error=$providerError}
-            }
-            $value=if($values.Count -eq 0){$null}elseif($values.Count -eq 1){$values[0]}else{$values}
-            return [pscustomobject]@{ok=$true;timedOut=$false;value=$value;error=''}
-        } catch {
-            $providerErrors=@($pipeline.Streams.Error)
-            $providerError=if($providerErrors.Count){[string]$providerErrors[0].Exception.Message}else{[string]$_.Exce
+        $reportDeadline = Conver

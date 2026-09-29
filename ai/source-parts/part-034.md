@@ -1,10 +1,200 @@
 # DevFleet source part 034
 
 Full-source UTF-8 byte interval [1534500, 1581000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 17c04e34384635872a55ebb694916e180ad7c06e43338acd275f8ff309db4891
+Payload SHA-256: fd3c2116e0beb802b83574b2b3db82e1d9c3775af9afb641fa91654298ed25b0
 
 <!-- BEGIN SOURCE SLICE -->
-t path.is_symlink() and not path.parent.is_symlink(), "FIXTURE_EDIT_PATH_UNSAFE")
+identity(path, self.fixture, self.request["execution"])
+        self.store.verify_owner(path, self.fixture)
+        return meta
+
+    def observe_runtime(self, *, running: bool, healthy: bool = False) -> dict[str, Any]:
+        meta = self.identity()
+        containers = self.probe.containers(self.fixture["projectId"])
+        persistent: list[dict[str, Any]] = []
+        for item in containers:
+            labels = (item.get("Config") or {}).get("Labels") or {}
+            require(isinstance(labels, dict), "CONTAINER_LABELS_INVALID")
+            for key, label in LABELS.items():
+                require(labels.get(label) == str(meta.get(key, "")), "CONTAINER_OWNERSHIP_MISMATCH")
+            require(labels.get("com.docker.compose.project") == self.fixture["runtimeId"]
+                    and labels.get("com.docker.compose.service"), "COMPOSE_IDENTITY_MISMATCH")
+            require(SHA256.fullmatch(str(item.get("Id", ""))), "CONTAINER_ID_NOT_CANONICAL")
+            if str(labels.get("com.docker.compose.oneoff", "")).lower() == "true":
+                require(not (item.get("State") or {}).get("Running"), "TRANSIENT_WRITER_REMAINS")
+                continue
+            persistent.append(item)
+        active = [item for item in persistent if (item.get("State") or {}).get("Running") is True]
+        require(len(active) == (1 if running else 0), "PERSISTENT_WRITER_COUNT_MISMATCH")
+        ui_page = self.ui.page(f"/projects/{self.fixture['slug']}")
+        require(ui_page.project_states and ui_page.project_states == [("running" if running else "stopped")],
+                "UI_RUNTIME_STATE_DISAGREES")
+        require(meta.get("lifecycle_status") == ("running" if running else "stopped"), "BACKEND_RUNTIME_STATE_DISAGREES")
+        if healthy:
+            require(meta.get("health_status") == "healthy", "APPLICATION_NOT_HEALTHY")
+        ids = []
+        for item in active:
+            observed = self.ui.json("/containers/" + item["Id"] + "/inspect")
+            require(observed.get("Id") == item["Id"] and (observed.get("State") or {}).get("Running") is True,
+                    "UI_CONTAINER_INSPECT_DISAGREES")
+            if healthy:
+                require((item.get("State") or {}).get("Health", {}).get("Status") == "healthy", "CONTAINER_NOT_HEALTHY")
+            ids.append(item["Id"])
+        return {"persistentContainerIds": ids, "persistentWriters": len(active), "healthy": healthy}
+
+    def wait_healthy(self) -> dict[str, Any]:
+        # Docker healthcheck is independent of the successful user health job.
+        deadline = min(self.ui.deadline, self.ui.clock() + 180)
+        while True:
+            try:
+                return self.observe_runtime(running=True, healthy=True)
+            except AcceptanceError as exc:
+                if exc.code not in {"CONTAINER_NOT_HEALTHY"} or self.ui.clock() >= deadline:
+                    raise
+                self.ui.sleep(min(1.0, max(0.0, deadline - self.ui.clock())))
+
+    def assert_no_pending(self) -> None:
+        for entry in self.state["operations"]:
+            operation = self.ui.json("/ui/operations/" + entry["id"])
+            require(operation.get("state") == entry["expectedState"], "ACCEPTANCE_OPERATION_PENDING_OR_CHANGED")
+
+    def prepare(self, credentials: tuple[str, str]) -> None:
+        require(not self.state["prepared"] and not self.fixture, "PREPARE_ALREADY_ATTEMPTED")
+        self.state["preflight"] = self.probe.preflight(self.request)
+        self.begin("U01")
+        self.ui.login(*credentials)
+        slug = "df-accept-" + hashlib.sha256(self.request["runId"].encode()).hexdigest()[:12]
+        path = safe_child(self.store.workspaces, slug)
+        require(not path.exists(), "FIXTURE_ALREADY_EXISTS")
+        self.state["fixture"] = {"slug": slug, "originalPath": str(path), "recoveredPath": ""}
+        self.save()
+        self.operation("create", page="/?view=projects", route="/projects/create", project=slug,
+                       fields={"slug": slug, "display_name": slug, "template": "generic", "target": "local",
+                               "runtime_isolation": "container", "resource_profile": "small", "scale": "small",
+                               "intent": "prototype", "profile": "balanced", "testing_level": "standard",
+                               "git_url": "", "language": "", "framework": "", "pid_mode": "private", "pid_limit": "4096"})
+        meta = self.store.metadata(path)
+        require(PROJECT_ID.fullmatch(str(meta.get("project_id", ""))), "CREATED_PROJECT_ID_INVALID")
+        self.fixture.update(projectId=meta["project_id"], runtimeId=meta.get("runtime_id", ""))
+        self.store.verify_identity(path, self.fixture, self.request["execution"])
+        require(meta.get("template") == "generic", "CREATED_TEMPLATE_MISMATCH")
+        for asset in ("compose.yaml", ".devcontainer/devcontainer.json", ".devfleet/project.json",
+                      ".devfleet/smoke-test.sh", ".devfleet/health-check.sh"):
+            require((path / asset).is_file() and not (path / asset).is_symlink(), "TEMPLATE_ASSET_MISSING")
+        owner = {"schemaVersion": 1, "runId": self.request["runId"], "slug": slug,
+                 "projectId": meta["project_id"], "nonce": secrets.token_hex(24)}
+        self.fixture["owner"] = owner
+        sentinel = f"DevFleet real-use acceptance\nrun:{owner['runId']}\nnonce:{owner['nonce']}\n".encode()
+        for name, data in ((OWNER_FILE, canonical(owner)), (SENTINEL_FILE, sentinel)):
+            with (path / name).open("xb") as stream:
+                stream.write(data)
+        self.fixture["sentinelSha256"] = hashlib.sha256(sentinel).hexdigest()
+        self.state["ledger"].append({"kind": "project", "path": str(path)})
+        self.save()
+        self.complete("U01", {"template": "generic", "projectId": meta["project_id"]})
+        self.begin("U02")
+        self.operation("start")
+        self.operation("health")
+        test = self.operation("test")
+        require(SMOKE_TEXT in str(test.get("result", "")), "TEMPLATE_SMOKE_OUTPUT_MISSING")
+        runtime = self.wait_healthy()
+        self.complete("U02", runtime)
+        self.begin("U03")
+        self.operation("stop")
+        self.observe_runtime(running=False)
+        self.operation("start")
+        self.operation("health")
+        self.wait_healthy()
+        self.assert_no_pending()
+        self.state["serviceBeforeRestart"] = self.probe.service()
+        self.state["prepared"] = True
+        self.save()
+
+    def backup_evidence(self, path: Path) -> dict[str, Any]:
+        meta = self.store.verify_identity(path, self.fixture, self.request["execution"])
+        require(meta.get("backup_status") == "verified", "PRODUCT_BACKUP_NOT_VERIFIED")
+        evidence = self.store.verify_backup(meta, self.fixture)
+        if evidence["path"] not in {entry["path"] for entry in self.state["ledger"]}:
+            self.state["ledger"].append(evidence)
+            self.save()
+        return evidence
+
+    def u04(self) -> None:
+        self.begin("U04")
+        self.identity()
+        backup_root = self.store.runtime / "workspace-backups"
+        self.state["backupBaseline"] = sorted(path.name for path in backup_root.iterdir()) if backup_root.is_dir() else []
+        self.state["backupDiscoveryRequired"] = True
+        self.save()
+        result = self.operation("backup", page=f"/projects/{self.fixture['slug']}?tab=backups")
+        try:
+            receipt = json.loads(result["result"]) if isinstance(result.get("result"), str) else result["result"]
+        except (KeyError, json.JSONDecodeError):
+            raise AcceptanceError("BACKUP_RECEIPT_INVALID") from None
+        # Even an insufficient durability receipt can have created a valid local
+        # archive. Bind that fixture before rejecting Vault acceptance.
+        immediate = self.backup_evidence(self.original())
+        require(isinstance(receipt, dict) and receipt.get("ok") is True and receipt.get("backup_status") == "verified"
+                and receipt.get("vault_upload_status") == "verified" and receipt.get("durability_level") == "vault",
+                "VAULT_UPLOAD_NOT_VERIFIED")
+        require(receipt.get("backup_id") == immediate["backupId"] and receipt.get("backup_sha256") == immediate["archiveSha256"],
+                "BACKUP_RECEIPT_DISAGREES")
+        self.state["quarantineUnverified"] = True
+        self.save()
+        quarantined = self.operation("quarantine", page=f"/projects/{self.fixture['slug']}?tab=isolate",
+                                    fields={"confirm_quarantine": "true"})
+        path = exact_returned_child(self.store.quarantine, quarantined.get("result"), "QUARANTINE_PATH_INVALID")
+        require(re.fullmatch(r"[0-9]{8}-[0-9]{6}-" + re.escape(self.fixture["slug"]), path.name),
+                "QUARANTINE_NAME_INVALID")
+        self.store.verify_identity(path, self.fixture, self.request["execution"])
+        self.store.verify_owner(path, self.fixture)
+        require(not Path(self.fixture["originalPath"]).exists(), "QUARANTINE_ORIGINAL_REMAINS")
+        self.state["ledger"].append({"kind": "quarantine", "path": str(path)})
+        self.state["quarantineUnverified"] = False
+        self.save()
+        quarantine_backup = self.backup_evidence(path)
+        require(not any((item.get("State") or {}).get("Running") for item in self.probe.containers(self.fixture["projectId"])),
+                "QUARANTINED_RUNTIME_REMAINS")
+        collision = safe_child(self.store.workspaces, self.fixture["slug"])
+        collision.mkdir()
+        marker = canonical({"runId": self.request["runId"], "nonce": self.fixture["owner"]["nonce"], "collision": True})
+        with (collision / OWNER_FILE).open("xb") as stream:
+            stream.write(marker)
+        self.state["collisionSha256"] = hashlib.sha256(marker).hexdigest()
+        self.save()
+        try:
+            failed = self.operation("restore-quarantine", page="/?view=settings", route="/quarantine/restore",
+                                    fields={"name": path.name}, match_fields={"name": path.name},
+                                    project=path.name, expected="failed")
+            require("already exists" in str(failed.get("error", "")), "QUARANTINE_COLLISION_WRONG_FAILURE")
+            require(list(collision.iterdir()) == [collision / OWNER_FILE]
+                    and digest(collision / OWNER_FILE) == self.state["collisionSha256"], "COLLISION_WAS_MODIFIED")
+            self.store.verify_owner(path, self.fixture)
+        finally:
+            self.remove_collision()
+        self.operation("restore-quarantine", page="/?view=settings", route="/quarantine/restore",
+                       fields={"name": path.name}, match_fields={"name": path.name}, project=path.name)
+        require(not path.exists(), "QUARANTINE_RESTORE_SOURCE_REMAINS")
+        self.identity()
+        self.complete("U04", {"immediateBackup": immediate, "quarantineBackup": quarantine_backup,
+                              "quarantineName": path.name, "sentinelSha256": self.fixture["sentinelSha256"]})
+
+    def remove_collision(self) -> None:
+        if not self.state.get("collisionSha256"):
+            return
+        path = safe_child(self.store.workspaces, self.fixture["slug"], exists=True)
+        require(list(path.iterdir()) == [path / OWNER_FILE] and not (path / OWNER_FILE).is_symlink()
+                and digest(path / OWNER_FILE) == self.state["collisionSha256"], "COLLISION_CLEANUP_REFUSED")
+        (path / OWNER_FILE).unlink()
+        path.rmdir()
+        self.state.pop("collisionSha256")
+        self.save()
+
+    @contextlib.contextmanager
+    def fixture_edit(self, relative: str, replacement: bytes):
+        require(relative in {"compose.yaml", ".devfleet/ownership-lease.json"}, "FIXTURE_EDIT_NOT_ALLOWED")
+        path = self.original() / relative
+        require(path.is_file() and not path.is_symlink() and not path.parent.is_symlink(), "FIXTURE_EDIT_PATH_UNSAFE")
         original = path.read_bytes()
         require(len(original) < 65536, "FIXTURE_EDIT_SOURCE_TOO_LARGE")
         entry = {"relative": relative, "originalBase64": base64.b64encode(original).decode("ascii"),
@@ -564,141 +754,4 @@ if (-not $WorkerMode) {
         if (-not $candidateIdentity) { throw 'Exact candidate launch identity could not be proven.' }
         $launchAck = Write-BoundaryCheckpoint -Phase 'LAUNCH_ACKNOWLEDGED' -Status 'PASS' -Detail @{
             processId=[int]$process.Id;processStartTime=$processStartUtc;sessionId=[int]$process.SessionId;candidateIdentity=$candidateIdentity;
-            candidatePath=$ExePath;candidateArguments=@($candidateArguments);driverPath=$PSCommandPath;driverIdentity=(Get-ProcessIdentityEvidence $driverPid $driverSessionId)
-        }
-
-        Remove-Item -LiteralPath $WorkerResultPath -Force -ErrorAction SilentlyContinue
-        $workerTokens = @(
-            '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-STA','-File',$PSCommandPath,'-WorkerMode',
-            '-ExePath',$ExePath,'-CandidateProcessId',[string]$process.Id,'-ExpectedCandidateStartUtc',$processStartUtc,
-            '-Action',$Action,'-Role',$Role,'-OutputPath',$WorkerResultPath,'-CheckpointPath',$CheckpointPath,
-            '-LaunchRequestPath',$LaunchRequestPath,'-RunId',$RunId,'-LaunchId',$LaunchId,'-TransactionId',$TransactionId,
-            '-PayloadSha256',$PayloadSha256,'-LaunchMode',$LaunchMode,'-ObserverDeadlineUtc',$ObserverDeadlineUtc,
-            '-ExpectedInteractiveSessionId',[string]$ExpectedInteractiveSessionId
-        )
-        if ($AllowMutation) { $workerTokens += '-AllowMutation' }
-        if ($AllowRebootRequired) { $workerTokens += '-AllowRebootRequired' }
-        if ($UseDurableCompletionFallback) { $workerTokens += '-UseDurableCompletionFallback' }
-        if ($ElevatedResume) { $workerTokens += '-ElevatedResume' }
-        $worker = Start-Process -FilePath ([string]$specification.taskExecutable) -ArgumentList (ConvertTo-WpfCommandLine -Tokens $workerTokens) -PassThru
-        $terminal = Wait-WpfBoundReport -Specification $specification `
-            -ReportProvider { Read-ObservedJsonFile -Path $WorkerResultPath -Kind TERMINAL } `
-            -WorkerStateProvider { try { $worker.Refresh(); if ($worker.HasExited) { 'Exited' } else { 'Running' } } catch { 'Exited' } } `
-            -StopWorker { try { if (-not $worker.HasExited) { $worker.Kill() } } catch {} } `
-            -ProgressProvider { Read-ObservedJsonFile -Path $CheckpointPath -Kind PROGRESS } `
-            -TerminalWriter { param($value) Write-WpfAtomicJson -Path $OutputPath -Value $value }
-
-        $terminal | Add-Member -NotePropertyName driverPid -NotePropertyValue $driverPid -Force
-        $terminal | Add-Member -NotePropertyName driverSessionId -NotePropertyValue $driverSessionId -Force
-        $terminal | Add-Member -NotePropertyName driverIdentity -NotePropertyValue (Get-ProcessIdentityEvidence $driverPid $driverSessionId) -Force
-        $terminal | Add-Member -NotePropertyName candidateIdentity -NotePropertyValue $candidateIdentity -Force
-        $terminal | Add-Member -NotePropertyName processId -NotePropertyValue ([int]$process.Id) -Force
-        $terminal | Add-Member -NotePropertyName processStartTime -NotePropertyValue $processStartUtc -Force
-        $terminal | Add-Member -NotePropertyName launchAcknowledgement -NotePropertyValue $launchAck -Force
-        $cleanupDisposition = Get-WpfCleanupDisposition -Status ([string]$terminal.status) -CompletionVerified:([bool]$terminal.completionVerified)
-        $terminal | Add-Member -NotePropertyName cleanupDisposition -NotePropertyValue $cleanupDisposition -Force
-        Write-WpfAtomicJson -Path $OutputPath -Value $terminal
-        if ([string]$terminal.status -in @('OBSERVER_FAILURE','CANCELLED')) { exit 2 }
-        if ([string]$terminal.status -in @('PRODUCT_FAILURE','FAIL')) { exit 3 }
-        exit 0
-    } catch {
-        $primary = New-MinimalTerminal -Status 'OBSERVER_FAILURE' -FailureClass 'DRIVER_STARTUP_OR_SUPERVISION_FAILURE' -ErrorMessage $_.Exception.Message -LastStep $(if($sequence -ge 2){'LAUNCH_ACKNOWLEDGED'}elseif($sequence -ge 1){'DRIVER_BOUND'}else{'LAUNCH_REQUESTED'})
-        Write-WpfAtomicJson -Path $OutputPath -Value $primary
-        $cleanupDisposition = 'RELINQUISH_LIFECYCLE_OWNER'
-        try {
-            Write-WpfAtomicJson -Path ($OutputPath + '.diagnostic.json') -Value ([ordered]@{status='DIAGNOSTIC';primaryError=$_.Exception.Message;driverPid=$driverPid;driverSessionId=$driverSessionId;processId=if($process){$process.Id}else{$null};timestampUtc=(Get-Date).ToUniversalTime().ToString('o')})
-        } catch {}
-        exit 2
-    } finally {
-        if ($process -and $cleanupDisposition -eq 'CLEANUP_EXACT_CANDIDATE') {
-            try { $process.Refresh(); if (-not $process.HasExited) { $process.CloseMainWindow() | Out-Null; Start-Sleep -Seconds 1; $process.Refresh(); if (-not $process.HasExited) { $process.Kill() } } } catch {}
-        }
-    }
-}
-
-# UI Automation is intentionally isolated in this worker process. The parent
-# supervisor can terminate this exact worker and publish a primary terminal
-# report even if a synchronous COM/UIA call below never returns.
-$actions = @()
-$visible = @()
-$diagnostics = @()
-$postConfirmationState = $null
-$window = $null
-try {
-    $candidateHash = Get-WpfFileSha256 -Path $ExePath
-    $candidateArguments = @($specification.candidateArguments | ForEach-Object { [string]$_ })
-    if ($RunId -cne [string]$specification.runId -or $LaunchId -cne [string]$specification.launchId -or $PayloadSha256 -cne [string]$specification.payloadSha256 -or $candidateHash -cne [string]$specification.candidateSha256) { throw 'UIA worker launch identity did not match the immutable launch request.' }
-    if ($TransactionId -and $TransactionId -cne [string]$specification.transactionId) { throw 'UIA worker transaction identity did not match the launch request.' }
-    $process = Get-Process -Id $CandidateProcessId -ErrorAction Stop
-    $actualStartUtc = $process.StartTime.ToUniversalTime()
-    if ($actualStartUtc.Ticks -ne (ConvertTo-WpfUtcInstant $ExpectedCandidateStartUtc).Ticks -or $process.SessionId -ne $ExpectedInteractiveSessionId) { throw 'UIA worker candidate PID/start-time/session binding failed.' }
-    $sequence = 2
-    [void](Write-BoundaryCheckpoint -Phase 'UIA_LOADING' -Status 'STARTED' -Detail @{workerPid=$driverPid;candidatePid=$process.Id})
-    Add-Type -AssemblyName UIAutomationClient
-    Add-Type -AssemblyName UIAutomationTypes
-    if (-not ('DevFleetE2EWindowProbe' -as [type])) {
-        Add-Type @'
-using System;
-using System.Text;
-using System.Runtime.InteropServices;
-public static class DevFleetE2EWindowProbe {
-    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-}
-'@
-    }
-    if (-not ('DevFleetE2EWin32' -as [type])) {
-        Add-Type @'
-using System;
-using System.Text;
-using System.Runtime.InteropServices;
-public static class DevFleetE2EWin32 {
-    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr hWndParent, IntPtr hWndChildAfter, string lpszClass, string lpszWindow);
-    [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
-    [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxCount);
-}
-'@
-    }
-    [void](Write-BoundaryCheckpoint -Phase 'UIA_READY' -Status 'PASS' -Detail @{workerPid=$driverPid})
-
-    function Get-UiElements { param([Parameter(Mandatory)]$Root) @($Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)) }
-    function Ensure-UiCheckbox {
-        param([Parameter(Mandatory)]$Root,[Parameter(Mandatory)][string]$Pattern)
-        $element=Get-UiElements $Root|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::CheckBox -and $_.Current.Name -match $Pattern}|Select-Object -First 1
-        if(-not $element){return $false};$toggle=$element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
-        if($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On){$toggle.Toggle();Start-Sleep -Milliseconds 300};return $true
-    }
-    function Set-UiTextValue {
-        param([Parameter(Mandatory)]$Root,[Parameter(Mandatory)][string]$AutomationId,[Parameter(Mandatory)][string]$Value)
-        $element=Get-UiElements $Root|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -and $_.Current.AutomationId -eq $AutomationId}|Select-Object -First 1
-        if(-not $element){return $false}
-        $valuePattern=$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-        if([string]$valuePattern.Current.Value -cne $Value){$valuePattern.SetValue($Value);Start-Sleep -Milliseconds 300}
-        if([string]$valuePattern.Current.Value -cne $Value){throw "UI text control $AutomationId did not accept the exact reviewed value."}
-        return $true
-    }
-    function Get-UiDiagnosticValues {
-        param([Parameter(Mandatory)]$Root)
-        $values=@();foreach($edit in @(Get-UiElements $Root|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit})){try{$value=$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value;if($value){$values+=[string]$value}}catch{}};return $values
-    }
-
-    $windowDeadline = Get-MinDeadline ((Get-Date).ToUniversalTime().AddSeconds(90))
-    while((Get-Date).ToUniversalTime() -lt $windowDeadline -and -not $window){Start-Sleep -Milliseconds 500;$process.Refresh();if($process.MainWindowHandle -ne 0){try{$window=[System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)}catch{}}}
-    if(-not $window){throw "Exact candidate did not expose a WPF window for action $Action."}
-    [void](Write-BoundaryCheckpoint -Phase 'WINDOW_ACQUIRED' -Status 'PASS' -Detail @{candidatePid=$process.Id;windowTitle=[string]$window.Current.Name})
-    $all=Get-UiElements $window;$buttons=@($all|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button})
-    $actions=@([ordered]@{name='startup';result='PASS';window=$window.Current.Name})
-    $navigationReady=$null;$executionAlreadyStarted=$false;$factoryResetPhraseSet=$false;$navigationDeadline=Get-MinDeadline ((Get-Date).ToUniversalTime().AddSeconds(120))
-    while((Get-Date).ToUniversalTime() -lt $navigationDeadline -and -not $navigationReady -and -not $executionAlreadyStarted){
-        $all=Get-UiElements $window;$buttons=@($all|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button})
-        $nextControl=$buttons|Where-Object{$_.Current.IsEnabled -and $_.Current.Name -match '^(Next|Continue)$'}|Select-Object -First 1
-        $executeControl=$buttons|Where-Object{$_.Current.Name -eq 'Execute verified plan'}|Select-Object -First 1
-        $windowHandle=[IntPtr]$process.MainWindowHandle;$windowOwner=0;if($windowHandle -ne [IntPtr]::Zero){[void][DevFleetE2EWindowProbe]::GetWindowThreadProcessId($windowHandle,[ref]$windowOwner)}
-        $pageKickerElement=@($all|Where-Object{$_.Current.AutomationId -eq 'PageKicker'}|Select-Object -First 1);$statusElement=@($all|Where-Object{$_.Current.AutomationId -eq 'OperationStatus'}|Select-Object -First 1)
-        $pageKicker=if($pageKickerElement){[string]$pageKickerElement.Current.Name}else{''};$operationStatus=if($statusElement){[string]$statusElement.Current.Name}else{''}
-        $navigationDisposition=Get-WpfNavigationDisposition -LaunchMode $LaunchMode -ElevatedResume ([bool]$ElevatedResume) -WindowOwnerMatches ($windowOwner -eq [uint32]$proces
+            candidatePath=$ExePath;can

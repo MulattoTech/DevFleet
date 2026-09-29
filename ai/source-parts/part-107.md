@@ -1,10 +1,233 @@
 # DevFleet source part 107
 
 Full-source UTF-8 byte interval [4929000, 4975500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: c8a692bda904005aca47ba8fd879a1e3c496a15d508def3f04f52e47ab5405b6
+Payload SHA-256: 647c807cd75728680265a63bb0afb3303f38cb82e1dfaf39bbb59d24e70c85a4
 
 <!-- BEGIN SOURCE SLICE -->
-ontent (Join-Path $dest 'vault-client.json') -Raw|ConvertFrom-Json
+ool]$config.Development.AllowTailnetPortPublishing; BackupBeforeRebuild=[bool]$config.Development.BackupBeforeRebuild; BackupBeforeQuarantine=[bool]$config.Development.BackupBeforeQuarantine
+ BackupIntervalMinutes=[int]$config.Backup.IntervalMinutes
+ PackageVersion=$packageVersion
+}
+$zip=Join-Path (Get-DevFleetStateRoot) "tmp\payload-$name.zip"
+Remove-Item $zip -Force -ErrorAction SilentlyContinue
+Compress-Archive -Path (Join-Path $tmp '*') -DestinationPath $zip
+$payloadDeadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetOperationMaximumSeconds 'payloadTransfer'))
+$payloadContext=Get-DevFleetDeadlineContext
+if($payloadContext -and ([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime() -lt $payloadDeadline){$payloadDeadline=([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime()}
+try {
+ Invoke-External $mp @('transfer',$zip,"${name}:/tmp/devfleet-payload.zip") -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
+ Write-StageMarker -Name $bootstrapBoundary.payloadTransferredStageName -Transaction $activeTransaction
+ Invoke-External $mp @('exec',$name,'--','bash','-lc',$bootstrapBoundary.extractionCommand) -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
+ Write-StageMarker -Name $bootstrapBoundary.payloadExtractedStageName -Transaction $activeTransaction
+ $bootstrapDeadline=[datetime]::UtcNow.AddSeconds($bootstrapBoundary.bootstrapMaxSeconds)
+ $bootstrapContext=Get-DevFleetDeadlineContext
+ if($bootstrapContext -and ([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime() -lt $bootstrapDeadline){$bootstrapDeadline=([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime()}
+ Invoke-MultipassWithStandardInput -FilePath $mp -InstanceName $name -CommandArgumentList @('bash','-lc',$bootstrapBoundary.bootstrapCommand) -TimeoutSeconds $bootstrapBoundary.bootstrapMaxSeconds -DeadlineUtc $bootstrapDeadline -StandardInputText ($nodeSecrets | ConvertTo-Json -Compress)
+} finally {
+ Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+ Remove-Item $zip -Force -ErrorAction SilentlyContinue
+ $nodeSecrets=$null
+}
+Add-LocalSshKeyToInstance -InstanceName $name
+Write-StageMarker -Name $bootstrapBoundary.completionStageName -Transaction $activeTransaction
+Write-Host "$name provisioned. Portal credentials are stored under C:\ProgramData\DevFleet\secrets." -ForegroundColor Green
+
+```
+
+
+## FILE: source/windows/03-Provision-Vault.ps1
+
+SHA256: 620c99ab23861ad44f74b5d79ceda9e79eba20feb89ff6694e0e548e2a5308c6 | Bytes: 7647 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param(
+ [switch]$ForceReprovision,
+ [string]$TransactionId,
+ [string]$TransactionPayloadSha256,
+ [string]$TransactionAction,
+ [string]$TransactionRole,
+ [string]$TransactionPreparedUtc
+)
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+Assert-PowerShell7;Assert-Administrator
+$deadlineContext=Get-DevFleetDeadlineContext
+if(-not $deadlineContext){$fallbackDeadline=[DateTime]::UtcNow.AddSeconds((Get-DevFleetStageBudgetSeconds 'vault'));Set-DevFleetDeadlineContext -TransactionDeadlineUtc $fallbackDeadline -StageName 'vault' -StageBudgetSeconds (Get-DevFleetStageBudgetSeconds 'vault') | Out-Null}
+$config=Get-DevFleetConfig;$v=$config.Vault;$name=$v.InstanceName;$package=Get-PackageRootFromState
+$activeTransaction=Wait-ActiveDevFleetTransaction -ExpectedRole 'Laptop'
+if(-not $activeTransaction -and $TransactionId -and $TransactionPayloadSha256 -and $TransactionAction -and $TransactionRole -and $TransactionPreparedUtc){
+ $propagated=[pscustomobject]@{transactionId=$TransactionId;payloadSha256=$TransactionPayloadSha256;action=$TransactionAction;role=$TransactionRole;preparedUtc=$TransactionPreparedUtc}
+ if(Test-DevFleetTransactionBinding -Transaction $propagated -ExpectedRole 'Laptop'){$activeTransaction=$propagated}
+}
+if(-not $activeTransaction){throw 'Active DevFleet transaction is missing, malformed, or not bound to the Vault role.'}
+$bootstrapSeconds=Get-DevFleetOperationMaximumSeconds 'vaultBootstrap'
+$bootstrapBoundary=New-DevFleetBootstrapBoundary -Kind vault -InstanceName $name -TransactionId ([string]$activeTransaction.transactionId) -PayloadSha256 ([string]$activeTransaction.payloadSha256) -BootstrapMaxSeconds $bootstrapSeconds -PackageVersion 'vault' -NodeRole 'vault'
+$mp=Get-MultipassExe
+Write-StageMarker -Name $bootstrapBoundary.multipassResolvedStageName -Transaction $activeTransaction
+Assert-MultipassIsolation -InstanceNames @($name)
+Write-StageMarker -Name $bootstrapBoundary.isolationVerifiedStageName -Transaction $activeTransaction
+$secrets=Get-OrCreateSecrets;$vaultIdentity=Get-OrCreateVaultIdentity
+$instancePresent=Test-MultipassInstance $name
+Write-StageMarker -Name $(if($instancePresent){$bootstrapBoundary.instancePresentStageName}else{$bootstrapBoundary.instanceAbsentStageName}) -Transaction $activeTransaction
+if($instancePresent){
+ if($ForceReprovision){throw 'Refusing automatic destruction of an existing backup vault.'}
+  New-DevFleetSnapshotSafe -InstanceName $name -SnapshotName "pre-refresh-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"|Out-Null
+  Invoke-External $mp @('start',$name) -IgnoreExitCode
+  Write-StageMarker -Name $bootstrapBoundary.instanceStartedStageName -Transaction $activeTransaction
+ Wait-MultipassReady $name 1200
+ Write-Host "$name already exists; refreshing safe configuration." -ForegroundColor Yellow
+}else{
+ $cloud=Join-Path (Get-DevFleetStateRoot) "tmp\cloud-$name.yaml"
+ $dependencyPolicy=Get-Content -LiteralPath (Join-Path $package 'linux/dependency-policy.json') -Raw|ConvertFrom-Json
+ $tailscaleFingerprint=[string]$dependencyPolicy.tailscale.signingKeySha256Fingerprint
+ if($tailscaleFingerprint-notmatch'^[A-F0-9]{40}$'){throw 'Canonical Tailscale signing-key fingerprint is invalid.'}
+ (Get-Content (Join-Path $package 'cloud-init\vault.yaml') -Raw).Replace('__NODE_NAME__',(ConvertTo-YamlSingleQuotedScalar $name)).Replace('__TAILSCALE_SIGNING_FINGERPRINT__',$tailscaleFingerprint)|Set-Content $cloud -Encoding utf8
+  # PowerShell `if` is a statement, not an expression; resolve the owning
+  # stage deadline before passing it to the fresh-launch recovery helper.
+  $launchDeadline=[datetime]::MinValue
+  if($deadlineContext){$launchDeadline=([datetime]$deadlineContext.StageDeadlineUtc).ToUniversalTime()}
+  Invoke-MultipassLaunchWithReadinessRecovery -InstanceName $name -LaunchArguments @('launch',[string]$v.UbuntuImage,'--name',$name,'--cpus',[string]$v.Cpus,'--memory',[string]$v.Memory,'--disk',[string]$v.Disk,'--cloud-init',$cloud) -ReadinessTimeoutSeconds 1200 -DeadlineUtc $launchDeadline -OnInstanceEstablished { param($launch) Write-StageMarker -Name $bootstrapBoundary.instanceLaunchedStageName -Transaction $activeTransaction }
+}
+Write-StageMarker -Name $bootstrapBoundary.instanceReadyStageName -Transaction $activeTransaction
+if($instancePresent){
+ $client=Invoke-External $mp @('exec',$name,'--','sh','-c','if command -v tailscale >/dev/null 2>&1; then printf PRESENT; else printf ABSENT; fi') -Capture -TimeoutSeconds 20
+ if($client-cne'PRESENT'){throw 'The existing Vault is missing its Tailscale client. Restore the client from the verified signed repository before running Repair; the existing Vault and backups have been preserved.'}
+}
+# Vault bootstrap and client configuration require an authenticated tailnet.
+# Fresh cloud-init installs the verified client; pair before transferring secrets
+# or starting bootstrap stages that depend on tailscale0 and its private IP.
+& (Join-Path $PSScriptRoot '04-Connect-Tailscale.ps1') -InstanceName $name
+$tmp=Join-Path (Get-DevFleetStateRoot) 'tmp\vault-payload';Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue;New-Item -ItemType Directory $tmp -Force|Out-Null
+Copy-Item (Join-Path $package 'linux') $tmp -Recurse
+$vaultSecrets=[ordered]@{VaultPort=$config.Network.VaultPort;RestUser=$secrets.VaultRestUser;RestPassword=$secrets.VaultRestPassword;ResticPassword=$secrets.ResticPassword;ClusterName=$config.ClusterName;DeploymentId=$vaultIdentity.deployment_id;NodeId=$vaultIdentity.node_id;NodeName=$vaultIdentity.node_name}|ConvertTo-Json -Compress
+$zip=Join-Path (Get-DevFleetStateRoot) 'tmp\vault-payload.zip';Remove-Item $zip -Force -ErrorAction SilentlyContinue;Compress-Archive -Path (Join-Path $tmp '*') -DestinationPath $zip
+$payloadDeadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetOperationMaximumSeconds 'payloadTransfer'))
+$payloadContext=Get-DevFleetDeadlineContext
+if($payloadContext -and ([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime() -lt $payloadDeadline){$payloadDeadline=([datetime]$payloadContext.StageDeadlineUtc).ToUniversalTime()}
+try {
+ Invoke-External $mp @('transfer',$zip,"${name}:/tmp/devfleet-vault-payload.zip") -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
+ Write-StageMarker -Name $bootstrapBoundary.payloadTransferredStageName -Transaction $activeTransaction
+ Invoke-External $mp @('exec',$name,'--','bash','-lc',$bootstrapBoundary.extractionCommand) -TimeoutSeconds (Get-DevFleetOperationMaximumSeconds 'payloadTransfer') -DeadlineUtc $payloadDeadline
+ Write-StageMarker -Name $bootstrapBoundary.payloadExtractedStageName -Transaction $activeTransaction
+ $bootstrapDeadline=[datetime]::UtcNow.AddSeconds($bootstrapBoundary.bootstrapMaxSeconds)
+ $bootstrapContext=Get-DevFleetDeadlineContext
+ if($bootstrapContext -and ([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime() -lt $bootstrapDeadline){$bootstrapDeadline=([datetime]$bootstrapContext.StageDeadlineUtc).ToUniversalTime()}
+ Invoke-MultipassWithStandardInput -FilePath $mp -InstanceName $name -CommandArgumentList @('bash','-lc',$bootstrapBoundary.bootstrapCommand) -TimeoutSeconds $bootstrapBoundary.bootstrapMaxSeconds -DeadlineUtc $bootstrapDeadline -StandardInputText $vaultSecrets
+} finally {
+ Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+ Remove-Item $zip -Force -ErrorAction SilentlyContinue
+ $vaultSecrets=$null
+}
+Write-StageMarker -Name $bootstrapBoundary.completionStageName -Transaction $activeTransaction;Write-Host "$name provisioned. Do not delete or purge this instance." -ForegroundColor Green
+
+```
+
+
+## FILE: source/windows/04-Connect-Tailscale.ps1
+
+SHA256: a8c18e358eeeeb4c00058fc893f165c2d47f90015e06abde8265bd7ae98b077b | Bytes: 1873 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$')][string]$InstanceName)
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Tailscale.psm1') -Force
+$mp=Get-MultipassExe
+$deadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetStageBudgetSeconds 'tailscale'))
+$activeTransaction = $null
+try { $activeTransaction = Get-ActiveDevFleetTransaction } catch { }
+$transactionId = if ($activeTransaction) { [string]$activeTransaction.transactionId } else { '' }
+$payloadSha256 = if ($activeTransaction) { [string]$activeTransaction.payloadSha256 } else { '' }
+$evidenceName = if ($transactionId -match '^[0-9a-fA-F]{32}$') { "setup-tailscale-pairing-$transactionId.log" } else { "setup-tailscale-pairing-pid-$PID.log" }
+$evidencePath = Join-Path (Join-Path $env:ProgramData 'M-TechLabs\DevFleet\Logs') $evidenceName
+$profile=Get-DevFleetTailscaleEnrollmentProfile
+$expectedPeer=if([string]$profile.hostName){[string]$profile.hostName}else{"$env:COMPUTERNAME-devfleet-host"}
+try {
+    $result=Invoke-DevFleetTailscaleOAuthPairing -FilePath $mp -InstanceName $InstanceName -Hostname $InstanceName -ExpectedPeer $expectedPeer -DeadlineUtc $deadline -EvidencePath $evidencePath -RunId ([string]$env:DEVFLEET_RUN_ID) -TransactionId $transactionId -PayloadSha256 $payloadSha256 -StageName 'tailscale' -TargetRole 'Guest' -PendingRebootProvider { Test-PendingReboot }
+} catch {
+    if ([string]$_.Exception.Message -match '^DEVFLEET_REBOOT_REQUIRED:') {
+        Write-Warning "Windows servicing requires a reboot during guest Tailscale stage for $InstanceName; returning 3010 before Vault completion is published."
+        exit 3010
+    }
+    throw
+}
+Write-Host "$InstanceName authenticated Tailscale IP: $($result.ipv4)" -ForegroundColor Green
+
+```
+
+
+## FILE: source/windows/04a-Connect-WindowsTailscale.ps1
+
+SHA256: 361255d8773a9de440bac3007db55635a7940e49409d77f9245651df44c3585b | Bytes: 1720 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param()
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Tailscale.psm1') -Force
+Assert-Administrator
+$service=Get-Service -Name Tailscale -ErrorAction SilentlyContinue
+$ts=Get-TailscaleExe
+$deadline=[datetime]::UtcNow.AddSeconds((Get-DevFleetStageBudgetSeconds 'windowsTailscale'))
+$activeTransaction = $null
+try { $activeTransaction = Get-ActiveDevFleetTransaction } catch { }
+$transactionId = if ($activeTransaction) { [string]$activeTransaction.transactionId } else { '' }
+$payloadSha256 = if ($activeTransaction) { [string]$activeTransaction.payloadSha256 } else { '' }
+$evidenceName = if ($transactionId -match '^[0-9a-fA-F]{32}$') { "setup-tailscale-pairing-$transactionId.log" } else { "setup-tailscale-pairing-pid-$PID.log" }
+$evidencePath = Join-Path (Join-Path $env:ProgramData 'M-TechLabs\DevFleet\Logs') $evidenceName
+$hostname = ("{0}-devfleet-host" -f $env:COMPUTERNAME.ToLower())
+try {
+    $result=Invoke-DevFleetTailscaleOAuthPairing -FilePath $ts -Hostname $hostname -DeadlineUtc $deadline -EvidencePath $evidencePath -RunId ([string]$env:DEVFLEET_RUN_ID) -TransactionId $transactionId -PayloadSha256 $payloadSha256 -StageName 'windows-tailscale' -TargetRole 'Host' -PendingRebootProvider { Test-PendingReboot }
+} catch {
+    if ([string]$_.Exception.Message -match '^DEVFLEET_REBOOT_REQUIRED:') {
+        Write-Warning 'Windows servicing requires a reboot during the Tailscale stage; returning 3010 before the stage marker is written.'
+        exit 3010
+    }
+    throw
+}
+Write-Host "Windows host $env:COMPUTERNAME authenticated Tailscale IP: $($result.ipv4)" -ForegroundColor Green
+
+```
+
+
+## FILE: source/windows/05-Configure-LocalVaultClient.ps1
+
+SHA256: 9687c9be4a3bf40a2e1481cd402c7d4118aaa0c4533e9037244b7bb3a25e0c62 | Bytes: 1235 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([Parameter(Mandatory)][string]$InstanceName)
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+$config=Get-DevFleetConfig;$secrets=Get-OrCreateSecrets;$mp=Get-MultipassExe
+$vaultIp=Get-InstanceIPv4 $config.Vault.InstanceName -PreferTailscale
+$pairingMode=if($vaultIp -match '^100\.'){'tailscale'}else{throw 'Authenticated Vault transport requires a Tailscale address; plaintext LAN fallback is disabled.'}
+$obj=[ordered]@{Repository="rest:http://${vaultIp}:$($config.Network.VaultPort)/$($secrets.VaultRestUser)/$($config.ClusterName)";RestUser=$secrets.VaultRestUser;RestPassword=$secrets.VaultRestPassword;ResticPassword=$secrets.ResticPassword;VaultIp=$vaultIp;VaultPort=$config.Network.VaultPort;PairingMode=$pairingMode}
+$tmp=Join-Path (Get-DevFleetStateRoot) 'secrets\vault-client.json';$obj|ConvertTo-Json|Set-Content $tmp -Encoding utf8
+Protect-DevFleetStateAcl
+Invoke-External $mp @('transfer',$tmp,"${InstanceName}:/tmp/vault-client.json")
+Invoke-External $mp @('exec',$InstanceName,'--','sudo','/usr/local/sbin/devfleet-configure-backup','/tmp/vault-client.json')
+Write-Host "Append-only backups configured for $InstanceName." -ForegroundColor Green
+
+```
+
+
+## FILE: source/windows/06-Import-Laptop-Bootstrap.ps1
+
+SHA256: e38b19b780ca0a6ef94aba9a71a225d4a6cc28d5c3fe6c80333f7fa0d00c8452 | Bytes: 2442 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([Parameter(Mandatory)][ValidateScript({Test-Path $_})][string]$BundlePath)
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+$config=Get-DevFleetConfig;$mp=Get-MultipassExe;$dest=Join-Path (Get-DevFleetStateRoot) 'tmp\import-laptop';$peerFile=$null;Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue
+Expand-EncryptedBundle -BundlePath $BundlePath -Destination $dest
+try {
+$vault=Get-Content (Join-Path $dest 'vault-client.json') -Raw|ConvertFrom-Json
 $tmp=Join-Path (Get-DevFleetStateRoot) 'secrets\vault-client.json';$vault|ConvertTo-Json|Set-Content $tmp -Encoding utf8
 Protect-DevFleetStateAcl
 $name=$config.Primary.InstanceName
@@ -495,218 +718,4 @@ def archive_filter(info):
     if not include_generated and any(part in excluded for part in pure.parts[1:]):
         return None
     if info.issym() or info.islnk() or info.isfifo() or info.isdev():
-        raise SystemExit("workspace archive contains a link or special file")
-    members.append(name)
-    return info
-
-with tarfile.open(archive, "w:gz") as bundle:
-    bundle.add(root, arcname=slug, recursive=True, filter=archive_filter)
-if not members:
-    raise SystemExit("workspace archive is empty")
-digest = hashlib.sha256()
-with Path(archive).open("rb") as stream:
-    for block in iter(lambda: stream.read(1024 * 1024), b""):
-        digest.update(block)
-digest = digest.hexdigest()
-print(json.dumps({"archive_sha256": digest, "member_count": len(members)}))
-'@
-    $result=Invoke-Multipass @('exec',$VmName,'--','sudo','python3','-c',$archiveScript,$Archive,$workspace,$Slug,([string]$IncludeGenerated)) 1200
-    try{$inspection=$result.Text|ConvertFrom-Json -AsHashtable}catch{throw 'Project VM did not return valid workspace archive verification JSON.'}
-    if([string]$inspection.archive_sha256 -notmatch '^[0-9a-f]{64}$' -or [int]$inspection.member_count -lt 1){throw 'Project VM returned incomplete workspace archive verification.'}
-    return $inspection
-}
-
-function Get-HostCapacity {
-    $computer = Get-CimInstance Win32_ComputerSystem;$os = Get-CimInstance Win32_OperatingSystem
-    $processor = Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum
-    $drive = $env:SystemDrive.TrimEnd(':') + ':';$disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$drive'"
-    $registry = Read-Registry;$committedCpu = 0.0;$committedMemory = 0.0;$committedDisk = 0.0;$vmCount = 0
-    foreach ($item in $registry.projects.Values) {
-        if ($item.state -notin @('destroyed')) { $committedCpu += [double]$item.cpus;$committedMemory += [double]$item.memory_gb;$committedDisk += [double]$item.disk_gb;$vmCount++ }
-    }
-    $policy = Get-Policy
-    $totalGb = [math]::Round($computer.TotalPhysicalMemory / 1GB, 2)
-    $memory = Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory
-    $availableGb = [math]::Round([double]$memory.AvailableBytes / 1GB, 2)
-    $commitGb = 0.0; $commitLimitGb = 0.0
-    try {
-        $commitGb = [math]::Round((Get-Counter '\Memory\Committed Bytes' -MaxSamples 1 -ErrorAction Stop).CounterSamples.CookedValue / 1GB, 2)
-        $commitLimitGb = [math]::Round((Get-Counter '\Memory\Commit Limit' -MaxSamples 1 -ErrorAction Stop).CounterSamples.CookedValue / 1GB, 2)
-    } catch {}
-    $diskFreeGb = [math]::Round($disk.FreeSpace / 1GB, 2)
-    $reservedCpu = [double]$policy.ReservedLogicalProcessors
-    $reservedDisk = [double]$policy.ReservedHostDiskGb
-    $physicalFloor = [math]::Max([double]$policy.PhysicalFloorMinGb, $totalGb * [double]$policy.PhysicalFloorPercent)
-    $commitFloor = [math]::Max([double]$policy.CommitHeadroomFloorMinGb, $commitLimitGb * [double]$policy.CommitHeadroomPercent)
-    $commitPercent = if ($commitLimitGb -gt 0) { [math]::Round($commitGb / $commitLimitGb * 100, 2) } else { 100 }
-    $resourceExhaustion = @()
-    try { $resourceExhaustion = @(Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows-Resource-Exhaustion-Detector';StartTime=(Get-Date).AddMinutes(-10)} -ErrorAction SilentlyContinue) } catch {}
-    $commitHeadroom = [math]::Max(0, $commitLimitGb - $commitGb)
-    $physicalHealthy = $availableGb -ge $physicalFloor
-    $commitHealthy = $commitHeadroom -ge $commitFloor -and $commitPercent -lt [double]$policy.CommitUsageLimitPercent
-    $adaptiveHealthy = $physicalHealthy -and $commitHealthy -and @($resourceExhaustion).Count -eq 0
-    $cpuPercent = 0.0
-    try { $cpuPercent = [math]::Round((Get-Counter '\Processor(_Total)\% Processor Time' -MaxSamples 1 -ErrorAction Stop).CounterSamples.CookedValue, 1) } catch {}
-    return [ordered]@{
-        host_id = [string]$script:Config.HostId;host_name = [string]$script:Config.HostName;agent_version = $script:AgentVersion;provider = 'multipass';provider_version = [string]$script:Config.MultipassVersion
-        resource_policy_version = [string]$policy.PolicyVersion;logical_cpus = [int]$processor.Sum;total_memory_gb = $totalGb;available_memory_gb = $availableGb;free_memory_gb = $availableGb;cpu_percent = $cpuPercent;disk_free_gb = $diskFreeGb
-        physical_floor_gb = [math]::Round($physicalFloor, 2);commit_headroom_floor_gb = [math]::Round($commitFloor, 2);commit_gb = $commitGb;commit_limit_gb = $commitLimitGb;commit_headroom_gb = $commitHeadroom;commit_usage_percent = $commitPercent;resource_exhaustion = @($resourceExhaustion).Count -gt 0
-        reserved_host_cpus = $reservedCpu;reserved_host_disk_gb = $reservedDisk
-        committed_project_cpus = [math]::Round($committedCpu, 2);committed_project_memory_gb = [math]::Round($committedMemory, 2);committed_project_disk_gb = [math]::Round($committedDisk, 2);managed_vm_count = $vmCount
-        allocatable_cpus = [math]::Max(0,[math]::Round([int]$processor.Sum - $reservedCpu - $committedCpu, 2))
-        allocatable_memory_gb = [math]::Max(0,[math]::Round([math]::Min($availableGb - $physicalFloor, $commitHeadroom - $commitFloor), 2))
-        allocatable_disk_gb = [math]::Max(0,[math]::Round($diskFreeGb - $reservedDisk - $committedDisk, 2))
-        health = if (-not $adaptiveHealthy -or $diskFreeGb -lt $reservedDisk -or $cpuPercent -ge 95) { 'degraded' } else { 'healthy' }
-    }
-}
-
-function Assert-HostCapacity {
-    $capacity = Get-HostCapacity;$policy = Get-Policy
-    if ($capacity.health -ne 'healthy') { throw 'Host capacity is temporarily below the configured safe threshold. No VM was created.' }
-    if ([int]$capacity.managed_vm_count -ge [int]$policy.MaximumVmCount) { throw 'The maximum managed VM count has been reached.' }
-    return $capacity
-}
-
-function Assert-ResourceRequest {
-    param([double]$Cpus,[double]$MemoryGb,[double]$DiskGb)
-    $policy = Get-Policy
-    if ($Cpus -lt 1 -or $Cpus -gt [double]$policy.MaxProjectCpus) { throw 'Requested project CPU allocation exceeds host-agent policy.' }
-    if ($MemoryGb -lt 2 -or $MemoryGb -gt [double]$policy.MaxProjectMemoryGb) { throw 'Requested project memory allocation exceeds host-agent policy.' }
-    if ($DiskGb -lt 20 -or $DiskGb -gt [double]$policy.MaxProjectDiskGb) { throw 'Requested project disk allocation exceeds host-agent policy.' }
-    $capacity = Assert-HostCapacity
-    if ($Cpus -gt $capacity.allocatable_cpus -or $MemoryGb -gt $capacity.allocatable_memory_gb -or $DiskGb -gt $capacity.allocatable_disk_gb) { throw ('Insufficient host capacity. Available: {0} CPU, {1} GB RAM, {2} GB disk.' -f $capacity.allocatable_cpus,$capacity.allocatable_memory_gb,$capacity.allocatable_disk_gb) }
-}
-
-function Get-ProjectVmName {
-    param([Parameter(Mandatory)][string]$Slug)
-    $Slug = Assert-Slug $Slug;$base = "devfleet-project-$Slug"
-    if ($base.Length -le 60) { return $base }
-    $sha = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($Slug));$hash = (($sha | ForEach-Object { $_.ToString('x2') }) -join '').Substring(0,12)
-    return "devfleet-project-$($Slug.Substring(0,35))-$hash"
-}
-
-function Get-MultipassVms { $result = Invoke-Multipass @('list','--format','json') 30;try { return @((($result.Text | ConvertFrom-Json).list)) } catch { throw 'Multipass did not return valid VM inventory JSON.' } }
-function Get-ProjectRecord { param([Parameter(Mandatory)][string]$Slug);$registry=Read-Registry;$key=(Assert-Slug $Slug).ToLowerInvariant();if(-not $registry.projects.ContainsKey($key)){throw 'Project VM is not registered with the DevFleet host agent.'};return $registry.projects[$key] }
-function Get-ProjectSlugByRuntime { param([Parameter(Mandatory)][string]$RuntimeId);$registry=Read-Registry;foreach($entry in $registry.projects.GetEnumerator()){if([string]$entry.Value.runtime_id -eq $RuntimeId){return [string]$entry.Key}};throw 'Runtime identity is not registered with the DevFleet host agent.' }
-function Assert-OwnedProjectVm { param([Parameter(Mandatory)][string]$Slug,[string]$RuntimeId='', [switch]$AllowStoppedTransition)
-    $record=Get-ProjectRecord $Slug;$expected=Get-ProjectVmName $Slug
-    if($record.vm_name -ne $expected -or $record.managed_by -ne 'devfleet' -or $record.host_id -ne $script:Config.HostId){throw 'Project VM ownership registry mismatch.'}
-    if($RuntimeId -and $record.runtime_id -ne $RuntimeId){throw 'Runtime identity does not match the ownership registry.'}
-    $inventory=@(Get-MultipassVms|Where-Object{$_.name -eq $record.vm_name});if($inventory.Count -ne 1){throw 'Registered project VM is missing or duplicated.'}
-    $info=Get-ProjectVmInfo $record.vm_name
-    if([string]$info.state -ne 'RUNNING'){
-        if($AllowStoppedTransition){return $record}
-        throw 'Live project VM ownership cannot be verified while the guest is stopped; refusing the operation.'
-    }
-    $runtimeText=(Invoke-Multipass @('exec',$record.vm_name,'--','sudo','cat','/etc/devfleet/project-runtime.json') 30).Text
-    try{$runtime=$runtimeText|ConvertFrom-Json -AsHashtable}catch{throw 'Live project VM ownership document is missing or malformed.'}
-    foreach($key in @('managed_by','project_id','slug','runtime_id','host_id','provisioning_attempt_id')){
-        if([string]$runtime[$key] -ne [string]$record[$key]){throw "Live project VM ownership mismatch for $key; refusing the operation."}
-    }
-    return $record
-}
-
-function New-CloudInit {
-    param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)][string]$ProjectId,[string]$GitUrl='', [Parameter(Mandatory)][string]$ProvisioningAttemptId)
-    $Slug=Assert-Slug $Slug;$ProjectId=Assert-ProjectId $ProjectId
-    if($GitUrl -and $GitUrl -notmatch '^(https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?|git@github\.com:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?)$'){throw 'Only GitHub repository URLs are accepted for VM bootstrap.'}
-    $publicKeyPath=[string]$script:Config.SshPublicKeyPath
-    if([string]::IsNullOrWhiteSpace($publicKeyPath) -or -not(Test-Path -LiteralPath $publicKeyPath -PathType Leaf)){throw 'Configured DevFleet SSH public key is not available for project VM provisioning.'}
-    $key=(Get-Content -LiteralPath $publicKeyPath -Raw).Trim()
-    if([string]::IsNullOrWhiteSpace($key) -or $key -match "['\r\n]"){throw 'Configured DevFleet SSH public key is invalid.'}
-    $keyProperty="    ssh_authorized_keys:`n      - '$key'"
-    $workspace="/home/devrunner/workspaces/$Slug";$cloneLine="mkdir -p '$workspace'";if($GitUrl){$cloneLine="git clone --depth 1 '$GitUrl' '$workspace'"}
-    $cloud=@"
-#cloud-config
-package_update: true
-packages:
-  - openssh-server
-  - git
-  - curl
-  - ca-certificates
-  - docker.io
-  - docker-compose-v2
-users:
-  - default
-  - name: devrunner
-    groups: [users]
-    shell: /bin/bash
-$keyProperty
-write_files:
-  - path: /etc/devfleet/project-runtime.json
-    permissions: !!str 0644
-    content: |
-      {"managed_by":"devfleet","project_id":"$ProjectId","slug":"$Slug","runtime_id":"$(Get-ProjectVmName $Slug)","host_id":"$($script:Config.HostId)","provisioning_attempt_id":"$ProvisioningAttemptId","bootstrap_version":"1","gpu_enabled":false}
-  - path: /usr/local/sbin/devfleet-project-health
-    permissions: !!str 0755
-    content: |
-      #!/usr/bin/env bash
-      set -eu
-      test -f /etc/devfleet/project-runtime.json
-      test -d /home/devrunner/workspaces/$Slug
-      docker --version >/dev/null
-      docker compose version >/dev/null
-runcmd:
-  - [ bash, -lc, "$cloneLine" ]
-  - [ bash, -lc, "mkdir -p /home/devrunner/workspaces/$Slug && chown -R devrunner:devrunner /home/devrunner/workspaces/$Slug" ]
-  - [ systemctl, enable, --now, ssh ]
-  - [ systemctl, enable, --now, docker ]
-"@
-    return $cloud
-}
-
-function Get-ProjectVmInfo { param([Parameter(Mandatory)][string]$VmName);$result=Invoke-Multipass @('info',$VmName,'--format','json') 30;try{$data=$result.Text|ConvertFrom-Json;if($data.info.$VmName){return $data.info.$VmName};return $data}catch{throw 'Multipass did not return valid project VM information.'} }
-function Get-PrimaryProjectVmIpv4 {
-    param([Parameter(Mandatory)]$Info)
-    if([string]$Info.state -ne 'RUNNING'){throw 'Project VM is not running; its address is unavailable.'}
-    $candidates=@($Info.ipv4|Where-Object{$_ -match '^\d{1,3}(?:\.\d{1,3}){3}$' -and $_ -notmatch '^(127\.|169\.254\.|172\.(17|18|19)\.)'})
-    if($candidates.Count -eq 0){throw 'Running project VM did not report a guest-reachable primary IPv4 address.'}
-    return [string]$candidates[0]
-}
-function Wait-ProjectVmReady { param([Parameter(Mandatory)][string]$VmName)
-    $deadline=(Get-Date).AddSeconds([int]$script:Config.BootTimeoutSeconds)
-    $attempt=0
-    while((Get-Date)-lt $deadline){
-        $attempt++;$remaining=[math]::Max(0,($deadline-(Get-Date)).TotalSeconds);$info=$null
-        try {
-            $info=Invoke-Multipass @('info',$VmName,'--format','json') 30
-            if($info.Text -match 'RUNNING'){
-                try{$health=Invoke-Multipass @('exec',$VmName,'--','sudo','/usr/local/sbin/devfleet-project-health') 30;if($health.ExitCode -eq 0){return $true};Write-AgentLog 'readiness' '' $VmName 'waiting' "Project VM health probe returned exit $($health.ExitCode); $([math]::Round($remaining,1)) seconds remain."}catch{Write-AgentLog 'readiness' '' $VmName 'waiting' "Project VM health probe failed on attempt $attempt; $([math]::Round($remaining,1)) seconds remain."}
-            } else {Write-AgentLog 'readiness' '' $VmName 'waiting' "Project VM is not RUNNING on attempt $attempt; $([math]::Round($remaining,1)) seconds remain."}
-        } catch {Write-AgentLog 'readiness' '' $VmName 'waiting' "Project VM readiness inventory failed on attempt $attempt; $([math]::Round($remaining,1)) seconds remain."}
-        $remaining=[math]::Max(0,($deadline-(Get-Date)).TotalSeconds);if($remaining -le 0){break};Start-Sleep -Seconds ([int][math]::Min(5,[math]::Max(1,$remaining)))
-    }
-    throw "Project VM did not become ready within $($script:Config.BootTimeoutSeconds) seconds."
-}
-
-function Import-ProjectWorkspace {
-    param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)][string]$RuntimeId,[Parameter(Mandatory)][string]$SourceVm,[Parameter(Mandatory)][string]$ProjectId)
-    $Slug=Assert-Slug $Slug;$ProjectId=Assert-ProjectId $ProjectId;$record=Assert-OwnedProjectVm $Slug $RuntimeId
-    if([string]$record.project_id -ne $ProjectId){throw 'Project identifier does not match the target VM ownership registry.'}
-    if($SourceVm -notmatch '^devfleet-[a-z0-9][a-z0-9._-]{1,62}$'){throw 'Workspace imports are limited to a DevFleet source VM.'}
-    if($SourceVm -eq $record.vm_name){throw 'The source VM and target project VM must be different.'}
-    $lock=New-ProvisioningLock
-    $sourceArchive='';$localArchive='';$importRoot="/home/devrunner/workspaces/.devfleet-import-$([guid]::NewGuid().ToString('N'))"
-    try {
-        $sourceInventory=@(Get-MultipassVms|Where-Object{$_.name -eq $SourceVm});if($sourceInventory.Count -ne 1){throw 'The DevFleet source VM is missing or duplicated.'}
-        if([string]$sourceInventory[0].state -ne 'RUNNING'){throw 'The DevFleet source VM must already be running; the import will not start or stop it.'}
-        $targetInfo=Get-ProjectVmInfo $record.vm_name;if([string]$targetInfo.state -ne 'RUNNING'){throw 'The target project VM is not running.'}
-        $sourcePath="/home/devrunner/workspaces/$Slug";$archiveName="devfleet-import-$Slug-$([guid]::NewGuid().ToString('N')).tar.gz";$sourceArchive="/tmp/$archiveName";$imports=Join-Path $script:Root 'imports';New-Item -ItemType Directory -Force -Path $imports|Out-Null;$localArchive=Join-Path $imports $archiveName
-        Invoke-Multipass @('exec',$SourceVm,'--','sudo','test','-d',$sourcePath) 30|Out-Null
-        Invoke-Multipass @('exec',$SourceVm,'--','sudo','tar','-czf',$sourceArchive,'-C','/home/devrunner/workspaces',$Slug) 600|Out-Null
-        $archiveValidator=@'
-import hashlib
-import json
-import sys
-import tarfile
-from pathlib import PurePosixPath
-
-archive, slug = sys.argv[1:]
-names = []
-with tarfile.open(archive, "r:gz") as bundle:
-    for member in bundle.getmembers():
-        name = member.name.replace("\\", "/")
-        pure = PurePosixPath(name)
-        if pure.is_absolute() or ".." in pure.parts or "\x00" in name or not (name == slug or name.startswith(slug + "/")):
-            raise SystemExit("unsafe archive path")
-        if member.issym() or member.islnk() or member
+        raise SystemExit("workspace archive contains a l

@@ -1,10 +1,224 @@
 # DevFleet source part 108
 
 Full-source UTF-8 byte interval [4975500, 5022000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: bcfc843214c27eb7305e828db2275d304f7bf5c8a0961a733b6d0303cfdc2319
+Payload SHA-256: a56c47514d59d1e4000dcf3f2f335e297c7d60fe0b8f669a8a4a9efa4386ccee
 
 <!-- BEGIN SOURCE SLICE -->
-.isdev() or not (member.isdir() or member.isfile()):
+ink or special file")
+    members.append(name)
+    return info
+
+with tarfile.open(archive, "w:gz") as bundle:
+    bundle.add(root, arcname=slug, recursive=True, filter=archive_filter)
+if not members:
+    raise SystemExit("workspace archive is empty")
+digest = hashlib.sha256()
+with Path(archive).open("rb") as stream:
+    for block in iter(lambda: stream.read(1024 * 1024), b""):
+        digest.update(block)
+digest = digest.hexdigest()
+print(json.dumps({"archive_sha256": digest, "member_count": len(members)}))
+'@
+    $result=Invoke-Multipass @('exec',$VmName,'--','sudo','python3','-c',$archiveScript,$Archive,$workspace,$Slug,([string]$IncludeGenerated)) 1200
+    try{$inspection=$result.Text|ConvertFrom-Json -AsHashtable}catch{throw 'Project VM did not return valid workspace archive verification JSON.'}
+    if([string]$inspection.archive_sha256 -notmatch '^[0-9a-f]{64}$' -or [int]$inspection.member_count -lt 1){throw 'Project VM returned incomplete workspace archive verification.'}
+    return $inspection
+}
+
+function Get-HostCapacity {
+    $computer = Get-CimInstance Win32_ComputerSystem;$os = Get-CimInstance Win32_OperatingSystem
+    $processor = Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum
+    $drive = $env:SystemDrive.TrimEnd(':') + ':';$disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$drive'"
+    $registry = Read-Registry;$committedCpu = 0.0;$committedMemory = 0.0;$committedDisk = 0.0;$vmCount = 0
+    foreach ($item in $registry.projects.Values) {
+        if ($item.state -notin @('destroyed')) { $committedCpu += [double]$item.cpus;$committedMemory += [double]$item.memory_gb;$committedDisk += [double]$item.disk_gb;$vmCount++ }
+    }
+    $policy = Get-Policy
+    $totalGb = [math]::Round($computer.TotalPhysicalMemory / 1GB, 2)
+    $memory = Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory
+    $availableGb = [math]::Round([double]$memory.AvailableBytes / 1GB, 2)
+    $commitGb = 0.0; $commitLimitGb = 0.0
+    try {
+        $commitGb = [math]::Round((Get-Counter '\Memory\Committed Bytes' -MaxSamples 1 -ErrorAction Stop).CounterSamples.CookedValue / 1GB, 2)
+        $commitLimitGb = [math]::Round((Get-Counter '\Memory\Commit Limit' -MaxSamples 1 -ErrorAction Stop).CounterSamples.CookedValue / 1GB, 2)
+    } catch {}
+    $diskFreeGb = [math]::Round($disk.FreeSpace / 1GB, 2)
+    $reservedCpu = [double]$policy.ReservedLogicalProcessors
+    $reservedDisk = [double]$policy.ReservedHostDiskGb
+    $physicalFloor = [math]::Max([double]$policy.PhysicalFloorMinGb, $totalGb * [double]$policy.PhysicalFloorPercent)
+    $commitFloor = [math]::Max([double]$policy.CommitHeadroomFloorMinGb, $commitLimitGb * [double]$policy.CommitHeadroomPercent)
+    $commitPercent = if ($commitLimitGb -gt 0) { [math]::Round($commitGb / $commitLimitGb * 100, 2) } else { 100 }
+    $resourceExhaustion = @()
+    try { $resourceExhaustion = @(Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows-Resource-Exhaustion-Detector';StartTime=(Get-Date).AddMinutes(-10)} -ErrorAction SilentlyContinue) } catch {}
+    $commitHeadroom = [math]::Max(0, $commitLimitGb - $commitGb)
+    $physicalHealthy = $availableGb -ge $physicalFloor
+    $commitHealthy = $commitHeadroom -ge $commitFloor -and $commitPercent -lt [double]$policy.CommitUsageLimitPercent
+    $adaptiveHealthy = $physicalHealthy -and $commitHealthy -and @($resourceExhaustion).Count -eq 0
+    $cpuPercent = 0.0
+    try { $cpuPercent = [math]::Round((Get-Counter '\Processor(_Total)\% Processor Time' -MaxSamples 1 -ErrorAction Stop).CounterSamples.CookedValue, 1) } catch {}
+    return [ordered]@{
+        host_id = [string]$script:Config.HostId;host_name = [string]$script:Config.HostName;agent_version = $script:AgentVersion;provider = 'multipass';provider_version = [string]$script:Config.MultipassVersion
+        resource_policy_version = [string]$policy.PolicyVersion;logical_cpus = [int]$processor.Sum;total_memory_gb = $totalGb;available_memory_gb = $availableGb;free_memory_gb = $availableGb;cpu_percent = $cpuPercent;disk_free_gb = $diskFreeGb
+        physical_floor_gb = [math]::Round($physicalFloor, 2);commit_headroom_floor_gb = [math]::Round($commitFloor, 2);commit_gb = $commitGb;commit_limit_gb = $commitLimitGb;commit_headroom_gb = $commitHeadroom;commit_usage_percent = $commitPercent;resource_exhaustion = @($resourceExhaustion).Count -gt 0
+        reserved_host_cpus = $reservedCpu;reserved_host_disk_gb = $reservedDisk
+        committed_project_cpus = [math]::Round($committedCpu, 2);committed_project_memory_gb = [math]::Round($committedMemory, 2);committed_project_disk_gb = [math]::Round($committedDisk, 2);managed_vm_count = $vmCount
+        allocatable_cpus = [math]::Max(0,[math]::Round([int]$processor.Sum - $reservedCpu - $committedCpu, 2))
+        allocatable_memory_gb = [math]::Max(0,[math]::Round([math]::Min($availableGb - $physicalFloor, $commitHeadroom - $commitFloor), 2))
+        allocatable_disk_gb = [math]::Max(0,[math]::Round($diskFreeGb - $reservedDisk - $committedDisk, 2))
+        health = if (-not $adaptiveHealthy -or $diskFreeGb -lt $reservedDisk -or $cpuPercent -ge 95) { 'degraded' } else { 'healthy' }
+    }
+}
+
+function Assert-HostCapacity {
+    $capacity = Get-HostCapacity;$policy = Get-Policy
+    if ($capacity.health -ne 'healthy') { throw 'Host capacity is temporarily below the configured safe threshold. No VM was created.' }
+    if ([int]$capacity.managed_vm_count -ge [int]$policy.MaximumVmCount) { throw 'The maximum managed VM count has been reached.' }
+    return $capacity
+}
+
+function Assert-ResourceRequest {
+    param([double]$Cpus,[double]$MemoryGb,[double]$DiskGb)
+    $policy = Get-Policy
+    if ($Cpus -lt 1 -or $Cpus -gt [double]$policy.MaxProjectCpus) { throw 'Requested project CPU allocation exceeds host-agent policy.' }
+    if ($MemoryGb -lt 2 -or $MemoryGb -gt [double]$policy.MaxProjectMemoryGb) { throw 'Requested project memory allocation exceeds host-agent policy.' }
+    if ($DiskGb -lt 20 -or $DiskGb -gt [double]$policy.MaxProjectDiskGb) { throw 'Requested project disk allocation exceeds host-agent policy.' }
+    $capacity = Assert-HostCapacity
+    if ($Cpus -gt $capacity.allocatable_cpus -or $MemoryGb -gt $capacity.allocatable_memory_gb -or $DiskGb -gt $capacity.allocatable_disk_gb) { throw ('Insufficient host capacity. Available: {0} CPU, {1} GB RAM, {2} GB disk.' -f $capacity.allocatable_cpus,$capacity.allocatable_memory_gb,$capacity.allocatable_disk_gb) }
+}
+
+function Get-ProjectVmName {
+    param([Parameter(Mandatory)][string]$Slug)
+    $Slug = Assert-Slug $Slug;$base = "devfleet-project-$Slug"
+    if ($base.Length -le 60) { return $base }
+    $sha = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($Slug));$hash = (($sha | ForEach-Object { $_.ToString('x2') }) -join '').Substring(0,12)
+    return "devfleet-project-$($Slug.Substring(0,35))-$hash"
+}
+
+function Get-MultipassVms { $result = Invoke-Multipass @('list','--format','json') 30;try { return @((($result.Text | ConvertFrom-Json).list)) } catch { throw 'Multipass did not return valid VM inventory JSON.' } }
+function Get-ProjectRecord { param([Parameter(Mandatory)][string]$Slug);$registry=Read-Registry;$key=(Assert-Slug $Slug).ToLowerInvariant();if(-not $registry.projects.ContainsKey($key)){throw 'Project VM is not registered with the DevFleet host agent.'};return $registry.projects[$key] }
+function Get-ProjectSlugByRuntime { param([Parameter(Mandatory)][string]$RuntimeId);$registry=Read-Registry;foreach($entry in $registry.projects.GetEnumerator()){if([string]$entry.Value.runtime_id -eq $RuntimeId){return [string]$entry.Key}};throw 'Runtime identity is not registered with the DevFleet host agent.' }
+function Assert-OwnedProjectVm { param([Parameter(Mandatory)][string]$Slug,[string]$RuntimeId='', [switch]$AllowStoppedTransition)
+    $record=Get-ProjectRecord $Slug;$expected=Get-ProjectVmName $Slug
+    if($record.vm_name -ne $expected -or $record.managed_by -ne 'devfleet' -or $record.host_id -ne $script:Config.HostId){throw 'Project VM ownership registry mismatch.'}
+    if($RuntimeId -and $record.runtime_id -ne $RuntimeId){throw 'Runtime identity does not match the ownership registry.'}
+    $inventory=@(Get-MultipassVms|Where-Object{$_.name -eq $record.vm_name});if($inventory.Count -ne 1){throw 'Registered project VM is missing or duplicated.'}
+    $info=Get-ProjectVmInfo $record.vm_name
+    if([string]$info.state -ne 'RUNNING'){
+        if($AllowStoppedTransition){return $record}
+        throw 'Live project VM ownership cannot be verified while the guest is stopped; refusing the operation.'
+    }
+    $runtimeText=(Invoke-Multipass @('exec',$record.vm_name,'--','sudo','cat','/etc/devfleet/project-runtime.json') 30).Text
+    try{$runtime=$runtimeText|ConvertFrom-Json -AsHashtable}catch{throw 'Live project VM ownership document is missing or malformed.'}
+    foreach($key in @('managed_by','project_id','slug','runtime_id','host_id','provisioning_attempt_id')){
+        if([string]$runtime[$key] -ne [string]$record[$key]){throw "Live project VM ownership mismatch for $key; refusing the operation."}
+    }
+    return $record
+}
+
+function New-CloudInit {
+    param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)][string]$ProjectId,[string]$GitUrl='', [Parameter(Mandatory)][string]$ProvisioningAttemptId)
+    $Slug=Assert-Slug $Slug;$ProjectId=Assert-ProjectId $ProjectId
+    if($GitUrl -and $GitUrl -notmatch '^(https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?|git@github\.com:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?)$'){throw 'Only GitHub repository URLs are accepted for VM bootstrap.'}
+    $publicKeyPath=[string]$script:Config.SshPublicKeyPath
+    if([string]::IsNullOrWhiteSpace($publicKeyPath) -or -not(Test-Path -LiteralPath $publicKeyPath -PathType Leaf)){throw 'Configured DevFleet SSH public key is not available for project VM provisioning.'}
+    $key=(Get-Content -LiteralPath $publicKeyPath -Raw).Trim()
+    if([string]::IsNullOrWhiteSpace($key) -or $key -match "['\r\n]"){throw 'Configured DevFleet SSH public key is invalid.'}
+    $keyProperty="    ssh_authorized_keys:`n      - '$key'"
+    $workspace="/home/devrunner/workspaces/$Slug";$cloneLine="mkdir -p '$workspace'";if($GitUrl){$cloneLine="git clone --depth 1 '$GitUrl' '$workspace'"}
+    $cloud=@"
+#cloud-config
+package_update: true
+packages:
+  - openssh-server
+  - git
+  - curl
+  - ca-certificates
+  - docker.io
+  - docker-compose-v2
+users:
+  - default
+  - name: devrunner
+    groups: [users]
+    shell: /bin/bash
+$keyProperty
+write_files:
+  - path: /etc/devfleet/project-runtime.json
+    permissions: !!str 0644
+    content: |
+      {"managed_by":"devfleet","project_id":"$ProjectId","slug":"$Slug","runtime_id":"$(Get-ProjectVmName $Slug)","host_id":"$($script:Config.HostId)","provisioning_attempt_id":"$ProvisioningAttemptId","bootstrap_version":"1","gpu_enabled":false}
+  - path: /usr/local/sbin/devfleet-project-health
+    permissions: !!str 0755
+    content: |
+      #!/usr/bin/env bash
+      set -eu
+      test -f /etc/devfleet/project-runtime.json
+      test -d /home/devrunner/workspaces/$Slug
+      docker --version >/dev/null
+      docker compose version >/dev/null
+runcmd:
+  - [ bash, -lc, "$cloneLine" ]
+  - [ bash, -lc, "mkdir -p /home/devrunner/workspaces/$Slug && chown -R devrunner:devrunner /home/devrunner/workspaces/$Slug" ]
+  - [ systemctl, enable, --now, ssh ]
+  - [ systemctl, enable, --now, docker ]
+"@
+    return $cloud
+}
+
+function Get-ProjectVmInfo { param([Parameter(Mandatory)][string]$VmName);$result=Invoke-Multipass @('info',$VmName,'--format','json') 30;try{$data=$result.Text|ConvertFrom-Json;if($data.info.$VmName){return $data.info.$VmName};return $data}catch{throw 'Multipass did not return valid project VM information.'} }
+function Get-PrimaryProjectVmIpv4 {
+    param([Parameter(Mandatory)]$Info)
+    if([string]$Info.state -ne 'RUNNING'){throw 'Project VM is not running; its address is unavailable.'}
+    $candidates=@($Info.ipv4|Where-Object{$_ -match '^\d{1,3}(?:\.\d{1,3}){3}$' -and $_ -notmatch '^(127\.|169\.254\.|172\.(17|18|19)\.)'})
+    if($candidates.Count -eq 0){throw 'Running project VM did not report a guest-reachable primary IPv4 address.'}
+    return [string]$candidates[0]
+}
+function Wait-ProjectVmReady { param([Parameter(Mandatory)][string]$VmName)
+    $deadline=(Get-Date).AddSeconds([int]$script:Config.BootTimeoutSeconds)
+    $attempt=0
+    while((Get-Date)-lt $deadline){
+        $attempt++;$remaining=[math]::Max(0,($deadline-(Get-Date)).TotalSeconds);$info=$null
+        try {
+            $info=Invoke-Multipass @('info',$VmName,'--format','json') 30
+            if($info.Text -match 'RUNNING'){
+                try{$health=Invoke-Multipass @('exec',$VmName,'--','sudo','/usr/local/sbin/devfleet-project-health') 30;if($health.ExitCode -eq 0){return $true};Write-AgentLog 'readiness' '' $VmName 'waiting' "Project VM health probe returned exit $($health.ExitCode); $([math]::Round($remaining,1)) seconds remain."}catch{Write-AgentLog 'readiness' '' $VmName 'waiting' "Project VM health probe failed on attempt $attempt; $([math]::Round($remaining,1)) seconds remain."}
+            } else {Write-AgentLog 'readiness' '' $VmName 'waiting' "Project VM is not RUNNING on attempt $attempt; $([math]::Round($remaining,1)) seconds remain."}
+        } catch {Write-AgentLog 'readiness' '' $VmName 'waiting' "Project VM readiness inventory failed on attempt $attempt; $([math]::Round($remaining,1)) seconds remain."}
+        $remaining=[math]::Max(0,($deadline-(Get-Date)).TotalSeconds);if($remaining -le 0){break};Start-Sleep -Seconds ([int][math]::Min(5,[math]::Max(1,$remaining)))
+    }
+    throw "Project VM did not become ready within $($script:Config.BootTimeoutSeconds) seconds."
+}
+
+function Import-ProjectWorkspace {
+    param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)][string]$RuntimeId,[Parameter(Mandatory)][string]$SourceVm,[Parameter(Mandatory)][string]$ProjectId)
+    $Slug=Assert-Slug $Slug;$ProjectId=Assert-ProjectId $ProjectId;$record=Assert-OwnedProjectVm $Slug $RuntimeId
+    if([string]$record.project_id -ne $ProjectId){throw 'Project identifier does not match the target VM ownership registry.'}
+    if($SourceVm -notmatch '^devfleet-[a-z0-9][a-z0-9._-]{1,62}$'){throw 'Workspace imports are limited to a DevFleet source VM.'}
+    if($SourceVm -eq $record.vm_name){throw 'The source VM and target project VM must be different.'}
+    $lock=New-ProvisioningLock
+    $sourceArchive='';$localArchive='';$importRoot="/home/devrunner/workspaces/.devfleet-import-$([guid]::NewGuid().ToString('N'))"
+    try {
+        $sourceInventory=@(Get-MultipassVms|Where-Object{$_.name -eq $SourceVm});if($sourceInventory.Count -ne 1){throw 'The DevFleet source VM is missing or duplicated.'}
+        if([string]$sourceInventory[0].state -ne 'RUNNING'){throw 'The DevFleet source VM must already be running; the import will not start or stop it.'}
+        $targetInfo=Get-ProjectVmInfo $record.vm_name;if([string]$targetInfo.state -ne 'RUNNING'){throw 'The target project VM is not running.'}
+        $sourcePath="/home/devrunner/workspaces/$Slug";$archiveName="devfleet-import-$Slug-$([guid]::NewGuid().ToString('N')).tar.gz";$sourceArchive="/tmp/$archiveName";$imports=Join-Path $script:Root 'imports';New-Item -ItemType Directory -Force -Path $imports|Out-Null;$localArchive=Join-Path $imports $archiveName
+        Invoke-Multipass @('exec',$SourceVm,'--','sudo','test','-d',$sourcePath) 30|Out-Null
+        Invoke-Multipass @('exec',$SourceVm,'--','sudo','tar','-czf',$sourceArchive,'-C','/home/devrunner/workspaces',$Slug) 600|Out-Null
+        $archiveValidator=@'
+import hashlib
+import json
+import sys
+import tarfile
+from pathlib import PurePosixPath
+
+archive, slug = sys.argv[1:]
+names = []
+with tarfile.open(archive, "r:gz") as bundle:
+    for member in bundle.getmembers():
+        name = member.name.replace("\\", "/")
+        pure = PurePosixPath(name)
+        if pure.is_absolute() or ".." in pure.parts or "\x00" in name or not (name == slug or name.startswith(slug + "/")):
+            raise SystemExit("unsafe archive path")
+        if member.issym() or member.islnk() or member.isdev() or not (member.isdir() or member.isfile()):
             raise SystemExit("unsupported archive member type")
         if member.mode & 0o7000:
             raise SystemExit("unsafe archive mode")
@@ -268,166 +482,4 @@ function Export-ProjectWorkspaceToSource { param([Parameter(Mandatory)][string]$
     $sourceInventory=@(Get-MultipassVms|Where-Object{$_.name -eq $SourceVm})
     if($sourceInventory.Count -ne 1 -or [string]$sourceInventory[0].state -ne 'RUNNING'){throw 'The DevFleet source VM must be running for a VM workspace export.'}
     $remoteArchive="/tmp/devfleet-export-$([guid]::NewGuid().ToString('N')).tar.gz"
-    $localArchive=Join-Path $script:Root "imports\$([guid]::NewGuid().ToString('N')).tar.gz"
-    $sourceArchive="/tmp/devfleet-export-source-$([guid]::NewGuid().ToString('N')).tar.gz"
-    $stage="/home/devrunner/workspaces/.devfleet-export-$Slug-$([guid]::NewGuid().ToString('N'))"
-    $workspace="/home/devrunner/workspaces/$Slug"
-    $oldPath="/home/devrunner/workspaces/$Slug-before-vm-export-$([guid]::NewGuid().ToString('N'))"
-    try {
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $localArchive)|Out-Null
-        $archiveInspection=New-VerifiedRemoteWorkspaceArchive $Record.vm_name $remoteArchive $Slug
-        $sourceArchiveHash=[string]$archiveInspection.archive_sha256
-        Invoke-Multipass @('transfer',"$($Record.vm_name):$remoteArchive",$localArchive) 1200|Out-Null
-        $hash=(Get-FileHash -LiteralPath $localArchive -Algorithm SHA256).Hash.ToLowerInvariant()
-        if($hash -ne $sourceArchiveHash){throw 'Workspace export archive SHA-256 differs between the project VM and host.'}
-        Invoke-Multipass @('transfer',$localArchive,"${SourceVm}:$sourceArchive") 1200|Out-Null
-        Invoke-Multipass @('exec',$SourceVm,'--','sudo','mkdir','-p',$stage) 30|Out-Null
-        Invoke-Multipass @('exec',$SourceVm,'--','sudo','tar','-xzf',$sourceArchive,'-C',$stage,'--no-same-owner','--no-same-permissions') 600|Out-Null
-        $sourceVmArchiveHash=((Invoke-Multipass @('exec',$SourceVm,'--','sha256sum',$sourceArchive) 60).Text -split '\s+')[0].ToLowerInvariant()
-        if($sourceVmArchiveHash -ne $hash){throw 'Workspace export archive SHA-256 differs between the host and source VM.'}
-        Invoke-Multipass @('exec',$SourceVm,'--','sudo','test','-f',"$stage/$Slug/.devfleet/project.json") 30|Out-Null
-        if($ReplaceSource){
-            $sourceState=(Invoke-Multipass @('exec',$SourceVm,'--','sudo','bash','-lc',"if [ -d '$workspace' ]; then printf exists; else printf absent; fi") 30).Text.Trim()
-            $hasExisting=$sourceState -eq 'exists'
-            if($hasExisting){Invoke-Multipass @('exec',$SourceVm,'--','sudo','mv',$workspace,$oldPath) 60|Out-Null}
-            Invoke-Multipass @('exec',$SourceVm,'--','sudo','mv',"$stage/$Slug",$workspace) 60|Out-Null
-            Invoke-Multipass @('exec',$SourceVm,'--','sudo','chown','-R','devrunner:devrunner',$workspace) 120|Out-Null
-            Write-AgentLog 'export-to-source' $Record.project_id $Record.runtime_id 'verified' "VM workspace exported to $SourceVm with equal source, host, and source-VM SHA-256."
-            return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$Record.runtime_id;project_id=$Record.project_id;source_vm=$SourceVm;archive_sha256=$hash;source_archive_sha256=$sourceArchiveHash;host_archive_sha256=$hash;source_vm_archive_sha256=$sourceVmArchiveHash;workspace_path=$workspace;previous_workspace_path=if($hasExisting){$oldPath}else{''};state='verified';message='Dedicated VM workspace exported and promoted to the source VM after archive equality verification.'}
-        }
-        return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$Record.runtime_id;project_id=$Record.project_id;source_vm=$SourceVm;archive_sha256=$hash;source_archive_sha256=$sourceArchiveHash;host_archive_sha256=$hash;source_vm_archive_sha256=$sourceVmArchiveHash;staging_path="$stage/$Slug";state='staged';message='Dedicated VM workspace exported to a verified staging directory after archive equality verification.'}
-    } finally {
-        Remove-Item -LiteralPath $localArchive -Force -ErrorAction SilentlyContinue
-        try{Invoke-Multipass @('exec',$Record.vm_name,'--','sudo','rm','-f',$remoteArchive) 30|Out-Null}catch{}
-        try{Invoke-Multipass @('exec',$SourceVm,'--','sudo','rm','-f',$sourceArchive) 30|Out-Null}catch{}
-        if(-not $ReplaceSource){try{Invoke-Multipass @('exec',$SourceVm,'--','sudo','rm','-rf',$stage) 30|Out-Null}catch{}}
-    }
-}
-
-function Remove-ImportFailedProjectVm {
-    param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)]$Record,[Parameter(Mandatory)]$Payload)
-    $Slug=Assert-Slug $Slug
-    if([string]$Record.state -notin @('creating','booting','ready','stopped')){throw 'Cleanup-only VM removal is limited to a newly provisioned project VM.'}
-    if(-not [bool]$Payload.backup_verified -or [string]::IsNullOrWhiteSpace([string]$Payload.backup_id)){throw 'Cleanup-only removal requires a verified provider-aware recovery backup.'}
-    foreach($name in 'backup_sha256','local_archive_sha256'){if([string]$Payload.$name -notmatch '^[0-9a-fA-F]{64}$'){throw "Cleanup-only removal requires a valid $name value."}}
-    $stage=[string]$Payload.cleanup_stage;if($stage -notin @('pre-import','post-import')){throw 'Cleanup-only removal requires an explicit pre-import or post-import stage.'}
-    $vmName=[string]$Record.vm_name
-    if($vmName -ne (Get-ProjectVmName $Slug) -or [string]$Record.runtime_id -ne $vmName -or [string]$Record.managed_by -ne 'devfleet' -or [string]$Record.host_id -ne [string]$script:Config.HostId){throw 'Cleanup-only removal failed the ownership registry identity check.'}
-    $inventory=@(Get-MultipassVms|Where-Object{$_.name -eq $vmName});if($inventory.Count -ne 1){throw 'Cleanup-only removal requires exactly one deterministic project VM.'}
-    $runtimeText=(Invoke-Multipass @('exec',$vmName,'--','sudo','cat','/etc/devfleet/project-runtime.json') 30).Text
-    try{$runtimeMeta=$runtimeText|ConvertFrom-Json -AsHashtable}catch{throw 'The project VM runtime identity document is invalid.'}
-    if([string]$runtimeMeta.managed_by -ne 'devfleet' -or [string]$runtimeMeta.slug -ne $Slug -or [string]$runtimeMeta.project_id -ne [string]$Record.project_id){throw 'The project VM runtime identity does not match the ownership registry.'}
-    $workspace="/home/devrunner/workspaces/$Slug";$projectMetaPath="$workspace/.devfleet/project.json"
-    if($stage -eq 'pre-import'){
-        Invoke-Multipass @('exec',$vmName,'--','sudo','bash','-lc',"test ! -e '$projectMetaPath'") 30|Out-Null
-    } else {
-        $projectText=(Invoke-Multipass @('exec',$vmName,'--','sudo','cat',$projectMetaPath) 30).Text
-        try{$projectMeta=$projectText|ConvertFrom-Json -AsHashtable}catch{throw 'The imported project metadata is invalid.'}
-        if([string]$projectMeta.slug -ne $Slug -or ([string]$projectMeta.identity -and [string]$projectMeta.identity -ne $Slug)){throw 'The imported workspace identity does not match the cleanup request.'}
-        if([string]$projectMeta.project_id -and [string]$projectMeta.project_id -ne [string]$Record.project_id){throw 'The imported workspace project identifier does not match the ownership registry.'}
-        $payloadImport=[string]$Payload.import_archive_sha256;$recordImport=[string]$Record.import_archive_sha256
-        if($payloadImport -and $payloadImport -notmatch '^[0-9a-fA-F]{64}$'){throw 'Cleanup-only removal received an invalid import archive SHA-256.'}
-        if($recordImport -and (!$payloadImport -or $recordImport -ne $payloadImport)){throw 'The cleanup import archive does not match the persisted import evidence.'}
-    }
-    $lock=New-ProvisioningLock
-    try {
-        $info=Get-ProjectVmInfo $vmName;if([string]$info.state -eq 'RUNNING'){Invoke-Multipass @('stop',$vmName) 120|Out-Null}
-        Invoke-Multipass @('delete',$vmName,'--purge') 600|Out-Null
-        if(@(Get-MultipassVms|Where-Object{$_.name -eq $vmName}).Count -ne 0){throw 'Multipass still reports the cleanup VM after deletion.'}
-        Remove-ProjectVmSshAlias $Record.runtime_id $Record.project_id
-        $Record.state='destroyed';$Record.cleanup_stage=$stage;$Record.destroyed_at=(Get-Date).ToUniversalTime().ToString('o');$Record.updated_at=$Record.destroyed_at;Update-ProjectRecord $Slug $Record|Out-Null
-        Write-AgentLog 'import-cleanup' $Record.project_id $Record.runtime_id 'destroyed' "Removed the verified $stage failed-migration VM and released its allocation."
-        return [ordered]@{ok=$true;host_name=$script:Config.HostName;runtime_id=$Record.runtime_id;vm_name=$vmName;project_id=$Record.project_id;state='destroyed';cleanup_only=$true;cleanup_stage=$stage;allocation_released=$true;runtime_identity_verified=$true;workspace_identity_verified=($stage -eq 'post-import');message='Failed-migration project VM reconciled after deterministic identity and recovery-evidence checks.'}
-    } finally {try{$lock.ReleaseMutex()}catch{};$lock.Dispose()}
-}
-
-# The project-VM section is intentionally independent from the ordinary
-# DevFleet aliases created by Configure-SSH.ps1.  It is the only section this
-# service changes, preserving all user configuration and the primary aliases.
-function Get-ProjectVmSshMarkers { param([Parameter(Mandatory)][string]$RuntimeId)
-    $safe=[regex]::Escape($RuntimeId)
-    return @{Begin="# BEGIN DEVFLEET PROJECT VM $RuntimeId";End="# END DEVFLEET PROJECT VM $RuntimeId";Pattern="(?ms)^# BEGIN DEVFLEET PROJECT VM $safe\r?\n.*?^# END DEVFLEET PROJECT VM $safe\r?\n?"}
-}
-
-function Get-ProjectVmKnownHostMarkers { param([Parameter(Mandatory)][string]$RuntimeId)
-    $safe=[regex]::Escape($RuntimeId)
-    return @{Begin="# BEGIN DEVFLEET PROJECT VM HOST KEY $RuntimeId";End="# END DEVFLEET PROJECT VM HOST KEY $RuntimeId";Pattern="(?ms)^# BEGIN DEVFLEET PROJECT VM HOST KEY $safe\r?\n.*?^# END DEVFLEET PROJECT VM HOST KEY $safe\r?\n?"}
-}
-
-function Set-DevFleetManagedTextBlock {
-    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Pattern,[string]$Block='')
-    $directory=Split-Path -Parent $Path;if($directory){New-Item -ItemType Directory -Force -Path $directory|Out-Null}
-    $existing=if(Test-Path -LiteralPath $Path){[IO.File]::ReadAllText($Path)}else{''}
-    $updated=[regex]::Replace($existing,$Pattern,'').TrimEnd()
-    if($Block){if($updated){$updated+="`r`n`r`n"};$updated+=$Block.Trim()+"`r`n"}elseif($updated){$updated+="`r`n"}
-    if($updated -ne $existing){$temp="$Path.$([guid]::NewGuid().ToString('N')).tmp";[IO.File]::WriteAllText($temp,$updated,(New-Object Text.UTF8Encoding($false)));Move-Item -LiteralPath $temp -Destination $Path -Force}
-    return $updated
-}
-
-function Sync-ProjectVmSshAlias {
-    param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)]$Record,[object]$VmInfo=$null,[string]$Address='')
-    $slug=Assert-Slug $Slug;$runtimeId=[string]$Record.runtime_id
-    if($runtimeId -ne (Get-ProjectVmName $slug)){throw 'Project VM SSH alias does not match the deterministic owned runtime identity.'}
-    $configPath=[string]$script:Config.SshConfigPath;$keyPath=[string]$script:Config.SshPrivateKeyPath;$knownHostsPath=[string]$script:Config.SshKnownHostsPath
-    if([string]::IsNullOrWhiteSpace($configPath) -or [string]::IsNullOrWhiteSpace($keyPath) -or [string]::IsNullOrWhiteSpace($knownHostsPath)){throw 'Host-agent SSH alias and known-host paths are not configured.'}
-    if(-not(Test-Path -LiteralPath $keyPath)){throw 'Configured DevFleet SSH private key is not available for project aliases.'}
-    $info=if($VmInfo){$VmInfo}else{Get-ProjectVmInfo ([string]$Record.vm_name)}
-    $address=if($Address){$Address}else{Get-PrimaryProjectVmIpv4 $info}
-    if([string]::IsNullOrWhiteSpace($address)){throw 'Project VM has no address available for its SSH alias.'}
-    $hostKey=(Invoke-Multipass @('exec',$record.vm_name,'--','sudo','cat','/etc/ssh/ssh_host_ed25519_key.pub') 30).Text.Trim();$hostKeyParts=$hostKey -split '\s+'
-    if($hostKeyParts.Count -lt 2 -or $hostKeyParts[0] -ne 'ssh-ed25519' -or $hostKeyParts[1] -notmatch '^[A-Za-z0-9+/]+={0,3}$'){throw 'Project VM did not provide a valid Ed25519 SSH host key.'}
-    $knownMarkers=Get-ProjectVmKnownHostMarkers $runtimeId;$knownBlock="$($knownMarkers.Begin)`r`n$runtimeId ssh-ed25519 $($hostKeyParts[1])`r`n$($knownMarkers.End)"
-    Set-DevFleetManagedTextBlock $knownHostsPath $knownMarkers.Pattern $knownBlock|Out-Null
-    $markers=Get-ProjectVmSshMarkers $runtimeId
-    $identity=$keyPath.Replace('\','/');$knownHosts=$knownHostsPath.Replace('\','/')
-    $block=@"
-$($markers.Begin)
-Host $runtimeId
-    HostName $address
-    User devrunner
-    IdentityFile $identity
-    IdentitiesOnly yes
-    ForwardAgent no
-    HostKeyAlias $runtimeId
-    UserKnownHostsFile $knownHosts
-    StrictHostKeyChecking yes
-$($markers.End)
-"@
-    Set-DevFleetManagedTextBlock $configPath $markers.Pattern $block|Out-Null
-    $ssh=Resolve-TrustedHostExecutable @((Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe'),(Join-Path $env:ProgramFiles 'OpenSSH\ssh.exe'))
-    $resolved=& $ssh -F $configPath -G $runtimeId 2>$null
-    if($LASTEXITCODE -ne 0){throw 'OpenSSH could not resolve the managed project VM alias.'}
-    $text=$resolved -join "`n"
-    if($text -notmatch "(?m)^hostname\s+$([regex]::Escape($address))$" -or $text -notmatch '(?m)^user\s+devrunner$' -or $text -notmatch '(?m)^identitiesonly\s+yes$' -or $text -notmatch '(?m)^forwardagent\s+no$' -or $text -notmatch '(?m)^stricthostkeychecking\s+(yes|true)$' -or $text -notmatch "(?m)^hostkeyalias\s+$([regex]::Escape($runtimeId))$"){throw 'Managed project VM SSH alias did not pass pinned configuration validation.'}
-    # The service runs as SYSTEM while the managed alias must remain usable by
-    # the installing developer. OpenSSH correctly rejects that developer-owned
-    # private key when SYSTEM evaluates its ACL, so validate with a short-lived
-    # SYSTEM-only copy of the same key and never expose its contents.
-    $validationKey=Join-Path $script:Root "ssh-validation-$([guid]::NewGuid().ToString('N'))"
-    try {
-        Copy-Item -LiteralPath $keyPath -Destination $validationKey -Force
-        $keyAcl=New-Object System.Security.AccessControl.FileSecurity;$keyAcl.SetAccessRuleProtection($true,$false)
-        $keyAcl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('SYSTEM','FullControl','Allow')))
-        $keyAcl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('Administrators','FullControl','Allow')))
-        Set-Acl -LiteralPath $validationKey -AclObject $keyAcl
-        $sshOutput=& $ssh -F $configPath -i $validationKey -o BatchMode=yes -o ConnectTimeout=15 $runtimeId 'id -un' 2>&1
-        if($LASTEXITCODE -ne 0 -or (($sshOutput -join "`n").Trim() -ne 'devrunner')){throw 'Managed project VM SSH alias did not pass an authenticated pinned host-key connection test.'}
-    } finally {Remove-Item -LiteralPath $validationKey -Force -ErrorAction SilentlyContinue}
-    $vsCode=if(Get-Command Sync-DevFleetVsCodeRemotePlatform -ErrorAction SilentlyContinue){Sync-DevFleetVsCodeRemotePlatform $runtimeId}else{[ordered]@{ok=$true;status='skipped';reason='VS Code helper is not installed.';alias=$runtimeId;platform='linux'}}
-    $Record.address=$address;$Record.ssh_alias=$runtimeId;$Record.updated_at=(Get-Date).ToUniversalTime().ToString('o');Update-ProjectRecord $slug $Record|Out-Null
-    Write-AgentLog 'sync-ssh-alias' $Record.project_id $runtimeId 'ready' 'Dedicated project VM SSH alias and managed Ed25519 host key passed configuration and authenticated connection checks.'
-    return [ordered]@{ok=$true;host_name=$script:Config.HostName;project_id=$Record.project_id;runtime_id=$runtimeId;ssh_alias=$runtimeId;address=$address;host_key_algorithm='ssh-ed25519';host_key_pinned=$true;authenticated_connection=$true;validated=$true;vscode_remote_platform=$vsCode}
-}
-
-function Refresh-ProjectVmConnectionState {
-    param([Parameter(Mandatory)][string]$Slug,[Parameter(Mandatory)]$Record)
-    $slug=Assert-Slug $Slug
-    $owned=Assert-OwnedProjectVm $slug ([string]$Record.runtime_id)
-    if([string]$owned.project_id -ne [string]$Record.project_id){throw 'Project identifier does not match the ownership registry.'}
-    $info=Get-ProjectVmInfo ([string]$owned.vm_name)
-    $address=Get-PrimaryProjectVmIpv4 $info
-    $sync=Sync-ProjectVmSshAlias $slug $owned -VmInfo $info -Address $address
-    $latest=Get-ProjectRecord $slug
-    $latest.state='ready';$latest.address=$address;$latest.updated_at=(Get-Date).ToUniversalTime().ToString('o');Update-ProjectRecord $slug $latest|Out-Null
-    Write-AgentLog 'refresh-connection-state' $latest.project_id $latest.runtime_id 'ready' "Reconciled owned project VM address $address and managed SSH alias."
-    return [ordered]@{ok=$true;host_name=$script:Config.HostName;project_id=$late
+    $localArchive=Join-Path $

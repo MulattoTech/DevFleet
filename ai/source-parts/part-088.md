@@ -1,9 +1,540 @@
 # DevFleet source part 088
 
 Full-source UTF-8 byte interval [4045500, 4092000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 0cd925270fda9b6df0bc3cfa73a5a346ffa48fd1501c5cfc746d79504f2b54c2
+Payload SHA-256: a91463942479c43b4d26081fb76184b56e1d3e368f8b53026660074638b1bc3a
 
 <!-- BEGIN SOURCE SLICE -->
+mpose.yaml
+
+SHA256: c9762116782f8293f44ff351dd86bb96c97491bbdf9ce7b4ca0d43cd118ca2b7 | Bytes: 509 | Git mode: 100644
+
+```
+services:
+  dev:
+    image: mcr.microsoft.com/devcontainers/php:1-8.3-bookworm
+    user: "vscode"
+    working_dir: /workspaces/__PROJECT_SLUG__
+    command: sh -lc "sleep infinity"
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - .:/workspaces/__PROJECT_SLUG__:cached
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "test -d /workspaces/__PROJECT_SLUG__"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+```
+
+
+## FILE: source/templates/php-laravel/docs/architecture.md
+
+SHA256: ce3bbb7cabe004c18d2e60a021adc61bc24b91586aa903e15927dafffa30f5d0 | Bytes: 328 | Git mode: 100644
+
+```
+# Architecture
+
+- Language: `php`
+- Framework: `laravel`
+- Scale/intent/testing/profile are recorded in `.devfleet/project.json`.
+- Rationale: selected from Dylan's DevFleet engineering preferences; this is not a scientific model benchmark.
+- Source remains in one canonical checkout; use Git worktrees for concurrent branches.
+
+```
+
+
+## FILE: source/templates/python-fastapi/.ai-bridge/chatgpt-memory.md
+
+SHA256: ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f | Bytes: 143 | Git mode: 100644
+
+```
+# Project continuity
+
+Keep this concise: current architecture, active branch, important decisions, and next safe action. Do not store secrets.
+
+```
+
+
+## FILE: source/templates/python-fastapi/.ai-bridge/codexpro-project-instructions.md
+
+SHA256: 95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd | Bytes: 641 | Git mode: 100644
+
+```
+Use CodexPro. Call server_config first. Run codexpro_self_test only for a fresh, broken, or reconfigured session. Open the current workspace with include_tree=false, include_skills=true, and include_global_skills=true. Load codex_context with include_diff=false. Read .ai-bridge/codexpro-project-instructions.md, .ai-bridge/chatgpt-memory.md, AGENTS.md, and relevant handoffs. Use targeted search/read and diff-oriented review; exclude dependencies, generated assets, caches, models, binaries, and .ai-bridge/local-agent. Continue routine implementation without repeated approval and update a concise handoff before context becomes crowded.
+
+```
+
+
+## FILE: source/templates/python-fastapi/.ai-bridge/current-plan.template.md
+
+SHA256: 7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb | Bytes: 69 | Git mode: 100644
+
+```
+# Current plan
+
+Goal:
+Changed files:
+Verification:
+Next safe action:
+
+```
+
+
+## FILE: source/templates/python-fastapi/.ai-bridge/prompts/broken-session-recovery.md
+
+SHA256: d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135 | Bytes: 166 | Git mode: 100644
+
+```
+Call server_config, then codexpro_self_test. Reopen the current workspace without a full tree, inspect status and handoffs, and report the precise failed capability.
+
+```
+
+
+## FILE: source/templates/python-fastapi/.ai-bridge/prompts/handoff-template.md
+
+SHA256: a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02 | Bytes: 78 | Git mode: 100644
+
+```
+Goal:
+Decisions:
+Changed files:
+Checks run/results:
+Open risks:
+Next action:
+
+
+```
+
+
+## FILE: source/templates/python-fastapi/.ai-bridge/prompts/reconnect.md
+
+SHA256: 5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab | Bytes: 105 | Git mode: 100644
+
+```
+Verify server_config and open_current_workspace, then load the latest concise handoff before continuing.
+
+```
+
+
+## FILE: source/templates/python-fastapi/.ai-bridge/prompts/session-bootstrap.md
+
+SHA256: 95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd | Bytes: 641 | Git mode: 100644
+
+```
+Use CodexPro. Call server_config first. Run codexpro_self_test only for a fresh, broken, or reconfigured session. Open the current workspace with include_tree=false, include_skills=true, and include_global_skills=true. Load codex_context with include_diff=false. Read .ai-bridge/codexpro-project-instructions.md, .ai-bridge/chatgpt-memory.md, AGENTS.md, and relevant handoffs. Use targeted search/read and diff-oriented review; exclude dependencies, generated assets, caches, models, binaries, and .ai-bridge/local-agent. Continue routine implementation without repeated approval and update a concise handoff before context becomes crowded.
+
+```
+
+
+## FILE: source/templates/python-fastapi/.devcontainer/devcontainer.json
+
+SHA256: 445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622 | Bytes: 209 | Git mode: 100644
+
+```
+{
+  "name": "__PROJECT_NAME__",
+  "dockerComposeFile": "../compose.yaml",
+  "service": "dev",
+  "workspaceFolder": "/workspaces/__PROJECT_SLUG__",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "vscode"
+}
+
+```
+
+
+## FILE: source/templates/python-fastapi/.devfleet/bootstrap.sh
+
+SHA256: f5603278e0f48b576757073d9390ac0babcd1220014a063fa101cc4581113b42 | Bytes: 73 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+python -m pip install -e ".[dev]"
+
+```
+
+
+## FILE: source/templates/python-fastapi/.devfleet/codexpro-bootstrap.sh
+
+SHA256: 18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b | Bytes: 2254 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+root=$(pwd -P)
+workspace_root=${DEVFLEET_WORKSPACES_ROOT:-/workspaces}
+[[ "$workspace_root" == /* && "$workspace_root" != */ ]] || { echo 'DEVFLEET_WORKSPACES_ROOT must be an absolute directory.' >&2; exit 2; }
+[[ "$root" == "$workspace_root"/* ]] || { echo "CodexPro root must be under $workspace_root." >&2; exit 2; }
+project_rel=${root#"$workspace_root"/}
+[[ "$project_rel" != */* && -n "$project_rel" ]] || { echo 'CodexPro root must identify one project.' >&2; exit 2; }
+runtime="$root/.devfleet/runtime"; bridge="$root/.ai-bridge/local-agent"; mkdir -p "$runtime" "$bridge/logs"
+log="$runtime/codexpro-bootstrap.log"; status="$runtime/codexpro-status.json"; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+health_url=${DEVFLEET_CODEXPRO_HEALTH_URL:-http://127.0.0.1:8787/healthz}
+write_status(){ python3 - "$status" "$1" "$2" "$now" <<'PY2'
+import json,sys
+p,state,msg,now=sys.argv[1:];open(p,'w').write(json.dumps({'state':state,'healthy':state=='healthy','message':msg,'updated_at':now},indent=2)+'\n')
+PY2
+}
+if DEVFLEET_CODEXPRO_HEALTH_URL="$health_url" python3 - <<'PY2' >/dev/null 2>&1
+import urllib.request
+import os
+urllib.request.urlopen(os.environ['DEVFLEET_CODEXPRO_HEALTH_URL'],timeout=2)
+PY2
+then write_status healthy 'CodexPro loopback health endpoint is responding.'; echo 'CodexPro is already healthy.' | tee -a "$log"; exit 0; fi
+if ! command -v codexpro >/dev/null 2>&1; then write_status unavailable 'CodexPro executable is not installed in this project container.'; echo 'CodexPro is unavailable. Install it using your verified private/local installation source, then rerun this hook. No credential is embedded.' | tee -a "$log"; exit 0; fi
+export CODEXPRO_TOOL_CARDS=${CODEXPRO_TOOL_CARDS:-1}
+( codexpro start >>"$log" 2>&1 & )
+sleep 2
+if DEVFLEET_CODEXPRO_HEALTH_URL="$health_url" python3 - <<'PY2' >/dev/null 2>&1
+import urllib.request
+import os
+urllib.request.urlopen(os.environ['DEVFLEET_CODEXPRO_HEALTH_URL'],timeout=2)
+PY2
+then write_status healthy 'CodexPro started successfully.'; exit 0; fi
+write_status authorization-required 'CodexPro is installed but not healthy; inspect the log for authorization or configuration requirements.'
+echo "CodexPro did not become healthy. Review $log"; exit 0
+
+```
+
+
+## FILE: source/templates/python-fastapi/.devfleet/codexpro-profile.json
+
+SHA256: c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44 | Bytes: 397 | Git mode: 100644
+
+```
+{
+  "defaultRoot": "/workspaces/__PROJECT_SLUG__",
+  "allowedRoots": [
+    "/workspaces/__PROJECT_SLUG__"
+  ],
+  "authEnabled": true,
+  "bashMode": "full",
+  "bashTranscript": "full",
+  "writeMode": "workspace",
+  "toolMode": "full",
+  "inheritEnv": false,
+  "contextDir": ".ai-bridge",
+  "maxReadBytes": 180000,
+  "maxWriteBytes": 1000000,
+  "maxOutputBytes": 120000,
+  "maxSearchResults": 200
+}
+
+```
+
+
+## FILE: source/templates/python-fastapi/.devfleet/codexpro.env.example
+
+SHA256: 86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30 | Bytes: 90 | Git mode: 100644
+
+```
+# Verified optional UI setting only. Do not store credentials here.
+CODEXPRO_TOOL_CARDS=1
+
+```
+
+
+## FILE: source/templates/python-fastapi/.devfleet/health-check.sh
+
+SHA256: 04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311 | Bytes: 83 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+test -d .devfleet
+./.devfleet/smoke-test.sh
+
+```
+
+
+## FILE: source/templates/python-fastapi/.devfleet/project-tools.json
+
+SHA256: 7f63322ef37a3e86013da49f66c381cb95574f43087fcfd33c3eef3e5a90889f | Bytes: 386 | Git mode: 100644
+
+```
+{
+  "id": "python-fastapi",
+  "language": "python",
+  "framework": "fastapi",
+  "maturity": "core",
+  "bootstrap_command": "./.devfleet/bootstrap.sh",
+  "format_command": "python -m ruff format .",
+  "lint_command": "python -m ruff check . && python -m mypy src",
+  "test_command": "python -m pytest -q",
+  "health_command": "python -c \"from app.main import app; assert app.title\""
+}
+
+```
+
+
+## FILE: source/templates/python-fastapi/.devfleet/smoke-test.sh
+
+SHA256: 95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31 | Bytes: 214 | Git mode: 100644
+
+```
+#!/usr/bin/env bash
+set -Eeuo pipefail
+test -f README.md
+test -f compose.yaml
+test -f .devcontainer/devcontainer.json
+test -f .devfleet/project.json -o -f .devfleet/template.json
+echo "Template smoke test passed."
+
+```
+
+
+## FILE: source/templates/python-fastapi/.devfleet/template.json
+
+SHA256: ddef3df299be0b9b8643e9fb22eb82fba9c8b45ae0ce593424b9ee2db0c38c9c | Bytes: 726 | Git mode: 100644
+
+```
+{
+  "id": "python-fastapi",
+  "language": "python",
+  "framework": "fastapi",
+  "maturity": "core",
+  "bootstrap_command": "./.devfleet/bootstrap.sh",
+  "format_command": "python -m ruff format .",
+  "lint_command": "python -m ruff check . && python -m mypy src",
+  "test_command": "python -m pytest -q",
+  "health_command": "python -c \"from app.main import app; assert app.title\"",
+  "start_command": "docker compose up -d --build",
+  "stop_command": "docker compose down --remove-orphans",
+  "restart_command": "docker compose restart",
+  "rebuild_command": "docker compose build && docker compose up -d",
+  "logs_command": "docker compose logs",
+  "codexpro_command": "./.devfleet/codexpro-bootstrap.sh"
+}
+```
+
+
+## FILE: source/templates/python-fastapi/.editorconfig
+
+SHA256: 05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44 | Bytes: 137 | Git mode: 100644
+
+```
+root = true
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+[*.py]
+indent_size = 4
+
+```
+
+
+## FILE: source/templates/python-fastapi/.gitignore
+
+SHA256: 8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe | Bytes: 133 | Git mode: 100644
+
+```
+.devfleet/runtime/
+.ai-bridge/local-agent/
+.env
+.env.*
+node_modules/
+.venv/
+__pycache__/
+dist/
+build/
+target/
+.next/
+coverage/
+*.log
+
+```
+
+
+## FILE: source/templates/python-fastapi/README.md
+
+SHA256: 0a03c11125cda23b9441d7531965f99704bb059dfabb89db00310aed30f62892 | Bytes: 363 | Git mode: 100644
+
+```
+# __PROJECT_NAME__
+
+Language: `python`  
+Framework: `fastapi`  
+DevFleet profile: `__PROJECT_PROFILE__`
+
+Generated by DevFleet. Run `./.devfleet/bootstrap.sh`, `./.devfleet/health-check.sh`, and the test command recorded in `.devfleet/project.json`. Language selection follows Dylan's engineering preferences and is not presented as a scientific model benchmark.
+
+```
+
+
+## FILE: source/templates/python-fastapi/compose.yaml
+
+SHA256: 60913528a2d623d64179c622373241ff562b6ad9af778a020f66acb23c65aca4 | Bytes: 513 | Git mode: 100644
+
+```
+services:
+  dev:
+    image: mcr.microsoft.com/devcontainers/python:1-3.12-bookworm
+    user: "vscode"
+    working_dir: /workspaces/__PROJECT_SLUG__
+    command: sh -lc "sleep infinity"
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - .:/workspaces/__PROJECT_SLUG__:cached
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "test -d /workspaces/__PROJECT_SLUG__"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+```
+
+
+## FILE: source/templates/python-fastapi/docs/architecture.md
+
+SHA256: 198ae8ef7460fc2c3e90bbd24102e084fa2b21343b9b18f86640199ad7331fea | Bytes: 331 | Git mode: 100644
+
+```
+# Architecture
+
+- Language: `python`
+- Framework: `fastapi`
+- Scale/intent/testing/profile are recorded in `.devfleet/project.json`.
+- Rationale: selected from Dylan's DevFleet engineering preferences; this is not a scientific model benchmark.
+- Source remains in one canonical checkout; use Git worktrees for concurrent branches.
+
+```
+
+
+## FILE: source/templates/python-fastapi/pyproject.toml
+
+SHA256: 0bdf89c37a4ae56fea7b0ac0bf3e03a0ca5a021f120342053ed0e8ec3e18c01c | Bytes: 381 | Git mode: 100644
+
+```
+[build-system]
+requires=["setuptools>=70"]
+build-backend="setuptools.build_meta"
+[project]
+name="__PROJECT_SLUG__"
+version="0.1.0"
+requires-python=">=3.12"
+dependencies=["fastapi>=0.115,<1","uvicorn>=0.34,<1"]
+[project.optional-dependencies]
+dev=["pytest>=8,<9","httpx>=0.28,<1","ruff>=0.12,<1","mypy>=1.15,<2"]
+[tool.pytest.ini_options]
+pythonpath=["src"]
+[tool.mypy]
+strict=true
+
+```
+
+
+## FILE: source/templates/python-fastapi/src/app/__init__.py
+
+SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 | Bytes: 0 | Git mode: 100644
+
+```
+
+```
+
+
+## FILE: source/templates/python-fastapi/src/app/main.py
+
+SHA256: 530299cc59537a7cb558c8fdaa33a9987b56cc2d69f682390c30d718192f0439 | Bytes: 139 | Git mode: 100644
+
+```
+from fastapi import FastAPI
+app=FastAPI(title="__PROJECT_NAME__")
+@app.get("/healthz")
+def healthz() -> dict[str,bool]: return {"ok":True}
+
+```
+
+
+## FILE: source/templates/python-fastapi/tests/test_smoke.py
+
+SHA256: ad12033efd95564d4f6c4e634a3b6afe95d7018061f46b7700a014f595cab45b | Bytes: 157 | Git mode: 100644
+
+```
+from fastapi.testclient import TestClient
+from app.main import app
+def test_health() -> None:
+    assert TestClient(app).get("/healthz").json()=={"ok":True}
+
+```
+
+
+## FILE: source/templates/python/.ai-bridge/chatgpt-memory.md
+
+SHA256: ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f | Bytes: 143 | Git mode: 100644
+
+```
+# Project continuity
+
+Keep this concise: current architecture, active branch, important decisions, and next safe action. Do not store secrets.
+
+```
+
+
+## FILE: source/templates/python/.ai-bridge/codexpro-project-instructions.md
+
+SHA256: 95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd | Bytes: 641 | Git mode: 100644
+
+```
+Use CodexPro. Call server_config first. Run codexpro_self_test only for a fresh, broken, or reconfigured session. Open the current workspace with include_tree=false, include_skills=true, and include_global_skills=true. Load codex_context with include_diff=false. Read .ai-bridge/codexpro-project-instructions.md, .ai-bridge/chatgpt-memory.md, AGENTS.md, and relevant handoffs. Use targeted search/read and diff-oriented review; exclude dependencies, generated assets, caches, models, binaries, and .ai-bridge/local-agent. Continue routine implementation without repeated approval and update a concise handoff before context becomes crowded.
+
+```
+
+
+## FILE: source/templates/python/.ai-bridge/current-plan.template.md
+
+SHA256: 7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb | Bytes: 69 | Git mode: 100644
+
+```
+# Current plan
+
+Goal:
+Changed files:
+Verification:
+Next safe action:
+
+```
+
+
+## FILE: source/templates/python/.ai-bridge/prompts/broken-session-recovery.md
+
+SHA256: d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135 | Bytes: 166 | Git mode: 100644
+
+```
+Call server_config, then codexpro_self_test. Reopen the current workspace without a full tree, inspect status and handoffs, and report the precise failed capability.
+
+```
+
+
+## FILE: source/templates/python/.ai-bridge/prompts/handoff-template.md
+
+SHA256: a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02 | Bytes: 78 | Git mode: 100644
+
+```
+Goal:
+Decisions:
+Changed files:
+Checks run/results:
+Open risks:
+Next action:
+
+
+```
 
 
 ## FILE: source/templates/python/.ai-bridge/prompts/reconnect.md
@@ -970,539 +1501,4 @@ echo "Template smoke test passed."
 ```
 
 
-## FILE: source/templates/rust-service/.devfleet/template.json
-
-SHA256: f9a553b0caae1d958e98ecb8a4559669b62e358a77825ce8476190b0df975972 | Bytes: 670 | Git mode: 100644
-
-```
-{
-  "id": "rust-service",
-  "language": "rust",
-  "framework": "axum",
-  "maturity": "core",
-  "bootstrap_command": "./.devfleet/bootstrap.sh",
-  "format_command": "cargo fmt --all",
-  "lint_command": "cargo clippy --all-targets -- -D warnings",
-  "test_command": "cargo test",
-  "health_command": "./.devfleet/health-check.sh",
-  "start_command": "docker compose up -d --build",
-  "stop_command": "docker compose down --remove-orphans",
-  "restart_command": "docker compose restart",
-  "rebuild_command": "docker compose build && docker compose up -d",
-  "logs_command": "docker compose logs",
-  "codexpro_command": "./.devfleet/codexpro-bootstrap.sh"
-}
-```
-
-
-## FILE: source/templates/rust-service/.editorconfig
-
-SHA256: 05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44 | Bytes: 137 | Git mode: 100644
-
-```
-root = true
-[*]
-charset = utf-8
-end_of_line = lf
-insert_final_newline = true
-indent_style = space
-indent_size = 2
-[*.py]
-indent_size = 4
-
-```
-
-
-## FILE: source/templates/rust-service/.gitignore
-
-SHA256: 8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe | Bytes: 133 | Git mode: 100644
-
-```
-.devfleet/runtime/
-.ai-bridge/local-agent/
-.env
-.env.*
-node_modules/
-.venv/
-__pycache__/
-dist/
-build/
-target/
-.next/
-coverage/
-*.log
-
-```
-
-
-## FILE: source/templates/rust-service/Cargo.toml
-
-SHA256: 3913040a9984df6c6832a8367fabbe9050fa0566bc3f83990ebcfddb6bb0e7d0 | Bytes: 129 | Git mode: 100644
-
-```
-[package]
-name="__PROJECT_SLUG__"
-version="0.1.0"
-edition="2021"
-[dependencies]
-axum="0.8"
-tokio={version="1",features=["full"]}
-
-```
-
-
-## FILE: source/templates/rust-service/README.md
-
-SHA256: 45933ed40e10522eb584d621c872d91c8d9948327408205bdec2c1cf0b33e659 | Bytes: 358 | Git mode: 100644
-
-```
-# __PROJECT_NAME__
-
-Language: `rust`  
-Framework: `axum`  
-DevFleet profile: `__PROJECT_PROFILE__`
-
-Generated by DevFleet. Run `./.devfleet/bootstrap.sh`, `./.devfleet/health-check.sh`, and the test command recorded in `.devfleet/project.json`. Language selection follows Dylan's engineering preferences and is not presented as a scientific model benchmark.
-
-```
-
-
-## FILE: source/templates/rust-service/compose.yaml
-
-SHA256: 8b474a2b349beec60e452b08e9b591a4f6bbf25eeee9088009fdfae1f6686906 | Bytes: 508 | Git mode: 100644
-
-```
-services:
-  dev:
-    image: mcr.microsoft.com/devcontainers/rust:1-1-bookworm
-    user: "vscode"
-    working_dir: /workspaces/__PROJECT_SLUG__
-    command: sh -lc "sleep infinity"
-    init: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - .:/workspaces/__PROJECT_SLUG__:cached
-    ports:
-      - "127.0.0.1:8080:8080"
-    healthcheck:
-      test: ["CMD-SHELL", "test -d /workspaces/__PROJECT_SLUG__"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
-```
-
-
-## FILE: source/templates/rust-service/docs/architecture.md
-
-SHA256: c39677d76d0df844dc40cdd8a7b9b5c646bbc8da1dd76558397be7181d6e5e02 | Bytes: 326 | Git mode: 100644
-
-```
-# Architecture
-
-- Language: `rust`
-- Framework: `axum`
-- Scale/intent/testing/profile are recorded in `.devfleet/project.json`.
-- Rationale: selected from Dylan's DevFleet engineering preferences; this is not a scientific model benchmark.
-- Source remains in one canonical checkout; use Git worktrees for concurrent branches.
-
-```
-
-
-## FILE: source/templates/rust-service/src/main.rs
-
-SHA256: 4480a18357cf852cd7e7454baa5a3cc73cc53e61c99d89a98cf1f3589d672874 | Bytes: 315 | Git mode: 100644
-
-```
-use axum::{routing::get,Router};async fn health()->&'static str{"ok"}#[tokio::main]async fn main(){let app=Router::new().route("/healthz",get(health));let l=tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();axum::serve(l,app).await.unwrap();}
-#[cfg(test)]mod tests{#[test]fn smoke(){assert_eq!(2+3,5);}}
-
-```
-
-
-## FILE: source/templates/scientific-julia/.ai-bridge/chatgpt-memory.md
-
-SHA256: ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f | Bytes: 143 | Git mode: 100644
-
-```
-# Project continuity
-
-Keep this concise: current architecture, active branch, important decisions, and next safe action. Do not store secrets.
-
-```
-
-
-## FILE: source/templates/scientific-julia/.ai-bridge/codexpro-project-instructions.md
-
-SHA256: 95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd | Bytes: 641 | Git mode: 100644
-
-```
-Use CodexPro. Call server_config first. Run codexpro_self_test only for a fresh, broken, or reconfigured session. Open the current workspace with include_tree=false, include_skills=true, and include_global_skills=true. Load codex_context with include_diff=false. Read .ai-bridge/codexpro-project-instructions.md, .ai-bridge/chatgpt-memory.md, AGENTS.md, and relevant handoffs. Use targeted search/read and diff-oriented review; exclude dependencies, generated assets, caches, models, binaries, and .ai-bridge/local-agent. Continue routine implementation without repeated approval and update a concise handoff before context becomes crowded.
-
-```
-
-
-## FILE: source/templates/scientific-julia/.ai-bridge/current-plan.template.md
-
-SHA256: 7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb | Bytes: 69 | Git mode: 100644
-
-```
-# Current plan
-
-Goal:
-Changed files:
-Verification:
-Next safe action:
-
-```
-
-
-## FILE: source/templates/scientific-julia/.ai-bridge/prompts/broken-session-recovery.md
-
-SHA256: d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135 | Bytes: 166 | Git mode: 100644
-
-```
-Call server_config, then codexpro_self_test. Reopen the current workspace without a full tree, inspect status and handoffs, and report the precise failed capability.
-
-```
-
-
-## FILE: source/templates/scientific-julia/.ai-bridge/prompts/handoff-template.md
-
-SHA256: a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02 | Bytes: 78 | Git mode: 100644
-
-```
-Goal:
-Decisions:
-Changed files:
-Checks run/results:
-Open risks:
-Next action:
-
-
-```
-
-
-## FILE: source/templates/scientific-julia/.ai-bridge/prompts/reconnect.md
-
-SHA256: 5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab | Bytes: 105 | Git mode: 100644
-
-```
-Verify server_config and open_current_workspace, then load the latest concise handoff before continuing.
-
-```
-
-
-## FILE: source/templates/scientific-julia/.ai-bridge/prompts/session-bootstrap.md
-
-SHA256: 95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd | Bytes: 641 | Git mode: 100644
-
-```
-Use CodexPro. Call server_config first. Run codexpro_self_test only for a fresh, broken, or reconfigured session. Open the current workspace with include_tree=false, include_skills=true, and include_global_skills=true. Load codex_context with include_diff=false. Read .ai-bridge/codexpro-project-instructions.md, .ai-bridge/chatgpt-memory.md, AGENTS.md, and relevant handoffs. Use targeted search/read and diff-oriented review; exclude dependencies, generated assets, caches, models, binaries, and .ai-bridge/local-agent. Continue routine implementation without repeated approval and update a concise handoff before context becomes crowded.
-
-```
-
-
-## FILE: source/templates/scientific-julia/.devcontainer/devcontainer.json
-
-SHA256: 31743d0b403e9a20eb3dffd87c5033c90bd0c28a0f522633bef1b18235b2c065 | Bytes: 207 | Git mode: 100644
-
-```
-{
-  "name": "__PROJECT_NAME__",
-  "dockerComposeFile": "../compose.yaml",
-  "service": "dev",
-  "workspaceFolder": "/workspaces/__PROJECT_SLUG__",
-  "shutdownAction": "stopCompose",
-  "remoteUser": "root"
-}
-
-```
-
-
-## FILE: source/templates/scientific-julia/.devfleet/bootstrap.sh
-
-SHA256: 0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a | Bytes: 116 | Git mode: 100644
-
-```
-#!/usr/bin/env bash
-set -Eeuo pipefail
-echo "Preview template: install dependencies inside this project container."
-
-```
-
-
-## FILE: source/templates/scientific-julia/.devfleet/codexpro-bootstrap.sh
-
-SHA256: 18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b | Bytes: 2254 | Git mode: 100644
-
-```
-#!/usr/bin/env bash
-set -Eeuo pipefail
-root=$(pwd -P)
-workspace_root=${DEVFLEET_WORKSPACES_ROOT:-/workspaces}
-[[ "$workspace_root" == /* && "$workspace_root" != */ ]] || { echo 'DEVFLEET_WORKSPACES_ROOT must be an absolute directory.' >&2; exit 2; }
-[[ "$root" == "$workspace_root"/* ]] || { echo "CodexPro root must be under $workspace_root." >&2; exit 2; }
-project_rel=${root#"$workspace_root"/}
-[[ "$project_rel" != */* && -n "$project_rel" ]] || { echo 'CodexPro root must identify one project.' >&2; exit 2; }
-runtime="$root/.devfleet/runtime"; bridge="$root/.ai-bridge/local-agent"; mkdir -p "$runtime" "$bridge/logs"
-log="$runtime/codexpro-bootstrap.log"; status="$runtime/codexpro-status.json"; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-health_url=${DEVFLEET_CODEXPRO_HEALTH_URL:-http://127.0.0.1:8787/healthz}
-write_status(){ python3 - "$status" "$1" "$2" "$now" <<'PY2'
-import json,sys
-p,state,msg,now=sys.argv[1:];open(p,'w').write(json.dumps({'state':state,'healthy':state=='healthy','message':msg,'updated_at':now},indent=2)+'\n')
-PY2
-}
-if DEVFLEET_CODEXPRO_HEALTH_URL="$health_url" python3 - <<'PY2' >/dev/null 2>&1
-import urllib.request
-import os
-urllib.request.urlopen(os.environ['DEVFLEET_CODEXPRO_HEALTH_URL'],timeout=2)
-PY2
-then write_status healthy 'CodexPro loopback health endpoint is responding.'; echo 'CodexPro is already healthy.' | tee -a "$log"; exit 0; fi
-if ! command -v codexpro >/dev/null 2>&1; then write_status unavailable 'CodexPro executable is not installed in this project container.'; echo 'CodexPro is unavailable. Install it using your verified private/local installation source, then rerun this hook. No credential is embedded.' | tee -a "$log"; exit 0; fi
-export CODEXPRO_TOOL_CARDS=${CODEXPRO_TOOL_CARDS:-1}
-( codexpro start >>"$log" 2>&1 & )
-sleep 2
-if DEVFLEET_CODEXPRO_HEALTH_URL="$health_url" python3 - <<'PY2' >/dev/null 2>&1
-import urllib.request
-import os
-urllib.request.urlopen(os.environ['DEVFLEET_CODEXPRO_HEALTH_URL'],timeout=2)
-PY2
-then write_status healthy 'CodexPro started successfully.'; exit 0; fi
-write_status authorization-required 'CodexPro is installed but not healthy; inspect the log for authorization or configuration requirements.'
-echo "CodexPro did not become healthy. Review $log"; exit 0
-
-```
-
-
-## FILE: source/templates/scientific-julia/.devfleet/codexpro-profile.json
-
-SHA256: c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44 | Bytes: 397 | Git mode: 100644
-
-```
-{
-  "defaultRoot": "/workspaces/__PROJECT_SLUG__",
-  "allowedRoots": [
-    "/workspaces/__PROJECT_SLUG__"
-  ],
-  "authEnabled": true,
-  "bashMode": "full",
-  "bashTranscript": "full",
-  "writeMode": "workspace",
-  "toolMode": "full",
-  "inheritEnv": false,
-  "contextDir": ".ai-bridge",
-  "maxReadBytes": 180000,
-  "maxWriteBytes": 1000000,
-  "maxOutputBytes": 120000,
-  "maxSearchResults": 200
-}
-
-```
-
-
-## FILE: source/templates/scientific-julia/.devfleet/codexpro.env.example
-
-SHA256: 86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30 | Bytes: 90 | Git mode: 100644
-
-```
-# Verified optional UI setting only. Do not store credentials here.
-CODEXPRO_TOOL_CARDS=1
-
-```
-
-
-## FILE: source/templates/scientific-julia/.devfleet/health-check.sh
-
-SHA256: 04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311 | Bytes: 83 | Git mode: 100644
-
-```
-#!/usr/bin/env bash
-set -Eeuo pipefail
-test -d .devfleet
-./.devfleet/smoke-test.sh
-
-```
-
-
-## FILE: source/templates/scientific-julia/.devfleet/project-tools.json
-
-SHA256: 92c1c25136a67c50f0f24f32740b8667e02a1ec46f4672507a1ae3c306fd155d | Bytes: 311 | Git mode: 100644
-
-```
-{
-  "id": "scientific-julia",
-  "language": "julia",
-  "framework": "base-julia",
-  "maturity": "preview",
-  "bootstrap_command": "./.devfleet/bootstrap.sh",
-  "format_command": "true",
-  "lint_command": "true",
-  "test_command": "./.devfleet/smoke-test.sh",
-  "health_command": "./.devfleet/health-check.sh"
-}
-
-```
-
-
-## FILE: source/templates/scientific-julia/.devfleet/smoke-test.sh
-
-SHA256: 95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31 | Bytes: 214 | Git mode: 100644
-
-```
-#!/usr/bin/env bash
-set -Eeuo pipefail
-test -f README.md
-test -f compose.yaml
-test -f .devcontainer/devcontainer.json
-test -f .devfleet/project.json -o -f .devfleet/template.json
-echo "Template smoke test passed."
-
-```
-
-
-## FILE: source/templates/scientific-julia/.devfleet/template.json
-
-SHA256: 1a9163890cfa3ff94a6270a18999298b0e21f1c12518bb0bd6ebffcba9b64aba | Bytes: 651 | Git mode: 100644
-
-```
-{
-  "id": "scientific-julia",
-  "language": "julia",
-  "framework": "base-julia",
-  "maturity": "preview",
-  "bootstrap_command": "./.devfleet/bootstrap.sh",
-  "format_command": "true",
-  "lint_command": "true",
-  "test_command": "./.devfleet/smoke-test.sh",
-  "health_command": "./.devfleet/health-check.sh",
-  "start_command": "docker compose up -d --build",
-  "stop_command": "docker compose down --remove-orphans",
-  "restart_command": "docker compose restart",
-  "rebuild_command": "docker compose build && docker compose up -d",
-  "logs_command": "docker compose logs",
-  "codexpro_command": "./.devfleet/codexpro-bootstrap.sh"
-}
-```
-
-
-## FILE: source/templates/scientific-julia/.editorconfig
-
-SHA256: 05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44 | Bytes: 137 | Git mode: 100644
-
-```
-root = true
-[*]
-charset = utf-8
-end_of_line = lf
-insert_final_newline = true
-indent_style = space
-indent_size = 2
-[*.py]
-indent_size = 4
-
-```
-
-
-## FILE: source/templates/scientific-julia/.gitignore
-
-SHA256: 8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe | Bytes: 133 | Git mode: 100644
-
-```
-.devfleet/runtime/
-.ai-bridge/local-agent/
-.env
-.env.*
-node_modules/
-.venv/
-__pycache__/
-dist/
-build/
-target/
-.next/
-coverage/
-*.log
-
-```
-
-
-## FILE: source/templates/scientific-julia/README.md
-
-SHA256: b0c4f2f64c3038b37635c68ce5cc7998574a804bd40b509f3b1d16d3cdac78d8 | Bytes: 365 | Git mode: 100644
-
-```
-# __PROJECT_NAME__
-
-Language: `julia`  
-Framework: `base-julia`  
-DevFleet profile: `__PROJECT_PROFILE__`
-
-Generated by DevFleet. Run `./.devfleet/bootstrap.sh`, `./.devfleet/health-check.sh`, and the test command recorded in `.devfleet/project.json`. Language selection follows Dylan's engineering preferences and is not presented as a scientific model benchmark.
-
-```
-
-
-## FILE: source/templates/scientific-julia/compose.yaml
-
-SHA256: f133b4199d18c28b29df897a03d182d6b2dac206e24ad4e2a9bc7dd0dd3381a2 | Bytes: 435 | Git mode: 100644
-
-```
-services:
-  dev:
-    image: julia:1.11-bookworm
-    user: "root"
-    working_dir: /workspaces/__PROJECT_SLUG__
-    command: sh -lc "sleep infinity"
-    init: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - .:/workspaces/__PROJECT_SLUG__:cached
-    healthcheck:
-      test: ["CMD-SHELL", "test -d /workspaces/__PROJECT_SLUG__"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
-```
-
-
-## FILE: source/templates/scientific-julia/docs/architecture.md
-
-SHA256: 92f1c73fe87ddb0748414935c2eb1643093ec6bef1dadcb2e73e2a67f49fb37f | Bytes: 333 | Git mode: 100644
-
-```
-# Architecture
-
-- Language: `julia`
-- Framework: `base-julia`
-- Scale/intent/testing/profile are recorded in `.devfleet/project.json`.
-- Rationale: selected from Dylan's DevFleet engineering preferences; this is not a scientific model benchmark.
-- Source remains in one canonical checkout; use Git worktrees for concurrent branches.
-
-```
-
-
-## FILE: source/templates/shell-automation/.ai-bridge/chatgpt-memory.md
-
-SHA256: ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f | Bytes: 143 | Git mode: 100644
-
-```
-# Project continuity
-
-Keep this concise: current architecture, active branch, important decisions, and next safe action. Do not store secrets.
-
-```
-
-
-## FILE: source/templates/shell-automation/.ai-bridge/codexpro-project-instructions.md
-
-SHA256: 95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd | Bytes: 641 | Git mode: 100644
-
-```
-Use CodexPro. Call server_config first. Run codexpro_self_test only for a fresh, broken, or reconfigured session. Open the current workspace with include_tree=false, include_skills=true, and include_global_skills=true. Load codex_c
+## 

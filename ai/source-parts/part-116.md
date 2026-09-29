@@ -1,10 +1,190 @@
 # DevFleet source part 116
 
 Full-source UTF-8 byte interval [5347500, 5394000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 8ac38a3fe7f7026a5fc7c3f30ae99531cb530c541d8ab8fa5cc000db95f2be04
+Payload SHA-256: 8486afd1713f5b9bf38a50aec499891e004a989c5426a1715aeb7ef5dc12c134
 
 <!-- BEGIN SOURCE SLICE -->
-ndently recomputed
+978183322204c523b40947d073aa0' -and
+        [string]$state.blocker_code -eq 'REPLACEMENT_CANDIDATE_BINDING_MISMATCH'
+    # Compute both sides from the live filesystem and the exact candidate commit
+    # using source/tools/release_fingerprint.py.  Never treat the current
+    # release-fingerprint.json rows as a live identity: they are candidate
+    # metadata and may be stale after tooling-only commits.
+    $identityArguments = @('--workspace',$Workspace,'--candidate-commit',$candidateCommit)
+    foreach ($artifactName in $candidateArtifacts.Keys) {
+        $artifactFullPath = Join-Path $Workspace ([string]$candidateArtifacts[$artifactName].path)
+        $identityArguments += @('--artifact',"$artifactName=$artifactFullPath")
+    }
+    $identityRaw = @(& $python (Join-Path $Workspace 'tools\compute_shipping_input_identity.py') @identityArguments)
+    if ($LASTEXITCODE -ne 0 -or $identityRaw.Count -eq 0) { throw 'Live/candidate shipping-input identity computation failed.' }
+    try { $identity = ($identityRaw -join "`n") | ConvertFrom-Json } catch { throw "Shipping-input identity output was not valid JSON: $($_.Exception.Message)" }
+    function Normalize-ShippingRows([object[]]$Rows) {
+        return @($Rows | Sort-Object root,path | ForEach-Object {
+            [ordered]@{root=[string]$_.root;path=[string]$_.path;bytes=[int64]$_.bytes;sha256=[string]$_.sha256;mode=[string]$_.mode}
+        })
+    }
+    $liveRows = Normalize-ShippingRows @($identity.liveShippingInputs)
+    $candidateRows = Normalize-ShippingRows @($identity.candidateShippingInputs)
+    if ($liveRows.Count -eq 0 -or $candidateRows.Count -eq 0) { throw 'Shipping-input identity computation returned no inputs.' }
+    $liveMode = ($identity.liveShippingModeContract | ConvertTo-Json -Compress -Depth 10)
+    $candidateMode = ($identity.candidateShippingModeContract | ConvertTo-Json -Compress -Depth 10)
+    # The Python identity tool is the authoritative canonical algorithm.  Do
+    # not hash a PowerShell serialization of rows here; that would omit the
+    # version and mode contract and could silently disagree with validators.
+    $rawLiveShippingInputIdentity = [string]$identity.liveShippingInputIdentity
+    $currentShippingInputIdentity = $rawLiveShippingInputIdentity
+    $candidateComputedIdentity = [string]$identity.candidateShippingInputIdentity
+    $candidateShippingInputIdentity = [string]$state.shipping_input_identity
+    if (-not $candidateShippingInputIdentity) { $candidateShippingInputIdentity = [string]$state.shippingInputIdentity }
+    if (-not $candidateShippingInputIdentity) { $candidateShippingInputIdentity = [string]$artifactManifest.shippingInputIdentity }
+    if ($failedAttemptContract) { $currentShippingInputIdentity = [string]$state.failed_replacement_attempt.buildTimeShippingInputIdentity }
+    $historicalDiagnosticTuple = $candidateCommit -eq '2739e0366d070285e44b4fc764ef9247d40b2f94' -and
+        $candidateShippingInputIdentity -eq 'daa30ef9f521a47fedb4bacce91e3440c20e1a8f05543b4d5e823e5c3541e64e' -and
+        [string]$state.releaseFingerprintId -eq '80c8b88c2f2ec828f5ab0f9713d63fa3f4cc4cbad7c382aa2f154f3196c3de84' -and
+        [bool]$state.source_changed_since_candidate -and [bool]$state.rebuild_required -and -not [bool]$state.candidate_is_current
+    if (-not $currentShippingInputIdentity -or -not $candidateShippingInputIdentity -or ($candidateComputedIdentity -ne $candidateShippingInputIdentity -and -not $historicalDiagnosticTuple -and -not $failedAttemptContract)) { throw 'Candidate-bound shipping-input identity does not match the exact candidate commit rows.' }
+    $embeddedFingerprintRows = Normalize-ShippingRows @($releaseFingerprint.shippingInputs)
+    if (($embeddedFingerprintRows | ConvertTo-Json -Compress -Depth 12) -cne ($candidateRows | ConvertTo-Json -Compress -Depth 12)) { throw 'release-fingerprint.json shipping rows are not the exact candidate Git-object rows.' }
+    if ([string]$identity.candidateReleaseFingerprintId -cne $releaseId -or [string]$releaseFingerprint.releaseFingerprintId -cne $releaseId) { throw 'Declared release fingerprint does not recompute from the candidate Git-object rows and exact artifact tuple.' }
+    $liveToolingId = [string]$identity.liveToolingFingerprint.toolingFingerprintId
+    if ($liveToolingId -cne $toolingId) {
+        if (-not $sourceChanged -or -not $rebuildRequired -or $workingToolingId -notmatch '^[0-9a-f]{64}$' -or $liveToolingId -cne $workingToolingId) {
+            throw 'Live release tooling differs from the candidate tuple without an exact fail-closed working-tree tooling fingerprint.'
+        }
+    }
+    if (($releaseFingerprint.shippingModeContract | ConvertTo-Json -Compress -Depth 10) -cne ($identity.candidateShippingModeContract | ConvertTo-Json -Compress -Depth 10)) { throw 'release-fingerprint.json mode contract is not candidate-bound.' }
+    $rawAuthorizedShippingPaths = @($state.authorized_correction.shipping_paths | ForEach-Object { ([string]$_).Trim().Replace('\\','/').TrimStart('/') } | Where-Object { $_ })
+    $authorizedShippingPaths = @($rawAuthorizedShippingPaths | Sort-Object -Unique)
+    if ($authorizedShippingPaths.Count -ne $rawAuthorizedShippingPaths.Count -or @($authorizedShippingPaths | Where-Object { $_ -notmatch '^(source|installer-source)/[^/].*$' -or $_ -match '(^|/)\.\.(/|$)' }).Count -gt 0) {
+        throw 'Authorized shipping correction paths are duplicated, malformed, or outside the shipping roots.'
+    }
+    $liveByPath = @{}; foreach ($row in $liveRows) { $liveByPath[(([string]$row.root).TrimEnd('/') + '/' + [string]$row.path)] = ($row | ConvertTo-Json -Compress -Depth 10) }
+    $candidateByPath = @{}; foreach ($row in $candidateRows) { $candidateByPath[(([string]$row.root).TrimEnd('/') + '/' + [string]$row.path)] = ($row | ConvertTo-Json -Compress -Depth 10) }
+    $shippingChangedPaths = @((@($liveByPath.Keys) + @($candidateByPath.Keys)) | Sort-Object -Unique | Where-Object { $liveByPath[$_] -cne $candidateByPath[$_] })
+    # A Windows checkout may materialize committed LF blobs as CRLF without
+    # changing the canonical Git-object candidate.  Prove this narrowly with
+    # Git's EOL-only diff mode before accepting the candidate as unchanged.
+    $crlfOnlyPaths = [Collections.Generic.List[string]]::new()
+    $substantiveShippingChangedPaths = [Collections.Generic.List[string]]::new()
+    foreach ($changedPath in $shippingChangedPaths) {
+        if (-not $liveByPath.ContainsKey($changedPath) -or -not $candidateByPath.ContainsKey($changedPath)) {
+            $substantiveShippingChangedPaths.Add($changedPath)
+            continue
+        }
+        & git -C $Workspace diff --quiet --ignore-space-at-eol $candidateCommit -- $changedPath
+        if ($LASTEXITCODE -eq 0) { $crlfOnlyPaths.Add($changedPath); continue }
+        if ($LASTEXITCODE -eq 1) { $substantiveShippingChangedPaths.Add($changedPath); continue }
+        throw "Git could not classify the candidate/live line-ending delta for $changedPath."
+    }
+    $crlfOnlyPaths = @($crlfOnlyPaths | Sort-Object -Unique)
+    $substantiveShippingChangedPaths = @($substantiveShippingChangedPaths | Sort-Object -Unique)
+    $crlfOnlyMaterialization = $shippingChangedPaths.Count -gt 0 -and $substantiveShippingChangedPaths.Count -eq 0
+    if ($crlfOnlyMaterialization) { $currentShippingInputIdentity = $candidateComputedIdentity }
+    $postFailurePaths = @($state.failed_replacement_attempt.postFailureEvidenceTooling.paths | ForEach-Object { ([string]$_.path).Trim().Replace('\','/') } | Where-Object { $_ })
+    $attemptedChangedPaths = @($shippingChangedPaths | Where-Object { $postFailurePaths -notcontains $_ })
+    $historicalCrlfPaths = @($attemptedChangedPaths | Where-Object { $authorizedShippingPaths -notcontains $_ })
+    $unknownHistoricalPaths = @($historicalCrlfPaths | Where-Object { $_ -notmatch '^(source|installer-source)/' })
+    if (($historicalDiagnosticTuple -or $failedAttemptContract) -and ($historicalCrlfPaths.Count -ne 28 -or $unknownHistoricalPaths.Count -ne 0)) { throw "Historical CRLF/current-change partition is not exactly 28 classified shipping rows (rows=$($historicalCrlfPaths.Count), unknown=$($unknownHistoricalPaths.Count))." }
+    $splitIdentityCorrectionAllowed = $sourceChanged -and $rebuildRequired -and $substantiveShippingChangedPaths.Count -gt 0 -and
+        ((@($substantiveShippingChangedPaths) -join "`n") -ceq (@($authorizedShippingPaths) -join "`n"))
+    if ($rawLiveShippingInputIdentity -cne $candidateComputedIdentity -or $liveMode -cne $candidateMode -or [string]$identity.liveVersion -cne [string]$identity.candidateVersion -or [string]$identity.liveInstallerVersion -cne [string]$identity.candidateInstallerVersion) {
+        if (-not $splitIdentityCorrectionAllowed -and -not $historicalDiagnosticTuple -and -not $failedAttemptContract -and -not $crlfOnlyMaterialization) { throw 'Live shipping inputs differ from the candidate-bound source/installer identity without an authorized, fail-closed replacement correction.' }
+    }
+    $allChanges = @(& git -C $Workspace diff --name-only $candidateCommit --; & git -C $Workspace ls-files --others --exclude-standard)
+    $allowedToolingOnly = $true
+    foreach ($change in $allChanges) {
+        $normalized = ([string]$change).Trim().Replace('\','/')
+        if (-not $normalized) { continue }
+        # Shipping classification is defined by the canonical candidate/live
+        # inventory, not by a folder allowlist. Release-control documentation
+        # and installed skill files can legitimately live outside tools/ while
+        # remaining non-shipping; a newly added shipping file appears in the
+        # live inventory and is rejected here.
+        $isShippingPath = $liveByPath.ContainsKey($normalized) -or $candidateByPath.ContainsKey($normalized)
+        if (-not $isShippingPath -or $crlfOnlyPaths -contains $normalized) { continue }
+        $allowedToolingOnly = $false
+        break
+    }
+    if ($candidateShippingInputIdentity -ne $currentShippingInputIdentity -or -not $allowedToolingOnly -or $failedAttemptContract) { $sourceChanged = $true; $rebuildRequired = $true }
+    if ($artifactMismatch) { $sourceChanged = $true; $rebuildRequired = $true }
+    $candidateIsCurrent = [bool]$state.candidate_is_current -and -not $sourceChanged -and -not $rebuildRequired -and -not $failedAttemptContract
+    $status = if ($preAcceptanceAudit) { 'PRE_ACCEPTANCE_RELEASE_AUDIT' } elseif ($finalAcceptanceValid) { 'PASS' } elseif ($failedAttemptContract) { 'BLOCKED — USER ACTION REQUIRED' } elseif (-not $candidateIsCurrent -or [string]$state.status -match '(?i)blocked') { 'BLOCKED' } elseif ([string]$state.status -match '(?i)awaiting|progress') { 'READY_FOR_FULLRELEASE' } else { 'IN_PROGRESS' }
+    $bundleMode = if ($preAcceptanceAudit -or $finalAcceptanceValid) { 'release' } else { 'diagnostic' }
+    $releaseValidationMode = if ($preAcceptanceAudit) { 'pre-acceptance' } else { $bundleMode }
+
+    Add-Tree (Join-Path $Workspace 'source') $sourceStage 'source'
+    Add-Tree (Join-Path $Workspace 'installer-source') $installerStage 'installer-source'
+    if ($crlfOnlyPaths.Count -gt 0) {
+        # Normalize only independently proven EOL-only rows to their canonical
+        # Git-object bytes.  Mixed substantive changes remain live in the
+        # diagnostic bundle and are bound by authorized_correction below.
+        foreach ($crlfPath in $crlfOnlyPaths) {
+            $parts = $crlfPath -split '/', 2
+            $destinationRoot = if ($parts[0] -eq 'source') { $sourceStage } else { $installerStage }
+            Add-GitBlob $candidateCommit $crlfPath (Join-Path $destinationRoot ($parts[1] -replace '/','\\')) | Out-Null
+        }
+    }
+    $stagedIdentityArguments = @('--source-root',$sourceStage,'--installer-root',$installerStage)
+    foreach ($artifactName in $candidateArtifacts.Keys) {
+        $artifactFullPath = Join-Path $Workspace ([string]$candidateArtifacts[$artifactName].path)
+        $stagedIdentityArguments += @('--artifact',"$artifactName=$artifactFullPath")
+    }
+    $stagedIdentityRaw = @(& $python (Join-Path $Workspace 'tools\compute_shipping_input_identity.py') @stagedIdentityArguments)
+    if ($LASTEXITCODE -ne 0 -or $stagedIdentityRaw.Count -eq 0) { throw 'Canonicalized diagnostic shipping-input identity computation failed.' }
+    try { $stagedIdentity = ($stagedIdentityRaw -join "`n") | ConvertFrom-Json } catch { throw "Canonicalized diagnostic shipping-input identity output was not valid JSON: $($_.Exception.Message)" }
+    $currentShippingInputIdentity = [string]$stagedIdentity.shippingInputIdentity
+    if ($currentShippingInputIdentity -notmatch '^[0-9a-f]{64}$') { throw 'Canonicalized diagnostic shipping-input identity is malformed.' }
+    if ($crlfOnlyMaterialization -and $currentShippingInputIdentity -cne $candidateComputedIdentity) { throw 'EOL-only normalization did not reproduce the candidate Git-object shipping identity.' }
+    Add-Tree (Join-Path $Workspace 'automation\release-e2e') (Join-Path $automationStage 'release-e2e') 'automation/release-e2e'
+    Add-Tree (Join-Path $Workspace 'tools') $toolingStage 'release-tooling'
+    # Carry the installed release-control contract and its durable Markdown
+    # memory as review context. These files are not promotion authority and do
+    # not enter the shipping-source inventory below.
+    $releaseControlStage = Join-Path $stage 'release-control'
+    Add-Tree (Join-Path $Workspace 'docs\ai\devfleet-release') (Join-Path $releaseControlStage 'workflow') 'release-control/workflow'
+    Add-CompactFile (Join-Path $Workspace '.agents\skills\devfleet-release-control\SKILL.md') (Join-Path $releaseControlStage 'installed-skill\SKILL.md') | Out-Null
+    # Include only the reviewed audit-convergence skill closure. It is advisory
+    # review evidence, not a second release authority or a source of runtime grants.
+    $auditSkillRoot = Join-Path $Workspace '.agents/skills/devfleet-audit-convergence'
+    if (Test-Path -LiteralPath $auditSkillRoot -PathType Container) {
+        $auditSkillFiles = @(
+            'SKILL.md', 'agents/openai.yaml', 'scripts/audit_io.py',
+            'scripts/audit_convergence.py', 'scripts/native_runner.py',
+            'references/completion-contract.md', 'tests/test_audit_convergence.py',
+            'tests/Test-AuditSkillPackaging.ps1'
+        )
+        foreach ($skillRelative in $auditSkillFiles) {
+            $inputRelative = '.agents/skills/devfleet-audit-convergence/' + $skillRelative
+            $checkedPath = $Workspace
+            foreach ($component in $inputRelative.Split('/')) {
+                $checkedPath = Join-Path $checkedPath $component
+                $item = Get-Item -LiteralPath $checkedPath -Force -ErrorAction Stop
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw 'Audit skill packaging rejects reparse-point inputs.'
+                }
+            }
+            if (-not (Test-Path -LiteralPath $checkedPath -PathType Leaf)) {
+                throw "Required audit skill file is missing: $skillRelative"
+            }
+            $beforeHash = Get-Hash $checkedPath
+            $destination = Join-Path $releaseControlStage ('audit-convergence-skill/' + $skillRelative)
+            if (-not (Add-CompactFile $checkedPath $destination)) {
+                throw "Audit skill staging failed: $skillRelative"
+            }
+            if ((Get-Hash $destination) -cne $beforeHash -or (Get-Hash $checkedPath) -cne $beforeHash) {
+                throw "Audit skill changed during staging: $skillRelative"
+            }
+        }
+    }
+    $agentMemoryRoot = Join-Path $Workspace 'audit\agent-memory'
+    if (Test-Path -LiteralPath $agentMemoryRoot -PathType Container) {
+        foreach ($memoryFile in @(Get-ChildItem -LiteralPath $agentMemoryRoot -Recurse -File -Filter '*.md')) {
+            $relativeMemory = $memoryFile.FullName.Substring($agentMemoryRoot.Length).TrimStart('\','/')
+            Add-CompactFile $memoryFile.FullName (Join-Path $auditStage (Join-Path 'agent-memory' $relativeMemory)) | Out-Null
+        }
+    }
+    if ($historicalDiagnosticTuple) {
+        # Include exact old-candidate bytes for every independently recomputed
         # CRLF-only path. Row hashes alone cannot prove normalized-content
         # equality, so diagnostic validation consumes this materialization.
         foreach ($historicalPath in $historicalCrlfPaths) {
@@ -269,7 +449,7 @@ ndently recomputed
         $baselineReceiptPath=Join-Path $Workspace (Join-Path 'evidence\baselines\receipts' $baselineReceiptFile)
         if((Get-Hash $baselineReceiptPath) -cne [string]$baselinePointer.receiptSha256){throw 'Accepted baseline receipt hash does not match its pointer.'}
         if(-not(Add-CompactFile $baselineReceiptPath (Join-Path $evidenceStage "baselines\receipts\$baselineReceiptFile"))){throw 'Accepted baseline receipt is missing.'}
-        if([int]$baselinePointer.generation -in @(3,4)){
+        if([int]$baselinePointer.generation -in @(3,4,5)){
             $baselineReceipt=Read-Json $baselineReceiptPath
             foreach($sourceHash in @([string]$baselineReceipt.successorLedgerSha256,[string]$baselineReceipt.nativeInventorySha256)){
                 if($sourceHash -cnotmatch '^[0-9a-f]{64}$'){throw 'Rebound baseline source hash is invalid.'}
@@ -292,165 +472,4 @@ ndently recomputed
                 if(-not(Test-Path -LiteralPath $artifactSource -PathType Leaf)){
                     $artifactSource=Join-Path $Workspace ("evidence\baselines\sources\{0}.json" -f $artifactHash)
                 }
-                if(-not(Test-Path -LiteralPath $artifactSource -PathType Leaf) -or (Get-Hash $artifactSource) -cne $artifactHash){throw 'Repair-3 signed-output receipt is missing or hash-mismatched.'}
-                $artifactDestination=Join-Path $evidenceStage ("baselines\sources\{0}.json" -f $artifactHash)
-                if(-not(Add-CompactFile $artifactSource $artifactDestination) -or (Get-Hash $artifactDestination) -cne $artifactHash){throw 'Repair-3 signed-output receipt staging failed hash verification.'}
-            }
-        }
-        $cursor=$baselinePointer
-        if([int]$cursor.generation -lt 1 -or [int]$cursor.generation -gt 4){throw 'Unsupported accepted baseline generation.'}
-        while([int]$cursor.generation -gt 1){
-            $previousHash=[string]$cursor.previousPointerSha256
-            if($previousHash -cnotmatch '^[0-9a-f]{64}$'){throw 'Rebound baseline predecessor hash is invalid.'}
-            $historyPath=Join-Path $Workspace "evidence\baselines\history\$previousHash.json"
-            if((Get-Hash $historyPath) -cne $previousHash){throw 'Rebound baseline predecessor pointer hash differs.'}
-            $previousPointer=Read-Json $historyPath
-            $previousReceiptFile=[string]$previousPointer.receiptFile
-            if([int]$previousPointer.generation -ne ([int]$cursor.generation-1) -or $previousReceiptFile -cnotmatch '^[0-9a-f]{32}\.json$'){throw 'Rebound baseline predecessor pointer is invalid.'}
-            $previousReceiptPath=Join-Path $Workspace (Join-Path 'evidence\baselines\receipts' $previousReceiptFile)
-            if((Get-Hash $previousReceiptPath) -cne [string]$previousPointer.receiptSha256){throw 'Rebound baseline predecessor receipt hash differs.'}
-            if([int]$previousPointer.generation -eq 3){
-                $previousReceipt=Read-Json $previousReceiptPath
-                foreach($sourceHash in @([string]$previousReceipt.successorLedgerSha256,[string]$previousReceipt.nativeInventorySha256)){
-                    if($sourceHash -cnotmatch '^[0-9a-f]{64}$'){throw 'Predecessor baseline source hash is invalid.'}
-                    $sourcePath=Join-Path $Workspace "evidence\baselines\sources\$sourceHash.json"
-                    if((Get-Hash $sourcePath) -cne $sourceHash){throw 'Predecessor baseline source hash differs.'}
-                    $stagedSource=Join-Path $evidenceStage "baselines\sources\$sourceHash.json"
-                    if(-not(Add-CompactFile $sourcePath $stagedSource)){throw 'Predecessor baseline source is missing.'}
-                }
-            }
-            if(-not(Add-CompactFile $historyPath (Join-Path $evidenceStage "baselines\history\$previousHash.json"))){throw 'Rebound baseline predecessor pointer is missing.'}
-            if(-not(Add-CompactFile $previousReceiptPath (Join-Path $evidenceStage "baselines\receipts\$previousReceiptFile"))){throw 'Rebound baseline predecessor receipt is missing.'}
-            $cursor=$previousPointer
-        }
-        if(-not(Add-CompactFile $baselinePointerPath (Join-Path $evidenceStage 'baselines\CURRENT.json'))){throw 'Accepted baseline pointer is missing.'}
-    }
-    $interactiveLoginEvidence=Join-Path $Workspace 'evidence\CURRENT-INTERACTIVE-LOGIN.json'
-    if(Test-Path -LiteralPath $interactiveLoginEvidence -PathType Leaf){Add-CompactFile $interactiveLoginEvidence (Join-Path $evidenceStage 'CURRENT-INTERACTIVE-LOGIN.json') | Out-Null}
-    Write-Json (Join-Path $evidenceStage 'CURRENT-STATUS.json') $currentStatus
-    Write-Json (Join-Path $evidenceStage 'CURRENT-GATES.json') $currentGates
-    Write-Json (Join-Path $evidenceStage 'FULLRELEASE-SUMMARY.json') $fullReleaseSummary
-    Write-Json (Join-Path $evidenceStage 'CURRENT-RELEASE-AUTHORITY.json') $currentAuthority
-    # Standard-token evidence is an independent release obligation.  Carry the
-    # atomic pointer plus the exact immutable raw/canonical bytes it names.
-    $standardPointerPath = Join-Path $Workspace 'evidence\CURRENT-STANDARD-TOKEN.json'
-    if (Test-Path -LiteralPath $standardPointerPath -PathType Leaf) {
-        $standardPointer = Read-Json $standardPointerPath
-        $standardRunId = [string]$standardPointer.runId
-        if ($standardRunId -notmatch '^standard-token-[A-Za-z0-9-]+$') { throw 'CURRENT-STANDARD-TOKEN RunId is malformed.' }
-        $standardRunRoot = Join-Path $Workspace "evidence\standard-token\$standardRunId"
-        foreach ($standardName in @('installer-self-test-raw.txt','standard-token-evidence.json')) {
-            $standardSource = Join-Path $standardRunRoot $standardName
-            if (-not (Add-CompactFile $standardSource (Join-Path $evidenceStage "standard-token\$standardRunId\$standardName"))) { throw "Immutable standard-token evidence is missing: $standardName" }
-        }
-        Add-CompactFile $standardPointerPath (Join-Path $evidenceStage 'CURRENT-STANDARD-TOKEN.json') | Out-Null
-    } elseif ($bundleMode -eq 'release') { throw 'Release audit/bundle requires CURRENT-STANDARD-TOKEN.json.' }
-
-    # A final release bundle embeds FINAL-ACCEPTANCE and the immutable
-    # pre-acceptance audit report/manifest/validation it closes over.  The
-    # archive itself remains outside the bundle to avoid recursive archives.
-    if ($finalAcceptanceValid -and -not $preAcceptanceAudit) {
-        $finalAcceptancePath = Join-Path $Workspace 'evidence\FINAL-ACCEPTANCE.json'
-        $releaseAuditPointerPath = Join-Path $Workspace 'evidence\CURRENT-RELEASE-AUDIT.json'
-        if (-not (Add-CompactFile $finalAcceptancePath (Join-Path $evidenceStage 'FINAL-ACCEPTANCE.json'))) { throw 'Valid FINAL-ACCEPTANCE disappeared while staging.' }
-        if (-not (Add-CompactFile $releaseAuditPointerPath (Join-Path $evidenceStage 'CURRENT-RELEASE-AUDIT.json'))) { throw 'CURRENT-RELEASE-AUDIT disappeared while staging.' }
-        $releaseAuditPointer = Read-Json $releaseAuditPointerPath
-        foreach ($bindingName in @('report','manifest','releaseValidation')) {
-            $binding = $releaseAuditPointer.evidence.$bindingName
-            $workspaceRelative = ([string]$binding.workspacePath).Replace('/','\')
-            $bundleRelative = [string]$binding.bundlePath
-            if ($workspaceRelative -notmatch '^audit\\release-audits\\[A-Za-z0-9-]+\\[A-Za-z0-9._-]+$' -or $bundleRelative -notmatch '^evidence/release-audits/[A-Za-z0-9-]+/[A-Za-z0-9._-]+$') { throw "Release-audit $bindingName binding path is unsafe." }
-            $sourceBinding = Join-Path $Workspace $workspaceRelative
-            $destinationBinding = Join-Path $stage ($bundleRelative.Replace('/','\'))
-            if (-not (Add-CompactFile $sourceBinding $destinationBinding)) { throw "Immutable release-audit binding is missing: $bindingName" }
-            if ((Get-Hash $sourceBinding) -cne [string]$binding.sha256 -or [int64](Get-Item -LiteralPath $sourceBinding).Length -ne [int64]$binding.bytes) { throw "Immutable release-audit binding changed: $bindingName" }
-        }
-    }
-    $triageJson = Join-Path $Audit 'external-ai-findings-triage-v1.2.13.json'; $triageMd = Join-Path $Audit 'external-ai-findings-triage-v1.2.13.md'
-    Add-CompactFile $triageJson (Join-Path $auditStage 'external-ai-findings-triage-v1.2.13.json') | Out-Null
-    Add-CompactFile $triageMd (Join-Path $auditStage 'external-ai-findings-triage-v1.2.13.md') | Out-Null
-    foreach ($evidenceName in @('production-ram-h10.json','resource-policy-h10.json','linux-native-h10.json','registry-persistence-attribution.json')) {
-        Add-CompactFile (Join-Path $Audit $evidenceName) (Join-Path $auditStage $evidenceName) | Out-Null
-    }
-    foreach ($durableName in @('CODEX-RESUME-CHECKPOINT.json','CODEX-RESUME-CHECKPOINT.md','NEXT-CODEX-HANDOFF.json','NEXT-CODEX-HANDOFF.md')) {
-        $sourceDurable = Join-Path $Audit $durableName
-        if(-not (Test-Path -LiteralPath $sourceDurable)){ continue }
-        # This checkpoint is a superseded, candidate-invalidation-era resume
-        # record. Preserve it in the bundle, but keep it under the explicit
-        # historical namespace so coherence tooling cannot treat its old
-        # tuple as a current authority.
-        $historical = $durableName -like 'CODEX-RESUME-CHECKPOINT.*'
-        if($durableName -like '*.json' -and -not $historical){
-            try { $historical = [bool]((Read-Json $sourceDurable).historical) } catch { $historical = $false }
-        } elseif($durableName -notlike '*.json') {
-            $historical = (Get-Content -LiteralPath $sourceDurable -Raw) -match '(?im)historical|superseded|obsolete'
-        }
-        $destination = if($historical){ New-Item -ItemType Directory -Force -Path (Join-Path $auditStage 'historical') | Out-Null; Join-Path $auditStage "historical\$durableName" } else { Join-Path $auditStage $durableName }
-        Add-CompactFile $sourceDurable $destination | Out-Null
-    }
-    Add-CompactFile (Join-Path $Workspace 'audit\FINALIZER-PRIMARY-BLOCKER.json') (Join-Path $auditStage 'FINALIZER-PRIMARY-BLOCKER.json') | Out-Null
-    $afterActionReport = Join-Path $Workspace 'audit\AFTER-ACTION-REPORT.md'
-    if (Test-Path -LiteralPath $afterActionReport -PathType Leaf) {
-        Add-CompactFile $afterActionReport (Join-Path $auditStage 'AFTER-ACTION-REPORT.md') | Out-Null
-    }
-    foreach ($coordinationName in @('YOLO-RESUME-HANDOFF.json','YOLO-RESUME-HANDOFF.md','SOL-HELPER-ALLOCATION-LEDGER.json','SOL-HELPER-FINDINGS.json')) {
-        Add-CompactFile (Join-Path $Audit $coordinationName) (Join-Path $auditStage $coordinationName) | Out-Null
-    }
-    foreach ($campaignName in @('wpf-no-report-20260905-ledger.json','wpf-replay2-terminal-cleanup.json')) {
-        $campaignEvidence = Join-Path $Workspace "evidence\campaigns\$campaignName"
-        if (Test-Path -LiteralPath $campaignEvidence -PathType Leaf) {
-            Add-CompactFile $campaignEvidence (Join-Path $evidenceStage "campaigns\$campaignName") | Out-Null
-        }
-    }
-    Add-AuthorizationLedgerClosure -Repository $Workspace -EvidenceRoot $evidenceStage | Out-Null
-    $readinessStage = Join-Path $evidenceStage 'readiness-runs'
-    foreach ($readinessRun in @(Get-ChildItem -LiteralPath $runRoot -Directory -Filter 'wpf-boundary-stable-readiness-*' -ErrorAction SilentlyContinue | Sort-Object Name)) {
-        $readinessResult = Join-Path $readinessRun.FullName 'wpf-boundary-contract-diagnostic.json'
-        if (Test-Path -LiteralPath $readinessResult -PathType Leaf) {
-            Add-CompactFile $readinessResult (Join-Path $readinessStage "$($readinessRun.Name)\wpf-boundary-contract-diagnostic.json") | Out-Null
-        }
-    }
-    $diagnosticStage = Join-Path $evidenceStage 'wpf-boundary-diagnostics'
-    foreach ($diagnosticRun in @(Get-ChildItem -LiteralPath $runRoot -Directory -Filter 'wpf-boundary-live-diagnostic-*' -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 2)) {
-        $diagnosticResult = Join-Path $diagnosticRun.FullName 'wpf-boundary-contract-diagnostic.json'
-        if (Test-Path -LiteralPath $diagnosticResult -PathType Leaf) {
-            Add-CompactFile $diagnosticResult (Join-Path $diagnosticStage "$($diagnosticRun.Name)\wpf-boundary-contract-diagnostic.json") | Out-Null
-        }
-    }
-    $blockerClassification=[string]$currentAuthority.blockerClassification
-    $nextAction=[string]$currentAuthority.nextAction
-    Write-Json (Join-Path $auditStage 'CURRENT-HANDOFF.json') $currentHandoff
-    Write-Json (Join-Path $evidenceStage 'CURRENT-HANDOFF.json') $currentHandoff
-    # A failed replacement attempt has three current blocker records that
-    # must travel together.  Copy the authoritative records after any
-    # historical-proof synthesis so a generated bundle cannot silently
-    # substitute an older CURRENT-PROOF or omit the binding evidence.
-    $evidenceInventory = @()
-    if ($failedAttemptContract) {
-        $requiredBlockerRecords = @(
-            @{ source = (Join-Path $Workspace 'evidence\CURRENT-PROOF.json'); destination = (Join-Path $evidenceStage 'CURRENT-PROOF.json'); relative = 'evidence/CURRENT-PROOF.json' },
-            @{ source = (Join-Path $Workspace 'audit\attemptedReplacementCandidate.json'); destination = (Join-Path $auditStage 'attemptedReplacementCandidate.json'); relative = 'audit/attemptedReplacementCandidate.json' },
-            @{ source = (Join-Path $Workspace 'audit\candidateBindingFailure.json'); destination = (Join-Path $auditStage 'candidateBindingFailure.json'); relative = 'audit/candidateBindingFailure.json' }
-        )
-        foreach ($record in $requiredBlockerRecords) {
-            if (-not (Add-CompactFile $record.source $record.destination)) { throw "Failed-attempt diagnostic blocker record is missing: $($record.relative)" }
-        }
-    }
-    if (-not (Test-Path -LiteralPath (Join-Path $auditStage 'external-ai-findings-triage-v1.2.13.json'))) { Write-Json (Join-Path $auditStage 'external-ai-findings-triage-v1.2.13.json') ([ordered]@{schemaVersion=1;status='NOT_IMPORTED_IN_THIS_SESSION';candidate=$candidate;findings=@()}) }
-    if (-not (Test-Path -LiteralPath (Join-Path $auditStage 'external-ai-findings-triage-v1.2.13.md'))) { Set-Content -LiteralPath (Join-Path $auditStage 'external-ai-findings-triage-v1.2.13.md') -Value '# DevFleet v1.2.13 external AI findings`n`nNo external finding file was available in the current workspace.' -Encoding UTF8 }
-    foreach ($evidenceRoot in @($auditStage,$evidenceStage)) {
-        if (-not (Test-Path -LiteralPath $evidenceRoot -PathType Container)) { continue }
-        foreach ($evidenceFile in @(Get-ChildItem -LiteralPath $evidenceRoot -Recurse -File -Force)) {
-            $relativeEvidence = $evidenceFile.FullName.Substring($stage.Length).TrimStart('\','/').Replace('\','/')
-            $evidenceInventory += [ordered]@{path=$relativeEvidence;bytes=[int64]$evidenceFile.Length;sha256=(Get-Hash $evidenceFile.FullName);mode='0644'}
-        }
-    }
-    # OrderedDictionary keys are not Sort-Object properties. Use an explicit
-    # key expression or -Unique collapses the complete inventory to one row.
-    $evidenceInventory = @($evidenceInventory | Sort-Object { $_['path'] } -Unique)
-    Write-Json (Join-Path $stage 'EVIDENCE-MODES.json') @($evidenceInventory | ForEach-Object { [ordered]@{path=$_.path;posixMode=420;mode='0644';executable=$false} })
-    Set-Content -LiteralPath (Join-Path $stage 'EVIDENCE-SHA256SUMS.txt') -Value @($evidenceInventory | ForEach-Object { '{0}  {1}' -f $_.sha256,$_.path }) -Encoding UTF8
-
-    $readme = @("# DevFleet v$releaseVersion — Universal AI Audit Bundle",'',"This is the one canonical source, tooling, compact-evidence, and audit bundle for independent review by ChatGPT, Gemini, Grok, Claude, or another reviewer.","", "Status: $status", "DevFleet: $releaseVersion / installer: $installerVersion", "Git: $branch / $head", "Current candidate: $candidateIsCurrent; source changed: $sourceChanged; rebuild required: $rebuildRequired",'', 'The bundle intentionally excludes compiled release binaries, nested archives, VM images, caches, credentials, tokens, and raw giant transcripts. The exact binary names, sizes, hashes, PE/AuthentiCode result, embedded TAR identity, and release/tooling fingerprints are in CURRENT-CANDIDATE.json.', '', 'The complete release-E2E automation source is under automation/release-e2e/. Historical evidence is explicitly marked and is not promoted to current-candidate PASS.', '', "Clean-extraction entrypoint: python release-tooling/run_portable_audit_tests.py --root . --output portable-audit-test-result.json", "Bundle validator: python source/tools/validate_ai_audit_bundle.py --archive DevFleet-v$releaseVersion-AI-Audit-LATEST.zip --mode $bundleMode")
-    Set-Content -LiteralPath (Join-Path $stage 'AUDIT-README.md') -Value $readme -Encoding UTF8
-    $manifest = [ordered]@{schemaVersion=2;bundle='DevFleet Universal AI Audit';status=$status;authorityId=$authorityId;generatedAt=(Get-Date).ToUniversalTime().ToString('o');devfleetVersion=$releaseVersion;installerVersion=$installerVersion;repositoryHead=$head;gitCommit=$head;candidateGitCommit=$candidateCommit;branch=$branch;shippingInputIdentity=$currentShippingInputIdentity;candidateShippingInputIdentity=$candidateShippingInputIdentity;workingTreeTuple=$candidate.workingTreeTuple;shippingModeContract=$identity.candidateShippingModeContract;candidateIsCurrent=$candidateIsCurrent;sourceChangedSinceCandidate=$sourceChange
+                if(-not(Test-Path -LiteralPath $artifactSource -PathType Leaf) -or (Get-Hash $artifactSource) -cne $artifactHash){throw 'Repair-3 

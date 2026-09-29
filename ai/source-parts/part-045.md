@@ -1,10 +1,69 @@
 # DevFleet source part 045
 
 Full-source UTF-8 byte interval [2046000, 2092500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 05621d23f7478b74f699d79c921ff1e239dc0711d0ce613d3f2a7ba84a3faff5
+Payload SHA-256: 4a375de8e14b2711ca32a8b3689ad632ea322bb9bf0694a43b1d4fa29fcc965d
 
 <!-- BEGIN SOURCE SLICE -->
-PF'" -and $source -match "Invoke-SupportedFreshInstallLifecycle[\s\S]{0,180}-CompleteLifecycle" -and $source -match 'FRESH-INSTALL-WPF requires verified lifecycle completion') 'LIFE-05 FRESH-INSTALL-WPF cannot promote a non-terminal lifecycle boundary'
+ductFreshInstallLifecycle -Context $lifeContext -Role 'Primary / Desktop' -WpfProvider $wpf -TransitionProvider $transition -RebootProvider $errorReboot -SettleProvider $settle
+$nullSettlement={param($s)$null};$nullSettlementResult=Invoke-ProductFreshInstallLifecycle -Context $lifeContext -Role 'Primary / Desktop' -WpfProvider $wpf -TransitionProvider $transition -RebootProvider $reboot -SettleProvider $nullSettlement
+Check ([string]$nullWpfResult.status -eq 'TERMINAL_FAILURE') 'WpfProvider null fails closed'
+Check ([string]$nullTransitionResult.status -eq 'TERMINAL_FAILURE') 'TransitionProvider null fails closed'
+Check ([string]$errorRebootResult.status -eq 'TERMINAL_FAILURE') 'RebootProvider error fails closed'
+Check ([string]$nullSettlementResult.status -eq 'TERMINAL_FAILURE') 'SettlementProvider null fails closed'
+function Check-FullLifecycleTerminalEvidence([psobject]$Result,[string]$Name){
+    $terminal=[string]$Result.evidencePath;$dir=if($terminal){Split-Path -Parent $terminal}else{''};$journal=if($dir){Join-Path $dir 'product-lifecycle-progress.jsonl'}else{''};$current=if($dir){Join-Path $dir 'product-lifecycle-progress-current.json'}else{''};$providerDetail=if($dir){Join-Path $dir 'product-lifecycle-provider-failure.json'}else{''};$pathsPresent=($terminal -and (Test-Path -LiteralPath $terminal) -and (Test-Path -LiteralPath $journal) -and (Test-Path -LiteralPath $current) -and (Test-Path -LiteralPath $providerDetail));$journalMatches=$false;if($pathsPresent){try{$last=@(Get-Content -LiteralPath $journal|Where-Object{$_})[-1]|ConvertFrom-Json;$journalMatches=([string]$last.event -eq 'TERMINAL' -and [string]$last.terminalReason -eq 'TERMINAL_FAILURE')}catch{}};Check ($pathsPresent -and $journalMatches) "$Name writes terminal/provider/current/journal evidence with matching terminal reason"
+}
+Check-FullLifecycleTerminalEvidence $nullWpfResult 'WpfProvider null'
+Check-FullLifecycleTerminalEvidence $nullTransitionResult 'TransitionProvider null'
+Check-FullLifecycleTerminalEvidence $errorRebootResult 'RebootProvider exception'
+Check-FullLifecycleTerminalEvidence $nullSettlementResult 'SettlementProvider null'
+$sessionFailureDir=Join-Path $lifeRoot 'session-failure-causal-evidence'
+$sessionFailureError=[InvalidOperationException]::new('LAB_GUEST_AUTHENTICATION_REJECTED: guest authentication was rejected; credential freshness remains unverified. Bounded attempts: 3.')
+$sessionFailureError.Data['failureCode']='LAB_GUEST_AUTHENTICATION_REJECTED';$sessionFailureError.Data['attemptCount']=3;$sessionFailureError.Data['authenticationOutcome']='REJECTED';$sessionFailureError.Data['credentialFreshness']='UNVERIFIED';$sessionFailureError.Data['nativeErrorCode']=1326
+& (Get-Module Invoke-RealProductPhase) {param($failure) function script:Connect-DevFleetGuest { throw $script:SessionFixtureFailure };$script:SessionFixtureFailure=$failure} $sessionFailureError
+$sessionFailureContext=[pscustomobject]@{phaseId='SESSION-FAILURE-CAUSAL';runDir=$sessionFailureDir;workspaceRoot=$WorkspaceRoot;vmId=$lifeContext.vmId;vmName=$lifeContext.vmName;candidate=$lifeContext.candidate;config=(Get-Content -Raw (Join-Path $WorkspaceRoot 'source\config\devfleet.config.json')|ConvertFrom-Json);phaseBudgetSeconds=60}
+$sessionFailureWpf={param($s)[pscustomobject]@{status='REAL E2E OBSERVER HANDOFF';guest=[pscustomobject]@{processId=0;role='Primary / Desktop'}}}
+$sessionFailureCallError='';try{$sessionFailureResult=Invoke-ProductFreshInstallLifecycle -Context $sessionFailureContext -Role 'Primary / Desktop' -WpfProvider $sessionFailureWpf}catch{$sessionFailureCallError=$_.Exception.Message}
+Check ([string]::IsNullOrEmpty($sessionFailureCallError) -and $null -ne $sessionFailureResult) 'real lifecycle caller returns a terminal result for session-open failure'
+if($sessionFailureCallError){Write-Output "session failure fixture invocation: $sessionFailureCallError"}
+$sessionFailureTerminal=Get-ChildItem -LiteralPath $sessionFailureDir -Filter 'product-lifecycle-terminal.json' -File -Recurse|Select-Object -First 1
+$sessionFailureEvidence=if($sessionFailureTerminal){Get-Content -Raw $sessionFailureTerminal.FullName|ConvertFrom-Json}else{[pscustomobject]@{safeFailure=$null;error=''}}
+Check ([string]$sessionFailureResult.provider -eq 'TransitionObserver' -and [string]$sessionFailureEvidence.safeFailure.failureCode -eq 'LAB_GUEST_AUTHENTICATION_REJECTED' -and [int]$sessionFailureEvidence.safeFailure.nativeErrorCode -eq 1326 -and [int]$sessionFailureEvidence.safeFailure.attemptCount -eq 3) 'real guest caller to observer to terminal evidence preserves allowlisted native failure metadata'
+Check (([string]$sessionFailureEvidence.error -notmatch 'DEMO_SECRET|password|credentialFreshness=') -and [string]$sessionFailureEvidence.safeFailure.credentialFreshness -eq 'UNVERIFIED') 'terminal failure evidence contains only safe fields and no raw exception text'
+$unknownSessionFailureDir=Join-Path $lifeRoot 'session-failure-unknown-evidence'
+& (Get-Module Invoke-RealProductPhase) {$script:SessionFixtureFailure=[InvalidOperationException]::new('deserialized remote authentication/session failure')}
+$unknownSessionFailureContext=$sessionFailureContext.PSObject.Copy();$unknownSessionFailureContext.runDir=$unknownSessionFailureDir;$unknownSessionFailureContext.phaseId='SESSION-FAILURE-UNKNOWN'
+$unknownSessionFailureResult=Invoke-ProductFreshInstallLifecycle -Context $unknownSessionFailureContext -Role 'Primary / Desktop' -WpfProvider $sessionFailureWpf
+$unknownSessionFailureTerminal=Get-ChildItem -LiteralPath $unknownSessionFailureDir -Filter 'product-lifecycle-terminal.json' -File -Recurse|Select-Object -First 1
+$unknownSessionFailureEvidence=if($unknownSessionFailureTerminal){Get-Content -Raw $unknownSessionFailureTerminal.FullName|ConvertFrom-Json}else{[pscustomobject]@{safeFailure=$null}}
+Check ([string]$unknownSessionFailureResult.status -eq 'TERMINAL_FAILURE' -and $null -eq $unknownSessionFailureEvidence.safeFailure) 'wrapped or deserialized session errors remain terminal with cause UNKNOWN'
+& (Get-Module Invoke-RealProductPhase) {Remove-Item Function:Connect-DevFleetGuest -ErrorAction SilentlyContinue;$script:SessionFixtureFailure=$null}
+$completedObservation=[pscustomobject]@{matchingConsumedReceipt=$true;installStateValid=$true;canonicalOwnershipValid=$true;authenticatedHealthOk=$true;progress=[ordered]@{}}
+$completedVariants=[ordered]@{
+    'valid checkpoint object'=[pscustomobject]@{checkpoint=$next.checkpoint}
+    'checkpointPresent false with object'=[pscustomobject]@{observation=[pscustomobject]@{checkpointPresent=$false;checkpoint=$next.checkpoint}}
+    'top-level generation only'=[pscustomobject]@{generation=1}
+    'top-level checkpointGeneration only'=[pscustomobject]@{checkpointGeneration=1}
+    'embedded observation checkpoint/generation'=[pscustomobject]@{observation=[pscustomobject]@{checkpointPresent=$true;checkpoint=[pscustomobject]@{generation=1;checkpointGeneration=1;state='waiting-for-reboot'}}}
+    'waiting-for-reboot state'=[pscustomobject]@{observation=[pscustomobject]@{state='waiting-for-reboot'}}
+}
+$variantTraceStart=$lifeTrace.Count;foreach($variant in $completedVariants.GetEnumerator()){$variantTransition={param($s)$result=[ordered]@{outcome='COMPLETED';observation=$completedObservation};foreach($p in $thisVariant.PSObject.Properties){$result[$p.Name]=$p.Value};[pscustomobject]$result};$thisVariant=$variant.Value;$variantResult=Invoke-ProductFreshInstallLifecycle -Context $lifeContext -Role 'Primary / Desktop' -WpfProvider $wpf -TransitionProvider $variantTransition -RebootProvider $reboot -SettleProvider $settle;Check ([string]$variantResult.status -eq 'TERMINAL_FAILURE') "COMPLETED $($variant.Key) is rejected";Check-FullLifecycleTerminalEvidence $variantResult "COMPLETED $($variant.Key)"}
+Check (@($lifeTrace|Select-Object -Skip $variantTraceStart|Where-Object{$_ -match '^REBOOT:'}).Count -eq 0) 'presence/checkpoint inconsistencies fail before any reboot provider call'
+Check ((Get-ProductLifecycleConsumerMode -PhaseId 'REBOOT-RESUME') -eq 'SYNTHETIC_THEN_PRODUCT' -and (Get-ProductLifecycleConsumerMode -PhaseId 'LINUX') -eq 'PRODUCT_ONLY' -and (Get-ProductLifecycleConsumerMode -PhaseId 'SURROGATE-DISPOSABLE') -eq 'PRODUCT_ONLY' -and (Get-ProductLifecycleConsumerMode -PhaseId 'MAINTENANCE-READY-PROVISION') -eq 'PRODUCT_ONLY' -and (Get-ProductLifecycleConsumerMode -PhaseId 'DEPENDENCY-MATRIX') -eq 'PRODUCT_ONLY') 'LIFE-04/LIFE-05 consumer dispatch proves synthetic independence'
+Check ([string]$lifeResult.phase -eq 'LIFE-TEST' -and [string]$lifeResult.invocationId -and (Test-Path -LiteralPath ([string]$lifeResult.evidencePath))) 'LIFE-04 invocation identity and isolated authority evidence are exposed'
+$lifeEvidenceDir=Split-Path -Parent ([string]$lifeResult.evidencePath);$observerEvidence=Join-Path $lifeEvidenceDir 'product-lifecycle-observer-generation-1.json';$generationEvidence=Join-Path $lifeEvidenceDir 'product-lifecycle-generation-1.json'
+Check ((Test-Path -LiteralPath $observerEvidence) -and (Test-Path -LiteralPath $generationEvidence) -and ([IO.Path]::GetFullPath($observerEvidence) -cne [IO.Path]::GetFullPath($generationEvidence)) -and @($lifeResult.evidenceReferences|Where-Object{$_.kind -eq 'observer-summary' -and $_.sha256}).Count -gt 0 -and @($lifeResult.evidenceReferences|Where-Object{$_.kind -eq 'lifecycle-generation' -and $_.sha256}).Count -gt 0) 'observer summary and lifecycle-generation evidence remain isolated with hash references'
+$dispatchTrace=[System.Collections.Generic.List[string]]::new()
+$syntheticProvider={param($s);[void]$dispatchTrace.Add('SYNTHETIC');[pscustomobject]@{status='PASS';productLifecycleTouched=$false}}
+$dispatchContext=[pscustomobject]@{phaseId='REBOOT-RESUME';runDir=$lifeRoot;vmId=$lifeContext.vmId;vmName=$lifeContext.vmName;candidate=$lifeContext.candidate;config=$lifeContext.config;phaseBudgetSeconds=60;lifecycleWpfProvider=$wpf;lifecycleTransitionProvider=$transition;lifecycleRebootProvider=$reboot;lifecycleSettleProvider=$settle;syntheticRebootProvider=$syntheticProvider}
+$dispatchBefore=$global:DevFleetProductDispatchCount;$dispatchResult=Invoke-ProductLifecycleConsumer -Context $dispatchContext
+Check ([string]$dispatchResult.contract -eq 'synthetic-probe-then-pure-product-lifecycle' -and $dispatchTrace[0] -eq 'SYNTHETIC' -and ($global:DevFleetProductDispatchCount-$dispatchBefore) -eq 1) 'LIFE-04 actual REBOOT-RESUME dispatch invokes synthetic then exactly one product lifecycle'
+$pureBefore=$dispatchTrace.Count;$pureProductBefore=$global:DevFleetProductDispatchCount
+foreach($purePhase in @('LINUX','SURROGATE-DISPOSABLE','DEPENDENCY-MATRIX','MAINTENANCE-READY-PROVISION')){$dispatchContext.phaseId=$purePhase;[void](Invoke-ProductLifecycleConsumer -Context $dispatchContext)}
+Check ($dispatchTrace.Count -eq $pureBefore -and ($global:DevFleetProductDispatchCount-$pureProductBefore) -eq 4) 'LIFE-05 actual Linux/surrogate/dependency/maintenance dispatch each invokes product once and synthetic zero'
+$maintenanceDispatch=[pscustomobject]@{phaseId='MAINTENANCE-READY';runDir=$lifeRoot;vmId=$lifeContext.vmId;vmName=$lifeContext.vmName;candidate=$lifeContext.candidate;config=$lifeContext.config;phaseBudgetSeconds=60;lifecycleWpfProvider=$wpf;lifecycleTransitionProvider=$transition;lifecycleRebootProvider=$reboot;lifecycleSettleProvider=$settle};Import-Module (Join-Path $WorkspaceRoot 'automation\release-e2e\modules\FullRelease.psm1') -Force;$maintenanceDispatchResult=Invoke-MaintenanceReadyProductLifecycle -WorkspaceRoot $WorkspaceRoot -Context $maintenanceDispatch
+Check ([string]$maintenanceDispatchResult.phase -eq 'MAINTENANCE-READY-PROVISION' -and [bool]$maintenanceDispatchResult.completionVerified) 'FullRelease maintenance provisioning uses dedicated pure product dispatch'
+Check ($source -match "'FRESH-INSTALL-WPF'" -and $source -match "Invoke-SupportedFreshInstallLifecycle[\s\S]{0,180}-CompleteLifecycle" -and $source -match 'FRESH-INSTALL-WPF requires verified lifecycle completion') 'LIFE-05 FRESH-INSTALL-WPF cannot promote a non-terminal lifecycle boundary'
 } finally {
     foreach($dir in @($script:testEvidenceDirs)){if($dir -and (Test-Path -LiteralPath $dir)){$resolved=[IO.Path]::GetFullPath($dir);if(-not $resolved.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase) -or (Split-Path -Leaf $resolved) -notmatch '^devfleet-(?:observer-[a-z0-9-]+|role-chain)-[a-f0-9]{32}$'){throw 'Observer fixture cleanup path rejected.'};Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction SilentlyContinue}}
     if($lifeRoot -and (Test-Path -LiteralPath $lifeRoot)){$resolved=[IO.Path]::GetFullPath($lifeRoot);if(-not $resolved.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase) -or (Split-Path -Leaf $resolved) -notmatch '^devfleet-life-[a-f0-9]{32}$'){throw 'Lifecycle fixture cleanup path rejected.'};Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction SilentlyContinue}
@@ -385,178 +444,4 @@ try{
         $initializer=@($ast.FindAll({param($n)$n-is[Management.Automation.Language.AssignmentStatementAst]-and$n.Left.Extent.Text-ceq'$request'-and$n.Right.Extent.Text-match'inputHashes=\[ordered\]'},$true))
         if($initializer.Count-ne1){throw 'Native host request construction is ambiguous'}
         $Context=[pscustomobject]@{runId='fullrelease-fixture-unit';candidate=[pscustomobject]@{tar=[pscustomobject]@{sha256=('a'*64)}}};$config=$script:testConfig;$deadline=[datetime]::UtcNow.AddSeconds(60);$budget=60
-        . ([scriptblock]::Create($initializer[0].Extent.Text))
-        $request.packageRoot=$temp;$request.workRoot=Join-Path $temp 'work'
-        $result=Invoke-MaintenanceVaultProvisioning -Request ([pscustomobject]$request)
-        if($result.status-cne'PASS'-or-not$script:stdinDelivered-or($script:steps-join ',')-cne'list,transfer,exec,exec'){throw 'Native fixture steps did not complete the exact setup path'}
-        $pairingOrder=@(Get-Content -LiteralPath $env:DEVFLEET_MAINTENANCE_TEST_TRACE)
-        if(($pairingOrder-join ',')-cne'windows-host,guest:devfleet-vault,client:devfleet-primary'){throw ('Maintenance Vault pairing order is unsafe: '+($pairingOrder-join ','))}
-        [ordered]@{status='PASS';realStepBodies=$true;realHostRequest=$true;realProductBootstrapBoundary=$true;externalIoMocked=$true;vmMutation=$false;steps=@($script:steps)}|ConvertTo-Json
-    } $temp $WorkspaceRoot
-} finally {$env:COMPUTERNAME=$oldComputer;$env:DEVFLEET_MAINTENANCE_TEST_TRACE=$oldTrace}
-
-```
-
-
-## FILE: automation/release-e2e/tests/Test-MaintenanceVaultPrivateFailurePreservation.ps1
-
-SHA256: 746ecef5996014ef9f032b2532db9a27ca901b42d80cf33a5e7aaa59303f4598 | Bytes: 3865 | Git mode: 100644
-
-```
-param([string]$WorkspaceRoot=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path)
-$ErrorActionPreference='Stop'
-$modulePath=Join-Path $WorkspaceRoot 'automation/release-e2e/modules/MaintenanceVault.psm1'
-Import-Module $modulePath -Force -DisableNameChecking
-$module=Get-Module MaintenanceVault
-$temp=Join-Path ([IO.Path]::GetTempPath()) ('devfleet-private-preservation-'+[guid]::NewGuid().ToString('N'))
-$runDir=Join-Path $temp 'run'
-$controlRoot=Join-Path $temp 'control'
-[IO.Directory]::CreateDirectory($runDir)|Out-Null
-[IO.Directory]::CreateDirectory($controlRoot)|Out-Null
-$plain=[Text.Encoding]::UTF8.GetBytes("PRIVATE_TEST_EXCEPTION``nPRIVATE_STREAM_WARNING``n")
-$runId='fullrelease-private-preservation-unit'
-$vmId=[guid]'84b7d8b8-ee6c-4085-aa29-4b0adc316de2'
-$sourcePath='C:\ProgramData\DevFleet\tmp\maintenance-vault-unit\private-product-operations.log'
-try{
-    $metadata=& $module {
-        param($bytes,$runId,$vmId,$sourcePath,$workspace,$runDir,$controlRoot)
-        Protect-MaintenanceVaultPrivateFailureBytes -Plaintext $bytes -RunId $runId -VmId $vmId -SourcePath $sourcePath -WorkspaceRoot $workspace -RunDir $runDir -ControlRoot $controlRoot
-    } $plain $runId $vmId $sourcePath $WorkspaceRoot $runDir $controlRoot
-    if(-not$metadata.roundTripVerified-or$metadata.plaintextWrittenToHost-or$metadata.plaintextIncludedInAudit){throw 'DPAPI preservation metadata is not fail-closed.'}
-    if([string]$metadata.encryption-cne'Windows DPAPI CurrentUser'){throw 'Unexpected private evidence encryption contract.'}
-    $encryptedPath=[string]$metadata.encryptedLocalPath
-    if(-not(Test-Path -LiteralPath $encryptedPath -PathType Leaf)){throw 'Encrypted private evidence file was not created.'}
-    $encrypted=[IO.File]::ReadAllBytes($encryptedPath)
-    if([Text.Encoding]::UTF8.GetString($encrypted)-match'PRIVATE_TEST_EXCEPTION'){throw 'Encrypted evidence contains plaintext marker.'}
-    Add-Type -AssemblyName System.Security
-    $entropy=[Text.Encoding]::UTF8.GetBytes("DevFleet exact failure evidence $runId")
-    $round=[Security.Cryptography.ProtectedData]::Unprotect($encrypted,$entropy,[Security.Cryptography.DataProtectionScope]::CurrentUser)
-    try{
-        if([Text.Encoding]::UTF8.GetString($round)-cne[Text.Encoding]::UTF8.GetString($plain)){throw 'Independent DPAPI round-trip differs.'}
-    } finally {if($round){[Array]::Clear($round,0,$round.Length)};if($entropy){[Array]::Clear($entropy,0,$entropy.Length)};if($encrypted){[Array]::Clear($encrypted,0,$encrypted.Length)}}
-    $metadataPath=Join-Path $runDir 'private-failure-preservation.json'
-    $persisted=Get-Content -LiteralPath $metadataPath -Raw|ConvertFrom-Json
-    if(-not[bool]$persisted.roundTripVerified-or[string]$persisted.sourceVmId-cne$vmId.ToString()){throw 'Persisted preservation metadata is incomplete.'}
-    if(Test-Path -LiteralPath (Join-Path $runDir 'private-product-operations.log')){throw 'Plaintext private log was written into run evidence.'}
-    $source=Get-Content -LiteralPath $modulePath -Raw
-    $call=$source.IndexOf('Save-MaintenanceVaultPrivateFailureEvidence -Session $session')
-    $throw=$source.IndexOf("throw 'Configured Primary Vault bounded worker failed; see maintenance-vault-process.json.'",$call)
-    if($call-lt0-or$throw-le$call){throw 'Failure branch does not preserve private evidence before public failure.'}
-    if($source.IndexOf('maintenance-vault-windows-tailscale-preflight.json')-lt0){throw 'Sanitized Windows Tailscale pre-Vault telemetry is missing.'}
-    [ordered]@{status='PASS';cases=7;dpapiRoundTrip=$true;plaintextHostFile=$false;preserveBeforeThrow=$true;tailscaleTelemetry=$true;vmMutation=$false}|ConvertTo-Json -Depth 4
-} finally {
-    if($plain){[Array]::Clear($plain,0,$plain.Length)}
-    if(Test-Path -LiteralPath $temp){Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue}
-}
-
-```
-
-
-## FILE: automation/release-e2e/tests/Test-MaintenanceVaultScenarioBinding.ps1
-
-SHA256: 2a62ceead9e4bebf83027d592c57583f37b7075896ef54169b1969199db2409e | Bytes: 2382 | Git mode: 100644
-
-```
-param([string]$WorkspaceRoot=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path)
-$ErrorActionPreference='Stop'
-$source=Get-Content (Join-Path $WorkspaceRoot 'automation/release-e2e/modules/executors/Invoke-RealProductPhase.psm1') -Raw
-$start=$source.IndexOf("            if(`$scenario-in@('permanent-delete','delete-restore','vault')){")
-$end=$source.IndexOf('            $runId=[string]$runId;', $start)
-if($start-lt0-or$end-le$start){throw 'Real configured-scenario guard was not found.'}
-$guard=[scriptblock]::Create($source.Substring($start,$end-$start))
-$scenario='permanent-delete';$primary='devfleet-primary';$mp='mock-external-multipass';$expectedTarHash='a'*64
-$config=[pscustomobject]@{Vault=[pscustomobject]@{InstanceName='devfleet-vault'}}
-$hostIdentity=[pscustomobject]@{deployment_id='33333333-3333-3333-3333-333333333333'}
-$script:readinessCalls=[Collections.Generic.List[string]]::new();$script:wrongId=$false
-$readinessSource='param($Primary,$MultipassPath);$script:readinessCalls.Add($Primary);[pscustomobject]@{status="PASS"}'
-function Get-VM {param([guid]$Id,$ErrorAction) [pscustomobject]@{Id=$Id;Name=if($script:wrongId){'foreign'}elseif($Id.ToString()-eq'11111111-1111-1111-1111-111111111111'){'devfleet-primary'}else{'devfleet-vault'}}}
-$fixture=[ordered]@{status='PASS';payloadSha256=$expectedTarHash;primaryRole='primary';primaryName=$primary;primaryId='11111111-1111-1111-1111-111111111111';vaultName='devfleet-vault';vaultId='22222222-2222-2222-2222-222222222222';deploymentId=$hostIdentity.deployment_id;configurationPresent=$true;proofCredit=$false}
-$vaultFixtureJson=$fixture|ConvertTo-Json -Compress
-. $guard
-if($primary-cne'devfleet-primary'-or($script:readinessCalls-join ',')-cne'devfleet-vault'){throw 'Vault readiness changed the Primary scenario target.'}
-$script:wrongId=$true;$caught='';$script:readinessCalls.Clear()
-try{. $guard}catch{$caught=$_.Exception.Message}
-if($caught-notmatch'immutable identity'-or$script:readinessCalls.Count-ne0){throw 'Changed VM identity must be rejected before readiness mutation.'}
-$script:wrongId=$false;$vaultFixtureJson='';$caught=''
-try{. $guard}catch{$caught=$_.Exception.Message}
-if($caught-notmatch'configured checkpoint'){throw 'Unconfigured positive scenario did not refuse.'}
-[ordered]@{status='PASS';cases=3;actualScenarioGuard=$true;externalIoMocked=$true;vmMutation=$false}|ConvertTo-Json
-
-```
-
-
-## FILE: automation/release-e2e/tests/Test-MaintenanceVaultWrapperStreams.ps1
-
-SHA256: c1b941de50dbbe3388c1e0e8f8779e8144eb2c25c054b1152385f30c8bff94ee | Bytes: 7778 | Git mode: 100644
-
-```
-param([string]$WorkspaceRoot=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path)
-$ErrorActionPreference='Stop'
-
-$modulePath=Join-Path $WorkspaceRoot 'automation/release-e2e/modules/MaintenanceVault.psm1'
-$tokens=$null
-$parseErrors=$null
-$ast=[Management.Automation.Language.Parser]::ParseFile($modulePath,[ref]$tokens,[ref]$parseErrors)
-if($parseErrors.Count-ne0){throw "MaintenanceVault parse failed: $($parseErrors[0].Message)"}
-$wrapperStrings=@($ast.FindAll({
-    param($node)
-    $node-is[Management.Automation.Language.StringConstantExpressionAst] -and
-        $node.Value-match'private-product-operations\.log' -and
-        $node.Value-match'Invoke-MaintenanceVaultProvisioning -Request \$request'
-},$true))
-if($wrapperStrings.Count-ne1){throw 'Generated Maintenance Vault wrapper body is missing or ambiguous.'}
-$wrapperLines=@($wrapperStrings[0].Value -split "`r?`n")
-$start=-1
-$end=-1
-for($i=0;$i-lt$wrapperLines.Count;$i++){
-    if($start-lt0-and$wrapperLines[$i]-match'^\$privateLog='){$start=$i}
-    if($start-ge0-and$wrapperLines[$i]-match'^try\{\$result=Invoke-MaintenanceVaultProvisioning'){$end=$i;break}
-}
-if($start-lt0-or$end-lt$start){throw 'Generated Maintenance Vault private-stream wrapper segment is missing.'}
-$wrapperSegment=($wrapperLines[$start..$end]-join[Environment]::NewLine)
-
-$temp=Join-Path ([IO.Path]::GetTempPath()) ('devfleet-vault-wrapper-test-'+[guid]::NewGuid().ToString('N'))
-[IO.Directory]::CreateDirectory($temp)|Out-Null
-try{
-    function Invoke-WrapperCase {
-        param([Parameter(Mandatory)][string]$Name,[Parameter(Mandatory)][bool]$ThrowProvisioning)
-        $caseRoot=Join-Path $temp $Name
-        [IO.Directory]::CreateDirectory($caseRoot)|Out-Null
-        $entryPath=Join-Path $caseRoot 'provisioning-entered.txt'
-        $childPath=Join-Path $caseRoot 'wrapper-child.ps1'
-        $child=@'
-param([Parameter(Mandatory)][string]$WorkRoot,[Parameter(Mandatory)][string]$EntryPath,[Parameter(Mandatory)][string]$Mode)
-$ErrorActionPreference='Stop'
-$request=[pscustomobject]@{workRoot=$WorkRoot;entryPath=$EntryPath;throwProvisioning=($Mode-ceq'throw')}
-function Invoke-MaintenanceVaultProvisioning {
-    param([Parameter(Mandatory)]$Request)
-    [IO.File]::WriteAllText([string]$Request.entryPath,'ENTERED',[Text.UTF8Encoding]::new($false))
-    Write-Warning 'PRIVATE_STREAM_WARNING' -WarningAction Continue
-    Write-Verbose 'PRIVATE_STREAM_VERBOSE' -Verbose
-    Write-Debug 'PRIVATE_STREAM_DEBUG' -Debug
-    Write-Information 'PRIVATE_STREAM_INFORMATION' -InformationAction Continue
-    if([bool]$Request.throwProvisioning){throw [InvalidOperationException]::new('PRIVATE_ORIGINAL_PROVISIONING_EXCEPTION')}
-    [pscustomobject][ordered]@{status='PASS';contract='maintenance-vault-wrapper-stream-test'}
-}
-'@
-        [IO.File]::WriteAllText($childPath,($child+[Environment]::NewLine+$wrapperSegment),[Text.UTF8Encoding]::new($false))
-        $pwsh=(Get-Command pwsh -CommandType Application -ErrorAction Stop).Source
-        $psi=[Diagnostics.ProcessStartInfo]::new()
-        $psi.FileName=$pwsh
-        $psi.UseShellExecute=$false
-        $psi.CreateNoWindow=$true
-        $psi.RedirectStandardOutput=$true
-        $psi.RedirectStandardError=$true
-        foreach($argument in @('-NoLogo','-NoProfile','-NonInteractive','-File',$childPath,'-WorkRoot',$caseRoot,'-EntryPath',$entryPath,'-Mode',$(if($ThrowProvisioning){'throw'}else{'pass'}))){[void]$psi.ArgumentList.Add($argument)}
-        $process=[Diagnostics.Process]::new()
-        $process.StartInfo=$psi
-        if(-not$process.Start()){throw 'Could not start local PowerShell 7 wrapper regression child.'}
-        $stdout=$process.StandardOutput.ReadToEnd()
-        $stderr=$process.StandardError.ReadToEnd()
-        $process.WaitForExit()
-        $privateLogs=@(Get-ChildItem -LiteralPath $caseRoot -Filter 'private-product-operations*.log' -File -ErrorAction SilentlyContinue)
-        [pscustomobject]@{
-            name=$Name
-            exitCode=$process.ExitCode
-            stdout=$stdout.Trim()
-            std
+        . ([scriptblock]::Create(

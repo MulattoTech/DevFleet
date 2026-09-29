@@ -1,10 +1,340 @@
 # DevFleet source part 093
 
 Full-source UTF-8 byte interval [4278000, 4324500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: f0cc7217206bc287583cf009e1a30850eb0bc2e816918affa59f88f0bf2afe76
+Payload SHA-256: fe9feb5ab2cd6be3f7112d7cb7e18d7f5e8886afad043f621a03a50bd9121fa7
 
 <!-- BEGIN SOURCE SLICE -->
-endency_matrix": "UNVERIFIED"},
+ublic','docker.devices'} <= {x['code'] for x in findings}
+
+
+def test_loopback_port_allowed():
+    findings=analyze('''services:\n  dev:\n    image: ubuntu:24.04\n    ports: [\"127.0.0.1:3000:3000\"]\n    security_opt: [\"no-new-privileges:true\"]\n    healthcheck: {test: [\"CMD\", \"true\"]}\n''')
+    assert not has_blockers(findings), findings
+
+def test_symlink_bind_source_outside_project_is_blocked(tmp_path: Path):
+    outside=tmp_path/'outside'
+    outside.mkdir()
+    project=tmp_path/'project'
+    project.mkdir()
+    try:
+        (project/'escape').symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip('Windows test host does not grant symbolic-link creation privilege')
+    (project/'compose.yaml').write_text('''services:\n  app:\n    image: alpine:3.20\n    security_opt: [no-new-privileges:true]\n    volumes:\n      - ./escape:/data\n    ports:\n      - 127.0.0.1:8080:80\n''')
+    findings=analyze_project(project)
+    assert has_blockers(findings)
+    assert any(x['code']=='docker.mount-resolution' for x in findings)
+
+
+def test_rebuild_context_symlink_outside_project_is_blocked(tmp_path: Path):
+    outside=tmp_path/'outside-build'
+    outside.mkdir()
+    project=tmp_path/'project'
+    project.mkdir()
+    try:
+        (project/'escape-build').symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip('Windows test host does not grant symbolic-link creation privilege')
+    (project/'compose.yaml').write_text('''services:\n  app:\n    build: ./escape-build\n    security_opt: [no-new-privileges:true]\n    ports:\n      - 127.0.0.1:8080:80\n''')
+    findings=analyze_project(project)
+    assert has_blockers(findings)
+    assert any(x['code']=='docker.build-context' for x in findings)
+
+```
+
+
+## FILE: source/tests/test_analyzer_v11.py
+
+SHA256: 11738fb7c631b7c0d2de4d70956ce3e458f5b0aed5d302702ff7bb60ee484ccb | Bytes: 4024 | Git mode: 100644
+
+```
+from pathlib import Path
+import pytest
+from devfleet.analyzer import analyze_project,has_blockers
+def project(tmp_path,text):
+ p=tmp_path/'demo';p.mkdir();(p/'compose.yaml').write_text(text);return p
+def test_windows_mount_blocked(tmp_path):assert has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    volumes: ["C:\\\\Users:/host"]\n'),'balanced',True))
+def test_parent_mount_blocked(tmp_path):assert has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    volumes: ["../:/host"]\n'),'fast',True))
+def test_docker_socket_blocked_in_fast(tmp_path):assert has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    volumes: ["/var/run/docker.sock:/var/run/docker.sock"]\n'),'fast',True))
+def test_loopback_port_allowed_balanced(tmp_path):assert not has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    ports: ["127.0.0.1:3000:3000"]\n    healthcheck: {test: ["CMD","true"]}\n    security_opt: ["no-new-privileges:true"]\n'),'balanced',True))
+def test_tailnet_allowed_balanced(tmp_path):assert not has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    ports: ["100.64.1.2:3000:3000"]\n    healthcheck: {test: ["CMD","true"]}\n    security_opt: ["no-new-privileges:true"]\n'),'balanced',True))
+def test_public_port_blocked(tmp_path):assert has_blockers(analyze_project(project(tmp_path,'services:\n  x:\n    image: x:1\n    ports: ["3000:3000"]\n'),'fast',True))
+def test_symlink_escape_blocked(tmp_path):
+ p=project(tmp_path,'services:\n  x:\n    image: x:1\n')
+ try:(p/'escape').symlink_to(tmp_path)
+ except OSError:pytest.skip('Windows test host does not grant symbolic-link creation privilege')
+ assert has_blockers(analyze_project(p,'balanced',True))
+def test_cache_invalidates(tmp_path):
+ p=project(tmp_path,'services:\n  x:\n    image: x:1\n    ports: ["127.0.0.1:3000:3000"]\n');a=analyze_project(p,'balanced');(p/'compose.yaml').write_text('services:\n  x:\n    image: x:1\n    ports: ["3000:3000"]\n');b=analyze_project(p,'balanced');assert a!=b and has_blockers(b)
+
+def test_balanced_hardening_items_are_warnings(tmp_path):
+ p=project(tmp_path,'services:\n  x:\n    build: .\n    ports: ["127.0.0.1:3000:3000"]\n');(p/'Dockerfile').write_text('FROM alpine:3.20\nRUN true\n')
+ findings=analyze_project(p,'balanced',True)
+ by_code={x['code']:x['severity'] for x in findings}
+ assert by_code['docker.healthcheck']=='warning'
+ assert by_code['docker.no-new-privileges']=='warning'
+ assert by_code['docker.non-root-user']=='warning'
+ assert not has_blockers(findings)
+
+def test_strict_hardening_items_block(tmp_path):
+ p=project(tmp_path,'services:\n  x:\n    build: .\n');(p/'Dockerfile').write_text('FROM alpine:3.20\n')
+ assert has_blockers(analyze_project(p,'strict',True))
+
+def test_fast_device_requires_project_acknowledgement(tmp_path):
+ p=project(tmp_path,'services:\n  x:\n    image: alpine:3.20\n    devices: ["/dev/kvm:/dev/kvm"]\n    ports: ["127.0.0.1:3000:3000"]\n    healthcheck: {test: ["CMD","true"]}\n    security_opt: ["no-new-privileges:true"]\n')
+ (p/'.devfleet').mkdir();(p/'.devfleet/project.json').write_text('{"profile":"fast","allow_devices":false}')
+ assert has_blockers(analyze_project(p,'fast',True))
+ (p/'.devfleet/project.json').write_text('{"profile":"fast","allow_devices":true}')
+ assert not has_blockers(analyze_project(p,'fast',True))
+
+def test_cache_invalidates_when_referenced_environment_file_changes(tmp_path):
+ p=project(tmp_path,'services:\n  x:\n    image: alpine:3.20\n    env_file: config/runtime-settings\n    ports: ["127.0.0.1:3000:3000"]\n    healthcheck: {test: ["CMD","true"]}\n    security_opt: ["no-new-privileges:true"]\n')
+ (p/'config').mkdir();env=p/'config/runtime-settings';env.write_text('MODE=one\n')
+ analyze_project(p,'balanced');cache=p/'.devfleet/runtime/analyzer-cache.json';first=cache.read_text()
+ env.write_text('MODE=two-with-different-size\n')
+ analyze_project(p,'balanced');assert cache.read_text()!=first
+
+```
+
+
+## FILE: source/tests/test_audit5_destructive.py
+
+SHA256: 3ce81d650d6d41c7d18b76194d7eefe01feeb1231d80f772051ef845003f0ec1 | Bytes: 5863 | Git mode: 100644
+
+```
+from __future__ import annotations
+
+import hashlib
+import os
+import tarfile
+from pathlib import Path
+
+import pytest
+from types import SimpleNamespace
+
+from devfleet import projects
+from devfleet.workspace_archives import (
+    create_workspace_archive,
+    restore_workspace_archive,
+    write_backup_manifest,
+)
+
+
+def _hash_tree(root: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for path in sorted(p for p in root.rglob("*") if p.is_file()):
+        result[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return result
+
+
+def _metadata(source: Path) -> None:
+    metadata = source / ".devfleet" / "project.json"
+    metadata.parent.mkdir(parents=True, exist_ok=True)
+    metadata.write_text('{"schema_version":3,"managed_by":"devfleet","project_id":"12345678-1234-1234-1234-123456789012","slug":"demo","runtime_provider":"docker-compose","host_id":"test-node"}', encoding="utf-8")
+
+
+def test_destructive_backup_preserves_generated_looking_user_files(tmp_path: Path):
+    source = tmp_path / "source"
+    _metadata(source)
+    for relative, data in {
+        "build/irreplaceable.bin": b"build-user-data",
+        "dist/manual-output.dat": b"dist-user-data",
+        "node_modules/user-preserved-test.txt": b"node-user-data",
+        ".next/notes.txt": b"next-user-data",
+        "arbitrary/nested-generated-looking/file.txt": b"nested-user-data",
+    }.items():
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    archive = tmp_path / "backup.tar.gz"
+    result = create_workspace_archive(source, "demo", archive, include_generated=True, consistency_level="quiesced")
+    assert result["omitted_paths"] == []
+    assert result["included_file_count"] == 6
+    restored = tmp_path / "restored"
+    restore_workspace_archive(archive, restored, "demo")
+    assert _hash_tree(source) == _hash_tree(restored)
+
+
+def test_routine_backup_keeps_documented_generated_directory_omission(tmp_path: Path):
+    source = tmp_path / "source"
+    _metadata(source)
+    (source / "build").mkdir(parents=True)
+    (source / "build" / "cache.bin").write_bytes(b"cache")
+    archive = tmp_path / "routine.tar.gz"
+    result = create_workspace_archive(source, "demo", archive)
+    assert "build" in result["omitted_paths"]
+    with tarfile.open(archive, "r:gz") as bundle:
+        assert "demo/build/cache.bin" not in bundle.getnames()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission fidelity is unavailable on Windows")
+def test_restore_preserves_safe_modes_and_strips_special_bits(tmp_path: Path):
+    source = tmp_path / "source"
+    source.mkdir()
+    _metadata(source)
+    executable = source / "hook.sh"
+    private = source / "private.key"
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    private.write_text("secret", encoding="utf-8")
+    os.chmod(executable, 0o755)
+    os.chmod(private, 0o600)
+    archive = tmp_path / "modes.tar.gz"
+    create_workspace_archive(source, "demo", archive, include_generated=True)
+
+    # Make the archive metadata hostile.  Restore must mask privilege-bearing
+    # special bits while retaining ordinary permissions.
+    rewritten = tmp_path / "hostile.tar.gz"
+    with tarfile.open(archive, "r:gz") as original, tarfile.open(rewritten, "w:gz") as target:
+        for member in original.getmembers():
+            member.mode |= 0o6000
+            if member.name.endswith("hook.sh"):
+                member.mode = 0o6755
+            source_file = original.extractfile(member) if member.isfile() else None
+            target.addfile(member, source_file)
+            if source_file is not None:
+                source_file.close()
+
+    restored = tmp_path / "restored"
+    restore_workspace_archive(rewritten, restored, "demo")
+    assert (restored / "hook.sh").stat().st_mode & 0o777 == 0o755
+    assert (restored / "private.key").stat().st_mode & 0o777 == 0o600
+
+
+def test_restore_deleted_project_uses_tombstone_and_exact_identity(tmp_path: Path, monkeypatch):
+    workspaces = tmp_path / "workspaces"
+    runtime = tmp_path / "runtime"
+    settings = SimpleNamespace(workspaces=workspaces, runtime_root=runtime, host_id="test-node")
+    monkeypatch.setattr(projects, "SETTINGS", settings)
+    source = tmp_path / "source"
+    _metadata(source)
+    (source / "build").mkdir()
+    (source / "build" / "irreplaceable.bin").write_bytes(b"keep")
+    backup_dir = runtime / "workspace-backups" / "demo-backup"
+    archive = backup_dir / "demo.tar.gz"
+    result = create_workspace_archive(source, "demo", archive, include_generated=True, consistency_level="quiesced")
+    write_backup_manifest(
+        backup_dir,
+        slug="demo",
+        project_id="12345678-1234-1234-1234-123456789012",
+        runtime={"provider": "docker-compose", "runtime_id": ""},
+        archive=result,
+        consistency_level="quiesced",
+    )
+    tombstone = {
+        "project_id": "12345678-1234-1234-1234-123456789012",
+        "slug": "demo",
+        "runtime_provider": "docker-compose",
+        "backup_id": "demo-backup",
+        "backup_sha256": result["archive_sha256"],
+    }
+    tombstone_path = projects._recovery_tombstone_path("demo", tombstone["project_id"])
+    tombstone_path.parent.mkdir(parents=True, exist_ok=True)
+    tombstone_path.write_text(__import__("json").dumps(tombstone), encoding="utf-8")
+    recovered = projects.restore_deleted_project(
+        "demo", "demo-backup", project_id=tombstone["project_id"], confirm_restore=True
+    )
+    assert recovered["ok"] is True
+    assert (workspaces / "demo" / "build" / "irreplaceable.bin").read_bytes() == b"keep"
+    with pytest.raises(ValueError, match="absent destination"):
+        projects.restore_deleted_project(
+            "demo", "demo-backup", project_id=tombstone["project_id"], confirm_restore=True
+        )
+
+```
+
+
+## FILE: source/tests/test_audit_coherence.py
+
+SHA256: 58d8a589d22f1d4ff33419dbee2864b9a56fe5a9b4a6ffcf4fdc6d1079156e57 | Bytes: 36369 | Git mode: 100644
+
+```
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import shutil
+import subprocess
+import sys
+import zipfile
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+import importlib.util
+
+_VALIDATOR_PATH = Path(__file__).parents[1] / "tools" / "validate_audit_coherence.py"
+_SPEC = importlib.util.spec_from_file_location("validate_audit_coherence", _VALIDATOR_PATH)
+assert _SPEC and _SPEC.loader
+_MODULE = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MODULE)
+validate_root = _MODULE.validate_root
+
+_AI_VALIDATOR_PATH = Path(__file__).parents[1] / "tools" / "validate_ai_audit_bundle.py"
+_AI_SPEC = importlib.util.spec_from_file_location("validate_ai_audit_bundle", _AI_VALIDATOR_PATH)
+assert _AI_SPEC and _AI_SPEC.loader
+_AI_MODULE = importlib.util.module_from_spec(_AI_SPEC)
+_AI_SPEC.loader.exec_module(_AI_MODULE)
+
+ROOT = Path(__file__).parents[2]
+
+_COMPUTE_SPEC = importlib.util.spec_from_file_location("compute_shipping_input_identity", ROOT / "tools/compute_shipping_input_identity.py")
+assert _COMPUTE_SPEC and _COMPUTE_SPEC.loader
+_COMPUTE_MODULE = importlib.util.module_from_spec(_COMPUTE_SPEC)
+_COMPUTE_SPEC.loader.exec_module(_COMPUTE_MODULE)
+
+_RELEASE_BUNDLE_SPEC = importlib.util.spec_from_file_location("validate_release_bundle", ROOT / "tools/validate_release_bundle.py")
+assert _RELEASE_BUNDLE_SPEC and _RELEASE_BUNDLE_SPEC.loader
+_RELEASE_BUNDLE_MODULE = importlib.util.module_from_spec(_RELEASE_BUNDLE_SPEC)
+_RELEASE_BUNDLE_SPEC.loader.exec_module(_RELEASE_BUNDLE_MODULE)
+
+def _fixture(tmp_path: Path) -> Path:
+    root = tmp_path / "bundle"
+    (root / "outputs").mkdir(parents=True)
+    (root / "audit").mkdir()
+    (root / "source" / "tools").mkdir(parents=True)
+    # The validator recomputes release identities from the canonical helper.
+    # Keep synthetic extracted fixtures self-contained just like the real
+    # bundle; omitting this authority turns valid fixtures into import errors.
+    shutil.copy2(ROOT / "source/tools/release_fingerprint.py", root / "source/tools/release_fingerprint.py")
+    shutil.copy2(ROOT / "source/tools/hook_modes.py", root / "source/tools/hook_modes.py")
+    (root / "installer-source").mkdir(parents=True)
+    (root / "source" / "VERSION").write_text("1.2.13", encoding="utf-8")
+    (root / "installer-source" / "INSTALLER_VERSION").write_text("1.4.1", encoding="utf-8")
+    mode = {"schemaVersion": 1, "defaultMode": "0644", "executableMode": "0755", "executableByContract": []}
+    rows = _fixture_shipping_rows(root)
+    rows.sort(key=lambda row: (row["root"], row["path"]))
+    shipping_identity = _MODULE._shipping_identity(
+        {(row["root"], row["path"]): row for row in rows}, mode, "1.2.13", "1.4.1"
+    )
+    artifacts = {
+        "exe": {"name": "exe", "path": "outputs/a.exe", "bytes": 1, "sha256": "a" * 64},
+        "tar": {"name": "tar", "path": "outputs/a.tar.gz", "bytes": 2, "sha256": "b" * 64},
+        "portable": {"name": "portable", "path": "outputs/a.zip", "bytes": 3, "sha256": "c" * 64},
+        "installerSource": {"name": "installerSource", "path": "outputs/a-source.zip", "bytes": 4, "sha256": "d" * 64},
+    }
+    state = {
+        "release_version": "1.2.13",
+        "installer_version": "1.4.1",
+        "git_commit": "1" * 40,
+        "candidate_git_commit": "1" * 40,
+        "releaseFingerprintId": "f" * 64,
+        "toolingFingerprintId": "e" * 64,
+        "shipping_input_identity": shipping_identity,
+        "candidate_shipping_input_identity": shipping_identity,
+        "source_changed_since_candidate": False,
+        "rebuild_required": False,
+        "candidate_is_current": True,
+        "candidate_build_current": True,
+        "validation_evidence_current": True,
+        "full_release_passed": False,
+        "physical_surrogate_certification_current": False,
+        "internal_promotion_allowed": False,
+        "public_promotion_allowed": False,
+        "production_safety": {"production_unchanged": True, "mulattotechsurface_touched": False},
+        "candidate": copy.deepcopy(artifacts),
+        "gates": {"dependency_matrix": "UNVERIFIED"},
     }
     manifest = {
         "releaseVersion": "1.2.13",
@@ -494,364 +824,4 @@ def test_shipping_identity_ordering_matches_all_three_validators():
     compute_identity = _COMPUTE_MODULE._shipping_identity({"devfleetVersion": "1.2.13", "installerVersion": "1.4.1", "shippingModeContract": mode, "shippingInputs": canonical})
     release_identity = _RELEASE_BUNDLE_MODULE._candidate_shipping_identity(rows, "1.2.13", "1.4.1", mode)
     assert source_identity == compute_identity == release_identity
-    flat = sorted(rows, key=lambda row: (row["root"], row["path"]))
-    assert flat != canonical
-
-
-def test_packaged_wrapper_preserves_diagnostic_candidate_status(monkeypatch, tmp_path: Path):
-    payload = {"status": "PASS_WITH_BLOCKER", "blockerCode": "HISTORICAL_CANDIDATE_REBUILD_REQUIRED", "releaseEligible": False}
-    monkeypatch.setattr(_AI_MODULE.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr=""))
-    result = _AI_MODULE._run_candidate_validator([sys.executable, "candidate-validator"], tmp_path, "diagnostic")
-    assert result == payload
-
-
-@pytest.mark.parametrize("output", ["not-json", "{}\n{}"])
-def test_packaged_wrapper_rejects_malformed_or_multiple_candidate_json(monkeypatch, tmp_path: Path, output: str):
-    monkeypatch.setattr(_AI_MODULE.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=output, stderr=""))
-    with pytest.raises(ValueError, match="structured JSON|malformed JSON|non-object"):
-        _AI_MODULE._run_candidate_validator([sys.executable, "candidate-validator"], tmp_path, "diagnostic")
-
-
-def test_packaged_wrapper_rejects_diagnostic_plain_pass_downgrade(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(_AI_MODULE.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps({"status": "PASS"}), stderr=""))
-    with pytest.raises(ValueError, match="downgraded or contradictory"):
-        _AI_MODULE._run_candidate_validator([sys.executable, "candidate-validator"], tmp_path, "diagnostic")
-
-
-def test_packaged_wrapper_rejects_release_blocker(monkeypatch, tmp_path: Path):
-    payload = {"status": "PASS_WITH_BLOCKER", "blockerCode": "PROOF_PENDING", "releaseEligible": False}
-    monkeypatch.setattr(_AI_MODULE.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr=""))
-    with pytest.raises(ValueError, match="contains a blocker"):
-        _AI_MODULE._run_candidate_validator([sys.executable, "candidate-validator"], tmp_path, "release")
-
-```
-
-
-## FILE: source/tests/test_auth_multiprocess.py
-
-SHA256: 5b678aec7d5e3adc3205a598f950a73b3102166c0495c9e52bb8076bb031bcaa | Bytes: 845 | Git mode: 100644
-
-```
-import json
-import multiprocessing
-
-from devfleet import auth
-
-
-def _issue_session_in_process(queue):
-    from devfleet.auth import issue_session
-    queue.put(issue_session("test")[0])
-
-
-def test_sessions_json_is_safe_for_separate_worker_processes():
-    path = auth._session_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("{}\n", encoding="utf-8")
-    ctx = multiprocessing.get_context("spawn")
-    queue = ctx.Queue()
-    workers = [ctx.Process(target=_issue_session_in_process, args=(queue,)) for _ in range(4)]
-    for worker in workers:
-        worker.start()
-    for worker in workers:
-        worker.join(20)
-    assert all(worker.exitcode == 0 for worker in workers)
-    records = json.loads(path.read_text(encoding="utf-8"))
-    assert len(records) == 4
-    for worker in workers:
-        worker.close()
-
-```
-
-
-## FILE: source/tests/test_backup_exit_status.py
-
-SHA256: 3f7fa30cf012e8451beba327ca3fb255a4b30152c72d30aeb15ea844587b3ba7 | Bytes: 1900 | Git mode: 100644
-
-```
-"""Execute the shipping Bash wrapper with only the external restic command substituted."""
-from pathlib import Path
-import json
-import os
-import shutil
-import subprocess
-import sys
-
-import pytest
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-@pytest.mark.skipif(sys.platform != 'linux' or not shutil.which('bash'), reason='Shipping backup wrapper runs on Linux')
-@pytest.mark.parametrize('restic_exit', [0, 1, 3, 10, 11, 12, 75, 124])
-def test_backup_preserves_restic_failure_and_never_promotes_incomplete_snapshot(tmp_path, restic_exit):
-    status = tmp_path / 'status'; status.mkdir()
-    cache = status / 'cache'; cache.mkdir()
-    config = tmp_path / 'restic.env'
-    config.write_text(f'RESTIC_CACHE_DIR="{cache}"\n')
-    tools = tmp_path / 'bin'; tools.mkdir()
-    restic = tools / 'restic'
-    restic.write_text('#!/bin/sh\nexit '+str(restic_exit)+'\n'); restic.chmod(0o755)
-    # Relocate fixed paths into this disposable test directory; keep control flow intact.
-    text = (ROOT / 'linux/devfleet-backup').read_text()
-    for old, new in [('/etc/devfleet/restic.env', config),
-                     ('/var/lib/devfleet/backup-status', status),
-                     ('/run/lock/devfleet-vault-operation.lock', tmp_path / 'operation.lock')]:
-        text = text.replace(old, str(new))
-    wrapper = tmp_path / 'backup'; wrapper.write_text(text)
-    result = subprocess.run(['bash', str(wrapper)], env={**os.environ, 'PATH':str(tools)+os.pathsep+os.environ['PATH']},
-                            capture_output=True, text=True, timeout=10)
-    assert result.returncode == restic_exit, 'The backup wrapper must retain the actual restic failure code'
-    telemetry = json.loads((status / 'latest.json').read_text())
-    assert telemetry['vault_upload_status'] == ('verified' if restic_exit == 0 else 'failed')
-    assert telemetry['durability_level'] == ('vault' if restic_exit == 0 else 'none')
-
-```
-
-
-## FILE: source/tests/test_backup_metadata_acl.py
-
-SHA256: eff0c7cc0f43496e74c46f1be348b76a8bedd536389e5f30b6d2521069964e78 | Bytes: 7834 | Git mode: 100644
-
-```
-"""Real Linux ACL regression: atomic metadata remains readable only by its backup identity."""
-from __future__ import annotations
-import errno
-import os
-from pathlib import Path
-import struct
-import subprocess
-import sys
-import tempfile
-from types import SimpleNamespace
-
-import pytest
-from devfleet import core, metadata_io
-
-BACKUP_UID = 60002
-OTHER_UID = 60003
-ACL_ACCESS = 'system.posix_acl_access'
-ACL_DEFAULT = 'system.posix_acl_default'
-
-
-def pack_acl(entries):
-    return struct.pack('<I', 2) + b''.join(struct.pack('<HHI', *entry) for entry in entries)
-
-
-def entries(raw):
-    assert struct.unpack('<I', raw[:4]) == (2,)
-    return list(struct.iter_unpack('<HHI', raw[4:]))
-
-
-@pytest.fixture
-def acl_workspace(monkeypatch):
-    if sys.platform != 'linux' or not hasattr(os, 'geteuid') or os.geteuid() != 0:
-        pytest.skip('Real different-UID ACL checks require Linux root in the isolated test environment')
-    import pwd
-    real_lookup = pwd.getpwnam
-    monkeypatch.setattr(pwd, 'getpwnam', lambda name: SimpleNamespace(pw_uid=BACKUP_UID)
-                        if name == 'devfleet-backup' else real_lookup(name))
-    with tempfile.TemporaryDirectory(prefix='devfleet-acl-test-') as root:
-        parent = Path(root)
-        parent.chmod(0o755)
-        workspace = parent / 'demo'
-        workspace.mkdir()
-        policy = pack_acl([(1,7,0xFFFFFFFF),(2,7,BACKUP_UID),(2,7,OTHER_UID),
-                           (4,0,0xFFFFFFFF),(16,7,0xFFFFFFFF),(32,0,0xFFFFFFFF)])
-        try:
-            os.setxattr(workspace, ACL_ACCESS, policy)
-            os.setxattr(workspace, ACL_DEFAULT, policy)
-        except OSError as exc:
-            if exc.errno in (errno.ENOTSUP, errno.EOPNOTSUPP):
-                pytest.skip('Test filesystem does not support POSIX ACLs')
-            raise
-        yield workspace
-
-
-def access_as(path, *, uid=BACKUP_UID, write=False):
-    code = ('from pathlib import Path; import sys; '
-            "p=Path(sys.argv[1]); " +
-            ("f=p.open('ab'); f.close()" if write else 'p.read_bytes()'))
-    result = subprocess.run([sys.executable, '-I', '-c', code, str(path)],
-                            user=uid, group=uid, extra_groups=[], capture_output=True,
-                            timeout=10, text=True)
-    return result.returncode == 0
-
-
-def assert_backup_only(path):
-    assert access_as(path), 'The configured backup identity cannot read newly published metadata'
-    assert not access_as(path, write=True), 'The backup identity must not write authoritative metadata'
-    assert not access_as(path, uid=OTHER_UID), 'Enabling backup read must not unmask another inherited principal'
-    assert path.stat().st_mode & 0o007 == 0, 'Metadata must not become world-accessible'
-
-
-def test_metadata_create_and_replace_keep_backup_read_access(acl_workspace):
-    p = acl_workspace
-    binding = metadata_io.write_project_metadata(p, {'test': 'initial'}, create=True)
-    assert_backup_only(p / '.devfleet/project.json')
-    binding = metadata_io.write_project_metadata(p, {'test': 'replacement'}, expected=binding)
-    assert_backup_only(p / '.devfleet/project.json')
-    assert metadata_io.read_project_metadata(p).value == {'test': 'replacement'}
-
-
-@pytest.mark.parametrize('writer,value', [(core.atomic_text, 'lease'), (core.atomic_bytes, b'lease'),
-                                         (core.atomic_json, {'lease': 'closed'})])
-def test_atomic_workspace_writes_keep_backup_read_access(acl_workspace, writer, value):
-    path = acl_workspace / 'ownership-lease.json'
-    writer(path, value)
-    assert_backup_only(path)
-    writer(path, value)
-    assert_backup_only(path)
-
-
-def test_paths_without_backup_acl_remain_private(tmp_path):
-    path = tmp_path / 'private.json'
-    core.atomic_json(path, {'private': True})
-    if os.name == 'posix':
-        assert path.stat().st_mode & 0o077 == 0
-
-
-def test_metadata_replacement_does_not_reintroduce_a_removed_acl(acl_workspace):
-    p = acl_workspace
-    binding = metadata_io.write_project_metadata(p, {'test': 'initial'}, create=True)
-    directory = p / '.devfleet'
-    os.removexattr(directory, ACL_DEFAULT)
-    binding = metadata_io.write_project_metadata(p, {'test': 'replacement'}, expected=binding)
-    assert not access_as(directory / 'project.json')
-    assert (directory / 'project.json').stat().st_mode & 0o077 == 0
-
-
-def test_default_acl_mask_denial_is_not_overridden(acl_workspace):
-    p = acl_workspace
-    acl = entries(os.getxattr(p, ACL_DEFAULT))
-    os.setxattr(p, ACL_DEFAULT, pack_acl([(t, 0 if t == 16 else v, u) for t,v,u in acl]))
-    target = p / 'denied-by-parent.json'
-    core.atomic_json(target, {'private': True})
-    assert not access_as(target), 'An explicitly masked parent backup grant is not permission to read'
-    assert target.stat().st_mode & 0o077 == 0
-
-
-def test_failed_acl_application_does_not_replace_committed_metadata(acl_workspace, monkeypatch):
-    p = acl_workspace
-    binding = metadata_io.write_project_metadata(p, {'original': True}, create=True)
-    previous = (p / '.devfleet/project.json').read_bytes()
-    def deny(*args, **kwargs):
-        raise OSError(errno.EACCES, 'synthetic ACL write refusal')
-    monkeypatch.setattr(metadata_io.os, 'setxattr', deny)
-    with pytest.raises(OSError):
-        metadata_io.write_project_metadata(p, {'replacement': True}, expected=binding)
-    assert (p / '.devfleet/project.json').read_bytes() == previous
-    assert not list((p / '.devfleet').glob('.project.json.*.tmp'))
-
-
-@pytest.mark.parametrize("publisher_default, expected_read, expected_write", [(7, True, True), (5, True, False), (0, False, False)])
-def test_inherited_publisher_acl_survives_restore_owner_change(acl_workspace, publisher_default, expected_read, expected_write):
-    """Restoration by an unprivileged backup UID cannot retain source ownership.
-
-    Exercise the actual ACL publication, then the ownership transition on this
-    disposable inode tree. This is not a restic/network certification test.
-    """
-    publisher_uid = 60004
-    p = acl_workspace
-    for attr in (ACL_ACCESS, ACL_DEFAULT):
-        policy = entries(os.getxattr(p, attr))
-        policy.insert(3, (2, 7 if attr == ACL_ACCESS else publisher_default, publisher_uid))
-        policy.sort(key=lambda row: (row[0], row[2]))
-        os.setxattr(p, attr, pack_acl(policy))
-    code = (
-        'import sys, pwd; from pathlib import Path; from types import SimpleNamespace; '
-        f'sys.path.insert(0, {str(Path(metadata_io.__file__).parents[1])!r}); '
-        'real = pwd.getpwnam; '
-        f'pwd.getpwnam = lambda n: SimpleNamespace(pw_uid={BACKUP_UID}) '
-        'if n == "devfleet-backup" else real(n); '
-        'from devfleet.metadata_io import write_project_metadata; '
-        'write_project_metadata(Path(sys.argv[1]), {"publisher": True}, create=True)'
-    )
-    created = subprocess.run([sys.executable, '-I', '-c', code, str(p)],
-                             user=publisher_uid, group=publisher_uid, extra_groups=[],
-                             capture_output=True, text=True, timeout=10)
-    assert created.returncode == 0, created.stderr
-    metadata = p / '.devfleet/project.json'
-    assert access_as(metadata, uid=publisher_uid)
-    assert_backup_only(metadata)
-    # Restore returns inode ownership to the restoring identity. The original
-    # publisher's *named* ACL must retain its formerly effective owner rights.
-    os.chown(metadata, BACKUP_UID, BACKUP_UID)
-    os.chown(metadata.parent, BACKUP_UID, BACKUP_UID)
-    assert access_as(metadata, uid=publisher_uid) == expected_read, 'Restore changed the inherited publisher read policy'
-    assert access_as(metadata, uid=publisher_uid, write=True) == expected_write, 'Restore changed the inherited publisher write policy'
-    assert not access_as(metadata, uid=OTHER_UID), 'Restore must not revive an unrelated principal'
-
-```
-
-
-## FILE: source/tests/test_bootstrap_input_safety.py
-
-SHA256: 6416e46165662fcc0e31c37f78c79e89d89991b71fbe6dd8c53786d84dda7be2 | Bytes: 4713 | Git mode: 100644
-
-```
-from pathlib import Path
-import json
-import sys
-
-import pytest
-
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def python_heredocs(name):
-    lines = (ROOT / "linux" / name).read_text(encoding="utf-8").splitlines()
-    blocks = []
-    for index, line in enumerate(lines):
-        if "<<'PY'" in line:
-            end = lines.index("PY", index + 1)
-            blocks.append((index + 2, "\n".join(lines[index + 1 : end]) + "\n"))
-    assert blocks, f"No embedded Python found in {name}"
-    return blocks
-
-
-@pytest.mark.parametrize("name", ["bootstrap-compute.sh", "bootstrap-vault.sh"])
-def test_bootstrap_embedded_python_compiles(name):
-    # bash -n cannot parse embedded Python; compile the exact production bodies.
-    for line, body in python_heredocs(name):
-        compile(body, f"{name}:heredoc-at-line-{line}", "exec")
-
-
-@pytest.mark.parametrize("forbidden", [None, "\x00", "\r", "\n"])
-def test_compute_secret_writer_executes_atomically_and_rejects_controls(tmp_path, monkeypatch, forbidden):
-    bodies = [body for _, body in python_heredocs("bootstrap-compute.sh") if "target.replace('/etc/devfleet/secrets.env')" in body]
-    assert len(bodies) == 1
-    body = compile(bodies[0], "bootstrap-compute.sh:secret-writer", "exec")
-    source, temporary, destination = (tmp_path / name for name in ("input.json", "temporary.env", "secrets.env"))
-    password = 'fixture-\\$`"' + (forbidden or "")
-    source.write_text(json.dumps({"AdminUser": "fixture-user", "AdminPassword": password, "ApiToken": "fixture-token"}), encoding="utf-8")
-    temporary.touch()
-    destination.write_text("original fixture\n", encoding="utf-8")
-    monkeypatch.setattr(sys, "argv", ["-", str(temporary), str(source)])
-    original_replace = Path.replace
-
-    def redirected_replace(path, target):
-        assert path == temporary and target == "/etc/devfleet/secrets.env"
-        return original_replace(path, destination)
-
-    monkeypatch.setattr(Path, "replace", redirected_replace)
-    if forbidden:
-        with pytest.raises(SystemExit, match="forbidden control character"):
-            exec(body, {})
-        assert destination.read_text(encoding="utf-8") == "original fixture\n"
-        assert temporary.read_bytes() == b""
-    else:
-        exec(body, {})
-        encoded = password.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
-        expected = 'DEVFLEET_ADMIN_USER="fixture-user"\nDEVFLEET_ADMIN_PASSWORD="' + encoded + '"\nDEVFLEET_API_TOKEN="fixture-token"\n'
-        assert destination.read_bytes() == expected.encode("utf-8")
-        assert not temporary.exists()
-    assert source.exists()
-
-
-def test_compute_bootstrap_validates_numeric_and_secret_boundaries_before_templates():
-    source = (ROOT / "linux" / "bootstrap-compute.sh").read_text(encoding="utf-8")
-    assert "PORT =~ ^[0-9]+$" in source
-    assert "BACKUP_INTERVAL =~ ^[0-9]+$" in source
-    assert "value != *$'\\r'*" in source
-    assert "value != *$'\\n'*" in
+    flat = sorted(rows, key=lambda row:

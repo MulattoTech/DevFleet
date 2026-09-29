@@ -1,10 +1,310 @@
 # DevFleet source part 063
 
 Full-source UTF-8 byte interval [2883000, 2929500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 08e761a9ddf8beab4521ebac83c69a3ffade833ddd66ef9576e40a68e545a497
+Payload SHA-256: 85d8a3c30c5a44fd8470e16e2a5aca79daf0e386b7f94ab9fa356830fed1982c
 
 <!-- BEGIN SOURCE SLICE -->
-a
+Fleet.Setup.csproj') },
+    @{ From = (Join-Path $PreparedInstaller 'DevFleet.Setup\app.manifest'); To = (Join-Path $Installer 'DevFleet.Setup\app.manifest') },
+    @{ From = (Join-Path $PreparedInstaller 'INSTALLER-BUILD-MANIFEST.json'); To = (Join-Path $Installer 'INSTALLER-BUILD-MANIFEST.json') },
+    @{ From = (Join-Path $PreparedInstaller "DevFleet.Setup\Payload\devfleet-v$version.tar.gz"); To = (Join-Path $Installer "DevFleet.Setup\Payload\devfleet-v$version.tar.gz") }
+  )
+  foreach ($pair in $copyPairs) { Copy-Item -LiteralPath $pair.From -Destination $pair.To -Force }
+}
+
+function Assert-ReleaseStagePath([string]$Path,[string]$Parent,[string]$LeafPattern) {
+  $resolved=[IO.Path]::GetFullPath($Path)
+  $expectedParent=[IO.Path]::GetFullPath($Parent).TrimEnd('\','/')
+  if((Split-Path -Parent $resolved) -cne $expectedParent -or (Split-Path -Leaf $resolved) -cnotmatch $LeafPattern){throw 'Release staging path escaped its owned parent.'}
+  foreach($candidate in @($expectedParent,$resolved)){
+    if((Test-Path -LiteralPath $candidate) -and ((Get-Item -LiteralPath $candidate -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Release staging path is a reparse point.'}
+  }
+}
+
+function Invoke-NormalizedPrepare([string]$Source, [string]$Installer, [string]$Previous, [string]$Outputs) {
+  $root = Join-Path ([IO.Path]::GetTempPath()) "devfleet-release-prepare-$([guid]::NewGuid().ToString('N'))"
+  $preparedSource = Join-Path $root 'source'
+  $preparedInstaller = Join-Path $root 'installer-source'
+  $preparedOutputs = Join-Path $root 'outputs'
+  try {
+    Assert-ReleaseStagePath $root ([IO.Path]::GetTempPath()) '^devfleet-release-prepare-[0-9a-f]{32}$'
+    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    Copy-ReleaseTree $Source $preparedSource
+    Copy-ReleaseTree $Installer $preparedInstaller
+    Normalize-TextTree $preparedSource
+    Normalize-TextTree $preparedInstaller
+    New-Item -ItemType Directory -Path $preparedOutputs -Force | Out-Null
+    $result = Invoke-Prepare $preparedSource $preparedInstaller $Previous $preparedOutputs
+    Copy-PreparedShippingInputs $preparedSource $preparedInstaller $Source $Installer
+    Copy-Item -Path (Join-Path $preparedOutputs '*') -Destination $Outputs -Force -Recurse
+    return [pscustomobject]@{ Version = $result.Version; Tar = (Join-Path $Outputs (Split-Path -Leaf $result.Tar)); Portable = (Join-Path $Outputs (Split-Path -Leaf $result.Portable)); TarSha256 = $result.TarSha256 }
+  } finally {
+    Assert-ReleaseStagePath $root ([IO.Path]::GetTempPath()) '^devfleet-release-prepare-[0-9a-f]{32}$'
+    if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+  }
+}
+
+if ($Mode -eq 'Prepare') {
+  $source = (Resolve-Path -LiteralPath $SourceRoot).Path
+  $installer = $PSScriptRoot
+  $previous = (Resolve-Path -LiteralPath $PreviousPortableZip).Path
+  $output = (Resolve-Path -LiteralPath (New-Item -ItemType Directory -Path $OutputDirectory -Force)).Path
+  $first = Invoke-NormalizedPrepare $source $installer $previous $output
+  if ($ProveIdempotent) {
+    $afterFirst = Get-Snapshot $source $installer
+    [void](Invoke-NormalizedPrepare $source $installer $previous $output)
+    $afterSecond = Get-Snapshot $source $installer
+    Assert-SameSnapshot $afterFirst $afterSecond 'second prepare pass'
+    Write-Output 'RELEASE_INPUT_PREPARE_IDEMPOTENCE=PASS'
+  }
+  [ordered]@{ mode = 'Prepare'; version = $first.Version; tar = $first.Tar; portable = $first.Portable; tarSha256 = $first.TarSha256 } | ConvertTo-Json -Compress
+  exit 0
+}
+
+if ($ProveIdempotent) { throw '-ProveIdempotent is valid only with -Mode Prepare.' }
+$sourcePath = (Resolve-Path -LiteralPath $SourceRoot).Path
+$workspace = Split-Path -Parent $sourcePath
+if ($CandidateCommit -notmatch '^[0-9a-fA-F]{40}$') { throw 'Verify mode requires an explicit 40-character candidate commit.' }
+$previous = (Resolve-Path -LiteralPath $PreviousPortableZip).Path
+$verificationRoot = Join-Path ((Resolve-Path -LiteralPath (New-Item -ItemType Directory -Path $OutputDirectory -Force)).Path) '.release-input-stage'
+Assert-ReleaseStagePath $verificationRoot ((Resolve-Path -LiteralPath $OutputDirectory).Path) '^\.release-input-stage$'
+if (Test-Path -LiteralPath $verificationRoot) { Remove-Item -LiteralPath $verificationRoot -Recurse -Force }
+New-Item -ItemType Directory -Path $verificationRoot -Force | Out-Null
+$archive = Join-Path $verificationRoot 'candidate.tar'
+& git -C $workspace -c core.autocrlf=false archive --format=tar --output=$archive $CandidateCommit source installer-source tools automation
+if ($LASTEXITCODE) { throw "Could not materialize candidate commit $CandidateCommit for release-input verification." }
+$candidateTree = Join-Path $verificationRoot 'candidate'
+$buildTree = Join-Path $verificationRoot 'build'
+New-Item -ItemType Directory -Path $candidateTree,$buildTree -Force | Out-Null
+& tar -xf $archive -C $candidateTree
+if ($LASTEXITCODE) { throw 'Candidate shipping tree extraction failed during release-input verification.' }
+Copy-Item -LiteralPath (Join-Path $candidateTree 'source') -Destination $buildTree -Recurse
+Copy-Item -LiteralPath (Join-Path $candidateTree 'installer-source') -Destination $buildTree -Recurse
+Copy-Item -LiteralPath (Join-Path $candidateTree 'tools') -Destination $buildTree -Recurse -ErrorAction SilentlyContinue
+Copy-Item -LiteralPath (Join-Path $candidateTree 'automation') -Destination $buildTree -Recurse -ErrorAction SilentlyContinue
+$buildSource = Join-Path $buildTree 'source'
+$buildInstaller = Join-Path $buildTree 'installer-source'
+$buildOutputs = Join-Path $verificationRoot 'artifacts'
+$expected = Get-Snapshot $candidateTree\source $candidateTree\installer-source
+[void](Invoke-Prepare $buildSource $buildInstaller $previous $buildOutputs)
+$actual = Get-Snapshot $buildSource $buildInstaller
+Assert-SameSnapshot $expected $actual 'candidate commit'
+[ordered]@{ mode = 'Verify'; candidateCommit = $CandidateCommit; sourceRoot = $buildSource; installerRoot = $buildInstaller; outputDirectory = $buildOutputs; status = 'PASS' } | ConvertTo-Json -Compress
+
+```
+
+
+## FILE: installer-source/PrivateSelfSignedSigning.psm1
+
+SHA256: 7f60833369394740699c4fbc6ef410e1f302844c5b53bfe70dcd3b57b33afc11 | Bytes: 8933 | Git mode: 100644
+
+```
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$script:PrivateSigningSubject = 'CN=DevFleet Private Personal Code Signing'
+$script:CodeSigningEku = '1.3.6.1.5.5.7.3.3'
+
+function Get-PrivateKeyExportable {
+    param([Parameter(Mandatory)]$Certificate)
+    $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Certificate)
+    if ($null -eq $rsa) { throw 'DevFleet private signing certificate does not expose an RSA private key.' }
+    try {
+        if ($rsa -is [System.Security.Cryptography.RSACng]) {
+            $policy = $rsa.Key.ExportPolicy
+            return [bool](
+                ($policy -band [System.Security.Cryptography.CngExportPolicies]::AllowExport) -or
+                ($policy -band [System.Security.Cryptography.CngExportPolicies]::AllowPlaintextExport)
+            )
+        }
+        if ($rsa -is [System.Security.Cryptography.RSACryptoServiceProvider]) {
+            return [bool]$rsa.CspKeyContainerInfo.Exportable
+        }
+        throw "Unsupported RSA private-key provider: $($rsa.GetType().FullName)"
+    } finally {
+        $rsa.Dispose()
+    }
+}
+
+function Test-UsablePrivateSigningCertificate {
+    param([Parameter(Mandatory)]$Certificate)
+    $eku = @($Certificate.EnhancedKeyUsageList | ForEach-Object { [string]$_.ObjectId })
+    if ($Certificate.Subject -cne $script:PrivateSigningSubject) { return $false }
+    if (-not $Certificate.HasPrivateKey) { return $false }
+    if ($Certificate.NotBefore -gt (Get-Date)) { return $false }
+    if ($Certificate.NotAfter -le (Get-Date).AddDays(30)) { return $false }
+    if ($script:CodeSigningEku -notin $eku) { return $false }
+    return -not (Get-PrivateKeyExportable -Certificate $Certificate)
+}
+
+function Assert-PrivateSigningCertificate {
+    param([Parameter(Mandatory)]$Certificate)
+    if (-not (Test-UsablePrivateSigningCertificate -Certificate $Certificate)) {
+        throw 'DevFleet private signing certificate failed exact subject, validity, EKU, private-key, or non-exportable-key policy.'
+    }
+    if ([int]$Certificate.PublicKey.Key.KeySize -lt 3072) {
+        throw 'DevFleet private signing certificate RSA key is smaller than 3072 bits.'
+    }
+}
+
+function Import-PublicCertificateForPrivateTrust {
+    param(
+        [Parameter(Mandatory)][string]$PublicCertificatePath,
+        [Parameter(Mandatory)][string]$Thumbprint
+    )
+    foreach ($storeName in @('TrustedPublisher')) {
+        $storePath = "Cert:\CurrentUser\$storeName"
+        $present = Get-ChildItem -LiteralPath $storePath | Where-Object { $_.Thumbprint -ceq $Thumbprint }
+        if (-not $present) {
+            & (Join-Path $env:SystemRoot 'System32\certutil.exe') -user -f -addstore $storeName $PublicCertificatePath | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "certutil failed to install the DevFleet public certificate in CurrentUser/$storeName." }
+        }
+        $verified = Get-ChildItem -LiteralPath $storePath | Where-Object { $_.Thumbprint -ceq $Thumbprint }
+        if (-not $verified) { throw "DevFleet public signing certificate was not installed in CurrentUser/$storeName." }
+    }
+    $trustedRoot = @(Get-ChildItem -LiteralPath 'Cert:\CurrentUser\Root' | Where-Object { $_.Thumbprint -ceq $Thumbprint })
+    if ($trustedRoot.Count -ne 1) {
+        throw "USER ACTION REQUIRED — Windows requires interactive consent before trusting DevFleet private signing certificate $Thumbprint in CurrentUser/Root."
+    }
+}
+
+function Initialize-DevFleetPrivateSigningIdentity {
+    [CmdletBinding()]
+    param(
+        [string]$StateRoot = (Join-Path $env:LOCALAPPDATA 'DevFleet\Signing\PrivateSelfSigned'),
+        [switch]$TrustSigningHost,
+        [string]$RequiredThumbprint,
+        [switch]$RequireExisting
+    )
+
+    New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
+    $metadataPath = Join-Path $StateRoot 'identity.json'
+    $publicCertificatePath = Join-Path $StateRoot 'DevFleet-Private-Personal-Code-Signing.cer'
+    $persisted = $null
+    if (Test-Path -LiteralPath $metadataPath -PathType Leaf) {
+        try { $persisted = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json }
+        catch { throw "DevFleet private signing identity metadata is malformed: $($_.Exception.Message)" }
+        if ([string]$persisted.subject -cne $script:PrivateSigningSubject) {
+            throw 'DevFleet private signing identity metadata has an unexpected subject.'
+        }
+        if ([string]$persisted.thumbprint -notmatch '^[0-9A-Fa-f]{40}$') {
+            throw 'DevFleet private signing identity metadata has an invalid thumbprint.'
+        }
+    }
+
+    $store = 'Cert:\CurrentUser\My'
+    $exactSubject = @(Get-ChildItem -LiteralPath $store | Where-Object { $_.Subject -ceq $script:PrivateSigningSubject })
+    $certificate = $null
+    $rolloverFrom = $null
+    $created = $false
+    if ($persisted) {
+        $rolloverFrom = ([string]$persisted.thumbprint).ToUpperInvariant()
+        $candidate = @($exactSubject | Where-Object { $_.Thumbprint -ceq $rolloverFrom })
+        if ($candidate.Count -gt 1) { throw 'Multiple certificates matched the persisted DevFleet private signing thumbprint.' }
+        if ($candidate.Count -eq 1 -and (Test-UsablePrivateSigningCertificate -Certificate $candidate[0])) {
+            $certificate = $candidate[0]
+            $rolloverFrom = $null
+        }
+    } else {
+        $usable = @($exactSubject | Where-Object { Test-UsablePrivateSigningCertificate -Certificate $_ })
+        if ($usable.Count -gt 1) {
+            throw 'Multiple usable DevFleet private signing identities exist without persisted exact-thumbprint authority.'
+        }
+        if ($usable.Count -eq 1) { $certificate = $usable[0] }
+    }
+
+    if ($RequireExisting) {
+        if (-not $RequiredThumbprint -or $RequiredThumbprint -notmatch '^[0-9A-Fa-f]{40}$') {
+            throw 'DevFleet private signing requires an explicit existing certificate thumbprint.'
+        }
+        $required = @(Get-ChildItem -LiteralPath $store | Where-Object { $_.Thumbprint -ceq $RequiredThumbprint.ToUpperInvariant() })
+        if ($required.Count -ne 1 -or -not (Test-UsablePrivateSigningCertificate -Certificate $required[0])) {
+            throw "RELEASE BLOCKED — required existing DevFleet signing certificate $RequiredThumbprint is unavailable or fails policy; replacement creation is forbidden."
+        }
+        $certificate = $required[0]
+        if ($persisted -and ([string]$persisted.thumbprint).ToUpperInvariant() -cne $certificate.Thumbprint.ToUpperInvariant()) {
+            throw 'Persisted DevFleet private signing identity does not match the required existing certificate thumbprint.'
+        }
+    }
+    if (-not $certificate) {
+        $certificate = New-SelfSignedCertificate `
+            -Type CodeSigningCert `
+            -Subject $script:PrivateSigningSubject `
+            -FriendlyName 'DevFleet PRIVATE/PERSONAL Code Signing' `
+            -CertStoreLocation $store `
+            -KeyAlgorithm RSA `
+            -KeyLength 3072 `
+            -HashAlgorithm SHA256 `
+            -KeyExportPolicy NonExportable `
+            -NotAfter (Get-Date).AddYears(3)
+        $created = $true
+    }
+
+    Assert-PrivateSigningCertificate -Certificate $certificate
+    Export-Certificate -Cert $certificate -FilePath $publicCertificatePath -Force | Out-Null
+    if ($TrustSigningHost) {
+        Import-PublicCertificateForPrivateTrust -PublicCertificatePath $publicCertificatePath -Thumbprint $certificate.Thumbprint
+    }
+
+    $metadata = [ordered]@{
+        schemaVersion = 1
+        profile = 'PRIVATE_SELF_SIGNED'
+        subject = $certificate.Subject
+        thumbprint = $certificate.Thumbprint
+        codeSigningEku = $script:CodeSigningEku
+        notBefore = $certificate.NotBefore.ToUniversalTime().ToString('o')
+        notAfter = $certificate.NotAfter.ToUniversalTime().ToString('o')
+        keyAlgorithm = $certificate.PublicKey.Oid.FriendlyName
+        keySize = [int]$certificate.PublicKey.Key.KeySize
+        privateKeyExportable = $false
+        privateKeyExported = $false
+        publicCertificatePath = $publicCertificatePath
+        trustStores = if ($TrustSigningHost) { @('CurrentUser/Root', 'CurrentUser/TrustedPublisher') } else { @() }
+        createdThisRun = $created
+        rolloverFromThumbprint = $rolloverFrom
+        updatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+    }
+    $temporary = "$metadataPath.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [IO.File]::WriteAllText($temporary, (($metadata | ConvertTo-Json -Depth 6) + [Environment]::NewLine), (New-Object Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $temporary -Destination $metadataPath -Force
+    } finally {
+        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+    }
+    return [pscustomobject]$metadata
+}
+
+Export-ModuleMember -Function Initialize-DevFleetPrivateSigningIdentity
+
+```
+
+
+## FILE: installer-source/RELEASING.md
+
+SHA256: c06c804c4fdb8c8262ea4d6993b1e3785eb07df8799b00deb34ee4a18f32607f | Bytes: 399 | Git mode: 100644
+
+```
+# Releasing
+
+The canonical sequence is source tests, the current `VERSION` TAR, portable ZIP, unsigned build and
+self-test, clean-room and maintenance E2E, Authenticode signing and timestamping,
+signature verification, signed self-test, final hashes, installer-source ZIP, and audit
+ZIP. A release stops on signing or required E2E failure. Fast rebuild is explicitly
+unsigned developer output only.
+
+```
+
+
+## FILE: installer-source/TAILSCALE-AUTH.md
+
+SHA256: bb622751864f369df29b393cf085d839af3df2c3e9d7d4270d25d67cbbd8b754 | Bytes: 2219 | Git mode: 100644
+
+````
+# Tailscale authentication
+
+Installation and authentication are separate. The normal automated provider is the
+DPAPI-bound `OAuthClientSecretStore` in the existing DevFleet E2E/local secret store.
+When authentication is genuinely needed, DevFleet passes the secret through a
 tightly ACL-protected temporary file using the installed client's supported
 `--client-secret=file:<path>` form. Disposable enrollment adds
 `ephemeral=true&preauthorized=true`; persistent enrollment uses
@@ -580,164 +880,4 @@ SHA256: 9a68f8aae772cd3e761b58075618fe35b01a76fd1668059a7a5b33c255a951c4 | Bytes
 9b3a513c9e8dc3a351bcb721eaf6ab05044f1d0583c61f2eaff41e1c88abcd38  DevFleet-v1.1.0-VALIDATION.md
 1eaa7f8e5513960dce8b9ef1501f9d1f6a60383aa6f0529c906666a08b04a163  INSTALL-CHECKLIST.txt
 a6eb7b82456f5de4c0d9446aa1901b70311e2dc8adf8bd8311affa25688d494e  Install-DevFleet.ps1
-16dcbabf33e13d0f8c66db25e104366f877d8c99e0eff2933aad90ab47272fcc  MIGRATION-ROLLBACK.md
-5ec4487ad07cec2145a6ade137e641047c19769957c03628978218a06dfb05a4  README-FIRST.md
-85ba7a2aa2c127e12f830f96aa1787f237598fae20e3ae7543828552b161f469  SECURITY-NOTES.txt
-155b462f564dd1c2ae210029544d39194c14c0c85fb8062d31eb2a614e84d42f  START-HERE-DESKTOP.cmd
-97b7b3a91ffa320f1729e1662da3d615bf82bc6aa116e276c2bf373d0b6fd065  START-HERE-LAPTOP.cmd
-3905ac18b10325246b765a33daac907f548c000372a1144ef736f44ef9136b2a  Upgrade-DevFleet.ps1
-c21698334b1e2308b8556ac1d10402342b8d3e837f65fa1c431eb23392824b1d  VERSION
-2736ff45f82f5c2ae6fd243801f786562d4ddfa6326f19cce66a72c6b9e28602  app/devfleet/__init__.py
-0ebb618f06b728c84a5e8cfeeb04485536824f11bce37e752f5ed9c9a160e785  app/devfleet/analyzer.py
-9810905e7e2ab9d1f1a426ffb9644e2c388de5d199aedf9848f953918ff7cb3d  app/devfleet/auth.py
-9772d26aae5fa5d81142a9e1e29361886b9effbaa92f3eef8a99724bd985441d  app/devfleet/caches.py
-30b25cb2a5e7479b08aeb3e1b161fe5b53d6eafe21f6b53ea6d2b827df5689a4  app/devfleet/codexpro.py
-3ad7879d81b09b62d176c5483204281caf4d7f81a57d03d6fd77cf9a7f4c1ee1  app/devfleet/configuration.py
-56dc9aa80609796d45523c4d701e05afde736cccbc9a925fab4f8d50304dc600  app/devfleet/containers.py
-244499e96e005ac615042edbe10082a93110f186de8340cdc8a77c95341ac77c  app/devfleet/core.py
-cd69e5b29293e828ef6c7cfcbc4538e73456e3ac3041fffb3ce2059375f81e5d  app/devfleet/failover.py
-47b084d09edea59545bad7d16bf197892edfd2fd1905e06f8fb418e5a466ce53  app/devfleet/host_control.py
-d3c417f349ee93e1aefe323f09233c8e4e8d3f612914e97f0b9e32df5b81b289  app/devfleet/language_policy.py
-968255eb2ab9f4121cb561dc474a382b3c47e7dcbe8c08936cda7022abfb7b31  app/devfleet/leases.py
-1da87d821f4910f3d0e86f39592593a351b55ab83a62174b90ffa62a80add618  app/devfleet/main.py
-188ee5ed02c51d802e85cfa75a1017e9fc2c5a897a51083ba4a09bd564afd290  app/devfleet/metadata_io.py
-ffd562d4c2685dacea1e183e708530ea4ccf04c20f19e2969d827190b286600b  app/devfleet/node_registry.py
-5805e067353f237924b00fff0b0c595db779ccea061b7ad5e34186052dec0e6e  app/devfleet/ollama.py
-d60334d923abed24439342e38ce4061e702b76a64813082718d29946e6832437  app/devfleet/operations.py
-1cd0b8e2b31ac2ff724837205ac8f83d2ee6cb0916a679512f543b8557f2dcc5  app/devfleet/profiles.py
-69e28afc1b739e74d8118ac34f4222db40f58b80a87fbef2f58c3be368bc4671  app/devfleet/projects.py
-5162c54a20a1dfa99eea6eeed3773127a7f4714d067e7f5455b3adff1632f83a  app/devfleet/request_guards.py
-9bec3c14f6019fe4439065f8419dd7f11cc2de01ed9e9bd15bbbc5bf94102eb1  app/devfleet/resource_profiles.py
-0fde1265ee3895e9dd1b0369256eca1e55fa51532ff1918982ad03ee4f5e4aad  app/devfleet/runtime.py
-d5c260df7828b383aa6c7f1d6ff2735783430e5db5457bdd2d5989316164607c  app/devfleet/status.py
-a0a9c477ebd09f6fa0713427174d3f86c685de2004badcd8f0c8dfc039dd4251  app/devfleet/version.py
-fcc44f267e3c4d0e8f9a674fa52a1675d46a5cb9877af27f8bc3868643605c0f  app/devfleet/workspace_archives.py
-fe238c807b668a2f7e0f2b929e24859260e6a7f76bd6762ac7b6b10ad7daac33  app/requirements-hashed.txt
-f9a988a58e9e3b9df6e7e78963ec1a074a5642b77fb6541f4463592f6eee6346  app/requirements.txt
-8e100c7cc4c96993212aaabfc30e7ed1bbc1167b8f2eb5db840671aee6b0599a  app/static/app.js
-9e95e0103e58d5d59f47b099381beb3f0e9af60b34a9a30fe00c121c04833128  app/static/style.css
-4262827dc7134b7a52088898b25c35eba6359089ca24b4149acc5053c5c877c9  app/systemd/devfleet-backup.service
-52148ce1d51758771ea6aa53c5168ab750af865b40a4b084334359f800796a7e  app/systemd/devfleet-backup.timer
-9bfd790f5f2152ac43bdc78fb56efc3924c1f10975f31c0995a1cb690d64836f  app/systemd/devfleet-vault-broker.socket
-4431ccb294f011419df43b9475954cfed6ff3f570d600074b4b5bda5037ef1da  app/systemd/devfleet-vault-broker@.service
-f33f84cc58fc18f2217a064cc40d9a55bbb14a008a664609b29d0518183a5cca  app/systemd/devfleet.service
-00862e8161b5dbe817a5e4a4e2ce662c67b43fa45c160a9070b5b624db1f8069  app/systemd/mutable-paths.json
-0fdd41703ebacd3f0231d7f18a74d908dbdc19f629f120d6af65c49b3707e559  app/templates/index.html
-2545054327bb69d476b2fdb4b28ed75b12e1d30222a34cab8a46ebb82d2af4d1  app/templates/login.html
-d27ae17fba723ce41695a05d644d6ac5e4eb99557f6ff9296005e23e8e587058  client/Configure-DockerContext.ps1
-9376560ad72753307bf3ce174039807ad00e2bb13b12b9f6c2087ff630e141dc  client/Configure-SSH.ps1
-38e8948c6ae1e6f3c9b5d605d5650666939fbe477d23b9b2c9329fdc22b92ad1  client/Configure-VSCode.ps1
-f299ee1509445c514d3faf5d91db10f071768f6f62b5cc90223856bf2afbdeff  client/ssh-config.example
-4cd73e74d6ab46ccbe37cb08c46200aa203747f3b6ac79bb823a1c03226911c1  client/vscode-extensions-core.txt
-56eee44c27cdc6b543a8f58f580629bc9197a7123a74d4f05f063aac54745eb9  client/vscode-extensions-enterprise.txt
-aaa364399deda68c33ac158dbf32dad3dc4a4a522f66567df618d7bb3a48e131  client/vscode-extensions-python.txt
-25b7b8985b0071eeaa9a69e1304dec94beb5919b14f1303a6353124d2c3455c8  client/vscode-extensions-systems.txt
-8eefa88fd78c091f9ac23130aef1399a649929fc6a895a05be4f3742c0aa874d  client/vscode-extensions-web.txt
-c5b88bbcff8c96b667cb46ea26eaabfb7336f2d7b5243f7a528553b825da0cf9  client/vscode-settings.jsonc
-00316cd0d11900a961163b07a24f26e9ebfc71830100847ce2cc10ef650ea4cf  cloud-init/compute.yaml
-02799e2f3cac7df71db945030cce0d122d3663564db761197ade7e34d09f18ca  cloud-init/vault.yaml
-e2db65056b5030e3547c8659563bdb0db197d71d6c6dfd50a609efddbd514279  config/compose-security-policy.json
-e6d6d298e5437f994eeab4579253b1ef1bf49fe2ebeeffe01cd6e9ca30c65b5d  config/devfleet.config.json
-3e3b592adfe477dbc58c3995f8f34602f14d4145ef01b9b4cad117053c32b148  config/ollama-profiles.json
-8e93275c24263491338ac3939a808acdf07f15c3d0c45badda90edb51646de8d  config/resource-policy.json
-b939c07de544806e87b8324c050a1a3aff6baac8b36fac57201d917ea8810b46  dependencies.json
-95f36460eee2e88d097ca0dc1f7cb4062292fc24e9702aaf2c28326127934c8f  docs/00-HARD-STOPS-AND-ASSUMPTIONS.md
-6b2d8c54bdef789c3fd80a6b6512a38d657c38bfb1a2e9a0b8bddd86809f3dc9  docs/01-ARCHITECTURE.md
-4ed32904f5194bf15804565bbd254bcb91479b7b87552780723c737f6b92d75e  docs/02-INSTALL-ORDER.md
-9c528be76c5285ec85c9eb2ae71fb68ac551dff06c54aef64d5b5c4f67013eb4  docs/03-DAILY-USE.md
-ab36d4634d1477f69ef0c4b910dcfa16b6eb157e7e72b081066ce643f36ce2e3  docs/04-RECOVERY.md
-cc5a849cfe183f417cc6ee4600c0605e5258dddf9e3fc71f7de9451a7019bf2c  docs/05-SECURITY-MODEL.md
-04a3d4244d99396de9a9b17ed21567aa4a491e724a551b8b211cd556de88fe80  docs/06-CODEXPRO-INTEGRATION.md
-24dc3b375dd5380ad3eef4d4a2b9ea3c90f02352136ceee936edde8865773429  docs/07-OFFICIAL-SOURCES.md
-78cdead576d5def42520f8276f09d14ebacd60fc19edf3e29f79d98a9fc1a02d  docs/08-DEVELOPMENT-PROFILES.md
-fc1505fce91fcbc2c07793e56e49d1b1595c8fe1d1c5d0a06d61ce99d61dc9a1  docs/09-LANGUAGE-SELECTION.md
-1c62c6d556381f532b86eb7fe737d9e39a5726a4a457127e1adfe4a8404d9992  docs/10-OLLAMA-AND-GPU.md
-adf463bf6333f1ff118433701d9bccb9038dc12c1c512a95f2932b46f5e3ad6b  docs/11-REMOTE-VSCODE.md
-28666495394ce7fa029bbf0c0d0949512333328d28181fb238bd901345af30f2  docs/12-UPGRADING-FROM-1.0.0.md
-04264853da9e3a2d5baa1002ccf43018df4af3c2d79bbf8236909e262a44501f  docs/13-PERFORMANCE-TUNING.md
-0e83ab1f2f01961b14ddc261a76128fa8f27ad35c04c63e732ef5824620ec80f  docs/RELEASE-FINGERPRINT-SCHEMA.md
-b7c8271409e747cc03a5214b7d082b9673e3e69131edd6a534db613bf6bb8faf  docs/host-agent-portability.md
-512bc920be2372e2211f897ba6b83dcfa72b4c5c8973f5f8f548363425880645  linux/bootstrap-compute.sh
-9f91b7f6d75029c4fbe47004e5ba85a11442eb92cbabc053fbb857b78be984ad  linux/bootstrap-input.sh
-08899264e01566206e13f36f04cffda80991c39bc54babfa75f593ae09e7102c  linux/bootstrap-vault.sh
-81a515050e5d312ac4a453fa1bdaa999cfc11ad6a652659776bf5747c6b69168  linux/dependency-advisory-allowlist.json
-9754d4c72b9a3c608f1ed1efda0d1ff7ae12f8d6be555ccd618466b8125c9269  linux/dependency-policy.json
-c1334694748167d8781713b3a74fe184b8a549dfde457a500233a97999e8f644  linux/devfleet-backup
-f12c94fa0f12ba9482cbf8b10de3dfc5211d46f01863498af2a1a5d14849479e  linux/devfleet-configure-backup
-ad369c63d0363aa359ce1e34d37deeeb2947fc7d90f8a137cc4c14756b3e0017  linux/devfleet-docker-mode-report
-11e17775c3f5a9dc5a59e79d70aeb2adcb0f25a0a1a6b4ecaafb1feefd1fd78a  linux/devfleet-health
-9a542f43851dfe31cc37928d650463e5724e6f0156fbe484b95a101645ec16cf  linux/devfleet-join-deployment
-cf80700961b1878e3de64867c67b293c44832cb0b70e59510081cbe7bfc487a1  linux/devfleet-purge-quarantine
-2d46e7a6e2797b33eb61c8c7aa516cad8f735a65725ff4819ce6abd5516d9b13  linux/devfleet-register-node
-0a3bc23dcf346c88d89fcc37bea30033b7d94b2f5649df6ab23e9721aefe32f5  linux/devfleet-repair
-426640f394e023de9d6f9be723b58d1ac2a42c83c528e0221a7c1a7018f13c23  linux/devfleet-restore-project
-226ad81de29d261ac0cfb014556729cb97004305cf151c60261ca5ae1505d09e  linux/devfleet-rotate-compute-secrets
-31cffd4c26ea1fd3e50ca108f7dced492159e5504673a17b6b7c0a624f347724  linux/devfleet-rotate-vault-secrets
-4a64a44a1d8a921bdededc65b093541ebd7c613430b414e0ea0445af4c04a7a6  linux/devfleet-safe-update
-502799d1a0beca07f2605b1b767aaf8babc938c8e55f6d8af0ff4827b08fa830  linux/devfleet-set-peer
-6773950522775354abe07a698c24bdce8b7f73b458e5963e308e8b64f44cf056  linux/devfleet-switch-docker-mode
-eb6f98d1459e8fdae8b0bc3f7c8ba7d0164ce964a86d9d8c7277f936430c6e5a  linux/devfleet-user-repair
-fcdfdcd5762286fafa0b2ce8a14353f9bf404717472515a8d43efa4f3e3a54b9  linux/devfleet-vault-broker
-aef4f5a6daa89f7a2e669a1e773e32e358801c242458b4a36da0e02769114763  linux/devfleet-vault-health
-bd9c01d8bf3ae54bbeba5f37b23d7dedc7e0a4a0778559d9c388f1b085e0c073  linux/devfleet-vault-maintenance
-245458f58ef1a87ffd19abe2d6e3112e812d9b4ca6151158658be5f32b563fbb  linux/devfleet-vault-request
-f754f18cf80416026dea3f0a0b37772b419751aaec0198fd914c1ab87d8b5aec  linux/upgrade-compute.sh
-6a96ba0e2d5a8296fb90f474da9d2f0173d3e41eba18965513f711104155f913  pytest.ini
-ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f  templates/cpp-cmake/.ai-bridge/chatgpt-memory.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/cpp-cmake/.ai-bridge/codexpro-project-instructions.md
-7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb  templates/cpp-cmake/.ai-bridge/current-plan.template.md
-d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135  templates/cpp-cmake/.ai-bridge/prompts/broken-session-recovery.md
-a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02  templates/cpp-cmake/.ai-bridge/prompts/handoff-template.md
-5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab  templates/cpp-cmake/.ai-bridge/prompts/reconnect.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/cpp-cmake/.ai-bridge/prompts/session-bootstrap.md
-445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622  templates/cpp-cmake/.devcontainer/devcontainer.json
-0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a  templates/cpp-cmake/.devfleet/bootstrap.sh
-18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b  templates/cpp-cmake/.devfleet/codexpro-bootstrap.sh
-c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44  templates/cpp-cmake/.devfleet/codexpro-profile.json
-86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30  templates/cpp-cmake/.devfleet/codexpro.env.example
-04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311  templates/cpp-cmake/.devfleet/health-check.sh
-cd4d78db29dabe909a6929b0a1dfb066d98d2b80bd59e490c1bd10a4fd6a0cb5  templates/cpp-cmake/.devfleet/project-tools.json
-95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31  templates/cpp-cmake/.devfleet/smoke-test.sh
-e8b1109631cc35fe43568d05bcea8b28ce2128bbd52569515296c481a901ab95  templates/cpp-cmake/.devfleet/template.json
-05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44  templates/cpp-cmake/.editorconfig
-8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe  templates/cpp-cmake/.gitignore
-228588bd8182b53ca0721b1342685e32c7afcb7f681cb513b87ab3e705cc8850  templates/cpp-cmake/README.md
-0aa515e43796e07025f2cfdcb121e0d6edad4cfea877399c65fa066a4ced6231  templates/cpp-cmake/compose.yaml
-7f2df08e2676a8a97abf899c5b7c2caa96209ba308a6fde7c1fd527cb09fea23  templates/cpp-cmake/docs/architecture.md
-ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f  templates/data-r/.ai-bridge/chatgpt-memory.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/data-r/.ai-bridge/codexpro-project-instructions.md
-7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb  templates/data-r/.ai-bridge/current-plan.template.md
-d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135  templates/data-r/.ai-bridge/prompts/broken-session-recovery.md
-a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02  templates/data-r/.ai-bridge/prompts/handoff-template.md
-5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab  templates/data-r/.ai-bridge/prompts/reconnect.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/data-r/.ai-bridge/prompts/session-bootstrap.md
-31743d0b403e9a20eb3dffd87c5033c90bd0c28a0f522633bef1b18235b2c065  templates/data-r/.devcontainer/devcontainer.json
-0c27aca8e0c1121a29c7384e5a262913033dc1db108cdac32a119ebce92b203a  templates/data-r/.devfleet/bootstrap.sh
-18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b  templates/data-r/.devfleet/codexpro-bootstrap.sh
-c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44  templates/data-r/.devfleet/codexpro-profile.json
-86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30  templates/data-r/.devfleet/codexpro.env.example
-04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311  templates/data-r/.devfleet/health-check.sh
-808c6a308c2e68d82e7f1c74e27f98b5dbf5903e1bfac70b9f777c890ca22ba2  templates/data-r/.devfleet/project-tools.json
-95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31  templates/data-r/.devfleet/smoke-test.sh
-dea898a52612bca2c9967c01ec0b59e60d44992986a9ec64fbdde3045321573c  templates/data-r/.devfleet/template.json
-05f9463d683e5957ca2f7cad77a5fec2986298b1ea3c6ca314174805fa1aff44  templates/data-r/.editorconfig
-8844bf55ab9a454e01fbeec045b6747de22e56d73b2e5dbb6dfd27228e84c7fe  templates/data-r/.gitignore
-ec91ebe76515639ed04056aa7dfe14f3c47c5c3c776de81f647565c4d6acfacd  templates/data-r/README.md
-1c84cd5554f19af11ea76022af21546d1e08f6bb4abb34bf8ad42ec3b6009581  templates/data-r/compose.yaml
-6cd72cb5a51cac627cba6256f617c70778cdb34113460b0fb596310a276240f8  templates/data-r/docs/architecture.md
-ba1d7efc17a095e70f6e77feb14e7e28097feceba6a6b4377105cb7d540a145f  templates/dotnet-service/.ai-bridge/chatgpt-memory.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/dotnet-service/.ai-bridge/codexpro-project-instructions.md
-7d2bf9a23bf85e57c790e8476e763eef0ca516aae620bebdf5af91b575173ddb  templates/dotnet-service/.ai-bridge/current-plan.template.md
-d77fe808e85dd804eee9a157e225a37d2990b4dc7c10e90e32f5cfb89e3b6135  templates/dotnet-service/.ai-bridge/prompts/broken-session-recovery.md
-a57d5e01214e57298501064614350de6b76a52133f32b990fda325e65735ca02  templates/dotnet-service/.ai-bridge/prompts/handoff-template.md
-5123bafc6042da10c0e3afcad5b069de73a7b5858a2466a44d53b81fb14a88ab  templates/dotnet-service/.ai-bridge/prompts/reconnect.md
-95198949e141746a7bbbdd1c198c1a06be917a469d7a9f33b898bb185f359bbd  templates/dotnet-service/.ai-bridge/prompts/session-bootstrap.md
-445934f639925a25401e37333f549c7f1a0cb1cbd7521b7ee6309da00f64e622  templates/dotnet-service/.devcontainer/devcontainer.json
-ec1e677581abb22ca7a86b4ef7e3c86708659f0784584daf6afb44125415a074  templates/dotnet-service/.devfleet/bootstrap.sh
-18459cba289cd6d0dd94081388234128aff3b7ac8e3609488569764af30ede0b  templates/dotnet-service/.devfleet/codexpro-bootstrap.sh
-c7e30a70af40b8cbc64cd6db3f091ee908a8ccc70549780005b797fc9108fb44  templates/dotnet-service/.devfleet/codexpro-profile.json
-86fb4ee91504cb8000731a492eeda3e5025d974caf8e6b293442ac3e0d87fa30  templates/dotnet-service/.devfleet/codexpro.env.example
-04250439ee1563434ea08e8370c3cb89aca47d878fb364cc78c2aef978929311  templates/dotnet-service/.devfleet/health-check.sh
-26721a1313e9b66ca20366a2046829a6e9525653ad509d68f5349c5ccd7c5e4d  templates/dotnet-service/.devfleet/project-tools.json
-95f6ec94983aec4d5f36460826e0d26aac2db481c25966728953d2f566f6cd31  templates/dotnet-service/.devfleet/smoke-test.sh
-cc65f3a10f3a1bf7574b82bccbba88dddb891571c56be4cf007cc42a7efb012c  templates/dotnet-service/.
+16dcbabf33e13d0f8c66db25e104366f877d8c99e0eff2933aad90ab47272fcc  MIGRATION-

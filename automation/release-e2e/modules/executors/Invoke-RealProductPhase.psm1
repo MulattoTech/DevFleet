@@ -2611,6 +2611,11 @@ function Get-DevFleetNestedPrimaryReadinessScriptBlock {
         $probeInvoker=if($NativeProbeProvider){$NativeProbeProvider}else{${function:Invoke-NestedMultipass}}
         $controlPlaneRecoveryInvoker=if($ControlPlaneRecoveryProvider){$ControlPlaneRecoveryProvider}else{${function:Invoke-NestedMultipassControlPlaneRecovery}}
         $readinessDeadline=([datetime](& $ClockProvider)).AddSeconds(180)
+        function Assert-NestedReadinessDeadline {
+            if([datetime](& $ClockProvider) -ge $readinessDeadline){
+                throw 'Nested readiness deadline exhausted; no further VM mutation or readiness acceptance is allowed.'
+            }
+        }
         # A restored L1 can expose a running nested Hyper-V Primary before
         # its Multipass daemon has a usable management channel. Treat only
         # this bounded transport timeout/nonzero inventory as a recovery
@@ -2649,12 +2654,19 @@ function Get-DevFleetNestedPrimaryReadinessScriptBlock {
         # Checkpoint restore may preserve Hyper-V Running state without a
         # usable Multipass management address.  Reset only the nested VM in
         # this disposable L1, then wait for Multipass to report IPv4/SSH.
+        Assert-NestedReadinessDeadline
         if(-not $infoReady -or [string]$instances[0].state -ceq 'Stopped'){
             $primaryVm=Get-ExactNestedPrimaryVm -ExpectedName $primary
+            Assert-NestedReadinessDeadline
             $primaryReadiness.hyperVStateBefore=$primaryVm.State.ToString()
             $readinessTrace.hyperVBefore=$primaryVm.State.ToString()
             if($primaryVm.State -ne 'Off'){& $VmStopProvider $primaryVm}
-            & $VmStartProvider (& $VmLookupProvider -Id ([guid]$primaryVm.Id))|Out-Null
+            Assert-NestedReadinessDeadline
+            $restartVm=& $VmLookupProvider -Id ([guid]$primaryVm.Id)
+            Assert-NestedReadinessDeadline
+            & $VmStartProvider $restartVm|Out-Null
+            # A pre-restart info response cannot qualify the restarted instance.
+            $infoReady=$false
             $readinessTrace.hyperVCycle='PASS'
             $primaryReadiness.recovery='bounded-disposable-nested-HyperV-powercycle'
         }
@@ -2673,6 +2685,7 @@ function Get-DevFleetNestedPrimaryReadinessScriptBlock {
             $remaining=[int][Math]::Floor(($readinessDeadline-[datetime](& $ClockProvider)).TotalSeconds);if($remaining -gt 0){& $SleepProvider ([Math]::Min(5000,$remaining*1000))}
         }
         if(-not $ready){$traceText=@($readinessTrace.GetEnumerator()|ForEach-Object{"$($_.Key)=$($_.Value)"}) -join ';';throw "Configured Primary did not become Multipass/SSH-ready within 180 seconds. READINESS_TRACE: $traceText"}
+        Assert-NestedReadinessDeadline
         $primaryReadiness.ready=$true
         return $primaryReadiness
     }

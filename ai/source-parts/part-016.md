@@ -1,10 +1,154 @@
 # DevFleet source part 016
 
 Full-source UTF-8 byte interval [697500, 744000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 33a35ff12d81b2b046024ecf31a19ae30d163b5ccc8621daf67a74a57dbb62a4
+Payload SHA-256: 54460392e4dbe4535a811d9cfd24ba31c7328519412ec199f75c4d19277c3d5d
 
 <!-- BEGIN SOURCE SLICE -->
-posable VM discovery is ambiguous: $($vms.Name -join ', ')." }
+-and $configured.PSObject.Properties['OperationMaximumsSeconds']) {
+        foreach ($property in $configured.OperationMaximumsSeconds.PSObject.Properties) {
+            $key = [string]$property.Name
+            if ($operation.Contains($key) -and $key -ne 'guestBootstrap') { $operation[$key] = [int]$property.Value }
+            elseif ($key -eq 'guestBootstrap' -and [int]$property.Value -ne $derivedGuestBootstrap) { throw "guestBootstrap must equal the sum of GuestBootstrapComponentsSeconds ($derivedGuestBootstrap); refusing an un-derived timeout override." }
+        }
+    }
+    $derivedPrerequisites = (6 * ([int]$operation.dependencyProbe + [int]$operation.dependencyHealth + [int]$operation.dependencyInstall + [int]$operation.dependencyVerification)) + [int]$operation.windowsCapability + [int]$operation.windowsFeature + (4 * [int]$operation.multipassConfiguration) + (3 * [int]$operation.vscodeExtension)
+    if ($configured -and $configured.OperationMaximumsSeconds -and $configured.OperationMaximumsSeconds.PSObject.Properties['prerequisites'] -and [int]$configured.OperationMaximumsSeconds.prerequisites -ne $derivedPrerequisites) { throw "prerequisites must equal the sum of its finite operation maxima ($derivedPrerequisites); refusing an un-derived timeout override." }
+    $operation.prerequisites = $derivedPrerequisites
+    foreach ($entry in $operation.GetEnumerator()) {
+        if ([int]$entry.Value -le 0) { throw "Deadline policy operation maximum '$($entry.Key)' must be positive." }
+    }
+
+    $stage = [ordered]@{
+        compute = [int]$operation.multipassLaunch + [int]$operation.multipassReadiness + [int]$operation.payloadTransfer + [int]$operation.guestBootstrap + [int]$operation.sshAndMarker
+        vault = [int]$operation.vaultSnapshot + [int]$operation.multipassLaunch + [int]$operation.multipassReadiness + [int]$operation.payloadTransfer + [int]$operation.vaultBootstrap + [int]$operation.sshAndMarker
+    }
+    $desktop = [int]$operation.bootstrap + [int]$operation.preflight + [int]$operation.prerequisites + [int]$operation.windowsTailscale + [int]$operation.hostAgent + $stage.compute + [int]$operation.tailscale + [int]$operation.shortcuts + [int]$operation.export + [int]$operation.verification
+    $laptop = [int]$operation.bootstrap + [int]$operation.preflight + [int]$operation.prerequisites + [int]$operation.windowsTailscale + [int]$operation.hostAgent + $stage.compute + $stage.vault + ([int]$operation.tailscale * 2) + [int]$operation.vaultClient + [int]$operation.shortcuts + [int]$operation.export + [int]$operation.verification
+    $transactionMargin = 600
+    $observerMargin = 600
+    $fullReleaseMargin = 600
+    $exactProofMargin = 600
+    $maxRebootBoundaries = 3
+    $observerNoProgress = 1800
+    if ($configured) {
+        foreach ($name in @('TransactionTerminalizationMarginSeconds','ObserverTerminalizationMarginSeconds','FullReleaseTerminalizationMarginSeconds','ExactProofTerminalizationMarginSeconds','MaxRebootBoundaries','ObserverNoProgressBudgetSeconds')) {
+            if ($configured.PSObject.Properties[$name]) {
+                $value = [int]$configured.$name
+                if ($value -le 0 -and $name -ne 'MaxRebootBoundaries') { throw "Deadline policy '$name' must be positive." }
+                if ($name -eq 'TransactionTerminalizationMarginSeconds') { $transactionMargin = $value }
+                elseif ($name -eq 'ObserverTerminalizationMarginSeconds') { $observerMargin = $value }
+                elseif ($name -eq 'FullReleaseTerminalizationMarginSeconds') { $fullReleaseMargin = $value }
+                elseif ($name -eq 'ExactProofTerminalizationMarginSeconds') { $exactProofMargin = $value }
+                elseif ($name -eq 'MaxRebootBoundaries') { $maxRebootBoundaries = $value }
+                elseif ($name -eq 'ObserverNoProgressBudgetSeconds') { $observerNoProgress = $value }
+            }
+        }
+    }
+    if ($maxRebootBoundaries -lt 1) { throw 'Deadline policy must permit at least one bounded reboot boundary.' }
+    $transaction = [ordered]@{ Desktop = $desktop + $transactionMargin; Laptop = $laptop + $transactionMargin }
+    $observerAbsoluteByRole = [ordered]@{
+        Desktop = [int]$transaction.Desktop + $observerMargin
+        Laptop = [int]$transaction.Laptop + $observerMargin
+    }
+    # Keep legacy scalar consumers conservative: the scalar is the largest
+    # role budget, while lifecycle callers select the exact role value.
+    $productTransaction = [int]($transaction.Values | Measure-Object -Maximum).Maximum
+    $observerAbsolute = [int]($observerAbsoluteByRole.Values | Measure-Object -Maximum).Maximum
+    $wpfAction = 600
+    $rebootBoundary = 420
+    $servicingSettlement = 180
+    $interactiveDesktop = 300
+    $checkpointPolling = 900
+    $lifecycleInner = $wpfAction + (($maxRebootBoundaries + 1) * $observerAbsolute) + ($maxRebootBoundaries * ($wpfAction + $rebootBoundary + $servicingSettlement + $interactiveDesktop)) + $checkpointPolling + $transactionMargin
+    $fullReleaseInner = $lifecycleInner
+    $fullReleaseWatchdog = $fullReleaseInner + $fullReleaseMargin
+    $exactProofInner = 300 + $fullReleaseInner
+    $exactProofOuter = $exactProofInner + $exactProofMargin
+    $maximumOuter = 90000
+    if ($configured -and $configured.PSObject.Properties['MaximumExactProofOuterWatchdogSeconds']) { $maximumOuter = [int]$configured.MaximumExactProofOuterWatchdogSeconds }
+    $policy = [pscustomobject][ordered]@{
+        version = $script:DeadlinePolicyVersion
+        operationMaximumsSeconds = [pscustomobject]$operation
+        guestBootstrapComponentsSeconds = [pscustomobject]$guestBootstrapComponents
+        stageBudgetsSeconds = [pscustomobject]$stage
+        transactionBudgetsSeconds = [pscustomobject]$transaction
+        transactionTerminalizationMarginSeconds = $transactionMargin
+        observerTerminalizationMarginSeconds = $observerMargin
+        fullReleaseTerminalizationMarginSeconds = $fullReleaseMargin
+        exactProofTerminalizationMarginSeconds = $exactProofMargin
+        observerNoProgressBudgetSeconds = $observerNoProgress
+        observerAbsoluteBudgetSeconds = $observerAbsolute
+        observerAbsoluteBudgetsSeconds = [pscustomobject]$observerAbsoluteByRole
+        productTransactionAbsoluteBudgetSeconds = $productTransaction
+        productLifecycleInnerBoundSeconds = $lifecycleInner
+        fullReleaseInnerBoundSeconds = $fullReleaseInner
+        fullReleaseWatchdogSeconds = $fullReleaseWatchdog
+        exactProofInnerBoundSeconds = $exactProofInner
+        exactProofOuterWatchdogSeconds = $exactProofOuter
+        maximumExactProofOuterWatchdogSeconds = $maximumOuter
+        maxRebootBoundaries = $maxRebootBoundaries
+        inequalities = [ordered]@{
+            stageDominatesOperations = ([int]$stage.compute -gt ([int]$operation.guestBootstrap + [int]$operation.sshAndMarker))
+            stageDominatesComputeOperations = ([int]$stage.compute -gt ([int]$operation.guestBootstrap + [int]$operation.sshAndMarker))
+            stageDominatesVaultOperations = ([int]$stage.vault -gt ([int]$operation.vaultBootstrap + [int]$operation.sshAndMarker))
+            observerDominatesDesktopTransaction = ([int]$observerAbsoluteByRole.Desktop -gt [int]$transaction.Desktop)
+            observerDominatesLaptopTransaction = ([int]$observerAbsoluteByRole.Laptop -gt [int]$transaction.Laptop)
+            observerDominatesTransaction = (($observerAbsoluteByRole.Values | Where-Object { $_ -gt 0 }).Count -eq 2 -and [int]$observerAbsoluteByRole.Desktop -gt [int]$transaction.Desktop -and [int]$observerAbsoluteByRole.Laptop -gt [int]$transaction.Laptop)
+            fullReleaseDominatesObserver = ($fullReleaseWatchdog -gt $observerAbsolute)
+            exactProofDominatesInner = ($exactProofOuter -gt $exactProofInner)
+        }
+    }
+    Assert-HarnessBudgetPolicy -Policy $policy | Out-Null
+    return $policy
+}
+
+function Assert-HarnessBudgetPolicy {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][psobject]$Policy)
+    foreach ($name in @('productTransactionAbsoluteBudgetSeconds','observerAbsoluteBudgetSeconds','fullReleaseWatchdogSeconds','exactProofInnerBoundSeconds','exactProofOuterWatchdogSeconds')) {
+        if (-not $Policy.PSObject.Properties[$name] -or [int]$Policy.$name -le 0) { throw "Deadline policy is missing a finite positive '$name'." }
+    }
+    foreach ($role in @('Desktop','Laptop')) {
+        if (-not $Policy.observerAbsoluteBudgetsSeconds.PSObject.Properties[$role]) { throw "Deadline policy is missing observer absolute budget for $role." }
+        if ([int]$Policy.observerAbsoluteBudgetsSeconds.$role -le [int]$Policy.transactionBudgetsSeconds.$role) { throw "Invalid deadline hierarchy: observer absolute must strictly exceed $role transaction." }
+    }
+    if ([int]$Policy.observerAbsoluteBudgetSeconds -lt [int]$Policy.observerAbsoluteBudgetsSeconds.Laptop) { throw 'Legacy observer absolute scalar must conservatively cover Laptop.' }
+    if ([int]$Policy.fullReleaseWatchdogSeconds -le [int]$Policy.observerAbsoluteBudgetSeconds) { throw 'Invalid deadline hierarchy: FullRelease watchdog must strictly exceed observer absolute.' }
+    if ([int]$Policy.exactProofOuterWatchdogSeconds -le [int]$Policy.exactProofInnerBoundSeconds) { throw 'Invalid deadline hierarchy: exact-proof outer watchdog must strictly exceed its calculated inner bound.' }
+    if ([int]$Policy.exactProofOuterWatchdogSeconds -gt [int]$Policy.maximumExactProofOuterWatchdogSeconds) { throw "Deadline policy requires exact-proof outer watchdog $($Policy.exactProofOuterWatchdogSeconds)s, exceeding configured maximum $($Policy.maximumExactProofOuterWatchdogSeconds)s; refusing to truncate." }
+    return $true
+}
+
+function Get-DeadlineRemainingSeconds {
+    param([Parameter(Mandatory)][datetime]$DeadlineUtc, [datetime]$NowUtc = ([datetime]::UtcNow))
+    [int][math]::Floor(($DeadlineUtc.ToUniversalTime() - $NowUtc.ToUniversalTime()).TotalSeconds)
+}
+
+function Get-EffectiveDeadlineTimeoutSeconds {
+    param([Parameter(Mandatory)][int]$OperationMaximumSeconds, [Parameter(Mandatory)][datetime]$DeadlineUtc, [datetime]$NowUtc = ([datetime]::UtcNow))
+    if ($OperationMaximumSeconds -le 0) { throw 'Operation maximum must be positive.' }
+    $remaining = Get-DeadlineRemainingSeconds -DeadlineUtc $DeadlineUtc -NowUtc $NowUtc
+    if ($remaining -le 0) { throw 'Owning deadline has expired; refusing to start another child operation.' }
+    [math]::Min($OperationMaximumSeconds, $remaining)
+}
+
+Export-ModuleMember -Function Get-HarnessBudgetPolicy,Assert-HarnessBudgetPolicy,Get-DeadlineRemainingSeconds,Get-EffectiveDeadlineTimeoutSeconds
+
+```
+
+
+## FILE: automation/release-e2e/modules/HostSafety.psm1
+
+SHA256: 9dcbac957f5aa060f0441eb8d372e39a190aab54cbf9af718a05368e567cb6c1 | Bytes: 8910 | Git mode: 100644
+
+```
+Set-StrictMode -Version Latest
+
+function Get-DisposableVm {
+    param([string]$VmName,[string]$Pattern = 'DevFleet-E2E-*')
+    if ($VmName) { $vms = @(Get-VM -Name $VmName -ErrorAction Stop) } else { $vms = @(Get-VM | Where-Object { $_.Name -like $Pattern }) }
+    if ($vms.Count -eq 0) { throw 'No ownership-scoped disposable DevFleet-E2E VM was found.' }
+    if ($vms.Count -gt 1 -and -not $VmName) { throw "Disposable VM discovery is ambiguous: $($vms.Name -join ', ')." }
     $vm = $vms[0]
     if ($vm.Name -notlike 'DevFleet-E2E-*') { throw "Refusing non-disposable VM target: $($vm.Name)" }
     $vm
@@ -526,106 +670,4 @@ function Get-DevFleetE2EPreLogonPolicyState {
     param([Parameter(Mandatory)][System.Management.Automation.Runspaces.PSSession]$Session)
     Invoke-Command -Session $Session -ScriptBlock {
         $policyPath='SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System';$winlogonPath='SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
-        $policyKey=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($policyPath,$false);$winlogonKey=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($winlogonPath,$false)
-        try {
-            function Read-PolicyValue($Key,[string]$Name) {
-                $present=$false;$kind=$null;$raw=$null
-                if($Key -and @($Key.GetValueNames()) -contains $Name){$present=$true;$kind=[string]$Key.GetValueKind($Name);$raw=$Key.GetValue($Name,$null,[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)}
-                $text=if($present -and $null -ne $raw){[string]$raw}else{$null};$hash=$null
-                if($present){$bytes=[Text.Encoding]::Unicode.GetBytes([string]$text);$sha=[Security.Cryptography.SHA256]::Create();try{$hash=(($sha.ComputeHash($bytes)|ForEach-Object{$_.ToString('x2')})-join '')}finally{$sha.Dispose()}}
-                [ordered]@{present=$present;registryValueKind=$kind;utf16CodeUnitCount=if($present){$text.Length}else{$null};stringLength=if($present){$text.Length}else{$null};isZeroLength=if($present){$text.Length -eq 0}else{$null};isOnlyNulCharacters=if($present){$text.Length -gt 0 -and $text -notmatch '[^\x00]'}else{$null};isOnlyWhitespace=if($present){$text.Length -gt 0 -and $text -notmatch '\S'}else{$null};utf16leSha256=$hash;rawValue=$raw}
-            }
-            $caption=Read-PolicyValue $policyKey 'LegalNoticeCaption';$text=Read-PolicyValue $policyKey 'LegalNoticeText';$winlogonCaption=Read-PolicyValue $winlogonKey 'LegalNoticeCaption';$winlogonText=Read-PolicyValue $winlogonKey 'LegalNoticeText'
-            $source='unknown';$sourceEvidence=[ordered]@{localPolicyRegistryPath=($null -ne $policyKey);winlogonRegistryPath=($null -ne $winlogonKey);domainPolicyRegistryPath=$false;policyManagerPath=$false}
-            $domainKey=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SOFTWARE\Policies\Microsoft\Windows\System',$false);try{if($domainKey -and (@($domainKey.GetValueNames())|Where-Object{$_ -in @('LegalNoticeCaption','LegalNoticeText')}).Count -gt 0){$source='domain-or-mdm-policy-registry';$sourceEvidence.domainPolicyRegistryPath=$true}}finally{if($domainKey){$domainKey.Dispose()}}
-            [ordered]@{caption=$caption;text=$text;winlogonCaption=$winlogonCaption;winlogonText=$winlogonText;source=$source;sourceEvidence=$sourceEvidence}
-        } finally {if($policyKey){$policyKey.Dispose()};if($winlogonKey){$winlogonKey.Dispose()}}
-    }
-}
-
-function Get-DevFleetE2EPreLogonPolicyStructure {
-    param([Parameter(Mandatory)][psobject]$State)
-    function Get-PolicyMember($Node,[string]$Name) {
-        if($null -eq $Node) { return $null }
-        if($Node -is [System.Collections.IDictionary]) { return $Node[$Name] }
-        $property=$Node.PSObject.Properties[$Name]
-        if($property){ return $property.Value }
-        return $null
-    }
-    function Get-PolicyStructure($Node) {
-        [ordered]@{
-            present=[bool](Get-PolicyMember $Node 'present')
-            registryValueKind=[string](Get-PolicyMember $Node 'registryValueKind')
-            utf16CodeUnitCount=Get-PolicyMember $Node 'utf16CodeUnitCount'
-            stringLength=Get-PolicyMember $Node 'stringLength'
-            isZeroLength=Get-PolicyMember $Node 'isZeroLength'
-            isOnlyNulCharacters=Get-PolicyMember $Node 'isOnlyNulCharacters'
-            isOnlyWhitespace=Get-PolicyMember $Node 'isOnlyWhitespace'
-            utf16leSha256=[string](Get-PolicyMember $Node 'utf16leSha256')
-        }
-    }
-    [ordered]@{caption=Get-PolicyStructure (Get-PolicyMember $State 'caption');text=Get-PolicyStructure (Get-PolicyMember $State 'text');winlogonCaption=Get-PolicyStructure (Get-PolicyMember $State 'winlogonCaption');winlogonText=Get-PolicyStructure (Get-PolicyMember $State 'winlogonText');source=[string](Get-PolicyMember $State 'source');sourceEvidence=Get-PolicyMember $State 'sourceEvidence'}
-}
-
-function Remove-DevFleetE2EPreLogonPolicy {
-    param([Parameter(Mandatory)][System.Management.Automation.Runspaces.PSSession]$Session)
-    $mutation=Invoke-Command -Session $Session -ScriptBlock {
-        $entries=@([ordered]@{label='PoliciesSystem';path='SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'},[ordered]@{label='Winlogon';path='SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'})
-        $before=@{};$after=@{}
-        foreach($entry in $entries){
-            $key=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($entry.path,$true);if($null -eq $key){throw "Pre-logon policy mutation could not open allowlisted path $($entry.label)."}
-            try{foreach($name in @('LegalNoticeCaption','LegalNoticeText')){$was=@($key.GetValueNames()) -contains $name;$before["$($entry.label):$name"]=$was;$key.DeleteValue($name,$false);$after["$($entry.label):$name"]=(@($key.GetValueNames()) -contains $name);if($after["$($entry.label):$name"]){throw "Pre-logon policy mutation remained for $($entry.label):$name."}}}finally{$key.Dispose()}
-        }
-        $changed=@();foreach($entry in $entries){if([bool]$before["$($entry.label):LegalNoticeCaption"] -or [bool]$before["$($entry.label):LegalNoticeText"]){$changed+=$entry.label}}
-        [ordered]@{changedPathLabels=@($changed|Select-Object -Unique);captionPresent=[bool]$after['PoliciesSystem:LegalNoticeCaption'];textPresent=[bool]$after['PoliciesSystem:LegalNoticeText'];winlogonCaptionPresent=[bool]$after['Winlogon:LegalNoticeCaption'];winlogonTextPresent=[bool]$after['Winlogon:LegalNoticeText']}
-    }
-    $changed=@($mutation.changedPathLabels)
-    if($changed.Count -gt 0){
-        $barrier=Invoke-DevFleetE2ERegistryPersistenceBarrier -Session $Session -PathLabel $changed
-        $check=Get-DevFleetE2EPreLogonPolicyState -Session $Session
-        if([bool]$check.caption.present -or [bool]$check.text.present -or [bool]$check.winlogonCaption.present -or [bool]$check.winlogonText.present){throw 'Pre-logon policy suppression was not durable after registry persistence barrier.'}
-        [ordered]@{captionPresent=$false;textPresent=$false;winlogonCaptionPresent=$false;winlogonTextPresent=$false;changedPathLabels=$changed;registryPersistenceBarrier=$barrier;preLogonPolicySuppressed=$true;preLogonPolicySuppressionPersisted=$true}
-    }else{
-        [ordered]@{captionPresent=[bool]$mutation.captionPresent;textPresent=[bool]$mutation.textPresent;winlogonCaptionPresent=[bool]$mutation.winlogonCaptionPresent;winlogonTextPresent=[bool]$mutation.winlogonTextPresent;changedPathLabels=@();registryPersistenceBarrier=$false;preLogonPolicySuppressed=$false;preLogonPolicySuppressionPersisted=$false}
-    }
-}
-
-function Restore-DevFleetE2EPreLogonPolicy {
-    param([Parameter(Mandatory)][System.Management.Automation.Runspaces.PSSession]$Session,[Parameter(Mandatory)][psobject]$Baseline)
-    Invoke-Command -Session $Session -ScriptBlock {
-        param($saved)
-        function Get-Node($Root,[string]$Name){if($Root -is [System.Collections.IDictionary]){return $Root[$Name]};$property=$Root.PSObject.Properties[$Name];if($property){return $property.Value};return $null}
-        function Get-Field($Node,[string]$Name){if($Node -is [System.Collections.IDictionary]){return $Node[$Name]};$property=$Node.PSObject.Properties[$Name];if($property){return $property.Value};return $null}
-        $entries=@([ordered]@{path='SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System';node='caption';name='LegalNoticeCaption'},[ordered]@{path='SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System';node='text';name='LegalNoticeText'},[ordered]@{path='SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon';node='winlogonCaption';name='LegalNoticeCaption'},[ordered]@{path='SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon';node='winlogonText';name='LegalNoticeText'})
-        foreach($entry in $entries){$node=Get-Node $saved $entry.node;$key=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($entry.path,$true);if($null -eq $key){throw "Pre-logon policy restore could not open allowlisted path $($entry.path)."};try{$present=[bool](Get-Field $node 'present');if($present){$raw=Get-Field $node 'rawValue';$kind=[Microsoft.Win32.RegistryValueKind]::Parse([Microsoft.Win32.RegistryValueKind],[string](Get-Field $node 'registryValueKind'));$key.SetValue($entry.name,$raw,$kind)}else{$key.DeleteValue($entry.name,$false)};$actualPresent=@($key.GetValueNames()) -contains $entry.name;if($actualPresent -ne $present){throw "Pre-logon policy restore did not verify $($entry.name)."}}finally{$key.Dispose()}}
-        [pscustomobject]@{status='PASS'}
-    } -ArgumentList $Baseline | Out-Null
-    $barrier=Invoke-DevFleetE2ERegistryPersistenceBarrier -Session $Session -PathLabel @('PoliciesSystem','Winlogon')
-    $check=Get-DevFleetE2EPreLogonPolicyState -Session $Session
-    function Get-NodeMember($Node,[string]$Name){if($Node -is [System.Collections.IDictionary]){return $Node[$Name]};$property=$Node.PSObject.Properties[$Name];if($property){return $property.Value};return $null}
-    foreach($name in @('caption','text','winlogonCaption','winlogonText')){
-        $expected=Get-NodeMember $Baseline $name;$actual=Get-NodeMember $check $name;$expectedPresent=[bool](Get-NodeMember $expected 'present');$actualPresent=[bool](Get-NodeMember $actual 'present');$expectedKind=[string](Get-NodeMember $expected 'registryValueKind');$actualKind=[string](Get-NodeMember $actual 'registryValueKind');$expectedHash=[string](Get-NodeMember $expected 'utf16leSha256');$actualHash=[string](Get-NodeMember $actual 'utf16leSha256');$expectedLength=[int](Get-NodeMember $expected 'stringLength');$actualLength=[int](Get-NodeMember $actual 'stringLength')
-        if($expectedPresent -ne $actualPresent -or $expectedKind -cne $actualKind -or $expectedHash -cne $actualHash -or $expectedLength -ne $actualLength){throw "Pre-logon policy baseline was not restored for $name."}
-    }
-    $structure=Get-DevFleetE2EPreLogonPolicyStructure -State $check
-    $structure['registryPersistenceBarrier']=$barrier
-    $structure['preLogonPolicyRestorationPersisted']=$true
-    $structure
-}
-
-function Set-DevFleetE2EWinlogonAutologon {
-    param([Parameter(Mandatory)][System.Management.Automation.Runspaces.PSSession]$Session,[Parameter(Mandatory)][securestring]$CredentialPassword)
-    $writeResult=Invoke-Command -Session $Session -ScriptBlock {
-        param([securestring]$securePassword)
-        if ([string]$env:COMPUTERNAME -cne 'DEVFLEET-E2E-01') { throw 'Native Winlogon arm reached an unexpected guest computer.' }
-        $path='SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
-        $key=$null;$ptr=[IntPtr]::Zero; $plain=$null
-        try {
-            if ($null -eq $securePassword) { throw 'Native Winlogon arm received no in-memory canonical credential.' }
-            $ptr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
-            $plain=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
-            $key=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($path,$true)
-            if($null -eq $key){throw 'Native Winlogon arm could not open the allowlisted Winlogon key.'}
-            $key.SetValue('DefaultUserName','E2EAdmin',[Microsoft.Win32.RegistryValueKind]::String)
-            $key.SetValue('DefaultDomainName',[string]$env:COMPUTERNAME,[Microsoft.Win32.RegistryValueKind]::String)
-            $key.SetValue('AutoAdminLogon','1',[Microsoft.Win32.RegistryValueKind]::
+        $policyKey=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($policyPath,$false);$winlogonKey=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($

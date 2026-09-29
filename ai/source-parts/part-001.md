@@ -1,12 +1,12 @@
 # DevFleet source part 001
 
 Full-source UTF-8 byte interval [0, 46500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: b89555980546ebc32a22e0392046d895cfe51a6ca02740a74dc31709eb50890d
+Payload SHA-256: a6bc51c542f24803a7409d5ed0de4634439c52305abfcdd8b58ba2aee0280068
 
 <!-- BEGIN SOURCE SLICE -->
 # DevFleet complete tracked source text
 
-Provenance original certification source HEAD 78e92440a51717f09f92676cba9c0b2e67d7b06c.
+Provenance original certification source HEAD e9068790ae9b0f55baa25b258791cb14c9e7091f.
 Original byte hashes/modes are in ORIGINAL-SOURCE-INVENTORY.json.
 Binary files are indexed and included as real files in the repository.
 

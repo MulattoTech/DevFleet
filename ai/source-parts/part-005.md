@@ -1,10 +1,70 @@
 # DevFleet source part 005
 
 Full-source UTF-8 byte interval [186000, 232500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: ad421e0746c22bf23c76e80bbbfa3959a96d67682f41f4cb70e0fb52597a5bdd
+Payload SHA-256: 63c92e9189bd7a8f9042d5887a0760246715f15c36533624ee5613aee93a81e6
 
 <!-- BEGIN SOURCE SLICE -->
-n'],
+            'Report is not bound to exact L1 and predecessor CLEAN')
+    for key in ('diskReadOnlyVerified', 'dismounted', 'diskFileSizeUnchanged',
+                'diskWriteTimeUnchanged', 'ledgerUnchanged'):
+        require(report.get(key) is True, 'Unverified read-only source chain: ' + key)
+    require(report.get('guestAuthenticationAttempted') is False and report.get('vmStarted') is False,
+            'Report is not a read-only offline inspection')
+    require(report.get('securityLogSha256') == expected_log_sha256.lower(),
+            'Guest Security log hash is not independently pinned')
+
+    require(ledger.get('policyId') == 'DF-FRESH-CERTIFICATION-20260926-R2',
+            'Wrong R2 journal')
+    attempts = [a for a in ledger.get('attempts', []) if isinstance(a, dict)
+                and a.get('runId') == run_id]
+    require(len(attempts) == 1 and ledger.get('activeRunId') is None,
+            'Run is missing, ambiguous, or still active')
+    attempt = attempts[0]
+    require(attempt.get('operation') == 'diagnostic' and attempt.get('state') == 'TERMINAL'
+            and attempt.get('certificationCredit') is False
+            and attempt.get('classification') == 'E2E_CREDENTIAL_REJECTED_BY_EXACT_CLEAN',
+            'Run is not the terminal historical-source diagnostic')
+    start, end = instant(attempt.get('reservedUtc')), instant(attempt.get('terminalUtc'))
+    require(start < end, 'Invalid terminal window')
+
+    lab = readiness.get('lab') or {}
+    auth = readiness.get('liveGuestAuth') or {}
+    admission = readiness.get('admission') or {}
+    require(lab.get('l1Id') == EXACT_VM and lab.get('cleanId') == EXACT_CLEAN,
+            'Readiness lab identity differs')
+    require(admission.get('runId') == run_id and admission.get('operation') == 'diagnostic',
+            'Readiness admission differs')
+    require(auth.get('attempted') is True and auth.get('cleanRestored') is True
+            and auth.get('connected') is False and auth.get('finalL1State') == 'Off'
+            and auth.get('failureClass') == 'System.Management.Automation.Remoting.PSDirectException'
+            and 'E2E_CREDENTIAL_REJECTED_BY_EXACT_CLEAN' in readiness.get('blockers', [])
+            and readiness.get('certificationCredit') is False,
+            'Readiness did not record the exact generic authentication rejection')
+
+    matching = []
+    events = report.get('events')
+    require(isinstance(events, list) and events, 'Missing guest failure events')
+    record_ids = set()
+    for event in events:
+        require(isinstance(event, dict) and type(event.get('recordId')) is int
+                and event['recordId'] > 0 and event['recordId'] not in record_ids,
+                'Malformed or duplicate event record identity')
+        record_ids.add(event['recordId'])
+        require(event.get('eventId') == 4625 and STATUS.fullmatch(str(event.get('status', '')))
+                and STATUS.fullmatch(str(event.get('subStatus', ''))),
+                'Malformed guest failure event')
+        event_time = instant(event.get('timeUtc'))
+        if start <= event_time <= end and event.get('targetUser') == EXACT_ACCOUNT \
+                and event.get('computer', '').lower() == EXACT_COMPUTER.lower():
+            matching.append(event)
+    require(len(matching) == 1, 'Missing or conflicting exact account failures in run window')
+    event = matching[0]
+    status, substatus = event['status'].lower(), event['subStatus'].lower()
+    return {
+        'schemaVersion': 1, 'scope': 'SUPPLEMENTARY_HISTORICAL_DIAGNOSIS',
+        'runId': run_id, 'classification': CLASSIFICATIONS.get((status, substatus),
+                                                               'UNKNOWN_AUTH_FAILURE'),
+        'historicalLedgerClassification': attempt['classification'],
         'guestAuthenticated': False, 'certificationCredit': False,
         'reportSha256': actual_hash, 'securityLogSha256': expected_log_sha256.lower(),
         'vmId': EXACT_VM, 'parentCheckpointId': EXACT_CLEAN,
@@ -739,119 +799,54 @@ if __name__ == '__main__':
 ```
 
 
-## FILE: .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair_successor.py
+## FILE: .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_r2_repair5_successor.py
 
-SHA256: e4624eddff607aadd50ce32915a0bb55387ab3b7b73b2cff2dfdaf1aff54ca49 | Bytes: 6408 | Git mode: 100644
+SHA256: a37284a6cac41353a88de659b7c6f0f61bda3b0f1c2f2413a4c5c066e313df58 | Bytes: 4734 | Git mode: 100644
 
 ```
-"""Fail-closed accounting for one proposed R2 repair successor; no lab access."""
+"""VM-free admission checks for a separately authorized fifth repair successor."""
 import importlib.util
+import json
 import pathlib
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 
+
 HERE = pathlib.Path(__file__).resolve().parent
+NATIVE_REPAIR4 = (pathlib.Path(r'C:\Users\Dylan\Documents\Codex\2026-08-12\ex-2\work'
+                               r'\DevFleet-v1.2.13-development') / 'audit' / 'agent-memory'
+                  / 'attempts' / 'DF-FRESH-CERTIFICATION-20260926-R2-REPAIR-4' / 'ledger.json')
 
 
-class RepairSuccessorTests(unittest.TestCase):
+class Repair5SuccessorTests(unittest.TestCase):
     def setUp(self):
+        if not NATIVE_REPAIR4.is_file():
+            self.skipTest('Original native repair-4 ledger is unavailable')
         spec = importlib.util.spec_from_file_location('fresh_attempts', HERE / 'fresh_attempts.py')
         self.journal = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.journal)
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = pathlib.Path(temp.name)
-        self.base_auth = self.root / 'base-authorization.md'
-        self.r2_auth = self.root / 'r2-authorization.md'
-        self.repair_auth = self.root / 'repair-authorization.md'
-        for path, content in ((self.base_auth, 'base owner authorization'),
-                              (self.r2_auth, 'R2 owner authorization'),
-                              (self.repair_auth, 'separate bounded repair authorization')):
-            path.write_text(content, encoding='utf-8')
-        self.base = self.root / 'base.json'
-        self.r2 = self.root / 'r2.json'
-        self.snapshot = self.root / 'r2-terminal-snapshot.json'
-        self.repair = self.root / 'r2-repair.json'
-        self.journal.initialize(self.base, self.base_auth, [])
-        self.journal.initialize(self.r2, self.r2_auth, [self.base], self.journal.POLICY_ID + '-R2')
+        self.live = self.root / 'repair4-live.json'
+        self.snapshot = self.root / 'repair4-terminal-snapshot.json'
+        self.live.write_bytes(NATIVE_REPAIR4.read_bytes())
+        self.snapshot.write_bytes(self.live.read_bytes())
+        self.authorization = self.root / 'new-owner-approval.md'
+        self.authorization.write_text('distinct prospective fifth repair authorization', encoding='utf-8')
+        self.successor = self.root / 'repair5.json'
+
+    def initialize(self):
+        return self.journal.initialize(self.successor, self.authorization,
+                                       [self.snapshot, self.live], self.journal.REPAIR5_ID)
 
     def request(self, operation, run_id):
         return {'runId': run_id, 'operation': operation,
                 'owner': {'pid': 1234, 'startUtc': datetime.now(timezone.utc).isoformat()},
-                'tuple': {'repositoryHead': 'a' * 40}, 'entrypoint': 'native-test.ps1',
-                'entrypointSha256': 'b' * 64, 'arguments': [],
-                'changedCondition': 'bounded repair successor behavioral test',
+                'tuple': {'repositoryHead': 'a' * 40},
+                'entrypoint': 'reviewed-native-test.ps1', 'entrypointSha256': 'b' * 64,
+                'arguments': [], 'changedCondition': 'complete generation-5 native binding before qualification',
                 'deadlineUtc': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
 
-    def initialize(self):
-        self.snapshot.write_bytes(self.r2.read_bytes())
-        return self.journal.initialize(self.repair, self.repair_auth,
-                                       [self.snapshot, self.r2], self.journal.REPAIR_ID)
-
-    def succeed(self, operation, number):
-        request = self.request(operation, f'repair-{number}')
-        self.journal.reserve(self.repair, request)
-        expected = dict(self.journal.REPAIR_SEQUENCE)[operation]
-        self.journal.finish(self.repair, request['runId'], request['owner'], 0,
-                            expected, [])
-
-    def test_exact_finite_limits_preserve_r2(self):
-        before = self.r2.read_bytes()
-        status = self.initialize()
-        self.assertEqual(self.r2.read_bytes(), before)
-        self.assertEqual(self.snapshot.read_bytes(), before)
-        self.assertEqual(status['remaining'], {'standard-token': 1, 'laptop-proof': 1,
-                                               'desktop-proof': 1, 'fullrelease': 1,
-                                               'diagnostic': 1, 'maintenance': 0,
-                                               'build-sign': 0})
-        for operation in ('maintenance', 'build-sign'):
-            with self.assertRaises(ValueError):
-                self.journal.reserve(self.repair, self.request(operation, operation), dry_run=True)
-        with self.assertRaises(ValueError):
-            self.journal.reserve(self.repair, self.request('diagnostic', 'out-of-order'), dry_run=True)
-        self.succeed('standard-token', 1)
-        self.journal.reserve(self.repair, self.request('diagnostic', 'repair-diagnostic'))
-        self.assertEqual(self.journal.status(self.repair)['remaining']['diagnostic'], 0)
-        self.assertIsNone(self.journal.status(self.r2)['active'])
-
-    def test_missing_or_reused_authorization_or_wrong_predecessors_rejected(self):
-        self.snapshot.write_bytes(self.r2.read_bytes())
-        for predecessors, authorization in (([self.snapshot], self.repair_auth),
-                                            ([self.r2, self.r2], self.repair_auth),
-                                            ([self.snapshot, self.r2], self.r2_auth)):
-            with self.assertRaises(ValueError):
-                self.journal.initialize(self.repair, authorization,
-                                        predecessors, self.journal.REPAIR_ID)
-
-    def test_snapshot_and_live_r2_must_match_and_remain_pinned(self):
-        self.snapshot.write_bytes(self.r2.read_bytes() + b' ')
-        with self.assertRaises(ValueError):
-            self.journal.initialize(self.repair, self.repair_auth,
-                                    [self.snapshot, self.r2], self.journal.REPAIR_ID)
-        self.initialize()
-        self.r2.write_bytes(self.r2.read_bytes() + b' ')
-        with self.assertRaisesRegex(ValueError, 'predecessor changed'):
-            self.journal.status(self.repair)
-
-    def test_existing_successor_cannot_reset_or_refund(self):
-        self.initialize()
-        for number, operation in enumerate(('standard-token', 'diagnostic',
-                                            'laptop-proof', 'desktop-proof')):
-            self.succeed(operation, number)
-        request = self.request('fullrelease', 'repair-fullrelease')
-        self.journal.reserve(self.repair, request)
-        self.journal.finish(self.repair, request['runId'], request['owner'], 2,
-                            'BLOCKED', [])
-        with self.assertRaises(ValueError):
-            self.journal.initialize(self.repair, self.repair_auth,
-                                    [self.snapshot, self.r2], self.journal.REPAIR_ID)
-        with self.assertRaises(ValueError):
-            self.journal.reserve(self.repair,
-                                 self.request('fullrelease', 'repair-second'), dry_run=True)
-
-    def test_failed_qualification_blocks_later_phases(self):
-        self.initialize()
-        request = self.request('standard-token', 'repair-standard-failed')
-        self.journal.reserve(self.repair, request)
-        self.journal.finish(sel
+    def test_exact_allowance_and

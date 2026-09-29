@@ -1,10 +1,269 @@
 # DevFleet source part 061
 
 Full-source UTF-8 byte interval [2790000, 2836500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: c792bbe5d09018656d381e90a75028e097b0c548968459c9c868f142d9a8df8f
+Payload SHA-256: 4e1148a422d789c24cfda38308e056aa5a91da69ca7d770d1f9d5b6c2242cb29
 
 <!-- BEGIN SOURCE SLICE -->
-gComparison.OrdinalIgnoreCase)
+EET MANAGED");
+        ledger.ManagedVsCodeFiles.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Code", "User", "devfleet-settings.reference.jsonc"));
+        ImportWindowsIntegrationOwnership(ledger);
+        OwnedPathSafety.ValidateLedger(ledger);
+        return ledger;
+    }
+
+    private static void RemoveOwnedControlPlane(InstallLedger ledger, Action<string>? progress)
+    {
+        new WindowsOwnedIntegrationCleanupService().Cleanup(ledger, progress);
+        RemoveManagedSshAndVsCode(ledger, progress);
+        ScheduleSelfRemoval(progress);
+        foreach (var file in ledger.FilesInstalled.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var full = Path.GetFullPath(file);
+            if (OwnedPathSafety.IsUnderOwnedRoot(full, AppPaths.InstallRoot) && File.Exists(full)) { File.Delete(full); progress?.Invoke($"Removed proven-owned program file: {full}"); }
+        }
+        foreach (var shortcut in ledger.ShortcutsCreated.Where(File.Exists)) { File.Delete(shortcut); progress?.Invoke($"Removed DevFleet shortcut: {shortcut}"); }
+        var shortcutRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "DevFleet");
+        if (Directory.Exists(shortcutRoot) && !Directory.EnumerateFileSystemEntries(shortcutRoot).Any()) Directory.Delete(shortcutRoot);
+        foreach (var reg in ledger.RegistryEntriesCreated) RemoveExactRegistryEntry(reg, progress);
+    }
+
+    private static IReadOnlyList<(string Name, Action Action)> BuildMonotonicCleanupStages(InstallLedger ledger, Action<string>? progress)
+    {
+        return [
+            ("stop-and-remove-owned-integrations", () => new WindowsOwnedIntegrationCleanupService().Cleanup(ledger, progress)),
+            ("remove-managed-ssh-and-vscode-integrations", () => RemoveManagedSshAndVsCode(ledger, progress)),
+            ("schedule-owned-self-removal", () => ScheduleSelfRemoval(progress)),
+            ("remove-owned-program-files", () => InstallerEngine.RemoveLedgerFiles(ledger, progress)),
+            ("remove-owned-shortcuts", () => { foreach (var shortcut in ledger.ShortcutsCreated.Distinct(StringComparer.OrdinalIgnoreCase)) { if (File.Exists(shortcut)) File.Delete(shortcut); if (File.Exists(shortcut)) throw new IOException($"Owned shortcut remains after cleanup: {shortcut}"); progress?.Invoke($"Removed and verified DevFleet shortcut: {shortcut}"); } }),
+            ("remove-owned-registry-entries", () => { foreach (var reg in ledger.RegistryEntriesCreated.Distinct(StringComparer.OrdinalIgnoreCase)) RemoveExactRegistryEntry(reg, progress); })
+        ];
+    }
+
+    private static void RemoveManagedSshAndVsCode(InstallLedger ledger, Action<string>? progress)
+    {
+        var sshConfig = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "config");
+        if (File.Exists(sshConfig))
+        {
+            var text = File.ReadAllText(sshConfig);
+            foreach (var marker in ledger.ManagedSshMarkers)
+            {
+                var parts = marker.Split('|', 2); if (parts.Length != 2) continue;
+                var pattern = $@"(?ms)^\s*{Regex.Escape(parts[0])}\s*$.*?^\s*{Regex.Escape(parts[1])}\s*$\r?\n?";
+                text = Regex.Replace(text, pattern, "");
+            }
+            File.WriteAllText(sshConfig, text);
+            var remaining = File.ReadAllText(sshConfig);
+            foreach (var marker in ledger.ManagedSshMarkers)
+            {
+                var parts = marker.Split('|', 2); if (parts.Length != 2) continue;
+                if (remaining.Contains(parts[0], StringComparison.Ordinal) || remaining.Contains(parts[1], StringComparison.Ordinal))
+                    throw new IOException($"Managed SSH marker remains after cleanup: {sshConfig}");
+            }
+            progress?.Invoke($"Removed and verified only the DevFleet managed SSH block: {sshConfig}");
+        }
+        foreach (var file in ledger.ManagedVsCodeFiles)
+        {
+            var expectedRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Code", "User") + Path.DirectorySeparatorChar;
+            var full = Path.GetFullPath(file); if (OwnedPathSafety.IsUnderOwnedRoot(full, expectedRoot) && Path.GetFileName(full).Equals("devfleet-settings.reference.jsonc", StringComparison.OrdinalIgnoreCase))
+            {
+                if (File.Exists(full)) File.Delete(full);
+                if (File.Exists(full)) throw new IOException($"Managed VS Code file remains after cleanup: {full}");
+                progress?.Invoke($"Removed and verified exact DevFleet VS Code reference file: {full}");
+            }
+        }
+    }
+
+    private static void ScheduleSelfRemoval(Action<string>? progress)
+    {
+        var current = Environment.ProcessPath;
+        var target = Path.Combine(AppPaths.InstallRoot, "DevFleet.Setup.exe");
+        if (string.IsNullOrWhiteSpace(current) || !Path.GetFullPath(current).Equals(Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)) return;
+        var helperDirectory = Path.Combine(AppPaths.CacheRoot, "SelfRemoval");
+        SecureStagingService.EnsureDirectory(helperDirectory);
+        var helper = Path.Combine(helperDirectory, $"DevFleet-Setup-Remove-{Guid.NewGuid():N}.ps1");
+        using (var stream = new FileStream(helper, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+        using (var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false)))
+        {
+            writer.Write("param([Parameter(Mandatory)][string]$Target,[Parameter(Mandatory)][string]$Helper)\n$ErrorActionPreference='Stop'\nStart-Sleep -Milliseconds 500\nif(Test-Path -LiteralPath $Target -PathType Leaf){Remove-Item -LiteralPath $Target -Force}\nif(Test-Path -LiteralPath $Helper -PathType Leaf){Remove-Item -LiteralPath $Helper -Force}\n");
+            writer.Flush();
+            stream.Flush(true);
+        }
+        var powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
+        if (!File.Exists(powershell)) throw new FileNotFoundException("Windows PowerShell self-removal helper is unavailable.", powershell);
+        var start = new ProcessStartInfo { FileName = powershell, UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden };
+        foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", helper, "-Target", target, "-Helper", helper }) start.ArgumentList.Add(argument);
+        if (Process.Start(start) is null) throw new InvalidOperationException("Unable to start the protected self-removal helper.");
+        progress?.Invoke("Immediate exact self-removal helper scheduled from protected installer state with argument-bound paths.");
+    }
+
+    private static void RemoveExactRegistryEntry(string key, Action<string>? progress)
+    {
+        const string prefix = "HKLM\\";
+        if (!key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) { progress?.Invoke($"Preserved non-machine registry entry outside owned scope: {key}"); return; }
+        var subkey = key[prefix.Length..];
+        using var root = Microsoft.Win32.Registry.LocalMachine;
+        try
+        {
+            root.DeleteSubKeyTree(subkey, throwOnMissingSubKey: false);
+            using var remaining = root.OpenSubKey(subkey);
+            if (remaining is not null) throw new IOException($"Owned registry entry remains after cleanup: {key}");
+            progress?.Invoke($"Removed and verified exact registry ownership: {key}");
+        }
+        catch (UnauthorizedAccessException ex) { throw new IOException($"Registry cleanup blocked by access policy: {key}", ex); }
+    }
+
+    private static void InstallStableLauncher(InstallLedger ledger, Action<string>? progress)
+    {
+        var current = Environment.ProcessPath; if (string.IsNullOrWhiteSpace(current) || !File.Exists(current)) return;
+        Directory.CreateDirectory(AppPaths.InstallRoot);
+        var target = Path.Combine(AppPaths.InstallRoot, "DevFleet.Setup.exe");
+        if (!Path.GetFullPath(current).Equals(Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)) File.Copy(current, target, true);
+        ledger.FilesInstalled.Add(target); ledger.OwnedResources.Add(new OwnedResource("launcher", "DevFleet Setup", "DevFleetLedger", target)); progress?.Invoke($"Stable launcher target verified: {target}");
+    }
+
+    private static void CreateInstalledAppEntry(InstallLedger ledger)
+    {
+        using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\DevFleet");
+        if (key is null) return;
+        var exe = Path.Combine(AppPaths.InstallRoot, "DevFleet.Setup.exe");
+        key.SetValue("DisplayName", "DevFleet"); key.SetValue("Publisher", "M-TechLabs"); key.SetValue("DisplayVersion", PayloadManifest.DevFleetVersion); key.SetValue("InstallLocation", AppPaths.InstallRoot); key.SetValue("UninstallString", $"\"{exe}\" --maintenance --action uninstall");
+        ledger.RegistryEntriesCreated.Add(@"HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\DevFleet");
+    }
+
+    private static void CreateShortcuts(InstallLedger ledger, Action<string>? progress)
+    {
+        var exe = Path.Combine(AppPaths.InstallRoot, "DevFleet.Setup.exe");
+        if (!File.Exists(exe)) return;
+        var start = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "DevFleet"); Directory.CreateDirectory(start);
+        foreach (var item in new[] { ("DevFleet", "--maintenance"), ("DevFleet Maintenance", "--maintenance") })
+        {
+            var path = Path.Combine(start, item.Item1 + ".lnk");
+            try
+            {
+                var type = Type.GetTypeFromProgID("WScript.Shell"); if (type is null) continue;
+                dynamic shell = Activator.CreateInstance(type)!; dynamic shortcut = shell.CreateShortcut(path); shortcut.TargetPath = exe; shortcut.Arguments = item.Item2; shortcut.WorkingDirectory = AppPaths.InstallRoot; shortcut.Description = "DevFleet installed launcher"; shortcut.Save(); ledger.ShortcutsCreated.Add(path); progress?.Invoke($"Shortcut target verified: {path} -> {exe} {item.Item2}");
+            }
+            catch { progress?.Invoke($"Shortcut COM creation unavailable in this environment: {path}"); }
+        }
+    }
+}
+
+```
+
+
+## FILE: installer-source/DevFleet.Setup/Services/InstallerServices.cs
+
+SHA256: 776f7362ad7aa5255cbcf6d8c44d2858193e2f00968bc342cffee45365e8a4f8 | Bytes: 44467 | Git mode: 100644
+
+```
+using System.Formats.Tar;
+using System.IO.Compression;
+using System.IO;
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Text.Json;
+using Microsoft.Win32;
+
+namespace DevFleet.Setup;
+
+internal static class TestEnvironment
+{
+    private static bool _enabled;
+    private static string? _selfTestRoot;
+    public static bool IsTestProcess => _enabled;
+    internal static void EnableForTests() => _enabled = true;
+
+    internal static void EnableForSelfTest(string root)
+    {
+        var full = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var temp = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var prefix = "DevFleet-Setup-SelfTest-";
+        var leaf = Path.GetFileName(full);
+        var parent = Directory.GetParent(full)?.FullName?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!string.Equals(parent, temp, StringComparison.OrdinalIgnoreCase) ||
+            !leaf.StartsWith(prefix, StringComparison.Ordinal) ||
+            !Guid.TryParseExact(leaf[prefix.Length..], "N", out _))
+            throw new InvalidDataException("Self-test root must be a fresh DevFleet GUID directory directly beneath the process temporary directory.");
+        _enabled = true;
+        _selfTestRoot = full;
+    }
+
+    internal static bool IsAuthorizedSelfTestPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(_selfTestRoot)) return false;
+        var full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return full.Equals(_selfTestRoot, StringComparison.OrdinalIgnoreCase) ||
+               full.StartsWith(_selfTestRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static void ClearSelfTestRoot() => _selfTestRoot = null;
+}
+
+public static class AppPaths
+{
+    private static string? _selfTestInstallRoot;
+    private static string? _selfTestStateRoot;
+    public static string InstallRoot => _selfTestInstallRoot ?? (TestEnvironment.IsTestProcess ? Environment.GetEnvironmentVariable("DEVFLEET_SETUP_INSTALL_ROOT") : null)
+        ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "M-TechLabs", "DevFleet");
+    public static string StateRoot => _selfTestStateRoot ?? (TestEnvironment.IsTestProcess ? Environment.GetEnvironmentVariable("DEVFLEET_SETUP_STATE_ROOT") : null)
+        ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "M-TechLabs", "DevFleet");
+    public static string InstallerRoot => Path.Combine(StateRoot, "Installer");
+    public static string CacheRoot => Path.Combine(StateRoot, "InstallerCache");
+    public static string LogsRoot => Path.Combine(StateRoot, "Logs");
+    public static string LedgerPath => Path.Combine(InstallerRoot, "install-state.json");
+
+    internal static void ConfigureSelfTestRoots(string installRoot, string stateRoot)
+    {
+        _selfTestInstallRoot = Path.GetFullPath(installRoot);
+        _selfTestStateRoot = Path.GetFullPath(stateRoot);
+    }
+}
+
+public sealed class InstallLedger
+{
+    public string InstallerVersion { get; set; } = PayloadManifest.InstallerVersion;
+    public string DevFleetVersion { get; set; } = PayloadManifest.DevFleetVersion;
+    public string InstallTimestampUtc { get; set; } = DateTime.UtcNow.ToString("O");
+    public string Role { get; set; } = "Standalone / unknown";
+    public string PackageSha256 { get; set; } = PayloadManifest.PayloadSha256;
+    public string InstallationGeneration { get; set; } = "";
+    public string WindowsIntegrationOwnershipPath { get; set; } = "";
+    public List<OwnedWindowsIntegration> WindowsIntegrations { get; set; } = [];
+    public List<string> FilesInstalled { get; set; } = [];
+    public List<string> ShortcutsCreated { get; set; } = [];
+    public List<string> RegistryEntriesCreated { get; set; } = [];
+    public List<OwnedResource> OwnedResources { get; set; } = [];
+    public List<string> PrerequisitesInstalledByDevFleet { get; set; } = [];
+    public List<string> PreExistingPrerequisites { get; set; } = [];
+    public List<string> ManagedSshMarkers { get; set; } = [];
+    public List<string> ManagedVsCodeFiles { get; set; } = [];
+    public List<string> ResolvedPrerequisitePaths { get; set; } = [];
+}
+
+public static class OwnedPathSafety
+{
+    // Only primitive rights which can mutate a directory are security-relevant
+    // here.  WriteData/CreateFiles and AppendData/CreateDirectories are enum
+    // aliases; each is represented once.  Composite Modify and FullControl are
+    // intentionally absent: their primitive mutation bits still intersect this
+    // mask and are therefore rejected, while read-only ACEs cannot be promoted.
+    public const FileSystemRights PrimitiveMutationRights =
+        FileSystemRights.WriteData |
+        FileSystemRights.AppendData |
+        FileSystemRights.WriteExtendedAttributes |
+        FileSystemRights.WriteAttributes |
+        FileSystemRights.Delete |
+        FileSystemRights.DeleteSubdirectoriesAndFiles |
+        FileSystemRights.ChangePermissions |
+        FileSystemRights.TakeOwnership;
+
+    public static bool HasPrimitiveMutationRights(FileSystemRights rights)
+        => (rights & PrimitiveMutationRights) != 0;
+
+    public static bool IsBroadUntrustedPrincipal(string identity)
+        => identity.Equals("Everyone", StringComparison.OrdinalIgnoreCase)
             || identity.EndsWith("\\Users", StringComparison.OrdinalIgnoreCase)
             || identity.Equals("NT AUTHORITY\\Authenticated Users", StringComparison.OrdinalIgnoreCase);
 
@@ -456,270 +715,4 @@ public static class RecoveryService
         AddText(zip, "recovery-manifest.json", JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
         AddText(zip, "install-state.json", JsonSerializer.Serialize(StateStore.ReadLedger(), new JsonSerializerOptions { WriteIndented = true }));
         AddText(zip, "project-inventory.json", JsonSerializer.Serialize(new ProjectDiscoveryService().Discover(), new JsonSerializerOptions { WriteIndented = true }));
-        AddText(zip, "runtime-inventory.json", JsonSerializer.Serialize(new { provider = "Multipass", note = "Runtime inventory is identity-only; no VM is deleted by recovery creation." }, new JsonSerializerOptions { WriteIndented = true }));
-        AddText(zip, "backup-catalog.json", JsonSerializer.Serialize(new { verifiedUtc = DateTime.UtcNow.ToString("O"), backups = new ProjectDiscoveryService().Discover().Select(new BackupVerificationService().Verify).Select(x => new { x.ProjectId, x.BackupId, x.ArchivePath, x.ExpectedSha256, x.RestoreEligible, x.IsVerified }) }, new JsonSerializerOptions { WriteIndented = true }));
-        AddText(zip, "dependency-inventory.json", JsonSerializer.Serialize(new { offlinePayload = false, note = "Third-party prerequisite installers are not bundled in this candidate." }, new JsonSerializerOptions { WriteIndented = true }));
-        AddText(zip, "managed-integrations.json", JsonSerializer.Serialize(new { ssh = "managed blocks listed by ledger/source", vscode = "managed aliases listed by ledger/source", services = "DevFleet-owned service/task inventory required before removal", firewall = "exact DevFleet-owned rule inventory required before removal" }, new JsonSerializerOptions { WriteIndented = true }));
-        AddText(zip, "recovery-instructions.txt", "Restore only to an explicitly selected DevFleet-owned destination after verifying identity and hashes. This package intentionally excludes raw private keys, tokens, passwords, and reusable credentials.\n");
-        progress?.Invoke($"Recovery package created: {path}");
-        return path;
-    }
-
-    private static void AddText(ZipArchive zip, string name, string value)
-    {
-        using var writer = new StreamWriter(zip.CreateEntry(name).Open()); writer.Write(value);
-    }
-}
-
-public static class ControlPlaneSnapshotService
-{
-    public static string Capture(string transactionId, Action<string>? progress = null)
-    {
-        var source = AppPaths.InstallRoot;
-        var target = Path.Combine(AppPaths.StateRoot, "Recovery", $"control-plane-{transactionId}");
-        if (Directory.Exists(target)) Directory.Delete(target, true);
-        if (Directory.Exists(source)) CopyDirectory(source, target);
-        progress?.Invoke($"Transactional control-plane snapshot captured: {target}");
-        return target;
-    }
-
-    public static void Restore(string snapshot, Action<string>? progress = null)
-    {
-        if (!Directory.Exists(snapshot)) throw new DirectoryNotFoundException($"Control-plane rollback snapshot is missing: {snapshot}");
-        if (Directory.Exists(AppPaths.InstallRoot)) Directory.Delete(AppPaths.InstallRoot, true);
-        CopyDirectory(snapshot, AppPaths.InstallRoot);
-        progress?.Invoke("Transactional control-plane snapshot restored after failed replacement.");
-    }
-
-    public static void Delete(string snapshot)
-    {
-        if (Directory.Exists(snapshot)) Directory.Delete(snapshot, true);
-    }
-
-    private static void CopyDirectory(string source, string target)
-    {
-        Directory.CreateDirectory(target);
-        foreach (var file in Directory.EnumerateFiles(source)) File.Copy(file, Path.Combine(target, Path.GetFileName(file)), true);
-        foreach (var directory in Directory.EnumerateDirectories(source)) CopyDirectory(directory, Path.Combine(target, Path.GetFileName(directory)));
-    }
-}
-
-public sealed class InstallerLogger
-{
-    private readonly string _path = Path.Combine(AppPaths.LogsRoot, $"setup-{DateTime.UtcNow:yyyyMMdd-HHmmss}.log");
-    public string LogPath => _path;
-    public InstallerLogger() => Directory.CreateDirectory(AppPaths.LogsRoot);
-    public void Write(string message)
-    {
-        var safe = message.Replace("Bearer ", "Bearer [REDACTED]", StringComparison.OrdinalIgnoreCase);
-        File.AppendAllText(_path, $"{DateTime.UtcNow:O} {safe}{Environment.NewLine}");
-    }
-}
-
-public static class InstallerEngine
-{
-    public static string Execute(InstallerPlan plan, string role, Action<string>? progress = null) => LifecycleEngine.Execute(plan, role, progress);
-
-    internal static void RemoveLedgerFiles(InstallLedger ledger, Action<string>? progress)
-    {
-        var root = Path.GetFullPath(AppPaths.InstallRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        foreach (var file in ledger.FilesInstalled.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            var full = Path.GetFullPath(file);
-            if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(full)) continue;
-            File.Delete(full);
-            if (File.Exists(full)) throw new IOException($"Owned file remains after cleanup: {full}");
-            progress?.Invoke($"Removed and verified owned file: {full}");
-        }
-    }
-
-    private static void RemoveOwnedProjectResources(InstallLedger ledger, Action<string>? progress)
-    {
-        foreach (var resource in ledger.OwnedResources.Where(r => !string.IsNullOrWhiteSpace(r.ProjectId) && r.OwnerProof.Equals("DevFleetLedger", StringComparison.OrdinalIgnoreCase)))
-        {
-            if (string.IsNullOrWhiteSpace(resource.Path)) { progress?.Invoke($"Manual review required: owned project resource {resource.Identity} has no path."); continue; }
-            var full = Path.GetFullPath(resource.Path);
-            var root = Path.GetPathRoot(full);
-            if (string.IsNullOrWhiteSpace(root) || full.TrimEnd(Path.DirectorySeparatorChar).Equals(root.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase) || full.TrimEnd(Path.DirectorySeparatorChar).Equals(Path.GetFullPath(AppPaths.StateRoot).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
-            {
-                progress?.Invoke($"Manual review required: refusing broad project target {full}.");
-                continue;
-            }
-            if (Directory.Exists(full)) Directory.Delete(full, true);
-            else if (File.Exists(full)) File.Delete(full);
-            progress?.Invoke($"Removed independently proven owned project resource: {resource.Identity} ({full})");
-        }
-    }
-
-    private static void CreateInstalledAppEntry(InstallLedger ledger)
-    {
-        using var key = Registry.LocalMachine.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\DevFleet");
-        if (key is null) return;
-        var exe = ledger.FilesInstalled.FirstOrDefault(p => Path.GetFileName(p).Equals("DevFleet.Setup.exe", StringComparison.OrdinalIgnoreCase)) ?? Environment.ProcessPath ?? "DevFleet.Setup.exe";
-        key.SetValue("DisplayName", "DevFleet"); key.SetValue("Publisher", "M-TechLabs"); key.SetValue("DisplayVersion", PayloadManifest.DevFleetVersion); key.SetValue("InstallLocation", AppPaths.InstallRoot); key.SetValue("UninstallString", $"\"{exe}\" --maintenance --action uninstall");
-        ledger.RegistryEntriesCreated.Add(@"HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\DevFleet");
-    }
-
-    private static void InstallStableLauncher(InstallLedger ledger, Action<string>? progress)
-    {
-        var current = Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(current) || !File.Exists(current)) return;
-        Directory.CreateDirectory(AppPaths.InstallRoot);
-        var target = Path.Combine(AppPaths.InstallRoot, "DevFleet.Setup.exe");
-        if (!Path.GetFullPath(current).Equals(Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)) File.Copy(current, target, true);
-        ledger.FilesInstalled.Add(target); ledger.OwnedResources.Add(new OwnedResource("launcher", "DevFleet Setup", "DevFleetLedger", target)); progress?.Invoke($"Stable installed launcher recorded: {target}");
-    }
-
-    private static void CreateShortcuts(InstallLedger ledger, Action<string>? progress)
-    {
-        var exe = Environment.ProcessPath; if (string.IsNullOrWhiteSpace(exe)) return;
-        var start = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "DevFleet"); Directory.CreateDirectory(start);
-        foreach (var item in new[] { ("DevFleet", "--maintenance"), ("DevFleet Maintenance", "--maintenance") })
-        {
-            var path = Path.Combine(start, item.Item1 + ".lnk");
-            try
-            {
-                var type = Type.GetTypeFromProgID("WScript.Shell"); if (type is null) continue;
-                dynamic shell = Activator.CreateInstance(type)!; dynamic shortcut = shell.CreateShortcut(path); shortcut.TargetPath = exe; shortcut.Arguments = item.Item2; shortcut.WorkingDirectory = Path.GetDirectoryName(exe); shortcut.Description = "DevFleet maintenance and workspace tools"; shortcut.Save(); ledger.ShortcutsCreated.Add(path); progress?.Invoke($"Shortcut created: {path}");
-            }
-            catch { progress?.Invoke($"Shortcut creation unavailable; the stable maintenance entry remains available from Installed Apps."); }
-        }
-    }
-}
-
-```
-
-
-## FILE: installer-source/DevFleet.Setup/app.manifest
-
-SHA256: 78330ef35e9a02705b4d58730ee1483bda62e9998894873b2d4b497e9524c266 | Bytes: 427 | Git mode: 100644
-
-```
-<?xml version="1.0" encoding="utf-8"?>
-<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
-  <assemblyIdentity version="1.4.1.0" name="MTechLabs.DevFleet.Setup" />
-  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
-    <security>
-      <requestedPrivileges>
-        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
-      </requestedPrivileges>
-    </security>
-  </trustInfo>
-</assembly>
-
-```
-
-
-## FILE: installer-source/DevFleet.Setup/dependencies.json
-
-SHA256: b939c07de544806e87b8324c050a1a3aff6baac8b36fac57201d917ea8810b46 | Bytes: 19463 | Git mode: 100644
-
-```
-{
-  "schemaVersion": 1,
-  "manifestVersion": "1.2.13",
-  "supportedProfile": "Windows 11 Pro x64, Internet-connected, administrator/UAC, hardware virtualization",
-  "dependencies": [
-    {
-      "id": "powershell7",
-      "displayName": "PowerShell 7",
-      "classification": "CORE_REQUIRED",
-      "required": true,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["bootstrap", "installer"],
-      "minimumSupportedVersion": "7.4.0",
-      "maximumMajor": 7,
-      "executableProbes": ["pwsh.exe"],
-      "registryProbes": ["HKLM:\\SOFTWARE\\Microsoft\\PowerShellCore\\InstalledVersions"],
-      "appPathsProbes": ["pwsh.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\PowerShell\\7\\pwsh.exe", "%LocalAppData%\\Microsoft\\powershell\\pwsh.exe"],
-      "wingetPackageId": "Microsoft.PowerShell",
-      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/PowerShell/PowerShell/releases/latest", "allowedHosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"], "assetRegex": "^PowerShell-7\\.[0-9.]+-win-x64\\.msi$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".msi"] },
-      "silentInstallArguments": ["/qn", "/norestart"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["-NoProfile", "-NonInteractive", "-Command", "$PSVersionTable.PSVersion.ToString()"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, App Paths, registry and known locations",
-      "postInstallVersionVerification": "pwsh version >= minimum and major policy"
-    },
-    {
-      "id": "git",
-      "displayName": "Git",
-      "classification": "CORE_REQUIRED",
-      "required": true,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["source-control", "guest-bootstrap"],
-      "minimumSupportedVersion": "2.40.0",
-      "maximumMajor": null,
-      "executableProbes": ["git.exe"],
-      "registryProbes": ["HKLM:\\SOFTWARE\\GitForWindows", "HKCU:\\SOFTWARE\\GitForWindows"],
-      "appPathsProbes": ["git.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\Git\\cmd\\git.exe", "%LocalAppData%\\Programs\\Git\\cmd\\git.exe"],
-      "wingetPackageId": "Git.Git",
-      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/git-for-windows/git/releases/latest", "allowedHosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"], "assetRegex": "^Git-[0-9.]+-64-bit\\.exe$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Johannes Schindelin, O=Johannes Schindelin, L=Bruehl, C=DE"], "extensions": [".exe"] },
-      "silentInstallArguments": ["/VERYSILENT", "/NORESTART", "/MERGETASKS=!runcode"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, App Paths, registry and known locations",
-      "postInstallVersionVerification": "git --version >= minimum"
-    },
-    {
-      "id": "openssh-client",
-      "displayName": "OpenSSH Client",
-      "classification": "CORE_REQUIRED",
-      "required": true,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["ssh", "guest-bootstrap"],
-      "minimumSupportedVersion": "8.1.0",
-      "maximumMajor": null,
-      "executableProbes": ["ssh.exe"],
-      "registryProbes": [],
-      "appPathsProbes": ["ssh.exe"],
-      "knownVendorInstallLocations": ["%WINDIR%\\System32\\OpenSSH\\ssh.exe"],
-      "wingetPackageId": null,
-      "directOfficialVendorResolver": { "type": "windows-capability", "metadataUri": "https://learn.microsoft.com/windows-server/administration/openssh/openssh_install_firstuse", "allowedHosts": ["learn.microsoft.com"], "assetRegex": null },
-      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".exe"] },
-      "silentInstallArguments": [],
-      "rebootSemantics": "capability-dependent",
-      "versionProbe": { "arguments": ["-V"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, App Paths, capability and known location",
-      "postInstallVersionVerification": "ssh -V >= minimum"
-    },
-    {
-      "id": "multipass",
-      "displayName": "Multipass",
-      "classification": "CORE_REQUIRED",
-      "required": true,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["virtualization", "ubuntu-provisioning"],
-      "minimumSupportedVersion": "1.13.0",
-      "maximumMajor": 1,
-      "executableProbes": ["multipass.exe"],
-      "registryProbes": ["HKLM:\\SOFTWARE\\Canonical\\Multipass"],
-      "appPathsProbes": ["multipass.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\Multipass\\bin\\multipass.exe", "%ProgramFiles(x86)%\\Multipass\\bin\\multipass.exe"],
-      "wingetPackageId": "Canonical.Multipass",
-      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/canonical/multipass/releases/latest", "allowedHosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"], "assetRegex": "(?i)^multipass.*win.*64.*\\.(msi|exe)$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=CANONICAL GROUP LIMITED, O=CANONICAL GROUP LIMITED, L=London, C=GB"], "installedExecutableTrust": "signed-installer-locked-path", "extensions": [".msi", ".exe"] },
-      "silentInstallArguments": ["/quiet", "/norestart"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["version"], "regex": "(?m)^multipass\\s+(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, App Paths, registry and known vendor locations",
-      "postInstallVersionVerification": "multipass version and multipass list both succeed"
-    },
-    {
-      "id": "virtualization-backend",
-      "displayName": "Virtualization backend",
-      "classification": "CORE_REQUIRED",
-      "required": true,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["multipass"],
-      "minimumSupportedVersion": "0.0.0",
-      "maximumMajor": null,
-      "executableProbes": ["systeminfo.exe"],
-      "registryProbes": [],
-      "appPathsProbes": [],
-      "knownVendorInstallLocations": [],
-      "wingetPackageId": null,
-      "directOfficialVendorResolver": { "type": "windows
+        AddText(zip, "runtime-inventory.json", JsonSerializer.Serialize(new { provider = "Multipass", note = "Runtime inventory is identity-only; no VM is deleted by recovery creation." }, new JsonSerializerOptions { WriteIndented = true })

@@ -1,10 +1,260 @@
 # DevFleet source part 047
 
 Full-source UTF-8 byte interval [2139000, 2185500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 4eaf0f00cd1afa2b6374b02c79ee606792d17b6ccffbd778ad08bdc3c6b597ea
+Payload SHA-256: 2830b1690ec00ce4145b420c8589ce120409f54a62504f42cbf69f8ea6b489fc
 
 <!-- BEGIN SOURCE SLICE -->
-false;if(`$childPid){try{`$null=Get-Process -Id `$childPid -ErrorAction Stop;`$alive=`$true}catch{}}`n[pscustomobject]@{timedOut=`$timedOut;childPid=`$childPid;alive=`$alive}|ConvertTo-Json -Compress"
+ -eq 'control-plane-recovery-failure' -and $failure -cnotmatch 'controlled Multipass service recovery failure'){throw 'Control-plane recovery failure lost its primary cause'}
+        if($case -eq 'wrong-host' -and $state.calls.Count){throw 'Readiness called transport on the physical host'}
+        if($case -eq 'info-timeout-exhausted' -and ($state.mutations -join '|') -cne 'stop|start'){throw 'Timeout scenario did not retain exact nested VM recovery'}
+        if($case -eq 'info-timeout-exhausted' -and $failure -cnotmatch 'READINESS_TRACE:.*inventory=PASS.*hyperVBefore=Running.*infoTimeouts=[1-9]'){throw 'Timeout failure did not retain sanitized readiness trace'}
+        if($case -eq 'info-timeout-exhausted' -and $failure -cmatch 'Last info:|IPv4:|10\.0\.0\.2'){throw 'Timeout failure leaked raw nested info output'}
+        $checks++;Write-Host "PASS $case"
+    }
+}finally{$env:COMPUTERNAME=$originalComputerName}
+Write-Host "PASS $checks shared nested readiness cases; all VM/transport I/O mocked; no VM mutation"
+
+```
+
+
+## FILE: automation/release-e2e/tests/Test-NestedPrimaryReadinessFreshness.ps1
+
+SHA256: 0412bd5863b8cafdedd17735f3b9f0db6cd55e2609b99b6678c5390fcde03d93 | Bytes: 4202 | Git mode: 100644
+
+```
+# VM-free regression: pre-restart readiness cannot qualify post-restart state.
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'modules/executors/Invoke-RealProductPhase.psm1') -Force -DisableNameChecking
+$readyBlock=Get-DevFleetNestedPrimaryReadinessScriptBlock
+$originalComputerName=$env:COMPUTERNAME
+$failures=[Collections.Generic.List[string]]::new()
+try {
+    $env:COMPUTERNAME='DEVFLEET-E2E-UNIT'
+    foreach($case in @('stopped-stale-info','deadline-before-cycle','deadline-after-stop','late-info-ready')){
+        $state=@{case=$case;clock=[datetime]'2026-09-29T00:00:00Z';infoCount=0;mutations=[Collections.Generic.List[string]]::new()}
+        $probe={param($Arguments,$TimeoutSeconds)
+            if($Arguments[0] -eq 'list'){
+                if($state.case -eq 'deadline-before-cycle'){$state.clock=$state.clock.AddSeconds(30)}
+                $text=if($state.case -eq 'stopped-stale-info'){'{"list":[{"name":"devfleet-primary","state":"Stopped"}]}'}else{'{"list":[{"name":"devfleet-primary","state":"Running"}]}'}
+            }elseif($Arguments[0] -eq 'info'){
+                $state.infoCount++
+                if($state.case -eq 'deadline-before-cycle'){$state.clock=$state.clock.AddSeconds([int]$TimeoutSeconds)}
+                if($state.case -eq 'late-info-ready'){$state.clock=$state.clock.AddSeconds(180)}
+                $text=if($state.case -eq 'late-info-ready' -or ($state.case -eq 'stopped-stale-info' -and $state.infoCount -eq 1)){'IPv4: 10.0.0.2'}else{'IPv4: --'}
+            }else{throw 'Unexpected transport operation in mocked test'}
+            [pscustomobject]@{exitCode=0;stdout=@($text);stderr=@();output=@($text)}
+        }.GetNewClosure()
+        $lookup={param($Name,$Id)
+            if($Name -and $state.case -eq 'deadline-before-cycle'){$state.clock=$state.clock.AddSeconds(60)}
+            [pscustomobject]@{Name='devfleet-primary';Id=[guid]'11111111-1111-1111-1111-111111111111';State='Running'}
+        }.GetNewClosure()
+        $stop={param($Vm)$state.mutations.Add('stop');if($state.case -eq 'deadline-after-stop'){$state.clock=$state.clock.AddSeconds(180)}}.GetNewClosure()
+        $start={param($Vm)$state.mutations.Add('start')}.GetNewClosure()
+        $clock={$state.clock}.GetNewClosure()
+        $sleep={param($Milliseconds)$state.clock=$state.clock.AddMilliseconds([int]$Milliseconds)}.GetNewClosure()
+        $result=$null;$errorText=$null
+        try {
+            $result=& $readyBlock -Primary 'devfleet-primary' -MultipassPath 'C:\Program Files\Multipass\bin\multipass.exe' -NativeProbeProvider $probe -ControlPlaneRecoveryProvider {throw 'Unexpected recovery in mocked test'} -VmLookupProvider $lookup -VmStopProvider $stop -VmStartProvider $start -ClockProvider $clock -SleepProvider $sleep
+        }catch{$errorText=$_.Exception.Message}
+        $problem=$null
+        if($case -eq 'stopped-stale-info'){
+            if($result -and $result.ready){$problem='Pre-restart info was accepted as post-restart readiness'}
+            elseif(-not $errorText -or $state.infoCount -lt 2){$problem='Post-restart readiness was not re-observed'}
+            elseif(($state.mutations -join '|') -cne 'stop|start'){$problem='Exact recovery sequence changed'}
+        }elseif($case -eq 'deadline-after-stop'){
+            if(($state.mutations -join '|') -cne 'stop'){$problem='Nested VM restarted after stop consumed the owner deadline'}
+            elseif(-not $errorText){$problem='Expired owner deadline after stop was not rejected'}
+        }else{
+            if($result -and $result.ready){$problem='Info first observed at the cutoff was accepted as ready'}
+            elseif($state.mutations.Count){$problem='Nested VM mutated after the fixed readiness deadline'}
+            elseif(-not $errorText){$problem='Expired owner deadline was not rejected'}
+        }
+        if($problem){$failures.Add($case+': '+$problem);Write-Host ('FAIL '+$case+': '+$problem)}
+        else{Write-Host ('PASS '+$case)}
+    }
+}finally{$env:COMPUTERNAME=$originalComputerName}
+if($failures.Count){throw ($failures -join '; ')}
+Write-Host 'PASS 4 readiness freshness/deadline cases; all VM/transport I/O mocked; no native credit'
+
+```
+
+
+## FILE: automation/release-e2e/tests/Test-NestedProductScenarioArgumentBinding.ps1
+
+SHA256: b356b9dd336a0eb408be0b54873c850da5da80ced35bdbc070258069ce4b8f07 | Bytes: 4200 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([string]$WorkspaceRoot)
+$ErrorActionPreference='Stop'
+if(-not $WorkspaceRoot){$WorkspaceRoot=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path}else{$WorkspaceRoot=(Resolve-Path -LiteralPath $WorkspaceRoot).Path}
+
+$executorPath=Join-Path $WorkspaceRoot 'automation\release-e2e\modules\executors\Invoke-RealProductPhase.psm1'
+$tarPath=(Resolve-Path (Join-Path $WorkspaceRoot 'outputs\devfleet-v1.2.13.tar.gz')).Path
+$tarHash=(Get-FileHash -LiteralPath $tarPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$runDir=Join-Path ([IO.Path]::GetTempPath()) ('DevFleet-NestedArgumentBinding-'+[guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($runDir)
+
+$observed=$null
+$errorText=$null
+try {
+    Import-Module $executorPath -Force -DisableNameChecking
+    $executorModule=Get-Module Invoke-RealProductPhase | Select-Object -First 1
+    $context=[pscustomobject]@{
+        runId='e2e-fullrelease-current-candidate-20260917T055128Z'
+        phaseId='PERMANENT-DELETE'
+        candidate=[pscustomobject]@{tar=[pscustomobject]@{path=$tarPath;sha256=$tarHash}}
+        vmName='DevFleet-E2E-Win11-01'
+        vmId='84b7d8b8-ee6c-4085-aa29-4b0adc316de2'
+        runDir=$runDir
+        workspaceRoot=$WorkspaceRoot
+    }
+    $probe=& $executorModule {
+        param($Context)
+        function Connect-DevFleetGuest { param([guid]$VmId) [pscustomobject]@{fake=$true} }
+        function Remove-DevFleetGuestSession { param($Session) }
+        function Get-StageIntegrity { param([string]$LocalPath,$Session,[string]$RemotePath) [pscustomobject]@{equal=$true} }
+        function Assert-ExactCandidate { param($Context) $Context.candidate }
+        function Copy-Item { param([string]$LiteralPath,[string]$Destination,[switch]$ToSession,[switch]$Force) }
+        function Invoke-Command {
+            param($Session,[scriptblock]$ScriptBlock,[object[]]$ArgumentList)
+            if($ArgumentList.Count -eq 1){ return $null }
+            $rows=@();$index=0
+            foreach($value in $ArgumentList){
+                $text=[string]$value
+                $rows += [pscustomobject]@{
+                    index=$index
+                    type=if($null -eq $value){'NULL'}else{$value.GetType().FullName}
+                    length=$text.Length
+                    value=$text
+                }
+                $index++
+            }
+            throw ('NESTED_ARGUMENT_CAPTURE:' + ($rows|ConvertTo-Json -Compress))
+        }
+        try {
+            [void](Invoke-NestedProductScenario -Context $Context -Scenario 'permanent-delete')
+            [pscustomobject]@{error='expected the remote argument capture to stop the probe';observed=@()}
+        } catch {
+            $message=$_.Exception.Message
+            $prefix='NESTED_ARGUMENT_CAPTURE:'
+            $captureIndex=$message.IndexOf($prefix,[StringComparison]::Ordinal)
+            if($captureIndex -lt 0){[pscustomobject]@{error=$message;observed=@()}}
+            else {[pscustomobject]@{error=$null;observed=(($message.Substring($captureIndex+$prefix.Length))|ConvertFrom-Json)}}
+        }
+    } $context
+    $observed=@($probe.observed)
+    $errorText=[string]$probe.error
+} finally {
+    if([IO.Directory]::Exists($runDir)){Remove-Item -LiteralPath $runDir -Recurse -Force -ErrorAction SilentlyContinue}
+}
+
+$runIdRow=$observed|Where-Object index -eq 4|Select-Object -First 1
+$phaseRow=$observed|Where-Object index -eq 5|Select-Object -First 1
+$scenarioRow=$observed|Where-Object index -eq 6|Select-Object -First 1
+$expectedRunId=[string]$context.runId
+$pass=([string]::IsNullOrEmpty($errorText) -and $runIdRow -and $phaseRow -and $scenarioRow -and
+    [string]$runIdRow.value -ceq $expectedRunId -and [string]$phaseRow.value -ceq [string]$context.phaseId -and
+    [string]$scenarioRow.value -ceq 'permanent-delete' -and [int]$runIdRow.length -le 128)
+[pscustomobject]@{
+    status=if($pass){'PASS'}else{'FAIL'}
+    passed=if($pass){1}else{0}
+    total=1
+    checks=@([pscustomobject]@{name='remote nested scenario receives scalar validated identity arguments';pass=$pass;observed=$observed;error=$errorText})
+    vmOperations=0
+    candidateBytesChanged=$false
+}|ConvertTo-Json -Depth 8
+if(-not $pass){exit 1}
+
+```
+
+
+## FILE: automation/release-e2e/tests/Test-NestedProductScenarioContract.ps1
+
+SHA256: 81149196fdcd62cf533f9bfa0e72d2fdc7bf6548eaabe677d542ecb417b33b09 | Bytes: 16399 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([string]$WorkspaceRoot)
+$ErrorActionPreference='Stop'
+if(-not $WorkspaceRoot){$WorkspaceRoot=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path}else{$WorkspaceRoot=(Resolve-Path -LiteralPath $WorkspaceRoot).Path}
+
+$executorPath=Join-Path $WorkspaceRoot 'automation\release-e2e\modules\executors\Invoke-RealProductPhase.psm1'
+$driverPath=Join-Path $WorkspaceRoot 'automation\release-e2e\modules\executors\Invoke-ProductLifecycleScenario.py'
+$evidencePath=Join-Path $WorkspaceRoot 'automation\release-e2e\modules\Evidence.psm1'
+$proofPath=Join-Path $WorkspaceRoot 'audit\run-exact-candidate-proof.ps1'
+Import-Module $executorPath -Force -DisableNameChecking
+$executorModule=Get-Module Invoke-RealProductPhase
+Import-Module $evidencePath -Force
+
+$checks=[Collections.Generic.List[object]]::new()
+function Add-Check([string]$Name,[bool]$Pass,[object]$Observed=$null){$checks.Add([pscustomobject]@{name=$Name;pass=$Pass;observed=$Observed})}
+
+$valid=@(
+    [pscustomobject]@{runId='fullrelease-current-candidate-readinessfix2-20260916T004745Z';phaseId='PERMANENT-DELETE';scenario='permanent-delete'},
+    [pscustomobject]@{runId='e2e-20260916T004745Z-12345678';phaseId='DELETE-RESTORE';scenario='delete-restore'}
+)
+foreach($case in $valid){
+    $identity=& $executorModule {param($RunId,$PhaseId,$Scenario)Resolve-DevFleetNestedScenarioIdentity -RunId $RunId -PhaseId $PhaseId -Scenario $Scenario} $case.runId $case.phaseId $case.scenario
+    Add-Check "valid nested identity: $($case.runId)" ($identity.root -ceq "/tmp/devfleet-e2e/$($case.runId)/$($case.phaseId)") $identity.root
+}
+
+$invalidRunIds=@(
+    '',
+    'e2e-short/../escape',
+    'e2e-short\escape',
+    'e2e-short_escape',
+    'e2e-short.escape',
+    'e2e-short--collision',
+    'e2e-short-',
+    'E2E-short-segment',
+    'other-short-segment',
+    ('fullrelease-'+('a'*129)),
+    "fullrelease-valid-segment`n"
+)
+foreach($runId in $invalidRunIds){
+    $rejected=$false
+    try{[void](& $executorModule {param($RunId)Resolve-DevFleetNestedScenarioIdentity -RunId $RunId -PhaseId 'PERMANENT-DELETE' -Scenario 'permanent-delete'} $runId)}catch{$rejected=$true}
+    Add-Check "reject nested RunId: $runId" $rejected
+}
+foreach($phaseId in @('permanent-delete','PERMANENT-DELETE/..','PERMANENT_DELETE','DELETE-RESTORE','-PERMANENT-DELETE','PERMANENT--DELETE')){
+    $rejected=$false
+    try{[void](& $executorModule {param($PhaseId)Resolve-DevFleetNestedScenarioIdentity -RunId 'fullrelease-valid-segment' -PhaseId $PhaseId -Scenario 'permanent-delete'} $phaseId)}catch{$rejected=$true}
+    Add-Check "reject mismatched phase: $phaseId" $rejected
+}
+
+$driverSource=Get-Content -LiteralPath $driverPath -Raw
+$patternMatch=[regex]::Match($driverSource,'RELEASE_RUN_ID_PATTERN\s*=\s*re\.compile\(r"(?<pattern>[^"]+)"\)')
+Add-Check 'Python driver exposes its canonical run identity pattern' $patternMatch.Success
+if($patternMatch.Success){
+    $driverPattern=[regex]::new(('\A(?:{0})\z' -f $patternMatch.Groups['pattern'].Value),[Text.RegularExpressions.RegexOptions]::CultureInvariant)
+    foreach($case in $valid){Add-Check "Python accepts valid RunId: $($case.runId)" $driverPattern.IsMatch($case.runId)}
+    foreach($runId in @($invalidRunIds|Where-Object{$_.Length -le 128})){Add-Check "Python rejects invalid RunId: $runId" (-not $driverPattern.IsMatch($runId))}
+}
+Add-Check 'Python applies length and full-match checks inside structured failure handling' ($driverSource -match 'try:\s*\r?\n\s*require\(len\(args\.run_id\) <= 128 and RELEASE_RUN_ID_PATTERN\.fullmatch\(args\.run_id\)')
+
+$tokens=$null;$parseErrors=$null
+$executorAst=[Management.Automation.Language.Parser]::ParseFile($executorPath,[ref]$tokens,[ref]$parseErrors)
+Add-Check 'executor parses without PowerShell syntax errors' (@($parseErrors).Count -eq 0) (@($parseErrors|ForEach-Object{$_.Message}) -join '; ')
+$wrapperNodes=@($executorAst.FindAll({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Invoke-NestedMultipass'},$true))
+Add-Check 'exactly one nested Multipass wrapper exists' ($wrapperNodes.Count -eq 1) $wrapperNodes.Count
+if($wrapperNodes.Count -eq 1){
+    $runner=[scriptblock]::Create("param(`$Executable,`$Command)`n`$mp=`$Executable`n$($wrapperNodes[0].Extent.Text)`nInvoke-NestedMultipass -Arguments @('-NoProfile','-NonInteractive','-Command',`$Command) -TimeoutSeconds 10")
+    $hash='a'*64
+    $probe=& $runner (Get-Process -Id $PID).Path "[Console]::Out.WriteLine('$hash');[Console]::Error.WriteLine('warning')"
+    Add-Check 'wrapper removes terminal blank rows from stdout' (@($probe.stdout).Count -eq 1 -and [string]$probe.stdout[0] -ceq $hash) (@($probe.stdout) -join '|')
+    Add-Check 'wrapper keeps stderr separate from parseable stdout' (@($probe.stderr).Count -eq 1 -and [string]$probe.stderr[0] -ceq 'warning' -and @($probe.output).Count -eq 2) (@($probe.output) -join '|')
+    $failureProbe=& $runner (Get-Process -Id $PID).Path "[Console]::Error.WriteLine('failure');exit 7"
+    Add-Check 'wrapper preserves nonzero exit and stderr-only output' ($failureProbe.exitCode -eq 7 -and @($failureProbe.stdout).Count -eq 0 -and @($failureProbe.stderr).Count -eq 1) $failureProbe.exitCode
+
+    $windowsPowerShell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $pidMarker=Join-Path ([IO.Path]::GetTempPath()) ('DevFleet-NestedTimeout-'+[guid]::NewGuid().ToString('N')+'.pid')
+    try{
+        $markerLiteral=$pidMarker.Replace("'","''")
+        $childCommand="[IO.File]::WriteAllText('$markerLiteral',[string]`$PID);Start-Sleep -Seconds 30"
+        $childCommandLiteral=$childCommand.Replace("'","''")
+        $ps5Literal=$windowsPowerShell.Replace("'","''")
+        $ps5Body="`$ErrorActionPreference='Stop'`n`$mp='$ps5Literal'`n$($wrapperNodes[0].Extent.Text)`n`$timedOut=`$false`ntry{Invoke-NestedMultipass -Arguments @('-NoProfile','-NonInteractive','-Command','$childCommandLiteral') -TimeoutSeconds 1|Out-Null}catch{`$timedOut=`$_.Exception.Message -like 'Nested Multipass operation timed out*'}`n`$childPid=if(Test-Path -LiteralPath '$markerLiteral'){[int](Get-Content -LiteralPath '$markerLiteral' -Raw)}else{0}`nStart-Sleep -Milliseconds 250`n`$alive=`$false;if(`$childPid){try{`$null=Get-Process -Id `$childPid -ErrorAction Stop;`$alive=`$true}catch{}}`n[pscustomobject]@{timedOut=`$timedOut;childPid=`$childPid;alive=`$alive}|ConvertTo-Json -Compress"
         $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($ps5Body))
         $ps5Raw=@(& $windowsPowerShell -NoProfile -NonInteractive -EncodedCommand $encoded 2>&1|ForEach-Object{[string]$_})
         $ps5Json=@($ps5Raw|Where-Object{$_.TrimStart().StartsWith('{')}|Select-Object -Last 1)
@@ -331,169 +581,4 @@ try {
         $pairingRecord = @($snapshot.records | Where-Object { $_.name -eq [IO.Path]::GetFileName($pairingLog) } | Select-Object -First 1)
         if ($case -eq 'sanitized') {
             $serialized = $snapshot | ConvertTo-Json -Depth 8
-            $pass = $snapshot.status -eq 'OBSERVED' -and $ordinaryRecord.Count -eq 1 -and $ordinaryRecord[0].tail -match 'IndentationError' -and $ordinaryRecord[0].tail.Length -le 16384 -and $pairingRecord.Count -eq 1 -and $pairingRecord[0].tail -match 'PAIRING_STARTED' -and $pairingRecord[0].tail -match 'BROWSER_LAUNCH_ACCEPTED' -and $pairingRecord[0].tail -match 'PAIRING_FAILED' -and $pairingRecord[0].tailOnly -eq $false -and $pairingRecord[0].headLineLimit -eq 32 -and $serialized -notmatch 'private multiword|private-token'
-        } elseif ($case -eq 'stale') {
-            $pass = $snapshot.status -eq 'NO_RECENT_LOG' -and $snapshot.records.Count -eq 0
-        } else {
-            $pass = $snapshot.status -eq 'UNAVAILABLE' -and $snapshot.records.Count -eq 0
-        }
-        if ($case -eq 'timeout') { $pass = $pass -and $watch.Elapsed.TotalSeconds -lt 7 }
-        $results.Add(@{ case = $case; pass = [bool]$pass; status = $snapshot.status; elapsedSeconds = [math]::Round($watch.Elapsed.TotalSeconds, 2) })
-    }
-    @{transactionId=('a'*32);payloadSha256=('b'*64)}|ConvertTo-Json|Set-Content -LiteralPath $active
-    'IndentationError: unexpected indent'|Set-Content -LiteralPath $log
-    $remote={param($s) [pscustomobject]@{terminalFailure=$false;stageMarkers=@();stageMarkerErrors=@();progress=@{checkpointState='';productChildInstances=@()};timestampUtc=[datetime]::UtcNow.ToString('o')}}
-    $marker={param($s)
-        $reads=@(foreach($target in $s.targets){
-            $value=@{schemaVersion=1;transactionId=$s.transactionId;payloadSha256=$s.payloadSha256;sequence=16;component=if($target.kind-eq'vault'){'serviceConfiguration'}else{'serviceAndFirewallFinalization'};state='FAILED';updatedUtc=[datetime]::UtcNow.ToString('o');packageVersion=if($target.kind-eq'vault'){'vault'}else{'1.2.13'};nodeRole=$target.nodeRole}
-            [pscustomobject]@{instanceName=$target.instanceName;text=($value|ConvertTo-Json -Compress);exitCode=0;timedOut=$false}
-        })
-        [pscustomobject]@{status='READS_COLLECTED';error='';inventoryExitCode=0;probedInstances=@($s.targets.instanceName);markerReads=$reads}
-    }
-    foreach($entry in @(@{role='Primary / Desktop';capture='OBSERVED'},@{role='Laptop / Surrogate';capture='OBSERVED'},@{role='Primary / Desktop';capture='UNAVAILABLE'})){
-        $role=$entry.role
-        if($entry.capture-eq'UNAVAILABLE'){@{transactionId=('c'*32);payloadSha256=('b'*64)}|ConvertTo-Json|Set-Content -LiteralPath $active}
-        $observation=& $module {
-            param($Role,$Remote,$Marker,$Since)
-            $p=@{Session='fixture';TransactionId=('a'*32);PayloadSha256=('b'*64);Role=$Role;ExpectedDevFleetVersion='1.2.13';ExpectedInstallerVersion='1.4.1';InvocationStartUtc=$Since;ObservationTimeoutSeconds=20;ExpectedNestedLinuxName='DevFleet-E2E-Linux-01';RemoteObservationProvider=$Remote;GuestMarkerReadProvider=$Marker}
-            $p.ExpectedComputeInstanceName=if($Role-eq'Primary / Desktop'){'devfleet-primary'}else{'devfleet-failover'}
-            if($Role-eq'Laptop / Surrogate'){$p.ExpectedVaultInstanceName='devfleet-vault'}
-            Get-ProductLifecycleObservation @p
-        } $role $remote $marker $since
-        $pass=$observation.terminalFailure-and$observation.terminalReason-match'reported FAILED'-and$observation.failureLogSnapshot.status-eq$entry.capture
-        if($entry.capture-eq'OBSERVED'){$pass=$pass-and$observation.failureLogSnapshot.records[0].tail-match'IndentationError'}else{$pass=$pass-and$observation.failureLogSnapshot.records.Count-eq0}
-        $results.Add(@{case=$role+' terminal observer capture '+$entry.capture;pass=[bool]$pass;status=$observation.failureLogSnapshot.status})
-        $summaryPath=Join-Path $root ('wait-'+$results.Count+'/observer.json')
-        $waited=& $module {
-            param($Observation,$Role,$Evidence,$Since)
-            Wait-DevFleetProductLifecycleTransition -Session 'fixture' -TransactionId ('a'*32) -PayloadSha256 ('b'*64) -Role $Role -BudgetSeconds 15 -PollSeconds 1 -ObservationTimeoutSeconds 10 -InvocationStartUtc $Since -EvidencePath $Evidence -ExpectedDevFleetVersion '1.2.13' -ExpectedInstallerVersion '1.4.1' -ObservationProvider {param($s) $s.providerContext} -ObservationProviderContext $Observation
-        } $observation $role $summaryPath $since
-        $saved=Get-Content -LiteralPath $summaryPath -Raw|ConvertFrom-Json
-        $journal=Get-Content -LiteralPath (Join-Path (Split-Path -Parent $summaryPath) 'product-lifecycle-progress.jsonl') -Raw
-        $pass=$waited.outcome-eq'TERMINAL_FAILURE'-and$saved.observation.failureLogSnapshot.status-eq$entry.capture-and$journal-match'failureLogSnapshot'
-        $results.Add(@{case=$role+' wait journal retains '+$entry.capture;pass=[bool]$pass;status=$waited.outcome})
-    }
-} finally {
-    $resolved=[IO.Path]::GetFullPath($root)
-    if([IO.Path]::GetDirectoryName($resolved)-cne$tempParent-or[IO.Path]::GetFileName($resolved)-notmatch'^devfleet-failure-logs-[0-9a-f]{32}$'){throw 'Fixture cleanup escaped its owner boundary.'}
-    if(Test-Path -LiteralPath $resolved){if((Get-Item -LiteralPath $resolved).Attributes-band[IO.FileAttributes]::ReparsePoint){throw 'Fixture root is a reparse point.'};Remove-Item -LiteralPath $resolved -Recurse -Force}
-}
-$results|ConvertTo-Json -Depth 4
-if(@($results|Where-Object{-not$_.pass}).Count){throw 'Product failure-log capture qualification failed.'}
-Write-Host "PASS $($results.Count)/$($results.Count) native failure-log capture checks"
-
-```
-
-
-## FILE: automation/release-e2e/tests/Test-ProductLaunchObserverDeferral.ps1
-
-SHA256: 8543a7358c2932c66808e4b95e285784a32e5e3f2f11351e19c6a5fd6cf20634 | Bytes: 7096 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([string]$WorkspaceRoot)
-$ErrorActionPreference='Stop'
-if(-not $WorkspaceRoot){$WorkspaceRoot=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path}
-Import-Module (Join-Path $WorkspaceRoot 'automation/release-e2e/modules/executors/Invoke-RealProductPhase.psm1') -Force
-$module=Get-Module Invoke-RealProductPhase
-$checks=[Collections.Generic.List[object]]::new()
-$remote={param($s)$s.context.observation}
-$guest={
-    param($s)
-    $s.context.probeCalls++
-    $reads=@(foreach($target in $s.targets){
-        $marker=@{schemaVersion=1;transactionId=$s.transactionId;payloadSha256=$s.payloadSha256;sequence=9;component='bootstrap';state='COMPLETED';updatedUtc='2026-01-01T00:00:06Z';packageVersion=if($target.nodeRole-ceq'vault'){'vault'}else{'1.2.13'};nodeRole=$target.nodeRole}
-        [pscustomobject]@{instanceName=$target.instanceName;text=($marker|ConvertTo-Json -Compress);exitCode=0;timedOut=$false}
-    })
-    [pscustomobject]@{status='READS_COLLECTED';error='';inventoryExitCode=0;probedInstances=@($s.targets.instanceName);markerReads=$reads}
-}
-foreach($case in @('desktop-launch','laptop-compute-launch','laptop-vault-launch','started','launched','ready','payload-transferred','payload-extracted','complete','no-native-child','foreign-parent','stale-child','unbound-transaction','wrong-payload','wrong-stage-role','wrong-instance-stage','duplicate-pid','foreign-native-path','parent-cycle','stale-transaction','existing-terminal')){
-    $role=if($case-like'laptop-*'){'Laptop / Surrogate'}else{'Primary / Desktop'}
-    $kind=if($case-like'laptop-*'){'Laptop'}else{'Desktop'}
-    $compute=if($kind-ceq'Laptop'){'devfleet-failover'}else{'devfleet-primary'}
-    $prefix=if($case-ceq'laptop-vault-launch'){'stage-vault'}else{"stage-compute-$compute"}
-    $stage=[pscustomobject]@{name="$prefix-instance-absent.complete";transactionId=('a'*32);payloadSha256=('b'*64);action='FreshInstall';role=$kind;stage="$prefix-instance-absent";completedUtc='2026-01-01T00:00:04Z'}
-    $candidate=[pscustomobject]@{pid=100;parentPid=99;name='DevFleet-Setup.exe';commandClass='DevFleet-Setup';startTimeUtc='2026-01-01T00:00:01Z'}
-    $bootstrap=[pscustomobject]@{pid=101;parentPid=100;name='pwsh.exe';commandClass='Bootstrap-Install';startTimeUtc='2026-01-01T00:00:02Z'}
-    $installer=[pscustomobject]@{pid=102;parentPid=101;name='pwsh.exe';commandClass='Install-DevFleet';startTimeUtc='2026-01-01T00:00:03Z'}
-    $native=[pscustomobject]@{pid=103;parentPid=102;name='multipass.exe';path='C:\Program Files\Multipass\bin\multipass.exe';commandClass='multipass';startTimeUtc='2026-01-01T00:00:05Z'}
-    $observation=[pscustomobject]@{candidateProcess=$candidate;activeTransaction=[pscustomobject]@{transactionId=('a'*32);payloadSha256=('b'*64);action='FreshInstall';role=$kind;preparedUtc='2026-01-01T00:00:02Z'};stageMarkers=@($stage);stageMarkerErrors=@();terminalFailure=$false;progress=[pscustomobject]@{productChildInstances=@($candidate,$bootstrap,$installer,$native);guestProgressMarkerStatus='DEFERRED'}}
-    switch($case){
-        'started' {$observation.stageMarkers+=,[pscustomobject]@{name="$prefix-instance-started.complete";transactionId=('a'*32);payloadSha256=('b'*64);action='FreshInstall';role=$kind;stage="$prefix-instance-started";completedUtc='2026-01-01T00:00:06Z'}}
-        'launched' {$observation.stageMarkers+=,[pscustomobject]@{name="$prefix-instance-launched.complete";transactionId=('a'*32);payloadSha256=('b'*64);action='FreshInstall';role=$kind;stage="$prefix-instance-launched";completedUtc='2026-01-01T00:00:06Z'}}
-        'ready' {$observation.stageMarkers+=,[pscustomobject]@{name="$prefix-instance-ready.complete";transactionId=('a'*32);payloadSha256=('b'*64);action='FreshInstall';role=$kind;stage="$prefix-instance-ready";completedUtc='2026-01-01T00:00:06Z'}}
-        'payload-transferred' {$observation.stageMarkers+=,[pscustomobject]@{name="$prefix-payload-transferred.complete";transactionId=('a'*32);payloadSha256=('b'*64);action='FreshInstall';role=$kind;stage="$prefix-payload-transferred";completedUtc='2026-01-01T00:00:06Z'}}
-        'payload-extracted' {$observation.stageMarkers+=,[pscustomobject]@{name="$prefix-payload-extracted.complete";transactionId=('a'*32);payloadSha256=('b'*64);action='FreshInstall';role=$kind;stage="$prefix-payload-extracted";completedUtc='2026-01-01T00:00:06Z'}}
-        'complete' {$observation.stageMarkers+=,[pscustomobject]@{name="$prefix.complete";transactionId=('a'*32);payloadSha256=('b'*64);action='FreshInstall';role=$kind;stage=$prefix;completedUtc='2026-01-01T00:00:06Z'}}
-        'no-native-child' {$observation.progress.productChildInstances=@($candidate,$bootstrap,$installer)}
-        'foreign-parent' {$native.parentPid=900}
-        'stale-child' {$native.startTimeUtc='2025-12-31T23:59:59Z'}
-        'unbound-transaction' {$observation.activeTransaction.transactionId='c'*32}
-        'wrong-payload' {$stage.payloadSha256='c'*64}
-        'wrong-stage-role' {$stage.role='Laptop'}
-        'wrong-instance-stage' {$stage.name='stage-compute-foreign-instance-absent.complete';$stage.stage='stage-compute-foreign-instance-absent'}
-        'duplicate-pid' {$observation.progress.productChildInstances+=,$native}
-        'foreign-native-path' {$native.path='C:\unrelated\multipass.exe'}
-        'parent-cycle' {$installer.parentPid=103}
-        'stale-transaction' {$observation.activeTransaction.preparedUtc='2025-12-31T23:59:59Z'}
-        'existing-terminal' {$observation.terminalFailure=$true}
-    }
-    $context=[pscustomobject]@{observation=$observation;probeCalls=0}
-    $parameters=@{Session=[pscustomobject]@{};TransactionId=('a'*32);PayloadSha256=('b'*64);Action='FreshInstall';Role=$role;PriorGeneration=1;MaxGeneration=3;CandidateProcessId=100;ExpectedDevFleetVersion='1.2.13';ExpectedInstallerVersion='1.4.1';ObservationTimeoutSeconds=10;InvocationStartUtc='2026-01-01T00:00:00Z';ExpectedComputeInstanceName=$compute;RemoteObservationProvider=$remote;GuestMarkerReadProvider=$guest;ObservationAdapterContext=$context}
-    if($kind-ceq'Laptop'){$parameters.ExpectedVaultInstanceName='devfleet-vault'}
-    $result=& $module {param($p)Get-ProductLifecycleObservation @p} $parameters
-    $expectDeferred=$case-in@('desktop-launch','laptop-compute-launch','laptop-vault-launch')
-    $pass=if($expectDeferred){$context.probeCalls-eq0-and$result.progress.guestProgressMarkerStatus-ceq'DEFERRED_PRODUCT_LAUNCH'-and-not$result.productRoleIdentityValid}else{$context.probeCalls-eq1-and$result.progress.guestProgressMarkerStatus-ceq'VALID'}
-    if($case-in@('wrong-payload','wrong-stage-role','wrong-instance-stage')){$pass=$pass-and@($result.stageMarkerErrors).Count-eq1}
-    $checks.Add([pscustomobject]@{case=$case;pass=[bool]$pass;probeCalls=$context.probeCalls;status=$result.progress.guestProgressMarkerStatus})
-}
-[pscustomobject]@{status=if(@($checks|Where-Object{-not$_.pass}).Count){'FAIL'}else{'PASS'};passed=@($checks|Where-Object{$_.pass}).Count;total=$checks.Count;checks=@($checks);vmOperations=0}|ConvertTo-Json -Depth 5
-if(@($checks|Where-Object{-not$_.pass}).Count){exit 1}
-
-```
-
-
-## FILE: automation/release-e2e/tests/Test-RealUseAcceptancePhase.ps1
-
-SHA256: 7d005da688720961d3a40d7182dee22ea146080d382043a726c6eab6cec04c7c | Bytes: 29495 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([string]$WorkspaceRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path)
-
-$ErrorActionPreference = 'Stop'
-$modulePath = Join-Path $WorkspaceRoot 'automation/release-e2e/modules/RealUseAcceptance.psm1'
-Import-Module $modulePath -Force -DisableNameChecking
-Import-Module (Join-Path $WorkspaceRoot 'automation/release-e2e/modules/Evidence.psm1') -Force -DisableNameChecking
-$checks = [Collections.Generic.List[object]]::new()
-
-function Check([string]$Name, [bool]$Pass) { $checks.Add([pscustomobject]@{name=$Name;pass=$Pass}) }
-function Rejects([scriptblock]$Action) { try { & $Action; return $false } catch { return $true } }
-function CaptureError([scriptblock]$Action) { try { & $Action | Out-Null; return '' } catch { return [string]$_.Exception.Message } }
-function Clone($Value) { return ($Value | ConvertTo-Json -Depth 32 | ConvertFrom-Json) }
-
-$temp = Join-Path $env:TEMP "DevFleet-RealUse-$([guid]::NewGuid().ToString('N'))"
-New-Item -ItemType Directory -Path $temp -Force | Out-Null
-try {
-    $runId = 'fullrelease-real-use-fixture-20260916T000000Z'
-    $runDir = Join-Path $temp 'run'; New-Item -ItemType Directory -Path $runDir | Out-Null
-    $candidatePath = Join-Path $temp 'candidate.exe'; [IO.File]::WriteAllText($candidatePath,'candidate',[Text.UTF8Encoding]::new($false))
-    $runnerDir = Join-Path $temp 'automation/release-e2e/modules/executors'; New-Item -ItemType Directory -Path $runnerDir -Force | Out-Null
-    $runnerPath = Join-Path $runnerDir 'Invoke-RealUseAcceptance.py'; [IO.File]::WriteAllText($runnerPath,"#!/usr/bin/env python3`n",[Text.UTF8Encoding]::new($false))
-    $exeHash = (Get-FileHash $candidatePath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $tarHash = '2' * 64; $releaseHash = '3' * 64; $toolingHash = '4' * 64; $shippingHash = '5' * 64
-    $repositoryHead = '6' * 40; $candidateCommit = '7' * 40; $transaction = '8' * 32; $invocation = '9' * 32
-    $candidate = [pscustomobject][ordered]@{
-        repositoryHead=$repositoryHead;gitCommit=$candidateCommit;shippingInputIdentity=$shippingHash;releaseFingerprintId=$releaseHash;toolingFingerprintId=$toolingHash
-        candidate=[pscustomobject]@{path=$candidatePath;sha256=$exeHash;bytes=(Get-Item $candidatePath).Length}
-        tar=[pscustomobject]@{path=(Join-Path $temp 'candidate.tar.gz');sha256=$tarHash;bytes=1}
-    }
-    $targets = @(
-        [pscustomobject]@{instanceName='devfleet-failover';nodeRole='surrogate';kind='compute'},
-        [pscustomobject]@{instanceName='devfleet-vault';nodeRole='vault';kind='vault'}
-    )
-    $lifeDir = Join-Path $runDir "lifecycle-SURROGATE-DISPOSABLE-$invocation"; New-Item -ItemType Directory -Path $lifeDir | Out-Null
-    $authorityPath = Join-Path $lifeDir 'product-lifecycle-completion-authority.json'
-    $authority = [ordered]@{status='REAL E2E PASS';contract='product-lifecycle-completion-authority';transactionId=$transaction;invocationId=$invocation;payloadSha256=$tarHash;role='Laptop / Surrogate';completionVerified=$true;authenticatedHealth=$true;guest=[ordered]@{roleEvidence=[ordered]@{requiredTargets=$targets}}}
-    Write-EvidenceJson -Path $authorityPath -Value $authority
-    $product = [pscustomobject][ordered]@{status='REAL E2E PASS';phase='SURROGATE-DISPOSABLE';contract='product-lifecycle
+     

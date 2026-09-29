@@ -1,10 +1,226 @@
 # DevFleet source part 021
 
 Full-source UTF-8 byte interval [930000, 976500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 0d276e97a9ac6aa69c0b2a0ecd911088dbe972e6c02926fc1604150d5cf6efc2
+Payload SHA-256: 1dc671e4dedb9a6ac09bb226769cc93067beb435e91e0d64fabb23aef86b71d1
 
 <!-- BEGIN SOURCE SLICE -->
-ew-RealUseAcceptancePassphrase
+port-Module (Join-Path $PSScriptRoot 'GuestSession.psm1') -Force
+
+$script:RealUseAcceptanceContract = 'devfleet-real-use-acceptance-v1'
+$script:RealUseAcceptancePhase = 'REAL-USE-ACCEPTANCE'
+$script:RealUseAcceptanceOwnerTimeoutSeconds = 36000
+$script:RealUseAcceptancePrepareTimeoutSeconds = 10800
+$script:RealUseAcceptanceCleanupReserveSeconds = 900
+$script:RealUsePairingCaptureContract = 'devfleet-real-use-primary-pairing-v1'
+$script:RealUseClusterJoinContract = 'devfleet-real-use-cluster-join-v1'
+$script:RealUseAcceptanceAssertions = [ordered]@{
+    U01 = @('authenticatedDashboard','templateCreated','identityBound','assetsPresent','credentialsNotLogged')
+    U02 = @('startCompleted','healthCompleted','testCompleted','smokeOutputObserved','uiBackendContainerAgree')
+    U03 = @('stopCompleted','restartCompleted','serviceRestartObserved','sameProjectAndData','noDuplicateWriter','noPendingOperations','healthRecovered')
+    U04 = @('immediateBackupVerified','vaultUploadVerified','backupBeforeQuarantine','quarantineReversible','foreignCollisionRejected','collisionPreserved','restoreCompleted','contentRecovered')
+    U05 = @('vaultCopyCompleted','copyIdentityBound','copyContentRecovered','originalUnchanged','copyStartRejected','securityStartRejected','foreignLeaseStartRejected','originalUsable','onlyIntendedOwnerStarts')
+}
+
+function Get-RealUseAcceptanceProperty {
+    param(
+        [AllowNull()][object]$Value,
+        [Parameter(Mandatory)][string]$Name,
+        [ref]$Found
+    )
+    $Found.Value = $false
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [System.Collections.IDictionary]) {
+        foreach ($key in $Value.Keys) {
+            if ([string]$key -ieq $Name) { $Found.Value = $true; return $Value[$key] }
+        }
+        return $null
+    }
+    foreach ($property in @($Value.PSObject.Properties)) {
+        if ([string]$property.Name -ieq $Name) { $Found.Value = $true; return $property.Value }
+    }
+    return $null
+}
+
+function Get-RealUseAcceptancePropertyNames {
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value) { return @() }
+    if ($Value -is [System.Collections.IDictionary]) { return @($Value.Keys | ForEach-Object { [string]$_ }) }
+    return @($Value.PSObject.Properties | ForEach-Object { [string]$_.Name })
+}
+
+function Assert-RealUseAcceptanceKeys {
+    param(
+        [Parameter(Mandatory)][object]$Value,
+        [Parameter(Mandatory)][string[]]$Allowed,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Required,
+        [Parameter(Mandatory)][string]$Label
+    )
+    $names = @(Get-RealUseAcceptancePropertyNames $Value)
+    $unknown = @($names | Where-Object { $_ -notin $Allowed })
+    $missing = @($Required | Where-Object { $_ -notin $names })
+    if ($unknown.Count -or $missing.Count) { throw "$Label has missing or unexpected fields." }
+    return $true
+}
+
+function Assert-RealUseAcceptanceRunId {
+    param([Parameter(Mandatory)][string]$RunId)
+    if ($RunId.Length -gt 128 -or $RunId -cnotmatch '\A(?:e2e|fullrelease)-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\z') {
+        throw 'REAL-USE-ACCEPTANCE RunId failed ownership validation.'
+    }
+    return $true
+}
+
+function Assert-RealUseAcceptanceContainedPath {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Label
+    )
+    $fullRoot = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $prefix = $fullRoot + [IO.Path]::DirectorySeparatorChar
+    if (-not $fullPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw "$Label is outside the current FullRelease evidence directory." }
+    return $fullPath
+}
+
+function Assert-RealUseAcceptanceCanonicalEvidencePath {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$LeafName
+    )
+    $actual = Assert-RealUseAcceptanceContainedPath -Root $Root -Path $Path -Label "REAL-USE-ACCEPTANCE $LeafName evidence"
+    $expected = [IO.Path]::GetFullPath((Join-Path $Root $LeafName))
+    if (-not $actual.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) { throw "REAL-USE-ACCEPTANCE $LeafName evidence path is not canonical." }
+    return $actual
+}
+
+function Test-RealUseAcceptanceJsonEqual {
+    param([AllowNull()][object]$Left, [AllowNull()][object]$Right)
+    $leftNormalized = $Left | ConvertTo-Json -Depth 32 -Compress | ConvertFrom-Json | ConvertTo-Json -Depth 32 -Compress
+    $rightNormalized = $Right | ConvertTo-Json -Depth 32 -Compress | ConvertFrom-Json | ConvertTo-Json -Depth 32 -Compress
+    return ($leftNormalized -ceq $rightNormalized)
+}
+
+function Assert-RealUseAcceptanceSanitizedValue {
+    param(
+        [AllowNull()][object]$Value,
+        [string]$Path = 'report',
+        [int]$Depth = 0
+    )
+    if ($Depth -gt 16) { throw 'REAL-USE-ACCEPTANCE report exceeds the bounded evidence depth.' }
+    if ($null -eq $Value) { return $true }
+    if ($Value -is [string]) {
+        if ($Value.Length -gt 4096 -or $Value -match '[\x00-\x08\x0B\x0C\x0E-\x1F]') { throw 'REAL-USE-ACCEPTANCE report contains an unsafe string.' }
+        if ($Value -match '(?i)(?:authorization\s*:|bearer\s+[A-Za-z0-9._~+/=-]{8,}|basic\s+[A-Za-z0-9+/=]{8,}|tskey-[A-Za-z0-9-]+|DEVFLEET_ADMIN_(?:USER|PASSWORD)\s*=|(?:password|secret|token|cookie)\s*[:=])') {
+            throw 'REAL-USE-ACCEPTANCE report contains a forbidden secret-shaped value.'
+        }
+        return $true
+    }
+    if ($Value -is [bool] -or $Value -is [byte] -or $Value -is [int16] -or $Value -is [int32] -or $Value -is [int64] -or $Value -is [single] -or $Value -is [double] -or $Value -is [decimal] -or $Value -is [datetime]) { return $true }
+    if ($Value -is [System.Collections.IEnumerable] -and -not ($Value -is [System.Collections.IDictionary]) -and -not ($Value -is [pscustomobject])) {
+        $items = @($Value)
+        if ($items.Count -gt 512) { throw 'REAL-USE-ACCEPTANCE report contains an oversized collection.' }
+        for ($index = 0; $index -lt $items.Count; $index++) { Assert-RealUseAcceptanceSanitizedValue -Value $items[$index] -Path "$Path[$index]" -Depth ($Depth + 1) | Out-Null }
+        return $true
+    }
+    $names = @(Get-RealUseAcceptancePropertyNames $Value)
+    if ($names.Count -gt 128) { throw 'REAL-USE-ACCEPTANCE report contains an oversized object.' }
+    foreach ($name in $names) {
+        if ($name -notmatch '^[A-Za-z][A-Za-z0-9]*$' -or ($name -cne 'credentialsNotLogged' -and $name -match '(?i)(password|secret|token|cookie|authorization|credential|apiKey)')) {
+            throw 'REAL-USE-ACCEPTANCE report contains a forbidden evidence field.'
+        }
+        $found = $false
+        $child = Get-RealUseAcceptanceProperty $Value $name ([ref]$found)
+        Assert-RealUseAcceptanceSanitizedValue -Value $child -Path "$Path.$name" -Depth ($Depth + 1) | Out-Null
+    }
+    return $true
+}
+
+function Test-RealUseAcceptanceSameValue {
+    param([AllowNull()][object]$Expected, [AllowNull()][object]$Actual)
+    if ($null -eq $Expected -and $null -eq $Actual) { return $true }
+    if ($null -eq $Expected -or $null -eq $Actual) { return $false }
+    return ([string]$Expected -ceq [string]$Actual)
+}
+
+function Test-RealUseAcceptanceSameInstant {
+    param([AllowNull()][object]$Expected, [AllowNull()][object]$Actual)
+    try {
+        return (([datetimeoffset]$Expected).ToUniversalTime().Ticks -eq ([datetimeoffset]$Actual).ToUniversalTime().Ticks)
+    } catch {
+        return $false
+    }
+}
+
+function Get-RealUseAcceptanceCandidateTuple {
+    param([Parameter(Mandatory)][object]$Candidate)
+    return [pscustomobject][ordered]@{
+        repositoryHead = [string]$Candidate.repositoryHead
+        candidateCommit = [string]$Candidate.gitCommit
+        shippingInputIdentity = [string]$Candidate.shippingInputIdentity
+        releaseFingerprintId = [string]$Candidate.releaseFingerprintId
+        toolingFingerprintId = [string]$Candidate.toolingFingerprintId
+        exeSha256 = [string]$Candidate.candidate.sha256
+        tarSha256 = [string]$Candidate.tar.sha256
+    }
+}
+
+function Get-RealUseAcceptancePrivateRoot {
+    param([Parameter(Mandatory)][string]$RunId)
+    Assert-RealUseAcceptanceRunId -RunId $RunId | Out-Null
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or [string]::IsNullOrWhiteSpace($env:ProgramData)) { throw 'REAL-USE-ACCEPTANCE private pairing state requires Windows DPAPI.' }
+    $base = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'DevFleet-E2E\Private\RealUseAcceptance')).TrimEnd('\','/')
+    $path = [IO.Path]::GetFullPath((Join-Path $base $RunId))
+    if (-not $path.StartsWith($base + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($path) -cne $RunId) { throw 'REAL-USE-ACCEPTANCE private pairing root escaped its fixed L0 boundary.' }
+    return $path
+}
+
+function New-RealUseAcceptancePassphrase {
+    $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    $bytes = [byte[]]::new(48)
+    $secure = [Security.SecureString]::new()
+    try {
+        [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+        foreach ($value in $bytes) { $secure.AppendChar($alphabet[[int]$value -band 63]) }
+        $secure.MakeReadOnly()
+        return $secure
+    } catch {
+        $secure.Dispose()
+        throw
+    } finally {
+        [Array]::Clear($bytes,0,$bytes.Length)
+    }
+}
+
+function Protect-RealUseAcceptancePrivateRoot {
+    param([Parameter(Mandatory)][string]$Path)
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    if (-not $identity -or -not $identity.User) { throw 'REAL-USE-ACCEPTANCE cannot identify the DPAPI owner.' }
+    $acl = [Security.AccessControl.DirectorySecurity]::new()
+    $acl.SetAccessRuleProtection($true,$false)
+    foreach ($sid in @(
+        $identity.User,
+        [Security.Principal.SecurityIdentifier]::new([Security.Principal.WellKnownSidType]::LocalSystemSid,$null),
+        [Security.Principal.SecurityIdentifier]::new([Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid,$null)
+    )) {
+        $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid,[Security.AccessControl.FileSystemRights]::FullControl,[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow)
+        [void]$acl.AddAccessRule($rule)
+    }
+    Set-Acl -LiteralPath $Path -AclObject $acl -ErrorAction Stop
+}
+
+function New-RealUseAcceptancePrivateState {
+    param([Parameter(Mandatory)][string]$RunId)
+    $root = Get-RealUseAcceptancePrivateRoot -RunId $RunId
+    if (Test-Path -LiteralPath $root) { throw 'REAL-USE-ACCEPTANCE private pairing state collided with an existing run root.' }
+    $created=$false;$secure=$null
+    try {
+        [void][IO.Directory]::CreateDirectory($root);$created=$true
+        Protect-RealUseAcceptancePrivateRoot -Path $root
+        $secretPath = Join-Path $root 'pairing-passphrase.dpapi'
+        $bundlePath = Join-Path $root 'primary-pairing.dfe'
+        $secure = New-RealUseAcceptancePassphrase
         $protected = ConvertFrom-SecureString -SecureString $secure -ErrorAction Stop
         [IO.File]::WriteAllText($secretPath,$protected,[Text.UTF8Encoding]::new($false))
         if (-not (Test-Path -LiteralPath $secretPath -PathType Leaf) -or (Get-Item -LiteralPath $secretPath).Length -lt 32) { throw 'REAL-USE-ACCEPTANCE DPAPI passphrase persistence failed.' }
@@ -321,90 +537,4 @@ function Assert-RealUseAcceptanceExecution {
     Assert-RealUseAcceptanceKeys -Value $Actual -Allowed $fields -Required $fields -Label $Label | Out-Null
     foreach ($field in $fields) {
         $actualFound = $false; $actualValue = Get-RealUseAcceptanceProperty $Actual $field ([ref]$actualFound)
-        $expectedFound = $false; $expectedValue = Get-RealUseAcceptanceProperty $Expected $field ([ref]$expectedFound)
-        if (-not $actualFound -or -not $expectedFound -or -not (Test-RealUseAcceptanceSameValue $expectedValue $actualValue)) { throw "$Label binding mismatch: $field." }
-    }
-    if ([string]$Actual.role -cne 'Laptop / Surrogate' -or [string]$Actual.vmName -notlike 'DevFleet-E2E-*') { throw "$Label is not bound to the installed Laptop/Surrogate disposable." }
-    if ([string]$Actual.vmId -cnotmatch '^[0-9a-fA-F-]{36}$' -or [string]$Actual.deploymentId -cnotmatch '^[0-9a-fA-F-]{36}$' -or [string]$Actual.nodeId -cnotmatch '^[0-9a-fA-F-]{36}$') { throw "$Label has a malformed VM or product identity." }
-    if ([string]$Actual.computeInstanceName -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$' -or [string]$Actual.vaultInstanceName -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$' -or [string]$Actual.nodeName -cne [string]$Actual.computeInstanceName) { throw "$Label has a malformed or divergent installed node identity." }
-    if ([string]$Actual.transactionId -cnotmatch '^[0-9a-f]{32}$' -or [string]$Actual.invocationId -cnotmatch '^[0-9a-f]{32}$' -or [string]$Actual.surrogateEvidenceSha256 -cnotmatch '^[0-9a-f]{64}$') { throw "$Label has a malformed lifecycle identity." }
-    return $true
-}
-
-function Assert-RealUseAcceptanceInput {
-    param([Parameter(Mandatory)][Alias('Input')][object]$AcceptanceInput, [Parameter(Mandatory)][object]$Request)
-    $fields = @('schemaVersion','runId','deadlineUtc','runnerSha256','candidate','execution','paths','baseUrl')
-    Assert-RealUseAcceptanceKeys -Value $AcceptanceInput -Allowed $fields -Required $fields -Label 'REAL-USE-ACCEPTANCE input' | Out-Null
-    if ([int]$AcceptanceInput.schemaVersion -ne 1 -or [string]$AcceptanceInput.runId -cne [string]$Request.runId -or -not (Test-RealUseAcceptanceSameInstant $Request.deadlineUtc $AcceptanceInput.deadlineUtc) -or [string]$AcceptanceInput.runnerSha256 -cne [string]$Request.runnerSha256) { throw 'REAL-USE-ACCEPTANCE input identity is not exact.' }
-    Assert-RealUseAcceptanceRunId -RunId ([string]$AcceptanceInput.runId) | Out-Null
-    Assert-RealUseAcceptanceCandidate -Actual $AcceptanceInput.candidate -Expected $Request.candidate -Label 'REAL-USE-ACCEPTANCE input candidate' | Out-Null
-    $expectedExecution = [ordered]@{
-        role = 'Laptop / Surrogate'; vmName = [string]$Request.vmName; vmId = [string]$Request.vmId
-        computeInstanceName = [string]$Request.computeInstanceName; vaultInstanceName = [string]$Request.vaultInstanceName
-        deploymentId = [string]$Request.deploymentId; nodeId = [string]$Request.nodeId; nodeName = [string]$Request.computeInstanceName
-        transactionId = [string]$Request.transactionId; invocationId = [string]$Request.invocationId
-        surrogateEvidenceSha256 = [string]$Request.surrogateEvidenceSha256
-    }
-    Assert-RealUseAcceptanceExecution -Actual $AcceptanceInput.execution -Expected $expectedExecution -Label 'REAL-USE-ACCEPTANCE input execution' | Out-Null
-    $pathFields = @('workspaces','quarantine','runtimeRoot')
-    Assert-RealUseAcceptanceKeys -Value $AcceptanceInput.paths -Allowed $pathFields -Required $pathFields -Label 'REAL-USE-ACCEPTANCE installed paths' | Out-Null
-    if ([string]$AcceptanceInput.paths.workspaces -cne '/home/devrunner/workspaces' -or [string]$AcceptanceInput.paths.quarantine -cne '/home/devrunner/.devfleet-quarantine' -or [string]$AcceptanceInput.paths.runtimeRoot -cne '/var/lib/devfleet/runtime') { throw 'REAL-USE-ACCEPTANCE installed mutable paths are outside the supported product contract.' }
-    if ([string]$AcceptanceInput.baseUrl -cnotmatch '^http://127\.0\.0\.1:(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$') { throw 'REAL-USE-ACCEPTANCE input base URL is not exact loopback HTTP.' }
-    Assert-RealUseAcceptanceSanitizedValue -Value $AcceptanceInput -Path 'input' | Out-Null
-    return $true
-}
-
-function Assert-RealUseAcceptanceReport {
-    param(
-        [Parameter(Mandatory)][object]$Report,
-        [Parameter(Mandatory)][Alias('Input')][object]$AcceptanceInput,
-        [Parameter(Mandatory)][ValidateSet('prepare','resume','cleanup')][string]$ExpectedStage,
-        [Parameter(Mandatory)][string[]]$AllowedStatus,
-        [switch]$RequirePass
-    )
-    $topFields = @('schemaVersion','contract','status','stage','runId','phaseId','candidate','execution','runnerSha256','startedAtUtc','finishedAtUtc','deadlineUtc','journeys','operations','fixture','cleanup','failure','cleanupFailure')
-    Assert-RealUseAcceptanceKeys -Value $Report -Allowed $topFields -Required $topFields -Label 'REAL-USE-ACCEPTANCE report' | Out-Null
-    Assert-RealUseAcceptanceSanitizedValue -Value $Report | Out-Null
-    if ([int]$Report.schemaVersion -ne 1 -or [string]$Report.contract -cne $script:RealUseAcceptanceContract -or [string]$Report.stage -cne $ExpectedStage -or [string]$Report.phaseId -cne $script:RealUseAcceptancePhase) { throw 'REAL-USE-ACCEPTANCE report contract or stage is invalid.' }
-    if ([string]$Report.status -notin $AllowedStatus -or [string]$Report.runId -cne [string]$AcceptanceInput.runId -or [string]$Report.runnerSha256 -cne [string]$AcceptanceInput.runnerSha256 -or -not (Test-RealUseAcceptanceSameInstant $AcceptanceInput.deadlineUtc $Report.deadlineUtc)) { throw 'REAL-USE-ACCEPTANCE report status or immutable identity is invalid.' }
-    Assert-RealUseAcceptanceCandidate -Actual $Report.candidate -Expected $AcceptanceInput.candidate -Label 'REAL-USE-ACCEPTANCE report candidate' | Out-Null
-    $executionFields = @('role','vmName','vmId','computeInstanceName','vaultInstanceName','deploymentId','nodeId','nodeName','transactionId','invocationId','surrogateEvidenceSha256','uiTransport','browserJavascriptExercised')
-    Assert-RealUseAcceptanceKeys -Value $Report.execution -Allowed $executionFields -Required $executionFields -Label 'REAL-USE-ACCEPTANCE report execution' | Out-Null
-    $executionProjection = [ordered]@{}
-    foreach ($field in @('role','vmName','vmId','computeInstanceName','vaultInstanceName','deploymentId','nodeId','nodeName','transactionId','invocationId','surrogateEvidenceSha256')) { $executionProjection[$field] = $Report.execution.$field }
-    Assert-RealUseAcceptanceExecution -Actual $executionProjection -Expected $AcceptanceInput.execution -Label 'REAL-USE-ACCEPTANCE report execution' | Out-Null
-    if ([string]$Report.execution.uiTransport -cne 'authenticated-http-form' -or $Report.execution.browserJavascriptExercised -isnot [bool] -or [bool]$Report.execution.browserJavascriptExercised) { throw 'REAL-USE-ACCEPTANCE report execution channel is invalid.' }
-    $started = [datetime]::MinValue; $finished = [datetime]::MinValue; $deadline = [datetime]::MinValue
-    if (-not [datetime]::TryParse([string]$Report.startedAtUtc, [ref]$started) -or -not [datetime]::TryParse([string]$Report.finishedAtUtc, [ref]$finished) -or -not [datetime]::TryParse([string]$Report.deadlineUtc, [ref]$deadline) -or $finished.ToUniversalTime() -lt $started.ToUniversalTime() -or $finished.ToUniversalTime() -gt $deadline.ToUniversalTime()) { throw 'REAL-USE-ACCEPTANCE report timestamps are invalid or outside the owning deadline.' }
-    $journeys = @($Report.journeys)
-    if ($journeys.Count -ne 5 -or @($journeys.id | Select-Object -Unique).Count -ne 5 -or @('U01','U02','U03','U04','U05' | Where-Object { $_ -notin @($journeys.id) }).Count) { throw 'REAL-USE-ACCEPTANCE report does not contain exactly U01-U05.' }
-    foreach ($journey in $journeys) {
-        Assert-RealUseAcceptanceKeys -Value $journey -Allowed @('id','status','assertions','observations') -Required @('id','status','assertions','observations') -Label 'REAL-USE-ACCEPTANCE journey' | Out-Null
-        $journeyId = [string]$journey.id
-        if ($journeyId -cnotin @($script:RealUseAcceptanceAssertions.Keys)) { throw 'REAL-USE-ACCEPTANCE journey identifier is invalid.' }
-        if ([string]$journey.status -notin @('PASS','IN_PROGRESS','NOT_RUN','BLOCKED')) { throw 'REAL-USE-ACCEPTANCE journey has an invalid status.' }
-        if ([string]$journey.status -eq 'PASS') {
-            $assertionNames = @(Get-RealUseAcceptancePropertyNames $journey.assertions)
-            $expectedAssertionNames = @($script:RealUseAcceptanceAssertions[$journeyId])
-            if ($assertionNames.Count -ne $expectedAssertionNames.Count -or @($assertionNames | Where-Object { $_ -cnotin $expectedAssertionNames }).Count -or @($expectedAssertionNames | Where-Object { $_ -cnotin $assertionNames }).Count) { throw 'REAL-USE-ACCEPTANCE PASS journey does not contain its exact fixed assertion set.' }
-            foreach ($name in $assertionNames) { $found = $false; $value = Get-RealUseAcceptanceProperty $journey.assertions $name ([ref]$found); if (-not $found -or $value -isnot [bool] -or -not [bool]$value) { throw 'REAL-USE-ACCEPTANCE PASS journey contains an unproven assertion.' } }
-        }
-    }
-    foreach ($operation in @($Report.operations)) {
-        $operationFields = @('id','kind','project','state','expectedState','route','httpStatus','renderedState','smokeOutputObserved')
-        Assert-RealUseAcceptanceKeys -Value $operation -Allowed $operationFields -Required $operationFields -Label 'REAL-USE-ACCEPTANCE operation' | Out-Null
-        if ([string]$operation.id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' -or [int]$operation.httpStatus -lt 100 -or [int]$operation.httpStatus -gt 599 -or $operation.smokeOutputObserved -isnot [bool]) { throw 'REAL-USE-ACCEPTANCE operation evidence is malformed.' }
-    }
-    $fixtureFields = @('slug','projectId','sentinelSha256','originalPath','recoveredPath')
-    [string[]]$requiredFixtureFields = @()
-    if ($RequirePass -or [string]$Report.status -in @('PASS','PREPARED')) { $requiredFixtureFields = @('slug','projectId','sentinelSha256','originalPath','recoveredPath') }
-    Assert-RealUseAcceptanceKeys -Value $Report.fixture -Allowed $fixtureFields -Required $requiredFixtureFields -Label 'REAL-USE-ACCEPTANCE fixture' | Out-Null
-    $fixtureNames = @(Get-RealUseAcceptancePropertyNames $Report.fixture)
-    if ('slug' -in $fixtureNames -and [string]$Report.fixture.slug -notmatch '^[a-z0-9][a-z0-9._-]{1,62}$') { throw 'REAL-USE-ACCEPTANCE fixture slug is malformed.' }
-    if ('projectId' -in $fixtureNames -and [string]$Report.fixture.projectId -notmatch '^[0-9a-fA-F-]{36}$') { throw 'REAL-USE-ACCEPTANCE fixture project identity is malformed.' }
-    if ('sentinelSha256' -in $fixtureNames -and [string]$Report.fixture.sentinelSha256 -notmatch '^[0-9a-f]{64}$') { throw 'REAL-USE-ACCEPTANCE fixture sentinel identity is malformed.' }
-    $cleanupFields = @('status','ownedOnly','resources','errors','vaultSnapshots')
-    Assert-RealUseAcceptanceKeys -Value $Report.cleanup -Allowed $cleanupFields -Required $cleanupFields -Label 'REAL-USE-ACCEPTANCE cleanup' | Out-Null
-    if ([string]$Report.cleanup.status -notin @('NOT_RUN','PASS','BLOCKED') -or $Report.cleanup.ownedOnly -isnot [bool]) { throw 'REAL-USE-ACCEPTANCE cleanup status is malformed.' }
-    foreach ($resource in @($Report.cleanup.resources)) {
-        Assert-RealUseAcceptanceKeys -Value $resource -Allowed @('kind','path','status') -Required @('kind',
+        $expectedFound = $false; $expectedVa

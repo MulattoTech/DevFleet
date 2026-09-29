@@ -1,10 +1,265 @@
 # DevFleet source part 058
 
 Full-source UTF-8 byte interval [2650500, 2697000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: d4772c2630b13f89eef3955fe49aa29fe2dcc93a2c5ad1d8c41c88ae16691a0e
+Payload SHA-256: 79e0346c1a7c55aa9d154eec33dfba8240eea8d8cc48b2cab18da567d5bb1411
 
 <!-- BEGIN SOURCE SLICE -->
-  try
+Windows.Media.Brush)FindResource(_plan.IsAllowed ? "AccentBrush" : "DangerBrush");
+    }
+
+    private async void ExecuteButton_Click(object sender, RoutedEventArgs e)
+    {
+        await ExecuteReviewedPlanAsync(requireConfirmation: true, elevatedResume: false);
+    }
+
+    private async Task ExecuteReviewedPlanAsync(bool requireConfirmation, bool elevatedResume)
+    {
+        if (_executing) return;
+        BuildPlanAndShow();
+        if (_plan is null || !_plan.IsAllowed) { MessageBox.Show(this, PlanService.ToText(_plan ?? new InstallerPlan()), "Execution blocked", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
+        if (requireConfirmation && MessageBox.Show(this, "Execute the reviewed plan now? Diagnostics remains read-only; cleanup actions use only the displayed ownership scope.", "Confirm exact plan", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if (!ElevationService.IsAdministrator && !TestEnvironment.IsTestProcess)
+        {
+            if (elevatedResume) throw new InvalidOperationException("The elevated resume continuation did not obtain an administrator token; refusing to relaunch recursively.");
+            // The unelevated UI may validate the plan, but it must not create
+            // protected staging. The elevated continuation reopens and
+            // independently verifies the embedded payload.
+            ElevationService.RelaunchVerified(RoleCombo.SelectedItem?.ToString() ?? "Primary / Desktop", CurrentMode, _deferNetworkPairing, _plan.AcknowledgeRootfulDocker);
+            Close();
+            return;
+        }
+            _executing = true; _progress = 0; _page = 6; RefreshPage(); ExecuteButton.IsEnabled = false; OperationLog.Clear();
+            try
+            {
+                var plan = _plan;
+                var role = RoleCombo.SelectedItem?.ToString() ?? "Standalone / unknown";
+                var result = await Task.Run(() => InstallerEngine.Execute(plan!, role, ReportProgress));
+            var rebootRequired = LifecycleEngine.LastExecution?.ExitCode == 3010 || File.Exists(RebootCheckpointService.Path);
+            if (rebootRequired)
+            {
+                ReportProgress("REBOOT REQUIRED: the verified checkpoint is preserved; restart this same candidate after Windows reboots.");
+                OperationStatus.Text = "Reboot required; checkpoint preserved";
+                OperationProgress.Value = 95;
+                _page = 6;
+                RefreshPage();
+                return;
+            }
+            ReportProgress($"VERIFIED COMPLETE: {result}"); OperationProgress.Value = 100; OperationStatus.Text = "Completed and verified"; _page = 7; RefreshPage();
+        }
+        catch (Exception ex)
+        {
+            ReportProgress($"FAILED — no unplanned continuation: {ex}"); OperationStatus.Text = "Failed; evidence preserved in the log"; OperationProgress.Value = 0;
+        }
+        finally { _executing = false; ExecuteButton.IsEnabled = true; BackButton.IsEnabled = true; }
+    }
+
+    private void ReportProgress(string message)
+    {
+        Dispatcher.Invoke(() => { _progress = Math.Min(95, _progress + 13); OperationProgress.Value = _progress; OperationStatus.Text = message; OperationLog.AppendText(message + Environment.NewLine); OperationLog.ScrollToEnd(); });
+    }
+
+    private void ExportButton_Click(object sender, RoutedEventArgs e)
+    {
+        var directory = Path.Combine(AppPaths.StateRoot, "Diagnostics"); Directory.CreateDirectory(directory); var stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+        var json = Path.Combine(directory, $"preflight-{stamp}.json"); var text = Path.Combine(directory, $"preflight-{stamp}.txt"); StateStore.WriteJsonAtomically(json, _preflight); File.WriteAllText(text, PreflightService.ToText(_preflight));
+        MessageBox.Show(this, $"Preflight exported to:\n{text}\n{json}", "Read-only report exported", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void CopyButton_Click(object sender, RoutedEventArgs e)
+    {
+        var content = _page == 2 ? PreflightText.Text : _page == 5 ? PlanText.Text : OperationLog.Text; Clipboard.SetText(content); OperationStatus.Text = "Diagnostics copied to clipboard";
+    }
+
+    private async void TailscaleSignIn_Click(object sender, RoutedEventArgs e)
+    {
+        if (_tailscaleBusy) return;
+        _tailscaleBusy = true; _tailscaleCancellation = new CancellationTokenSource(); var sourceButton = sender as Button; if (sourceButton is not null) sourceButton.IsEnabled = false;
+        try
+        {
+        var dependency = DependencyService.Catalog.Single(x => x.Name == "Tailscale"); var detected = new DependencyService().Detect(dependency);
+        if (!detected.Compatible) { TailscaleStatusText.Text = "Tailscale is missing or outdated. The Dependencies stage will install/update it from the official source before pairing."; return; }
+        TailscaleStatusText.Text = "Starting bounded Tailscale authentication…";
+        var auth = await TailscaleAuthenticationService.BeginAsync(new ProcessRunner(), detected.ExecutablePath, _tailscaleCancellation.Token); _tailscaleAuthenticationUri = auth.AuthenticationUri; OpenTailscaleAuthButton.IsEnabled = _tailscaleAuthenticationUri is not null; TailscaleStatusText.Text = $"{auth.State}: {auth.Detail}";
+        }
+        catch (OperationCanceledException) { TailscaleStatusText.Text = "Tailscale authentication cancelled."; }
+        catch (Exception ex) { TailscaleStatusText.Text = $"Tailscale authentication failed: {ex.Message}"; }
+        finally { _tailscaleBusy = false; _tailscaleCancellation?.Dispose(); _tailscaleCancellation = null; if (sourceButton is not null) sourceButton.IsEnabled = true; }
+    }
+
+    private void OpenTailscaleAuth_Click(object sender, RoutedEventArgs e)
+    {
+        if (_tailscaleAuthenticationUri is null || !_tailscaleAuthenticationUri.Host.Equals("login.tailscale.com", StringComparison.OrdinalIgnoreCase)) return;
+        Process.Start(new ProcessStartInfo { FileName = _tailscaleAuthenticationUri.AbsoluteUri, UseShellExecute = true });
+    }
+
+    private async void CheckTailscale_Click(object sender, RoutedEventArgs e)
+    {
+        if (_tailscaleBusy) return;
+        _tailscaleBusy = true; _tailscaleCancellation = new CancellationTokenSource(); var sourceButton = sender as Button; if (sourceButton is not null) sourceButton.IsEnabled = false;
+        try
+        {
+        var dependency = DependencyService.Catalog.Single(x => x.Name == "Tailscale"); var detected = new DependencyService().Detect(dependency);
+        if (!detected.Found) { TailscaleStatusText.Text = "Not installed yet."; return; }
+        var result = await new ProcessRunner().RunAsync(detected.ExecutablePath, ["status", "--json"], cancellationToken: _tailscaleCancellation.Token); TailscaleStatusText.Text = result.ExitCode == 0 ? "Authenticated — Tailscale status returned successfully." : "Authentication required or Tailscale service unavailable.";
+        }
+        catch (OperationCanceledException) { TailscaleStatusText.Text = "Tailscale status check cancelled."; }
+        catch (Exception ex) { TailscaleStatusText.Text = $"Tailscale status failed: {ex.Message}"; }
+        finally { _tailscaleBusy = false; _tailscaleCancellation?.Dispose(); _tailscaleCancellation = null; if (sourceButton is not null) sourceButton.IsEnabled = true; }
+    }
+
+    private void CancelButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_tailscaleBusy) { _tailscaleCancellation?.Cancel(); return; }
+        if (_executing) { MessageBox.Show(this, "The current transaction is active. Wait for its bounded operation to finish; no forced reboot or blind cancellation is issued.", "Transaction in progress", MessageBoxButton.OK, MessageBoxImage.Information); return; }
+        Close();
+    }
+}
+
+```
+
+
+## FILE: installer-source/DevFleet.Setup/Payload/devfleet-v1.2.13.tar.gz
+
+SHA256: e3176c500f652d6023dcb611ccd580567ed9448da343a5fd4c3649214ca0b654 | Bytes: 530862 | Git mode: 100644
+
+Binary file: retrieve the actual repository file at this path. It is not encoded into this reading document.
+
+
+## FILE: installer-source/DevFleet.Setup/PayloadManifest.cs
+
+SHA256: 3d59d604bf39f55204d33e3135ac256b0c4322458afd2e153ad2b61308c56e1d | Bytes: 345 | Git mode: 100644
+
+```
+namespace DevFleet.Setup;
+
+internal static class PayloadManifest
+{
+    public const string DevFleetVersion = "1.2.13";
+    public const string InstallerVersion = "1.4.1";
+    public const string PayloadName = "devfleet-v1.2.13.tar.gz";
+    public const string PayloadSha256 = "e3176c500f652d6023dcb611ccd580567ed9448da343a5fd4c3649214ca0b654";
+}
+```
+
+
+## FILE: installer-source/DevFleet.Setup/Services/InstallerLifecycle.cs
+
+SHA256: c6963a43398085968288e4b76fea4137e5790264c0fa827efd6afd9a0d2f556c | Bytes: 141135 | Git mode: 100644
+
+```
+using System.Diagnostics;
+using System.IO;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Text.Json;
+using System.Threading;
+using Microsoft.Win32;
+
+namespace DevFleet.Setup;
+
+public sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError, bool OutputComplete = true);
+public sealed record ProcessInvocation(string FileName, IReadOnlyList<string> Arguments, string? WorkingDirectory);
+
+public static class DeadlinePolicy
+{
+    public const string Version = "1.0.0";
+    public const int TransactionTerminalizationMarginSeconds = 600;
+    public const int BootstrapSeconds = 240;
+    public const int PreflightSeconds = 120;
+    public const int PrerequisiteDependencyCount = 6;
+    public const int DependencyProbeSeconds = 60;
+    public const int DependencyHealthSeconds = 180;
+    public const int DependencyInstallSeconds = 1800;
+    public const int DependencyVerificationSeconds = 60;
+    public const int WindowsCapabilitySeconds = 900;
+    public const int WindowsFeatureSeconds = 900;
+    public const int MultipassConfigurationSeconds = 600;
+    public const int VsCodeExtensionSeconds = 300;
+    public static int PrerequisitesSeconds => PrerequisiteDependencyCount * (DependencyProbeSeconds + DependencyHealthSeconds + DependencyInstallSeconds + DependencyVerificationSeconds) + WindowsCapabilitySeconds + WindowsFeatureSeconds + (4 * MultipassConfigurationSeconds) + (3 * VsCodeExtensionSeconds);
+    public const int WindowsTailscaleSeconds = 180;
+    public const int HostAgentSeconds = 300;
+    public const int MultipassLaunchSeconds = 900;
+    public const int MultipassReadinessSeconds = 1200;
+    public const int PayloadTransferSeconds = 900;
+    public const int GuestBootstrapPackagePrerequisitesSeconds = 900;
+    public const int GuestBootstrapDockerRepositoryAndInstallSeconds = 1200;
+    public const int GuestBootstrapTailscaleRepositoryAndInstallSeconds = 1200;
+    public const int GuestBootstrapRootlessRuntimeSeconds = 600;
+    public const int GuestBootstrapNodeToolchainSeconds = 600;
+    public const int GuestBootstrapPythonRuntimeSeconds = 1200;
+    public const int GuestBootstrapServiceAndFirewallFinalizationSeconds = 600;
+    public const int GuestBootstrapTerminalizationMarginSeconds = 300;
+    public static int GuestBootstrapSeconds => GuestBootstrapPackagePrerequisitesSeconds + GuestBootstrapDockerRepositoryAndInstallSeconds + GuestBootstrapTailscaleRepositoryAndInstallSeconds + GuestBootstrapRootlessRuntimeSeconds + GuestBootstrapNodeToolchainSeconds + GuestBootstrapPythonRuntimeSeconds + GuestBootstrapServiceAndFirewallFinalizationSeconds + GuestBootstrapTerminalizationMarginSeconds;
+    public const int VaultBootstrapPackagePrerequisitesSeconds = 900;
+    public const int VaultBootstrapRestServerSeconds = 1200;
+    public const int VaultBootstrapTailscaleSeconds = 600;
+    public const int VaultBootstrapServiceConfigurationSeconds = 600;
+    public const int VaultBootstrapFirewallFinalizationSeconds = 300;
+    public const int VaultBootstrapTerminalizationMarginSeconds = 300;
+    public static int VaultBootstrapSeconds => VaultBootstrapPackagePrerequisitesSeconds + VaultBootstrapRestServerSeconds + VaultBootstrapTailscaleSeconds + VaultBootstrapServiceConfigurationSeconds + VaultBootstrapFirewallFinalizationSeconds + VaultBootstrapTerminalizationMarginSeconds;
+    public const int SshAndMarkerSeconds = 300;
+    public const int VaultSnapshotSeconds = 300;
+    public const int TailscaleSeconds = 900;
+    public const int VaultClientSeconds = 300;
+    public const int ShortcutsSeconds = 180;
+    public const int ExportSeconds = 300;
+    public const int VerificationSeconds = 300;
+
+    public static int ComputeStageSeconds => MultipassLaunchSeconds + MultipassReadinessSeconds + PayloadTransferSeconds + GuestBootstrapSeconds + SshAndMarkerSeconds;
+    public static int VaultStageSeconds => VaultSnapshotSeconds + MultipassLaunchSeconds + MultipassReadinessSeconds + PayloadTransferSeconds + VaultBootstrapSeconds + SshAndMarkerSeconds;
+    public static int DesktopTransactionSeconds => BootstrapSeconds + PreflightSeconds + PrerequisitesSeconds + WindowsTailscaleSeconds + HostAgentSeconds + ComputeStageSeconds + TailscaleSeconds + ShortcutsSeconds + ExportSeconds + VerificationSeconds + TransactionTerminalizationMarginSeconds;
+    public static int LaptopTransactionSeconds => BootstrapSeconds + PreflightSeconds + PrerequisitesSeconds + WindowsTailscaleSeconds + HostAgentSeconds + ComputeStageSeconds + VaultStageSeconds + (TailscaleSeconds * 2) + VaultClientSeconds + ShortcutsSeconds + ExportSeconds + VerificationSeconds + TransactionTerminalizationMarginSeconds;
+
+    public static int GetConnectedTransactionBudgetSeconds(string role) => role.Contains("Laptop", StringComparison.OrdinalIgnoreCase) ? LaptopTransactionSeconds : DesktopTransactionSeconds;
+}
+
+public interface IProcessRunner
+{
+    ProcessResult Run(string fileName, IReadOnlyList<string> arguments, string? workingDirectory = null);
+    Task<ProcessResult> RunAsync(string fileName, IReadOnlyList<string> arguments, string? workingDirectory = null, CancellationToken cancellationToken = default)
+        => Task.Run(() => Run(fileName, arguments, workingDirectory), cancellationToken);
+}
+
+public sealed class ProcessRunner : IProcessRunner
+{
+    public int DefaultTimeoutSeconds { get; }
+    public bool AllowEnvironmentOverride { get; }
+
+    public ProcessRunner(int defaultTimeoutSeconds = 900, bool allowEnvironmentOverride = true)
+    {
+        if (defaultTimeoutSeconds <= 0) throw new ArgumentOutOfRangeException(nameof(defaultTimeoutSeconds));
+        DefaultTimeoutSeconds = defaultTimeoutSeconds;
+        AllowEnvironmentOverride = allowEnvironmentOverride;
+    }
+
+    public ProcessResult Run(string fileName, IReadOnlyList<string> arguments, string? workingDirectory = null)
+        => RunAsync(fileName, arguments, workingDirectory).GetAwaiter().GetResult();
+
+    public async Task<ProcessResult> RunAsync(string fileName, IReadOnlyList<string> arguments, string? workingDirectory = null, CancellationToken cancellationToken = default)
+    {
+        using var process = new Process { StartInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            WorkingDirectory = workingDirectory ?? Environment.CurrentDirectory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        } };
+        foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
+        process.Start();
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        var timeoutSeconds = AllowEnvironmentOverride && int.TryParse(Environment.GetEnvironmentVariable("DEVFLEET_SETUP_PROCESS_TIMEOUT_SECONDS"), out var configured) && configured > 0 ? configured : DefaultTimeoutSeconds;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+        try
         {
             await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
             var exitCode = process.ExitCode;
@@ -493,197 +748,4 @@ public sealed class DependencyService
         var winget = GetWingetHealth();
         if (winget.Status == "Healthy" && !string.IsNullOrWhiteSpace(dependency.WingetPackageId))
         {
-            var result = _runner.Run(winget.ExecutablePath, ["download", "--id", dependency.WingetPackageId!, "--exact", "--source", "winget", "--accept-source-agreements", "--accept-package-agreements", "--download-directory", destinationRoot]);
-            if (result.ExitCode == 0)
-            {
-                var package = Directory.EnumerateFiles(destinationRoot, "*", SearchOption.AllDirectories).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
-                if (package is not null) return package;
-            }
-        }
-        return DownloadDirectOfficial(dependency, destinationRoot);
-    }
-
-    private string DownloadDirectOfficial(DependencyDefinition dependency, string destinationRoot)
-    {
-        if (dependency.DirectOfficialVendorResolver.Type.Equals("windows-capability", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"{dependency.Name} requires the supported Windows capability path; no executable vendor payload is applicable.");
-        var metadataUri = dependency.OfficialMetadata;
-        if (!dependency.DirectOfficialVendorResolver.AllowedHosts.Contains(metadataUri.Host, StringComparer.OrdinalIgnoreCase))
-            throw new InvalidDataException($"Official metadata host is not allowlisted for {dependency.Name}: {metadataUri.Host}");
-        using var response = GetAllowlistedResponse(metadataUri, dependency.DirectOfficialVendorResolver.AllowedHosts, dependency.Name);
-        response.EnsureSuccessStatusCode();
-        var pattern = dependency.DirectOfficialVendorResolver.AssetRegex ?? throw new InvalidDataException($"No official asset rule for {dependency.Name}.");
-        string assetName;
-        Uri url;
-        string? expectedDigest = null;
-        if (dependency.DirectOfficialVendorResolver.Type.Equals("github-release", StringComparison.OrdinalIgnoreCase))
-        {
-            using var json = JsonDocument.Parse(response.Content.ReadAsStream());
-            var root = json.RootElement;
-            var tag = root.GetProperty("tag_name").GetString() ?? throw new InvalidDataException($"Official release tag is missing for {dependency.Name}.");
-            if (!string.IsNullOrWhiteSpace(dependency.DirectOfficialVendorResolver.ExpectedOwner) && root.GetProperty("author").GetProperty("login").GetString() != dependency.DirectOfficialVendorResolver.ExpectedOwner)
-                throw new InvalidDataException($"Official release owner mismatch for {dependency.Name}.");
-            if (!string.IsNullOrWhiteSpace(dependency.DirectOfficialVendorResolver.ExpectedRepository) && !(root.GetProperty("html_url").GetString() ?? "").Contains($"/{dependency.DirectOfficialVendorResolver.ExpectedOwner}/{dependency.DirectOfficialVendorResolver.ExpectedRepository}/releases/", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException($"Official release repository mismatch for {dependency.Name}.");
-            string? pageAssetName = null;
-            if (!string.IsNullOrWhiteSpace(dependency.DirectOfficialVendorResolver.OfficialPageUri))
-            {
-                using var pageResponse = GetAllowlistedResponse(new Uri(dependency.DirectOfficialVendorResolver.OfficialPageUri), dependency.DirectOfficialVendorResolver.AllowedHosts, dependency.Name);
-                var page = pageResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-                var pagePattern = dependency.DirectOfficialVendorResolver.OfficialPageAssetRegex ?? pattern;
-                foreach (Match match in Regex.Matches(page, "href\\s*=\\s*['\"](?<href>[^'\"]+)['\"]", RegexOptions.IgnoreCase))
-                {
-                    var href = match.Groups["href"].Value;
-                    if (Uri.TryCreate(href, UriKind.Absolute, out var pageUri) && Regex.IsMatch(Path.GetFileName(pageUri.AbsolutePath), pagePattern) && pageUri.AbsolutePath.Contains($"/releases/download/{tag}/", StringComparison.OrdinalIgnoreCase))
-                    {
-                        pageAssetName = Path.GetFileName(pageUri.AbsolutePath);
-                        break;
-                    }
-                }
-                if (pageAssetName is null) throw new InvalidDataException($"Official download page did not identify a release asset matching tag {tag} for {dependency.Name}.");
-            }
-            var assets = root.GetProperty("assets").EnumerateArray().Where(x => Regex.IsMatch(x.GetProperty("name").GetString() ?? "", pattern) && (pageAssetName is null || x.GetProperty("name").GetString() == pageAssetName)).ToArray();
-            if (assets.Length != 1) throw new InvalidDataException($"Expected exactly one official x64 asset for {dependency.Name}, found {assets.Length}.");
-            var asset = assets[0];
-            assetName = asset.GetProperty("name").GetString()!;
-            url = new Uri(asset.GetProperty("browser_download_url").GetString() ?? "");
-            if (!url.AbsolutePath.Contains($"/{dependency.DirectOfficialVendorResolver.ExpectedOwner}/{dependency.DirectOfficialVendorResolver.ExpectedRepository}/releases/download/{tag}/", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException($"Official release asset path/tag mismatch for {dependency.Name}.");
-            if (asset.TryGetProperty("digest", out var digestElement)) expectedDigest = digestElement.GetString();
-        }
-        else if (dependency.DirectOfficialVendorResolver.Type.Equals("official-download-page", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!string.IsNullOrWhiteSpace(dependency.DirectOfficialVendorResolver.DirectUri))
-            {
-                var directUri = new Uri(dependency.DirectOfficialVendorResolver.DirectUri);
-                if (!dependency.DirectOfficialVendorResolver.AllowedHosts.Contains(directUri.Host, StringComparer.OrdinalIgnoreCase)) throw new InvalidDataException($"Official direct URI host is not allowlisted for {dependency.Name}: {directUri.Host}");
-                using var directResponse = GetAllowlistedResponse(directUri, dependency.DirectOfficialVendorResolver.AllowedHosts, dependency.Name);
-                url = directResponse.RequestMessage?.RequestUri ?? directUri;
-                assetName = Path.GetFileName(url.AbsolutePath);
-                if (string.IsNullOrWhiteSpace(assetName) || !Regex.IsMatch(assetName, pattern)) throw new InvalidDataException($"Official direct URI resolved to an unexpected asset for {dependency.Name}: {assetName}");
-            }
-            else
-            {
-                var html = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-                var links = Regex.Matches(html, @"href\s*=\s*[""'](?<href>[^""']+)[""']", RegexOptions.IgnoreCase).Select(x => x.Groups["href"].Value);
-                var selected = links.Select(x => Uri.TryCreate(metadataUri, x, out var candidate) ? candidate : null).Where(x => x is not null && dependency.DirectOfficialVendorResolver.AllowedHosts.Contains(x.Host, StringComparer.OrdinalIgnoreCase) && Regex.IsMatch(Path.GetFileName(x.AbsolutePath), pattern)).FirstOrDefault();
-                if (selected is null) throw new InvalidDataException($"No allowlisted official download-page asset matched for {dependency.Name}.");
-                url = selected;
-                assetName = Path.GetFileName(url.AbsolutePath);
-            }
-        }
-        else throw new InvalidOperationException($"Direct official resolver is not implemented for {dependency.Name}; refusing an unauthenticated fallback. Metadata: {dependency.OfficialMetadata}");
-        if (!dependency.DirectOfficialVendorResolver.AllowedHosts.Contains(url.Host, StringComparer.OrdinalIgnoreCase)) throw new InvalidDataException($"Official asset host is not allowlisted for {dependency.Name}: {url.Host}");
-        var path = Path.Combine(destinationRoot, assetName);
-        Exception? last = null;
-        for (var attempt = 1; attempt <= 3; attempt++)
-        {
-            try
-            {
-                using var downloadResponse = GetAllowlistedResponse(url, dependency.DirectOfficialVendorResolver.AllowedHosts, dependency.Name);
-                using var download = downloadResponse.Content.ReadAsStream();
-                using var output = File.Create(path);
-                download.CopyTo(output);
-                if (dependency.InstallerAuthenticityPolicy.Strategy is "VendorReleaseSha256" or "AuthenticodeOrVendorReleaseSha256")
-                {
-                    if (string.IsNullOrWhiteSpace(expectedDigest)) throw new InvalidDataException($"Official vendor release did not provide a SHA-256 digest for {dependency.Name}.");
-                    _verifiedVendorDigests[path] = VendorReleaseAuthenticity.NormalizeDigest(expectedDigest);
-                    VendorReleaseAuthenticity.VerifySha256(path, expectedDigest);
-                }
-                return path;
-            }
-            catch (Exception ex) when (attempt < 3) { last = ex; Thread.Sleep(TimeSpan.FromSeconds(attempt)); }
-        }
-        throw new IOException($"Official download failed after bounded retries for {dependency.Name}.", last);
-    }
-
-    public void VerifyInstaller(string installerPath, DependencyDefinition? dependency = null)
-    {
-        if (!File.Exists(installerPath)) throw new FileNotFoundException("Dependency installer is missing.", installerPath);
-        if (dependency?.InstallerAuthenticityPolicy.Strategy is "VendorReleaseSha256" or "AuthenticodeOrVendorReleaseSha256")
-        {
-            if (!_verifiedVendorDigests.TryGetValue(installerPath, out var digest)) throw new InvalidDataException($"No verified official vendor digest is bound to {Path.GetFileName(installerPath)}.");
-            VendorReleaseAuthenticity.VerifySha256(installerPath, digest);
-            return;
-        }
-        var escaped = installerPath.Replace("'", "''");
-        var result = _runner.Run(TrustedExecutableResolver.PowerShellPath(), ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", $"$s=Get-AuthenticodeSignature -LiteralPath '{escaped}'; if($s.Status -ne 'Valid'){{exit 9}}; $s.SignerCertificate.Subject"]);
-        if (result.ExitCode != 0 || !result.OutputComplete || string.IsNullOrWhiteSpace(result.StandardOutput)) throw new InvalidDataException($"Authenticode verification failed for {Path.GetFileName(installerPath)}{(result.OutputComplete ? "." : ": redirected signer output was incomplete.")}");
-        if (dependency is not null && dependency.InstallerAuthenticityPolicy.AllowedSignerSubjectsExact.Length > 0)
-        {
-            var subject = result.StandardOutput.Trim();
-            if (!SignerIdentity.MatchesExact(subject, dependency.InstallerAuthenticityPolicy.AllowedSignerSubjectsExact))
-                throw new InvalidDataException($"Authenticode signer is not allowlisted for {dependency.Name}: {subject}");
-        }
-        else if (dependency is not null && dependency.InstallerAuthenticityPolicy.AllowedSignerPatterns.Length > 0)
-            throw new InvalidDataException($"Legacy substring signer policy is rejected for {dependency.Name}; release policy must provide AllowedSignerSubjectsExact.");
-    }
-
-    private HttpResponseMessage GetAllowlistedResponse(Uri initialUri, IReadOnlyCollection<string> allowedHosts, string dependencyName)
-    {
-        var uri = initialUri;
-        for (var hop = 0; hop <= 5; hop++)
-        {
-            if (!uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(uri.Host) || !string.IsNullOrEmpty(uri.UserInfo))
-                throw new InvalidDataException($"Official download redirect is not an allowlisted HTTPS URI for {dependencyName}: {uri}");
-            if (!allowedHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase))
-                throw new InvalidDataException($"Official download host is not allowlisted for {dependencyName}: {uri.Host}");
-            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-            request.Headers.UserAgent.ParseAdd($"DevFleet-Setup/{PayloadManifest.InstallerVersion}");
-            var response = _http.Send(request);
-            if ((int)response.StatusCode is >= 300 and <= 399)
-            {
-                var location = response.Headers.Location;
-                response.Dispose();
-                if (location is null) throw new InvalidDataException($"Official download redirect omitted Location for {dependencyName}.");
-                uri = new Uri(uri, location);
-                continue;
-            }
-            response.EnsureSuccessStatusCode();
-            return response;
-        }
-        throw new InvalidDataException($"Official download exceeded the redirect limit for {dependencyName}.");
-    }
-
-    public DependencyResult Install(DependencyDefinition dependency, string installerPath)
-    {
-        VerifyInstaller(installerPath, dependency);
-        var args = dependency.SilentInstallArguments.Length == 0 ? ["/quiet", "/norestart"] : dependency.SilentInstallArguments;
-        ProcessResult result = Path.GetExtension(installerPath).Equals(".msi", StringComparison.OrdinalIgnoreCase)
-            ? _runner.Run(TrustedExecutableResolver.SystemExecutable("msiexec.exe"), ["/i", installerPath, .. args])
-            : _runner.Run(installerPath, args);
-        if (result.ExitCode is not (0 or 3010)) throw new InvalidOperationException($"{dependency.Name} installation failed ({result.ExitCode}): {result.StandardError}");
-        var detected = Detect(dependency);
-        if (!detected.Compatible) throw new InvalidOperationException($"{dependency.Name} completed but a compatible executable was not discovered.");
-        return new(true, true, result.ExitCode == 3010, $"{dependency.Name} {detected.Version} at {detected.ExecutablePath}");
-    }
-
-    public IReadOnlyList<DependencyDetection> DetectAll() => Catalog.Select(Detect).ToArray();
-    public DependencyResult VerifyLocalPayload(string dependencyRoot)
-    {
-        if (!Directory.Exists(dependencyRoot)) return new(false, false, false, "Offline prerequisite payload directory is absent.");
-        var manifestPath = Path.Combine(dependencyRoot, "OFFLINE-DEPENDENCIES.json");
-        if (!File.Exists(manifestPath)) return new(false, false, false, "Release-bound offline dependency manifest is absent.");
-        try
-        {
-            using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
-            var root = document.RootElement;
-            if (root.GetProperty("schemaVersion").GetInt32() != 2 || root.GetProperty("devfleetVersion").GetString() != PayloadManifest.DevFleetVersion || !root.TryGetProperty("releaseBinding", out _))
-                return new(false, false, false, "Offline dependency manifest is not bound to this release.");
-            if (!root.TryGetProperty("payloads", out var payloads) || payloads.ValueKind != JsonValueKind.Array)
-                return new(false, false, false, "Release-bound offline payload entries are absent.");
-            var entries = payloads.EnumerateArray().ToArray();
-            var entryByName = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
-            foreach (var entry in entries)
-            {
-                var fileName = entry.GetProperty("filename").GetString() ?? "";
-                var dependencyId = entry.GetProperty("dependencyId").GetString() ?? "";
-                var expectedSha = entry.GetProperty("sha256").GetString() ?? "";
-                var expectedSize = entry.GetProperty("sizeBytes").GetInt64();
-                if (string.IsNullOrWhiteSpace(dependencyId) || string.IsNullOrWhiteSpace(fileName) || Path.IsPathRooted(fileName) || fileName.Contains("..", StringComparison.Ordinal) || !Regex.IsMatch(expectedSha, "^[0-9a-fA-F]{64}$") || expectedSize < 0 || !entryByName.TryAdd(fileName, entry))
-                    return new(false, false, false, "Offline payload manifest contains an invalid or duplicate entry.");
-            }
-            var files = Directory.EnumerateFiles(dependencyRoot, "*", SearchOption.AllDirectories)
-                .Where(path => !path.Equals(manifestPath, StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-            var actualByName = files.ToDictionary(path => Path.GetRelativePath(dependencyRoot, path), StringComparer.OrdinalIgnoreCase);
-            if (actualByName.Keys.Any(name => !ent
+            var result = _runner.Run(winget.ExecutablePath, ["download", "--id", dependency.WingetPackageId!

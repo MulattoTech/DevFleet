@@ -1,10 +1,360 @@
 # DevFleet source part 069
 
 Full-source UTF-8 byte interval [3162000, 3208500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 74599f9694ea7ce61747b57a842e7be6f76740e34b9016e4659b2b00cc648d3f
+Payload SHA-256: be4a5ac37099a09314790fdec04323c3c42f34d116d284c8b0f65e78ea035c43
 
 <!-- BEGIN SOURCE SLICE -->
-session(request)
+lueError("Workspace imports are limited to a DevFleet source VM.")
+    if not runtime_id:
+        raise ValueError("A target project VM runtime id is required for workspace import.")
+    payload = {"slug": slug, "project_id": project_id, "source_vm": source_vm}
+    return host_control_request("import", payload, runtime_id=runtime_id)
+
+
+def sync_project_vm_ssh_alias(slug: str, runtime_id: str, *, project_id: str = "") -> dict[str, Any]:
+    """Create or refresh the host-owned alias for one dedicated project VM.
+
+    The host agent derives both alias and address from its ownership registry;
+    callers cannot submit SSH configuration text or an arbitrary host.
+    """
+    slug = validate_slug(slug)
+    project_id = validate_project_id(project_id)
+    if not runtime_id:
+        raise ValueError("A project VM runtime id is required for SSH alias synchronization.")
+    return host_control_request("sync-ssh-alias", {"slug": slug, "project_id": project_id}, runtime_id=runtime_id)
+
+
+def refresh_project_vm_connection_state(slug: str, runtime_id: str, *, project_id: str = "") -> dict[str, Any]:
+    """Reconcile the current owned VM address, registry, and pinned SSH alias."""
+    slug = validate_slug(slug)
+    project_id = validate_project_id(project_id)
+    if not runtime_id:
+        raise ValueError("A project VM runtime id is required for connection-state refresh.")
+    return host_control_request("refresh-connection-state", {"slug": slug, "project_id": project_id}, runtime_id=runtime_id)
+
+
+def export_project_workspace(slug: str, runtime_id: str, *, project_id: str = "") -> dict[str, Any]:
+    slug = validate_slug(slug)
+    project_id = validate_project_id(project_id)
+    if not runtime_id:
+        raise ValueError("A project VM runtime id is required for workspace export.")
+    return host_control_request("export", {"slug": slug, "project_id": project_id}, runtime_id=runtime_id)
+
+
+def export_project_workspace_to_source(slug: str, runtime_id: str, *, source_vm: str, project_id: str = "", replace_source: bool = False) -> dict[str, Any]:
+    slug = validate_slug(slug)
+    source_vm = validate_slug(source_vm)
+    project_id = validate_project_id(project_id)
+    if not source_vm.startswith("devfleet-") or not runtime_id:
+        raise ValueError("VM export requires a DevFleet source VM and target runtime id.")
+    return host_control_request("export-to-source", {"slug": slug, "project_id": project_id, "source_vm": source_vm, "replace_source": bool(replace_source)}, runtime_id=runtime_id)
+
+
+def restore_previous_source_workspace(slug: str, runtime_id: str, *, source_vm: str, project_id: str, previous_workspace_path: str) -> dict[str, Any]:
+    """Atomically reinstate the source workspace retained by a VM export."""
+    slug = validate_slug(slug)
+    source_vm = validate_slug(source_vm)
+    project_id = validate_project_id(project_id)
+    if not source_vm.startswith("devfleet-") or not runtime_id or not previous_workspace_path:
+        raise ValueError("Restoring a previous source workspace requires a DevFleet source VM, runtime id, and retained path.")
+    payload = {"slug": slug, "project_id": project_id, "source_vm": source_vm, "previous_workspace_path": previous_workspace_path}
+    return host_control_request("restore-previous-source", payload, runtime_id=runtime_id)
+
+
+def project_vm_operation(slug: str, operation: str, *, runtime_id: str = "", project_id: str = "", command_key: str = "", tail: int = 150) -> dict[str, Any]:
+    slug = validate_slug(slug)
+    project_id = validate_project_id(project_id)
+    if operation not in {"project-start", "project-stop", "project-restart", "project-health", "project-test", "project-bootstrap", "project-rebuild", "project-logs"}:
+        raise ValueError("Unsupported structured project VM operation.")
+    payload: dict[str, Any] = {"slug": slug, "project_id": project_id}
+    if command_key:
+        payload["command_key"] = command_key
+    if operation == "project-logs":
+        payload["tail"] = max(1, min(int(tail), 500))
+    return host_control_request(operation, payload, runtime_id=runtime_id)
+
+
+def stop_project_vm(slug: str, *, runtime_id: str = "", project_id: str = "") -> dict[str, Any]:
+    return runtime_project_vm(slug, "stop", runtime_id=runtime_id, project_id=project_id)
+
+
+def destroy_project_vm(slug: str, confirm_slug: str, confirm_phrase: str, *, backup_verified: bool = False, backup_id: str = "", backup_sha256: str = "", cleanup_only: bool = False, cleanup_stage: str = "", local_archive_sha256: str = "", import_archive_sha256: str = "", runtime_id: str = "", project_id: str = "") -> dict[str, Any]:
+    slug = validate_slug(slug)
+    if confirm_slug != slug or confirm_phrase != f"DESTROY {slug}":
+        raise ValueError("Permanent destruction requires the exact project slug and confirmation phrase.")
+    if not cleanup_only and (not backup_id or not backup_sha256):
+        raise ValueError("Permanent VM destruction requires an identified, hashed workspace backup artifact.")
+    if cleanup_only:
+        if not backup_verified or not backup_id:
+            raise ValueError("Failed-migration cleanup requires a verified provider-aware backup identity.")
+        if cleanup_stage not in {"pre-import", "post-import"}:
+            raise ValueError("Failed-migration cleanup requires an explicit pre-import or post-import stage.")
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", str(backup_sha256 or "")) or not re.fullmatch(r"[0-9a-fA-F]{64}", str(local_archive_sha256 or "")):
+            raise ValueError("Failed-migration cleanup requires verified provider and local archive SHA-256 values.")
+        if cleanup_stage == "post-import" and import_archive_sha256 and not re.fullmatch(r"[0-9a-fA-F]{64}", str(import_archive_sha256)):
+            raise ValueError("Failed-migration cleanup import archive SHA-256 is malformed.")
+    payload = {"slug": slug, "project_id": project_id, "confirm_slug": confirm_slug, "confirm_phrase": confirm_phrase, "backup_verified": bool(backup_verified), "backup_id": backup_id, "backup_sha256": backup_sha256, "cleanup_only": bool(cleanup_only), "cleanup_stage": cleanup_stage, "local_archive_sha256": local_archive_sha256, "import_archive_sha256": import_archive_sha256}
+    return host_control_request("destroy", payload, runtime_id=runtime_id)
+
+```
+
+
+## FILE: source/app/devfleet/language_policy.py
+
+SHA256: d3c417f349ee93e1aefe323f09233c8e4e8d3f612914e97f0b9e32df5b81b289 | Bytes: 2079 | Git mode: 100644
+
+```
+from __future__ import annotations
+TEMPLATES={
+'generic':('other','none','core'),'python':('python','standard-library','core'),'python-fastapi':('python','fastapi','core'),'node':('javascript','node','core'),'typescript-node':('typescript','node','core'),'typescript-next':('typescript','nextjs','core'),'go-service':('go','net-http','core'),'dotnet-service':('csharp','aspnet-core','core'),'java-spring':('java','spring-boot','core'),'rust-service':('rust','axum','core'),
+'kotlin-service':('kotlin','ktor','preview'),'php-laravel':('php','laravel','preview'),'ruby-rails':('ruby','rails','preview'),'flutter':('dart','flutter','preview'),'elixir-phoenix':('elixir','phoenix','preview'),'cpp-cmake':('cpp','cmake','preview'),'shell-automation':('shell','bash','preview'),'data-r':('r','base-r','preview'),'scientific-julia':('julia','base-julia','preview'),'sql-project':('sql','migrations','preview')}
+def recommend_template(language:str='',framework:str='',scale:str='',intent:str='',project_kind:str='')->str:
+ l=language.lower();f=framework.lower();k=project_kind.lower()
+ if 'fastapi' in f or k=='rapid-api':return 'python-fastapi'
+ if 'next' in f or k in {'web-frontend','full-stack-web','browser-extension','vscode-extension'}:return 'typescript-next' if 'next' in f or k=='full-stack-web' else 'typescript-node'
+ return {'python':'python','javascript':'node','typescript':'typescript-node','go':'go-service','csharp':'dotnet-service','c#':'dotnet-service','java':'java-spring','rust':'rust-service','kotlin':'kotlin-service','php':'php-laravel','ruby':'ruby-rails','dart':'flutter','elixir':'elixir-phoenix','cpp':'cpp-cmake','c++':'cpp-cmake','shell':'shell-automation','bash':'shell-automation','r':'data-r','julia':'scientific-julia','sql':'sql-project'}.get(l,'generic')
+def template_metadata(name:str)->dict[str,str]:
+ language,framework,maturity=TEMPLATES[name];return {'language':language,'framework':framework,'template_maturity':maturity,'language_rationale':"Selected using Dylan's DevFleet engineering preferences; this is not a scientific model benchmark."}
+
+```
+
+
+## FILE: source/app/devfleet/leases.py
+
+SHA256: 968255eb2ab9f4121cb561dc474a382b3c47e7dcbe8c08936cda7022abfb7b31 | Bytes: 1668 | Git mode: 100644
+
+```
+from __future__ import annotations
+from pathlib import Path
+from typing import Any
+from .core import SETTINGS,atomic_json,now_iso,run
+from .metadata_io import read_project_metadata
+def lease_path(project:Path)->Path:return project/'.devfleet'/'ownership-lease.json'
+def load_lease(project:Path)->dict[str,Any]:
+ try:return __import__('json').loads(lease_path(project).read_text())
+ except Exception:return {}
+def _git(project:Path)->tuple[str,bool]:
+ commit=run(['git','rev-parse','HEAD'],cwd=project,check=False,timeout=15).stdout.strip();dirty=bool(run(['git','status','--porcelain'],cwd=project,check=False,timeout=15).stdout.strip());return commit,dirty
+def update_lease(project:Path,*,active:bool|None=None,clean_shutdown:bool|None=None,backup_time:str|None=None,active_node:str|None=None)->dict[str,Any]:
+ data=load_lease(project);meta={}
+ try:
+  value=read_project_metadata(project).value
+  meta=value if isinstance(value,dict) else {}
+ except Exception:pass
+ commit,dirty=_git(project);now=now_iso();data.update({'project_identity':meta.get('identity',project.name),'project_id':meta.get('project_id',''),'active_node':(active_node or SETTINGS.node_name) if active is not None else data.get('active_node'),'heartbeat_time':now,'git_commit':commit,'working_tree_dirty':dirty})
+ if active is not None:
+  data['active']=active
+  if active:data['start_time']=now;data['last_clean_shutdown']=None
+ if clean_shutdown is not None:data['last_clean_shutdown']=now if clean_shutdown else None
+ if backup_time:data['last_backup']=backup_time
+ atomic_json(lease_path(project),data);return data
+def heartbeat_lease(project:Path)->dict[str,Any]:return update_lease(project)
+
+```
+
+
+## FILE: source/app/devfleet/main.py
+
+SHA256: 1da87d821f4910f3d0e86f39592593a351b55ab83a62174b90ffa62a80add618 | Bytes: 67806 | Git mode: 100644
+
+```
+from __future__ import annotations
+from urllib.parse import quote, urlsplit
+import hashlib, html, hmac, json, logging, os, re
+from pathlib import Path
+from typing import Any
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+import httpx
+from .auth import (
+    LOGIN_CSRF_COOKIE,
+    SESSION_COOKIE,
+    check_api,
+    check_session,
+    issue_session,
+    login_csrf_token,
+    login_retry_after,
+    revoke_session,
+    safe_next,
+    session_cookie_options,
+    session_csrf_token,
+    session_user,
+    validate_login_csrf,
+    valid_credentials,
+)
+from .core import (
+    SETTINGS,
+    load_peer,
+    safe_child,
+    validate_project_id,
+    validate_slug,
+    run,
+    client_allowed_by_network,
+)
+from .projects import (
+    create_project,
+    start_project,
+    stop_project,
+    restart_project,
+    inspect_runtime,
+    runtime_health,
+    open_workspace,
+    rebuild_project,
+    quarantine_project,
+    destroy_project,
+    list_backups,
+    restore_backup,
+    list_quarantine,
+    restore_quarantine,
+    restore_from_vault,
+    backup_project,
+    test_project,
+    load_authoritative_project_identity_for_mutation,
+    load_meta,
+    metadata_path,
+    commit_project_metadata,
+    project_logs,
+    bootstrap_codexpro,
+    bootstrap_project,
+    health_project,
+    assign_project_runtime,
+    detect_runtime,
+    project_command_readiness,
+    project_capabilities,
+    reconcile_failed_migration,
+    assert_project_quiesced_for_transfer,
+    finalize_source_transfer,
+    project_transfer_lock,
+    receive_transferred_project,
+    activate_transferred_project,
+)
+from .status import (
+    cluster_snapshot,
+    local_status,
+    peer_status,
+    peer_node_status,
+    runtime_status,
+    cluster_status,
+)
+from .containers import (
+    container_action,
+    container_logs,
+    inspect_container,
+    list_containers,
+    validate_container_ref,
+)
+from .operations import submit_operation, get_operation, list_operations
+from .analyzer import analyze_project
+from .language_policy import TEMPLATES, recommend_template
+from .resource_profiles import (
+    RESOURCE_PROFILES,
+    RUNTIME_ISOLATIONS,
+    capacity_allows,
+    custom_resource_metadata,
+    recommend_resource_profile,
+    recommend_runtime_isolation,
+)
+from .host_control import host_control_status, get_host_capacity, get_provider_status
+from .failover import guided_transfer
+from .workspace_archives import inspect_workspace
+from .request_guards import RequestAdmissionMiddleware
+from .version import __version__
+
+app = FastAPI(title="DevFleet", version=__version__, docs_url=None, redoc_url=None)
+LOGGER = logging.getLogger("devfleet")
+templates = Jinja2Templates(
+    directory=str(
+        Path(os.environ.get("DEVFLEET_TEMPLATE_DIR", "/opt/devfleet/templates"))
+    )
+)
+app.mount(
+    "/static",
+    StaticFiles(
+        directory=str(
+            Path(os.environ.get("DEVFLEET_STATIC_DIR", "/opt/devfleet/static"))
+        ),
+        check_dir=True,
+    ),
+    name="static",
+)
+app.add_middleware(RequestAdmissionMiddleware)
+
+
+def ui_csrf_token(request: Request | None = None) -> str:
+    if request is None:
+        raise ValueError("A request-bound session is required for UI CSRF generation.")
+    return session_csrf_token(request)
+
+
+def valid_ui_csrf(value: str, request: Request | None = None) -> bool:
+    expected = ui_csrf_token(request)
+    return bool(value and expected) and hmac.compare_digest(value, expected)
+
+
+@app.middleware("http")
+async def headers(request: Request, call_next):
+    started = __import__("time").perf_counter()
+    response = await call_next(request)
+    duration = (__import__("time").perf_counter() - started) * 1000
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Cache-Control"] = (
+        "public, max-age=31536000, immutable"
+        if request.url.path.startswith("/static/")
+        else "no-store"
+    )
+    response.headers["Server-Timing"] = f"app;dur={duration:.2f}"
+    response.headers["X-DevFleet-Render-Ms"] = f"{duration:.2f}"
+    return response
+
+
+@app.middleware("http")
+async def network_guard(request: Request, call_next):
+    if not client_allowed_by_network(request.client.host if request.client else None):
+        return JSONResponse(
+            {
+                "detail": "Portal access is restricted to loopback and the configured Tailscale network."
+            },
+            status_code=403,
+        )
+    return await call_next(request)
+
+
+def _human_ui_route(path: str) -> bool:
+    return path == "/" or path.startswith(
+        (
+            "/projects",
+            "/cluster",
+            "/containers",
+            "/peer",
+            "/operations",
+            "/ui",
+            "/quarantine",
+            "/repair",
+        )
+    )
+
+
+@app.middleware("http")
+async def session_guard(request: Request, call_next):
+    if _human_ui_route(request.url.path) and not session_user(request):
+        target = request.url.path + (
+            (f"?{request.url.query}") if request.url.query else ""
+        )
+        return RedirectResponse(
+            "/login?next=" + quote(safe_next(target), safe="/?:=&%"), status_code=303
+        )
+    return await call_next(request)
+
+
+def ui(request: Request, csrf_token: str = ""):
+    check_session(request)
     if request.method not in {"GET", "HEAD", "OPTIONS"}:
         if not valid_ui_csrf(csrf_token, request):
             raise HTTPException(403, "A valid session CSRF token is required.")
@@ -845,484 +1195,4 @@ def api_runtime_recommend(
     resource = recommend_resource_profile(
         scale=scale,
         intent=intent,
-        project_kind=project_kind,
-        language=language,
-        framework=framework,
-    )
-    return {
-        "resource_profile": resource.name,
-        "resource_limits": resource.__dict__,
-        "runtime_isolation": recommend_runtime_isolation(
-            scale=scale, intent=intent, project_kind=project_kind
-        ),
-        "runtime_options": RUNTIME_ISOLATIONS,
-    }
-
-
-@app.post("/projects/create")
-def project_create(
-    request: Request,
-    slug: str = Form(...),
-    display_name: str = Form(""),
-    template: str = Form("auto"),
-    git_url: str = Form(""),
-    target: str = Form("local"),
-    language: str = Form(""),
-    framework: str = Form(""),
-    scale: str = Form("small"),
-    intent: str = Form("prototype"),
-    testing_level: str = Form("standard"),
-    profile: str = Form("balanced"),
-    resource_profile: str = Form(""),
-    runtime_isolation: str = Form(""),
-    use_ollama: bool = Form(False),
-    worktree_source: str = Form(""),
-    worktree_branch: str = Form(""),
-    project_kind: str = Form(""),
-    custom_cpus: str = Form(""),
-    custom_ram_gb: str = Form(""),
-    custom_disk_gb: str = Form(""),
-    pid_mode: str = Form("private"),
-    pid_limit: str = Form("4096"),
-    csrf_token: str = Form(""),
-):
-    ui(request, csrf_token)
-    payload = {
-        "slug": slug,
-        "display_name": display_name,
-        "template": template,
-        "git_url": git_url,
-        "language": language,
-        "framework": framework,
-        "scale": scale,
-        "intent": intent,
-        "testing_level": testing_level,
-        "profile": profile,
-        "resource_profile": resource_profile,
-        "resource_limits": _form_resource_limits(
-            resource_profile,
-            custom_cpus,
-            custom_ram_gb,
-            custom_disk_gb,
-            pid_limit,
-            pid_mode,
-        ),
-        "runtime_isolation": runtime_isolation,
-        "use_ollama": use_ollama,
-        "worktree_source": worktree_source,
-        "worktree_branch": worktree_branch,
-        "project_kind": project_kind,
-    }
-    if profile == "fast":
-        raise HTTPException(
-            400,
-            "Use the explicit Fast profile acknowledgement after creating the project in Balanced mode.",
-        )
-
-    def task(ctx):
-        ctx.update(10, "Validating project request", "validate")
-        result = (
-            peer_call("POST", "/api/projects/create", payload)
-            if target == "peer"
-            else create_project(operation_context=ctx, **payload)
-        )
-        ctx.update(90, "Project runtime provisioned", "verify")
-        return result
-
-    return redirect(
-        submit_operation("peer-create" if target == "peer" else "create", slug, task)
-    )
-
-
-@app.get("/projects/{slug}", response_class=HTMLResponse)
-def project_page(request: Request, slug: str):
-    ui(request)
-    return index(
-        request,
-        operation=request.query_params.get("operation", ""),
-        view="project",
-        project=slug,
-    )
-
-
-@app.get("/projects/{slug}/workspace")
-def project_workspace(request: Request, slug: str):
-    ui(request)
-    _require_owned_project_for_mutation(slug)
-    result = open_workspace(slug)
-    if not result.get("ok"):
-        raise HTTPException(
-            409, str(result.get("error") or "Workspace is not ready to open.")
-        )
-    return RedirectResponse(str(result["launcher_uri"]), status_code=307)
-
-
-@app.post("/projects/{slug}/environment")
-def project_environment(
-    request: Request,
-    slug: str,
-    runtime_isolation: str = Form("container"),
-    resource_profile: str = Form(""),
-    custom_cpus: str = Form(""),
-    custom_ram_gb: str = Form(""),
-    custom_disk_gb: str = Form(""),
-    pid_mode: str = Form("private"),
-    pid_limit: str = Form("4096"),
-    wizard_confirmed: bool = Form(False),
-    csrf_token: str = Form(""),
-):
-    ui(request, csrf_token)
-    if not wizard_confirmed:
-        raise HTTPException(
-            400,
-            "Complete the Environment, Resources, Review, and Confirm stages before applying this assignment.",
-        )
-    _require_owned_project_for_mutation(slug, allow_legacy_migration=True)
-    preflight = _preflight(
-        slug,
-        runtime_isolation,
-        resource_profile,
-        custom_cpus,
-        custom_ram_gb,
-        custom_disk_gb,
-        pid_mode,
-        pid_limit,
-    )
-    if not preflight["migration_ready"]:
-        raise HTTPException(
-            409,
-            "Environment preflight is not ready: " + "; ".join(preflight["blockers"]),
-        )
-    limits = _form_resource_limits(
-        resource_profile,
-        custom_cpus,
-        custom_ram_gb,
-        custom_disk_gb,
-        pid_limit,
-        pid_mode,
-    )
-
-    def task(ctx):
-        ctx.update(
-            8, "Validating the existing workspace and selected environment", "validate"
-        )
-        result = assign_project_runtime(
-            slug, runtime_isolation, resource_profile, limits, operation_context=ctx
-        )
-        ctx.log(json.dumps(result, default=str)[-4000:])
-        return result
-
-    operation_id = submit_operation(
-        "runtime-adoption",
-        slug,
-        task,
-        idempotency_key=f'runtime-adoption:{slug}:{runtime_isolation}:{resource_profile or "current"}',
-    )
-    if ui_wants_json(request):
-        return JSONResponse(
-            {
-                "ok": True,
-                "operation_id": operation_id,
-                "message": "Environment assignment queued.",
-            },
-            status_code=202,
-        )
-    return redirect(operation_id)
-
-
-@app.post("/projects/{slug}/{action}")
-def project_action(
-    request: Request,
-    slug: str,
-    action: str,
-    confirm_failover: bool = Form(False),
-    confirm_quarantine: bool = Form(False),
-    confirm_slug: str = Form(""),
-    confirm_phrase: str = Form(""),
-    backup_id: str = Form(""),
-    confirm_restore: bool = Form(False),
-    allow_overwrite: bool = Form(False),
-    csrf_token: str = Form(""),
-):
-    ui(request, csrf_token)
-    if action not in PROJECT_ACTIONS:
-        raise HTTPException(404, "Unknown project action.")
-    project = safe_child(SETTINGS.workspaces, slug)
-    if not project.is_dir() or project.is_symlink():
-        raise HTTPException(404, "Project not found.")
-    metadata = _require_owned_project_for_mutation(slug)
-    capabilities = project_capabilities(slug, metadata)
-    if (
-        action
-        in {
-            "restart",
-            "runtime-health",
-            "bootstrap",
-            "health",
-            "test",
-            "codexpro",
-            "logs",
-        }
-        and not capabilities["can_run_runtime_action"]
-    ):
-        raise HTTPException(
-            409,
-            f"Runtime action unavailable: {capabilities['status_reason'] or 'environment is not ready.'}",
-        )
-    if action == "quarantine" and not confirm_quarantine:
-        raise HTTPException(400, "Quarantine requires explicit acknowledgement.")
-    if action == "destroy" and (
-        confirm_slug != slug or confirm_phrase != f"DESTROY {slug}"
-    ):
-        raise HTTPException(400, "Permanent destruction requires exact confirmation.")
-    if action == "restore-backup" and (not confirm_restore or not backup_id):
-        raise HTTPException(400, "Backup restore requires an identified backup and explicit confirmation.")
-
-    payload = {
-        "confirm_failover": confirm_failover,
-        "confirm_quarantine": confirm_quarantine,
-        "confirm_slug": confirm_slug,
-        "confirm_phrase": confirm_phrase,
-        "backup_id": backup_id,
-        "confirm_restore": confirm_restore,
-        "allow_overwrite": allow_overwrite,
-    }
-    shared_task = _project_action_task(slug, action, payload)
-    def task(ctx):
-        return shared_task(ctx)
-
-    idempotency_key = _action_idempotency_key(slug, action, payload)
-    operation_id = submit_operation(action, slug, task, idempotency_key=idempotency_key)
-    if ui_wants_json(request):
-        return JSONResponse({"ok": True, "operation_id": operation_id}, status_code=202)
-    return redirect(operation_id)
-
-
-@app.post("/projects/{slug}/profile")
-def project_profile(
-    request: Request,
-    slug: str,
-    profile: str = Form(...),
-    confirm_fast: bool = Form(False),
-    allow_devices: bool = Form(False),
-    allow_privileged: bool = Form(False),
-    csrf_token: str = Form(""),
-):
-    ui(request, csrf_token)
-    profile = profile.lower()
-    if profile not in {"strict", "balanced", "fast"}:
-        raise HTTPException(400, "Unknown profile.")
-    if profile == "fast" and not confirm_fast:
-        raise HTTPException(400, "Fast Trusted mode requires explicit acknowledgement.")
-    if (allow_devices or allow_privileged) and (profile != "fast" or not confirm_fast):
-        raise HTTPException(
-            400, "Device or privileged access requires Fast Trusted acknowledgement."
-        )
-    project = safe_child(SETTINGS.workspaces, slug)
-    meta = _require_owned_project_for_mutation(slug)
-    previous = str(meta.get("profile") or SETTINGS.development_profile)
-    meta.setdefault("profile_history", []).append(
-        {
-            "from": previous,
-            "to": profile,
-            "time": __import__("time").strftime(
-                "%Y-%m-%dT%H:%M:%SZ", __import__("time").gmtime()
-            ),
-        }
-    )
-    meta["profile_history"] = meta["profile_history"][-50:]
-    meta["profile"] = profile
-    meta["allow_tailnet_ports"] = profile != "strict"
-    meta["allow_devices"] = bool(allow_devices) if profile == "fast" else False
-    meta["allow_privileged"] = bool(allow_privileged) if profile == "fast" else False
-    commit_project_metadata(project, meta)
-    analyze_project(project, profile, force=True)
-    return RedirectResponse("/", 303)
-
-
-@app.post("/peer/projects/{slug}/{action}")
-def peer_project_action(
-    request: Request,
-    slug: str,
-    action: str,
-    confirm_failover: bool = Form(False),
-    confirm_quarantine: bool = Form(False),
-    csrf_token: str = Form(""),
-):
-    ui(request, csrf_token)
-    payload = {
-        "confirm_failover": bool(confirm_failover),
-        "confirm_quarantine": bool(confirm_quarantine),
-    }
-
-    def task(ctx):
-        ctx.update(15, "Sending authenticated action to peer")
-        result = peer_call("POST", f"/api/projects/{slug}/{action}", payload)
-        ctx.log(str(result)[-4000:])
-        ctx.update(90, "Peer action completed")
-        return result
-
-    return redirect(submit_operation("peer-" + action, slug, task))
-
-
-@app.post("/repair")
-def repair(request: Request, csrf_token: str = Form("")):
-    ui(request, csrf_token)
-
-    def task(ctx):
-        ctx.update(20, "Running non-destructive node repair")
-        result = run(["/usr/local/bin/devfleet-user-repair"], timeout=600).stdout[
-            -8000:
-        ]
-        ctx.log(result)
-        ctx.update(90, "Repair health checks completed")
-        return result
-
-    return redirect(submit_operation("repair", "node", task))
-
-
-@app.post("/projects/{slug}/transfer-to-peer")
-def transfer(request: Request, slug: str, csrf_token: str = Form("")):
-    ui(request, csrf_token)
-    metadata = _require_owned_project_for_mutation(slug)
-    if metadata.get("runtime_isolation") == "vm":
-        raise HTTPException(
-            409,
-            "Dedicated-VM peer transfer is blocked until a verified node-to-node VM transfer protocol is available. The current VM remains the canonical owner.",
-        )
-    state = peer_node_status()
-    if not state.get("ok"):
-        raise HTTPException(
-            409,
-            "DevFleetFailover is offline or unavailable; ownership transfer is disabled.",
-        )
-    project_id = str(metadata.get("project_id") or "")
-    deployment_id = str(metadata.get("deployment_id") or "")
-    source_host_id = str(metadata.get("host_id") or "")
-    try:
-        validate_project_id(project_id)
-        validate_project_id(deployment_id)
-    except ValueError as exc:
-        raise HTTPException(409, "Project transfer identity is incomplete.") from exc
-    if not source_host_id:
-        raise HTTPException(409, "Project transfer source host identity is missing.")
-    if (
-        deployment_id != str(SETTINGS.deployment_id or "")
-        or source_host_id != SETTINGS.host_id
-    ):
-        raise HTTPException(
-            409, "Project transfer source is not owned by this node and deployment."
-        )
-    peer_node = state.get("node") if isinstance(state.get("node"), dict) else {}
-    peer_identity = (
-        peer_node.get("node_identity")
-        if isinstance(peer_node.get("node_identity"), dict)
-        else {}
-    )
-    destination_host_id = str(peer_node.get("node") or "")
-    if (
-        not re.fullmatch(
-            r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", destination_host_id
-        )
-        or destination_host_id == source_host_id
-        or str(peer_identity.get("deployment_id") or "") != deployment_id
-    ):
-        raise HTTPException(
-            409, "Peer transfer identity is not bound to this deployment."
-        )
-
-    def task(ctx):
-        with project_transfer_lock(slug):
-            return guided_transfer(
-                slug,
-                ctx,
-                stop=stop_project,
-                backup=backup_project,
-                assert_quiesced=assert_project_quiesced_for_transfer,
-                project_id=project_id,
-                deployment_id=deployment_id,
-                source_host_id=source_host_id,
-                destination_host_id=destination_host_id,
-                finalize_source=finalize_source_transfer,
-                peer_call=peer_call,
-            )
-
-    return redirect(
-        submit_operation(
-            "ownership-transfer",
-            slug,
-            task,
-            project_id=project_id,
-            runtime_id=str(metadata.get("runtime_id") or ""),
-            host_id=source_host_id,
-            idempotency_key=(
-                f"ownership-transfer:{slug}:{project_id}:{deployment_id}:"
-                f"{source_host_id}:{destination_host_id}"
-            ),
-        )
-    )
-
-
-@app.post("/quarantine/restore")
-def restore(request: Request, name: str = Form(...), csrf_token: str = Form("")):
-    ui(request, csrf_token)
-
-    def task(ctx):
-        ctx.update(20, "Restoring reversible quarantine entry")
-        result = restore_quarantine(name)
-        ctx.update(90, "Quarantine entry restored")
-        return result
-
-    return redirect(submit_operation("restore-quarantine", name, task))
-
-
-@app.get("/projects/{slug}/logs", response_class=HTMLResponse)
-def logs(request: Request, slug: str):
-    ui(request)
-    safe_child(SETTINGS.workspaces, slug)
-    return RedirectResponse(f"/projects/{slug}?tab=logs", 303)
-
-
-@app.get("/ui/projects/{slug}/logs")
-def ui_project_logs(request: Request, slug: str, tail: int = 150):
-    ui(request)
-    project = safe_child(SETTINGS.workspaces, slug)
-    if not project.is_dir():
-        raise HTTPException(404, "Project not found.")
-    meta = _require_owned_project_for_mutation(slug)
-    capabilities = project_capabilities(slug, meta)
-    if not capabilities["can_query_logs"]:
-        return JSONResponse(
-            {
-                "ok": False,
-                "slug": slug,
-                "state": capabilities["lifecycle_state"],
-                "terminal": True,
-                "logs": "Start the project to view live logs.",
-                "capabilities": capabilities,
-            },
-            status_code=409,
-        )
-    bounded = max(1, min(int(tail), 500))
-    try:
-        logs_value = project_logs(slug, tail=bounded)
-    except FileNotFoundError:
-        raise HTTPException(404, "Project not found.")
-    except (OSError, ValueError, RuntimeError) as exc:
-        raise HTTPException(503, f"Project logs unavailable: {str(exc)[-500:]}")
-    return JSONResponse(
-        {
-            "ok": True,
-            "slug": slug,
-            "tail": bounded,
-            "provider": meta.get("runtime_provider")
-            or meta.get("runtime_isolation")
-            or "unknown",
-            "logs": str(logs_value)[-30000:],
-        }
-    )
-
-
-@app.get("/api/projects/{slug}/runtime", dependencies=[Depends(check_api)])
-def api_project_runtime(slug: str):
-    project = safe_child(SETTI
+        proj

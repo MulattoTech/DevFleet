@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "scope": "PUBLIC_ADVISORY_SNAPSHOT_NOT_NATIVE_AUTHORITY",
+  "publishedAtUtc": "2026-09-29T17:26:11.104201+00:00",
+  "candidateTuple": {
+    "repositoryHead": "e9068790ae9b0f55baa25b258791cb14c9e7091f",
+    "candidateBuildCommit": "be0f1473838b4c2255d22efd99b25a58fd588a78",
+    "shippingInputIdentity": "4d7d2dcfd486adb622e413ed9abe894df6d105457e91aa0f96779d776a5e4b44",
+    "releaseFingerprintId": "5f2c05466de5189841c9505041659b22beb9661023c039ced9b91d8e3561cca0",
+    "toolingFingerprintId": "412cfacbf5ab72705512871a9e38206b06010cbb39db655fd581ff7c7b2a3b0a",
+    "candidateSha256": "1ee8059ea9ae253ab358b9aec5241aae1019676cb54544b5f352080cdf132908"
+  },
+  "nativeStatus": {
+    "status": "BLOCKED",
+    "proofsPassed": 0,
+    "proofsRequired": 2,
+    "fullReleasePassed": false,
+    "validationEvidenceCurrent": false,
+    "internalPromotionAllowed": false,
+    "publicPromotionAllowed": false,
+    "publicPublisherTrust": false
+  },
+  "diagnostic": {
+    "runId": "diagnostic-image-r5-20260929T172011Z-e906879",
+    "classification": "DIAGNOSTIC_IMAGE_REMOTE_FAILURE_NOT_REPRODUCED",
+    "exitCode": 0,
+    "elapsedSeconds": 63.783,
+    "certificationCredit": false,
+    "productInstalled": false,
+    "nestedLaunchPerformed": false,
+    "sourceSha256": "1dc7ffb4254b3a4a6625b29d87ad5cf1781799b02d8ed4010c597b8794c70978",
+    "probes": {
+      "FIND_INITIAL": {
+        "exitCode": 0,
+        "startedAtUtc": "2026-09-29T17:20:51.2678887Z",
+        "finishedAtUtc": "2026-09-29T17:20:51.3354021Z",
+        "outputComplete": true,
+        "sourceSha256": "43c4569b25b7efc14b78e915f40b1dcb0bc23874741a2791f6da1e42745459b4",
+        "releaseImage": {
+          "aliases": [],
+          "os": "Ubuntu",
+          "release": "24.04 LTS",
+          "remote": "",
+          "version": "20260926"
+        }
+      },
+      "FIND_FORCE_UPDATE": {
+        "exitCode": 0,
+        "startedAtUtc": "2026-09-29T17:20:52.3618139Z",
+        "finishedAtUtc": "2026-09-29T17:20:54.7583271Z",
+        "outputComplete": true,
+        "sourceSha256": "ce3c45a93ab7051e070e7f83beab2fbf3b09dec6a45a14b9f1bf005f8340863b",
+        "releaseImage": {
+          "aliases": [],
+          "os": "Ubuntu",
+          "release": "24.04 LTS",
+          "remote": "",
+          "version": "20260926"
+        }
+      },
+      "FIND_AFTER_REFRESH": {
+        "exitCode": 0,
+        "startedAtUtc": "2026-09-29T17:20:54.7724927Z",
+        "finishedAtUtc": "2026-09-29T17:20:54.8379140Z",
+        "outputComplete": true,
+        "sourceSha256": "16aafb0f69981ce5daf710ac0fb7f9c7b42cbdb28440dea7a7490684848cbf11",
+        "releaseImage": {
+          "aliases": [],
+          "os": "Ubuntu",
+          "release": "24.04 LTS",
+          "remote": "",
+          "version": "20260926"
+        }
+      },
+      "MULTIPASS_VERSION": {
+        "exitCode": 0,
+        "startedAtUtc": "2026-09-29T17:20:47.6565378Z",
+        "finishedAtUtc": "2026-09-29T17:20:51.2478870Z",
+        "outputComplete": true,
+        "sourceSha256": "f1c54d292c7165c61a650cfe03b995df88e705738a1f85154ccaac2a2800fa23",
+        "versionLines": [
+          "multipass   1.16.4+win",
+          "multipassd  1.16.4+win"
+        ]
+      },
+      "NESTED_MULTIPASS_INVENTORY": {
+        "exitCode": 0,
+        "startedAtUtc": "2026-09-29T17:20:54.8500186Z",
+        "finishedAtUtc": "2026-09-29T17:20:54.9174693Z",
+        "outputComplete": true,
+        "sourceSha256": "60388ce96003baaad69c6d105eee908a1c00d8436f39e177e1367c5461006f37",
+        "instanceCount": 0
+      }
+    },
+    "dns": "PASS",
+    "https": [
+      {
+        "status": 200,
+        "result": "REACHABLE",
+        "endpoint": "https://cloud-images.ubuntu.com/releases/streams/v1/index.json"
+      },
+      {
+        "status": 200,
+        "result": "REACHABLE",
+        "endpoint": "https://cloud-images.ubuntu.com/releases/streams/v1/com.ubuntu.cloud:released:download.json"
+      }
+    ],
+    "cleanup": {
+      "status": "PASS",
+      "repairedCleanRestored": true,
+      "nestedL2": "ABSENT",
+      "nestedObservationUtc": "2026-09-29T17:21:15.2664080Z",
+      "l1": "Off",
+      "l1ObservationUtc": "2026-09-29T17:21:15.7437636Z"
+    },
+    "protectedInputsUnchanged": true
+  },
+  "rawPrivateEvidencePublished": false
+}

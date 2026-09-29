@@ -1,10 +1,219 @@
 # DevFleet source part 114
 
 Full-source UTF-8 byte interval [5254500, 5301000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 1e3c1c8de4443b8d0b91c3a43cec273dc9ff7f3ff26a49d201d6897cfb5d81ad
+Payload SHA-256: a1e6de6499b6ada0b6c14827add0287cc4c7a3586ed60dd1e2ee324b7b19fa3e
 
 <!-- BEGIN SOURCE SLICE -->
- required.
+       environmentUserInteractive = [Environment]::UserInteractive
+        elevated = $elevated
+        browserVisibility = 'UNKNOWN'
+    }
+    $writeEvent = {
+        param([string]$EventClass, [hashtable]$Extra = @{})
+        $script:DevFleetTailscalePairingEventSequence++
+        $event = @{}
+        foreach ($key in $eventContext.Keys) { $event[$key] = $eventContext[$key] }
+        $event.schemaVersion = 1
+        $event.eventSequence = $script:DevFleetTailscalePairingEventSequence
+        $event.eventClass = $EventClass
+        $event.timestampUtc = [datetime]::UtcNow.ToString('o')
+        foreach ($key in $Extra.Keys) { $event[$key] = $Extra[$key] }
+        Write-DevFleetTailscalePairingEvent -Path $EvidencePath -Event $event
+    }
+    $context=Get-DevFleetDeadlineContext
+    if($context-and([datetime]$context.StageDeadlineUtc).ToUniversalTime()-lt$DeadlineUtc){$DeadlineUtc=([datetime]$context.StageDeadlineUtc).ToUniversalTime()}
+    $eventContext.ownerDeadlineUtc = $DeadlineUtc.ToUniversalTime().ToString('o')
+    &$writeEvent 'PAIRING_STARTED' @{ authenticatedState = 'NOT_OBSERVED'; pollCount = 0 }
+    $command={
+        param([string[]]$Arguments)
+        $verb = [string]$Arguments[0]
+        $remaining=[int][math]::Floor(($DeadlineUtc-[datetime]::UtcNow).TotalSeconds)-5
+        if($remaining-le0){&$writeEvent 'COMMAND_BLOCKED_DEADLINE' @{ command = $verb; commandOutcome = 'BLOCKED'; failureClass = 'OWNER_DEADLINE_EXPIRED'; authenticatedState = 'NOT_OBSERVED' };throw 'Tailscale browser pairing exceeded the owning stage deadline.'}
+        $maximum=if($Arguments[0]-ceq'up'){35}else{10}
+        if($Arguments[0]-ceq'up'-and$remaining-lt$maximum){&$writeEvent 'COMMAND_BLOCKED_DEADLINE' @{ command = $verb; commandOutcome = 'BLOCKED'; failureClass = 'INSUFFICIENT_HANDOFF_BUDGET'; authenticatedState = 'NOT_OBSERVED' };throw 'Insufficient stage time remains for the bounded Tailscale browser handoff.'}
+        $nativeArgs=if($InstanceName){@('exec',$InstanceName,'--','sudo','tailscale')+$Arguments}else{$Arguments}
+        &$writeEvent 'COMMAND_STARTED' @{ command = $verb; commandOutcome = 'STARTED' }
+        try {
+            $output=Invoke-External -FilePath $FilePath -ArgumentList $nativeArgs -Capture -IgnoreExitCode -TimeoutSeconds ([math]::Min($maximum,$remaining)) -DeadlineUtc $DeadlineUtc
+            if([datetime]::UtcNow-gt$DeadlineUtc){throw 'Tailscale command returned after the owning stage deadline.'}
+            $outputClass = if ($verb -ceq 'up') {
+                if (Get-DevFleetTailscaleAuthenticationUri $output) { 'OFFICIAL_URI_PRESENT' } else { 'NO_OFFICIAL_URI' }
+            } else {
+                (Get-DevFleetTailscaleStatusSummary -StatusJson $output -ExpectedHostname $Hostname).statusClass
+            }
+            &$writeEvent 'COMMAND_COMPLETED' @{ command = $verb; commandOutcome = 'COMPLETED'; commandOutputClass = $outputClass }
+            return $output
+        } catch {
+            &$writeEvent 'COMMAND_FAILED' @{ command = $verb; commandOutcome = 'FAILED'; failureClass = Get-DevFleetTailscalePairingFailureClass $_.Exception.Message }
+            throw
+        }
+    }
+    $pollCount = 0
+    $lastStatusClass = ''
+    try {
+        $status=&$command @('status','--json')
+        $summary=Get-DevFleetTailscaleStatusSummary -StatusJson $status -ExpectedHostname $Hostname
+        &$writeEvent 'INITIAL_STATUS_OBSERVED' @{ statusClass = $summary.statusClass; authenticated = [bool]$summary.authenticated; authenticatedState = if ($summary.authenticated) { 'AUTHENTICATED' } else { 'NOT_AUTHENTICATED' }; selfHostname = $summary.selfHostname; nodeIdentityMatch = $summary.nodeIdentityMatch; pollCount = 0 }
+        $ip=Get-DevFleetAuthenticatedTailscaleIPv4 $status
+        if($ip){&$writeEvent 'PAIRING_AUTHENTICATED' @{ statusClass = $summary.statusClass; authenticated = $true; authenticatedState = 'AUTHENTICATED'; authenticatedStateTransition = 'INITIAL_TO_AUTHENTICATED'; selfHostname = $summary.selfHostname; nodeIdentityMatch = $summary.nodeIdentityMatch; pollCount = 0 };return [pscustomobject]@{authenticated=$true;ipv4=$ip;browserOpened=$false}}
+        # Return the device URL before waiting for the user. An unbounded `up`
+        # hides its redirected URL inside the WPF install child until it exits.
+        $output=&$command @('up','--timeout=30s','--accept-dns=false','--hostname',$Hostname)
+        $status=&$command @('status','--json')
+        $summary=Get-DevFleetTailscaleStatusSummary -StatusJson $status -ExpectedHostname $Hostname
+        &$writeEvent 'PRE_LAUNCH_STATUS_OBSERVED' @{ statusClass = $summary.statusClass; authenticated = [bool]$summary.authenticated; authenticatedState = if ($summary.authenticated) { 'AUTHENTICATED' } else { 'NOT_AUTHENTICATED' }; selfHostname = $summary.selfHostname; nodeIdentityMatch = $summary.nodeIdentityMatch; pollCount = 0 }
+        $ip=Get-DevFleetAuthenticatedTailscaleIPv4 $status
+        if($ip){&$writeEvent 'PAIRING_AUTHENTICATED' @{ statusClass = $summary.statusClass; authenticated = $true; authenticatedState = 'AUTHENTICATED'; authenticatedStateTransition = 'PRE_LAUNCH_TO_AUTHENTICATED'; selfHostname = $summary.selfHostname; nodeIdentityMatch = $summary.nodeIdentityMatch; pollCount = 0 };return [pscustomobject]@{authenticated=$true;ipv4=$ip;browserOpened=$false}}
+        $uri=Get-DevFleetTailscaleAuthenticationUri $output
+        $output=$null
+        if(-not$uri){&$writeEvent 'PAIRING_FAILED' @{ failureClass = 'NO_VALID_OFFICIAL_URI'; authenticatedState = 'NOT_AUTHENTICATED'; pollCount = 0 };throw 'Tailscale did not supply one valid official browser authentication link.'}
+        &$writeEvent 'URI_VALIDATED' @{ uriValidated = $true; authenticatedState = 'NOT_AUTHENTICATED'; pollCount = 0 }
+        &$writeEvent 'BROWSER_LAUNCH_REQUESTED' @{ uriValidated = $true; browserLaunchRequested = $true; authenticatedState = 'NOT_AUTHENTICATED'; pollCount = 0 }
+        try {
+            $launch=Open-DevFleetTailscaleAuthenticationPage $uri
+            $launchAccepted=$true
+            if($launch -and $launch.PSObject.Properties['apiAccepted']){$launchAccepted=[bool]$launch.apiAccepted}
+            $browserProcessId=$null;$browserProcessSessionId=$null;$browserProcessObserved=$false
+            if($launch -and $launch.PSObject.Properties['processId'] -and $launch.processId){$browserProcessId=[int]$launch.processId;$browserProcessObserved=$browserProcessId-gt0}
+            if($launch -and $launch.PSObject.Properties['processSessionId'] -and $null -ne $launch.processSessionId){$browserProcessSessionId=[int]$launch.processSessionId}
+            $sessionMatch=$null;if($null -ne $browserProcessSessionId -and $ownerSessionId -gt0){$sessionMatch=[int]$browserProcessSessionId-eq$ownerSessionId}
+            &$writeEvent 'BROWSER_LAUNCH_ACCEPTED' @{ uriValidated = $true; browserLaunchRequested = $true; browserLaunchApiAccepted = $launchAccepted; browserProcessObserved = $browserProcessObserved; browserProcessId = $browserProcessId; browserProcessSessionId = $browserProcessSessionId; browserSessionMatchesOwner = $sessionMatch; authenticatedState = 'NOT_AUTHENTICATED'; pollCount = 0 }
+        } catch {
+            &$writeEvent 'BROWSER_LAUNCH_FAILED' @{ uriValidated = $true; browserLaunchRequested = $true; browserLaunchApiAccepted = $false; browserProcessObserved = $false; authenticatedState = 'NOT_AUTHENTICATED'; failureClass = 'BROWSER_LAUNCH_API_FAILED'; pollCount = 0 }
+            throw
+        }
+        $uri=$null
+        Write-Host "Approve Tailscale device $Hostname in the browser. Setup will continue after authentication."
+        &$writeEvent 'PAIRING_WAIT_ENTERED' @{ uriValidated = $true; browserLaunchRequested = $true; browserLaunchApiAccepted = $true; authenticatedState = 'WAITING_FOR_AUTHENTICATION'; pollCount = 0 }
+        while([datetime]::UtcNow-lt$DeadlineUtc){
+            $pollCount++
+            $status=&$command @('status','--json')
+            $summary=Get-DevFleetTailscaleStatusSummary -StatusJson $status -ExpectedHostname $Hostname
+            if($summary.statusClass -cne $lastStatusClass){
+                $lastStatusClass=$summary.statusClass
+                &$writeEvent 'POLL_STATUS_OBSERVED' @{ statusClass = $summary.statusClass; authenticated = [bool]$summary.authenticated; authenticatedState = if ($summary.authenticated) { 'AUTHENTICATED' } else { 'NOT_AUTHENTICATED' }; selfHostname = $summary.selfHostname; nodeIdentityMatch = $summary.nodeIdentityMatch; pollCount = $pollCount; lastStatusClass = $summary.statusClass }
+            }
+            $ip=Get-DevFleetAuthenticatedTailscaleIPv4 $status
+            if($ip){&$writeEvent 'PAIRING_AUTHENTICATED' @{ statusClass = $summary.statusClass; authenticated = $true; authenticatedState = 'AUTHENTICATED'; authenticatedStateTransition = 'WAITING_TO_AUTHENTICATED'; selfHostname = $summary.selfHostname; nodeIdentityMatch = $summary.nodeIdentityMatch; pollCount = $pollCount; lastStatusClass = $summary.statusClass };return [pscustomobject]@{authenticated=$true;ipv4=$ip;browserOpened=$true}}
+            $remaining=($DeadlineUtc-[datetime]::UtcNow).TotalMilliseconds
+            if($remaining-gt0){Start-Sleep -Milliseconds ([int][math]::Min(2000,$remaining))}
+        }
+        &$writeEvent 'PAIRING_FAILED' @{ uriValidated = $true; browserLaunchRequested = $true; browserLaunchApiAccepted = $true; authenticatedState = 'NOT_AUTHENTICATED'; authenticatedStateTransition = 'WAITING_TO_DEADLINE'; pollCount = $pollCount; lastStatusClass = $lastStatusClass; failureClass = 'OWNER_DEADLINE_EXPIRED_AFTER_BROWSER_HANDOFF' }
+        throw 'Tailscale browser pairing exceeded the owning stage deadline.'
+    } catch {
+        &$writeEvent 'PAIRING_FAILED' @{ authenticatedState = 'NOT_AUTHENTICATED'; pollCount = $pollCount; lastStatusClass = $lastStatusClass; failureClass = Get-DevFleetTailscalePairingFailureClass $_.Exception.Message }
+        throw
+    }
+}
+
+Export-ModuleMember -Function Invoke-DevFleetTailscaleBrowserPairing,Invoke-DevFleetTailscaleOAuthPairing,Get-DevFleetTailscaleReadiness,Get-DevFleetTailscaleEnrollmentProfile,Get-DevFleetTailscaleOAuthSecretPath,Set-DevFleetTailscaleOAuthClientSecret
+
+```
+
+
+## FILE: source/windows/Export-Diagnostics.ps1
+
+SHA256: fd1dbee84b4be48f94162c14e75ed847f6c15a6ed898c08e86ddb0a827437cf3 | Bytes: 1036 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([switch]$AllLocalInstances)
+$ErrorActionPreference='Continue'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+$config=Get-DevFleetConfig;$mp=Get-MultipassExe;$out=Join-Path (Get-DevFleetStateRoot) "exports\diagnostics-$((Get-Date).ToString('yyyyMMdd-HHmmss'))";New-Item -ItemType Directory $out -Force|Out-Null
+Get-ComputerInfo|Out-File (Join-Path $out 'computer-info.txt')
+& $mp version|Out-File (Join-Path $out 'multipass-version.txt')
+& $mp list --format json|Out-File (Join-Path $out 'multipass-list.json')
+$names=@($config.Primary.InstanceName,$config.Failover.InstanceName,$config.Vault.InstanceName)|Where-Object{Test-MultipassInstance $_}
+foreach($name in $names){& $mp exec $name -- bash -lc 'sudo journalctl -u devfleet -n 300 --no-pager 2>/dev/null || sudo journalctl -u rest-server -n 300 --no-pager 2>/dev/null || true'|Out-File (Join-Path $out "$name.log")}
+Compress-Archive -Path "$out\*" -DestinationPath "$out.zip"
+Write-Host "Diagnostics: $out.zip" -ForegroundColor Green
+
+```
+
+
+## FILE: source/windows/Export-Vault-OfflineCopy.ps1
+
+SHA256: 2ec63a9fa38753b0f55ff752faa9f3511b47e2fca70cff9b432fac2823eb9dd7 | Bytes: 1727 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([string]$DestinationDirectory)
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
+Assert-Administrator
+$config=Get-DevFleetConfig;$mp=Get-MultipassExe;$name=$config.Vault.InstanceName
+if(-not (Test-MultipassInstance $name)){throw 'The local DevFleet vault VM was not found.'}
+if(-not $DestinationDirectory){
+  $default=Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'DevFleet-Offline-Vault-Copies'
+  $entered=Read-Host "Destination folder [$default] (an external drive is preferable)"
+  $DestinationDirectory=if($entered){$entered}else{$default}
+}
+New-Item -ItemType Directory -Path $DestinationDirectory -Force|Out-Null
+$stamp=(Get-Date).ToString('yyyyMMdd-HHmmss')
+$remote="/tmp/devfleet-vault-$stamp.tar.gz"
+$local=Join-Path $DestinationDirectory "devfleet-vault-$stamp.tar.gz"
+Write-Host 'Temporarily stopping the REST service to make a consistent encrypted repository copy...' -ForegroundColor Cyan
+$command="set -Eeuo pipefail; systemctl stop rest-server; trap 'systemctl start rest-server' EXIT; tar -C /srv -czf '$remote' restic; chown ubuntu:ubuntu '$remote'; chmod 0640 '$remote'; systemctl start rest-server; trap - EXIT"
+Invoke-External $mp @('exec',$name,'--','sudo','bash','-lc',$command)
+try{Invoke-External $mp @('transfer',"${name}:$remote",$local)}
+finally{Invoke-External $mp @('exec',$name,'--','sudo','rm','-f',$remote) -IgnoreExitCode}
+$hash=Get-FileHash -Algorithm SHA256 -Path $local
+"$($hash.Hash.ToLower())  $([IO.Path]::GetFileName($local))"|Set-Content "$local.sha256" -Encoding ascii
+Write-Host "Offline encrypted vault copy: $local" -ForegroundColor Green
+Write-Host "SHA-256: $($hash.Hash)" -ForegroundColor Green
+
+```
+
+
+## FILE: source/windows/Install-DevFleet-HostAgent.ps1
+
+SHA256: 2f8aaeef509e22b14ee2f53b7cc64ef92851042e7487c0e5eefacd9c77c7396b | Bytes: 18803 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param(
+    [string]$InstallRoot = 'C:\ProgramData\DevFleetHostAgent',
+    [int]$Port = 8790,
+    [switch]$SkipFirewall,
+    [switch]$AdoptLegacyDevFleetIntegrations
+)
+
+$ErrorActionPreference = 'Stop'
+$commonModule = Join-Path $PSScriptRoot 'DevFleet.Common.psm1'
+$protocolModule = Join-Path $PSScriptRoot 'DevFleet-HostAgentProtocol.psm1'
+$ownershipModule = Join-Path $PSScriptRoot 'DevFleet-WindowsIntegrationOwnership.psm1'
+Import-Module $commonModule -Force
+Import-Module $protocolModule -Force
+Import-Module $ownershipModule -Force
+function Write-AtomicText {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Text,[Text.Encoding]$Encoding = [Text.UTF8Encoding]::new($false))
+    $tmp = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
+    [IO.File]::WriteAllText($tmp,$Text,$Encoding)
+    Move-Item -LiteralPath $tmp -Destination $Path -Force
+}
+$expectedHost = $env:DEVFLEET_HOST_AGENT_EXPECTED_HOST
+if ($expectedHost -and $env:COMPUTERNAME -ne $expectedHost) { throw "Host-agent fixture restriction failed. Expected: $expectedHost. Current host: $env:COMPUTERNAME" }
+$multipass = Get-MultipassExe
+if (-not $multipass) { throw 'Multipass was installed but could not be rediscovered from PATH, App Paths, registry, or known vendor locations.' }
+$packageRoot = Split-Path -Parent $PSScriptRoot
+$agentSource = Join-Path $packageRoot 'windows\DevFleet-HostAgent.ps1'
+$protocolSource = Join-Path $packageRoot 'windows\DevFleet-HostAgentProtocol.psm1'
+if (-not (Test-Path -LiteralPath $agentSource)) { throw "Host agent source not found: $agentSource" }
+if (-not (Test-Path -LiteralPath $protocolSource)) { throw "Host agent protocol helper not found: $protocolSource" }
+$vscodeHelperSource = Join-Path $packageRoot 'windows\DevFleet-VSCode.ps1'
+if (-not (Test-Path -LiteralPath $vscodeHelperSource)) { throw "VS Code helper source not found: $vscodeHelperSource" }
+$ownershipModuleSource = Join-Path $packageRoot 'windows\DevFleet-WindowsIntegrationOwnership.psm1'
+$removalHelperSource = Join-Path $packageRoot 'windows\Remove-DevFleet-OwnedIntegrations.ps1'
+if (-not (Test-Path -LiteralPath $ownershipModuleSource)) { throw "Windows integration ownership helper not found: $ownershipModuleSource" }
+if (-not (Test-Path -LiteralPath $removalHelperSource)) { throw "Windows integration removal helper not found: $removalHelperSource" }
+
+# The agent is intentionally a SYSTEM scheduled task.  Multipass 1.16.x
+# authenticates each Windows client by its per-profile certificate, so make
+# the already-authenticated installing user's client available to SYSTEM.
+# Copy only the two client PEM files into the SYSTEM profile and lock the
+# destination to SYSTEM and local Administrators.  No Multipass daemon
+# restart or host-network change is required.
 $userMultipassCertRoot = Join-Path $env:LOCALAPPDATA 'multipass-client-certificate'
 $systemMultipassCertRoot = Join-Path $env:SystemRoot 'System32\config\systemprofile\AppData\Local\multipass-client-certificate'
 if (-not (Test-Path -LiteralPath $userMultipassCertRoot)) {
@@ -414,248 +623,4 @@ if ([string]$hostIdentity.node_role -eq 'surrogate') {
     Assert-MultipassIsolation -InstanceNames @($vaultName)
     Invoke-External $multipass @('start',$vaultName) -IgnoreExitCode
     $liveVaultIdentity = Get-ExactGuestIdentity -Multipass $multipass -Name $vaultName -Path '/etc/devfleet-vault-identity.json'
-    if ([string]$vaultIdentity.deployment_id -ne [string]$hostIdentity.deployment_id -or [string]$liveVaultIdentity.deployment_id -ne [string]$hostIdentity.deployment_id -or [string]$liveVaultIdentity.node_id -ne [string]$vaultIdentity.node_id -or [string]$liveVaultIdentity.node_name -ne $vaultName) {
-        throw 'SECRET RECOVERY REQUIRED: vault identity does not match the exact deployment inventory; no credentials were changed.'
-    }
-} elseif (Test-Path -LiteralPath (Join-Path $stateRoot 'secrets\vault-client.json') -PathType Leaf) {
-    throw 'SECRET RECOVERY REQUIRED: this primary is bound to an external vault. Run a coordinated all-node recovery from the surrogate/vault host; no credentials were changed.'
-}
-
-$hostAgentRoot = Join-Path $env:ProgramData 'DevFleetHostAgent'
-$hostTokenPath = Join-Path $hostAgentRoot 'token.txt'
-$hostOwnershipPath = Join-Path $hostAgentRoot 'integration-ownership.json'
-$hostOwnership = Read-DevFleetIntegrationOwnership -Path $hostOwnershipPath
-$taskBinding = @($hostOwnership.ScheduledTasks | Where-Object { [string]$_.Name -eq 'DevFleet Host Agent' })
-$task = Get-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue
-if ($taskBinding.Count -ne 1 -or -not $task -or @($task.Actions).Count -ne 1) { throw 'SECRET RECOVERY REQUIRED: Host Agent task ownership is incomplete; no credentials were changed.' }
-$taskActual = @{Name=[string]$task.TaskName;Executable=[string]$task.Actions[0].Execute;Arguments=[string]$task.Actions[0].Arguments;Principal=[string]$task.Principal.UserId;LogonType=[string]$task.Principal.LogonType;RunLevel=[string]$task.Principal.RunLevel;Description=[string]$task.Description;Generation=[string]$taskBinding[0].Generation}
-Assert-DevFleetTaskBinding -Expected $taskBinding[0] -Actual $taskActual | Out-Null
-
-$recoveryRoot = Join-Path $stateRoot "secret-recovery\$generation"
-New-Item -ItemType Directory -Path $recoveryRoot -Force | Out-Null
-Protect-DevFleetStateAcl
-$secretPath = Join-Path $stateRoot 'secrets\host-secrets.json'
-if (Test-Path -LiteralPath $secretPath -PathType Leaf) { Copy-Item -LiteralPath $secretPath -Destination (Join-Path $recoveryRoot 'host-secrets.before.json') -Force }
-if (Test-Path -LiteralPath $hostTokenPath -PathType Leaf) { Copy-Item -LiteralPath $hostTokenPath -Destination (Join-Path $recoveryRoot 'host-agent-token.before.txt') -Force }
-$pendingSecretsPath = Join-Path $recoveryRoot 'host-secrets.pending.json'
-Write-AtomicUtf8 -Path $pendingSecretsPath -Text (($newSecrets | ConvertTo-Json -Depth 5) + [Environment]::NewLine)
-
-$computeHelper = Join-Path (Get-PackageRootFromState) 'linux\devfleet-rotate-compute-secrets'
-$vaultHelper = Join-Path (Get-PackageRootFromState) 'linux\devfleet-rotate-vault-secrets'
-if (-not (Test-Path -LiteralPath $computeHelper -PathType Leaf) -or ($vaultName -and -not (Test-Path -LiteralPath $vaultHelper -PathType Leaf))) { throw 'Secret recovery helpers are missing from the exact package.' }
-$remoteComputeHelper = "/tmp/devfleet-rotate-compute-$generation"
-$remoteVaultHelper = "/tmp/devfleet-rotate-vault-$generation"
-$computeApplied = $false
-$vaultApplied = $false
-$hostTokenApplied = $false
-$committed = $false
-$evidence = [ordered]@{schemaVersion=1;secretGeneration=$generation;deploymentId=[string]$hostIdentity.deployment_id;hostNodeId=[string]$hostIdentity.node_id;compute=[ordered]@{name=$computeName;nodeId=[string]$computeIdentity.node_id;verified=$false};vault=if($vaultName){[ordered]@{name=$vaultName;nodeId=[string]$vaultIdentity.node_id;verified=$false}}else{$null};hostAgent=[ordered]@{task='DevFleet Host Agent';ownershipGeneration=[string]$hostOwnership.InstallationGeneration;verified=$false};plaintextSecretsLogged=$false;status='IN_PROGRESS';startedAt=(Get-Date).ToUniversalTime().ToString('o')}
-try {
-    New-DevFleetSnapshotSafe -InstanceName $computeName -SnapshotName "pre-secret-rekey-$($generation.Substring(0,8))" | Out-Null
-    Wait-MultipassReady -Name $computeName -TimeoutSeconds 600
-    Invoke-External $multipass @('transfer',$computeHelper,"${computeName}:$remoteComputeHelper")
-    if ($vaultName) {
-        New-DevFleetSnapshotSafe -InstanceName $vaultName -SnapshotName "pre-secret-rekey-$($generation.Substring(0,8))" | Out-Null
-        Wait-MultipassReady -Name $vaultName -TimeoutSeconds 600
-        Invoke-External $multipass @('transfer',$vaultHelper,"${vaultName}:$remoteVaultHelper")
-        $vaultPayload = [ordered]@{schema_version=1;secret_generation=$generation;deployment_id=[string]$hostIdentity.deployment_id;node_id=[string]$vaultIdentity.node_id;cluster=[string]$config.ClusterName;rest_user=[string]$newSecrets.VaultRestUser;rest_password=[string]$newSecrets.VaultRestPassword;restic_password=[string]$newSecrets.ResticPassword}
-        Invoke-MultipassWithStandardInput -FilePath $multipass -InstanceName $vaultName -CommandArgumentList @('sudo','bash',$remoteVaultHelper,'apply',$generation) -StandardInputText ($vaultPayload | ConvertTo-Json -Compress)
-        $vaultApplied = $true; $evidence.vault.verified = $true
-    }
-    $computePayload = [ordered]@{schema_version=1;secret_generation=$generation;deployment_id=[string]$hostIdentity.deployment_id;node_id=[string]$hostIdentity.node_id;admin_user=[string]$newSecrets.PortalAdminUser;admin_password=[string]$newSecrets.PortalAdminPassword;api_token=[string]$newSecrets.NodeApiToken;host_control_token=$newHostToken}
-    Invoke-MultipassWithStandardInput -FilePath $multipass -InstanceName $computeName -CommandArgumentList @('sudo','bash',$remoteComputeHelper,'apply',$generation) -StandardInputText ($computePayload | ConvertTo-Json -Compress)
-    $computeApplied = $true; $evidence.compute.verified = $true
-
-    if ($vaultName) {
-        $vaultIp = Get-InstanceIPv4 -Name $vaultName -PreferTailscale
-        if (-not $vaultIp) { throw 'Rotated vault endpoint has no verified reachable address.' }
-        $vaultClient = [ordered]@{Repository="rest:http://${vaultIp}:$($config.Network.VaultPort)/$($newSecrets.VaultRestUser)/$($config.ClusterName)";RestUser=[string]$newSecrets.VaultRestUser;RestPassword=[string]$newSecrets.VaultRestPassword;ResticPassword=[string]$newSecrets.ResticPassword;VaultIp=$vaultIp;VaultPort=[int]$config.Network.VaultPort;SecretGeneration=$generation}
-        $pendingVaultClient = Join-Path $recoveryRoot 'vault-client.pending.json'
-        Write-AtomicUtf8 -Path $pendingVaultClient -Text (($vaultClient | ConvertTo-Json -Depth 5) + [Environment]::NewLine)
-        Invoke-External $multipass @('transfer',$pendingVaultClient,"${computeName}:/tmp/devfleet-vault-client-$generation.json")
-        $remoteVaultClient = "/tmp/devfleet-vault-client-$generation.json"
-        $configureBackup = 'set -Eeuo pipefail; trap ''rm -f -- "$1"'' EXIT; /usr/local/sbin/devfleet-configure-backup "$1"'
-        Invoke-External $multipass @('exec',$computeName,'--','sudo','bash','-c',$configureBackup,'--',$remoteVaultClient)
-    }
-
-    Write-AtomicUtf8 -Path $hostTokenPath -Text ($newHostToken + [Environment]::NewLine)
-    $hostTokenApplied = $true
-    Stop-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue
-    Start-ScheduledTask -TaskName 'DevFleet Host Agent'
-    $hostHealth = $null
-    $hostAgentConfig = Get-Content -LiteralPath (Join-Path $hostAgentRoot 'config.json') -Raw | ConvertFrom-Json
-    if ([string]$hostAgentConfig.ListenPrefix -notmatch ':(\d{2,5})/$') { throw 'Host Agent listen prefix is invalid during secret verification.' }
-    $hostAgentPort = [int]$Matches[1]
-    for ($attempt = 0; $attempt -lt 20 -and -not $hostHealth; $attempt++) {
-        try { $hostHealth = Invoke-HostAgentAuthenticatedJson -Uri "http://127.0.0.1:$hostAgentPort/healthz" -Method GET -Key $newHostToken -ExpectedHost $env:COMPUTERNAME }
-        catch { Start-Sleep -Milliseconds 500 }
-    }
-    if (-not $hostHealth.ok) { throw 'Rotated Host Agent credential did not verify.' }
-    $evidence.hostAgent.verified = $true
-
-    if ($vaultName) {
-        $pendingVaultClient = Join-Path $recoveryRoot 'vault-client.pending.json'
-        $vaultClientPath = Join-Path $stateRoot 'secrets\vault-client.json'
-        Write-AtomicUtf8 -Path $vaultClientPath -Text (Get-Content -LiteralPath $pendingVaultClient -Raw)
-    }
-    Write-AtomicUtf8 -Path $secretPath -Text (($newSecrets | ConvertTo-Json -Depth 5) + [Environment]::NewLine)
-    Protect-DevFleetStateAcl
-    $committed = $true
-    $evidence.status='COMMITTED';$evidence.completedAt=(Get-Date).ToUniversalTime().ToString('o')
-} catch {
-    $evidence.status='ROLLED_BACK';$evidence.error=$_.Exception.Message;$evidence.failedAt=(Get-Date).ToUniversalTime().ToString('o')
-    if ($hostTokenApplied -and (Test-Path -LiteralPath (Join-Path $recoveryRoot 'host-agent-token.before.txt'))) {
-        Copy-Item -LiteralPath (Join-Path $recoveryRoot 'host-agent-token.before.txt') -Destination $hostTokenPath -Force
-        Stop-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue; Start-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue
-    } elseif ($hostTokenApplied) {
-        Remove-Item -LiteralPath $hostTokenPath -Force -ErrorAction SilentlyContinue
-        Stop-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue
-    }
-    if ($computeApplied) { try { Invoke-External $multipass @('exec',$computeName,'--','sudo','bash',$remoteComputeHelper,'rollback',$generation) } catch { $evidence.compute.rollbackError=$_.Exception.Message } }
-    if ($vaultApplied) { try { Invoke-External $multipass @('exec',$vaultName,'--','sudo','bash',$remoteVaultHelper,'rollback',$generation) } catch { $evidence.vault.rollbackError=$_.Exception.Message } }
-    throw
-} finally {
-    foreach ($target in @(@($computeName,$remoteComputeHelper),@($vaultName,$remoteVaultHelper))) {
-        if ($target[0]) { try { Invoke-External $multipass @('exec',[string]$target[0],'--','sudo','rm','-f','--',[string]$target[1]) -IgnoreExitCode } catch {} }
-    }
-    Remove-Item -LiteralPath $pendingSecretsPath -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath (Join-Path $recoveryRoot 'vault-client.pending.json') -Force -ErrorAction SilentlyContinue
-    Write-AtomicUtf8 -Path (Join-Path $recoveryRoot 'recovery-evidence.json') -Text (($evidence | ConvertTo-Json -Depth 8) + [Environment]::NewLine)
-}
-if (-not $committed) { throw 'Secret recovery did not commit.' }
-[ordered]@{ok=$true;status='COMMITTED';secretGeneration=$generation;deploymentId=[string]$hostIdentity.deployment_id;compute=$computeName;vault=$vaultName;plaintextSecretsLogged=$false;recoveryEvidence=(Join-Path $recoveryRoot 'recovery-evidence.json')} | ConvertTo-Json -Compress
-
-```
-
-
-## FILE: source/windows/Set-DevFleetDockerMode.ps1
-
-SHA256: f76be7c8d6fc8364fba6b7a142efe687351355681473e56cc30b51e021377f95 | Bytes: 2185 | Git mode: 100644
-
-```
-[CmdletBinding(SupportsShouldProcess)]
-param(
-    [Parameter(Mandatory)][ValidateSet('Primary','Failover')][string]$NodeRole,
-    [Parameter(Mandatory)][ValidateSet('rootless','rootful')][string]$Mode,
-    [switch]$AcknowledgeRootful
-)
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-Assert-PowerShell7
-Assert-Administrator
-$config=Get-DevFleetConfig
-$node=if($NodeRole -eq 'Primary'){$config.Primary}else{$config.Failover}
-$instance=[string]$node.InstanceName
-if($Mode -eq 'rootful' -and -not $AcknowledgeRootful){
-    throw 'Rootful Docker requires -AcknowledgeRootful. It has broader authority inside the disposable VM, but still receives no Windows mounts or Docker TCP exposure.'
-}
-if(-not(Test-MultipassInstance $instance)){throw "Multipass instance is not installed locally: $instance"}
-Assert-MultipassIsolation -InstanceNames @($instance)
-$stamp=(Get-Date).ToString('yyyyMMdd-HHmmss')
-$logDir=Join-Path (Get-DevFleetStateRoot) 'logs'
-New-Item -ItemType Directory $logDir -Force|Out-Null
-if($PSCmdlet.ShouldProcess($instance,"Switch Docker mode to $Mode without migrating or deleting either store")){
-    New-DevFleetSnapshotSafe -InstanceName $instance -SnapshotName "pre-docker-mode-$Mode-$stamp"|Out-Null
-    $mp=Get-MultipassExe
-    Invoke-External $mp @('start',$instance) -IgnoreExitCode
-    $report=Invoke-External $mp @('exec',$instance,'--','sudo','/usr/local/bin/devfleet-docker-mode-report') -Capture
-    Set-Content (Join-Path $logDir "docker-mode-before-$instance-$stamp.txt") $report -Encoding utf8
-    $args=@('exec',$instance,'--','sudo','/usr/local/bin/devfleet-switch-docker-mode',$Mode)
-    if($Mode -eq 'rootful'){$args+='--acknowledge-rootful'}
-    Invoke-External $mp $args
-    if($NodeRole -eq 'Primary'){$config.Docker.PrimaryMode=$Mode}else{$config.Docker.FailoverMode=$Mode}
-    if($Mode -eq 'rootful'){$config.Docker.RootfulModeAcknowledged=$true}
-    Save-DevFleetConfig -Config $config
-    & (Join-Path $PSScriptRoot 'Test-DevFleet.ps1') -InstanceName $instance
-    Write-Host "Docker mode for $instance is now $Mode. The other Docker store was not migrated or deleted." -ForegroundColor Green
-}
-
-```
-
-
-## FILE: source/windows/Set-DevFleetTailscaleOAuthCredential.ps1
-
-SHA256: 0105c2847c27380d28d1dc28f2866309f107ced8dd750589b42185bd39bc27f3 | Bytes: 917 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param()
-
-$ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Tailscale.psm1') -Force
-Assert-PowerShell7
-Assert-Administrator
-
-Write-Host 'DevFleet Tailscale OAuth setup' -ForegroundColor Cyan
-Write-Host 'Paste the OAuth client secret only into the local secure prompt. It is never sent to Codex, printed, or placed in a command argument.' -ForegroundColor DarkGray
-$secret = Read-Host 'Tailscale OAuth client secret' -AsSecureString
-try {
-    $path = Set-DevFleetTailscaleOAuthClientSecret -Secret $secret
-    [pscustomobject]@{
-        status = 'PASS'
-        provider = 'OAuthClientSecret'
-        storage = 'DevFleet protected local state ACL'
-        path = $path
-        secretPrinted = $false
-        secretInEvidence = $false
-    } | ConvertTo-Json -Compress
-} finally {
-    $secret = $null
-}
-
-```
-
-
-## FILE: source/windows/Show-DevFleet-Credentials.ps1
-
-SHA256: 71a2690913ce61e9a48b24bcf7bcf6a6933c41b46b432375a212ebc3a2b159aa | Bytes: 647 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([switch]$CopyPassword)
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
-$secrets=Get-OrCreateSecrets
-Write-Host "`nDevFleet dashboard credentials for this Windows host" -ForegroundColor Cyan
-Write-Host "Username: $($secrets.PortalAdminUser)"
-Write-Host "Password: $($secrets.PortalAdminPassword)"
-if($CopyPassword){Set-Clipboard -Value $secrets.PortalAdminPassword;Write-Host 'Password copied to clipboard.' -ForegroundColor Yellow}
-Write-Host "Stored with restricted ACLs under C:\ProgramData\DevFleet\secrets." -ForegroundColor DarkGray
-Read-Host 'Press Enter to close'
-
-```
-
-
-## FILE: source/windows/Start-DevFleet.ps1
-
-SHA256: 111e3e8828b164feae5ec9bc7a0000683bbb8bbb77c4921aab5b28713447f404 | Bytes: 1989 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([Parameter(Mandatory)][string]$InstanceName,[ValidateSet('Dashboard','VSCode')][string]$Mode='Dashboard')
-$ErrorActionPreference='Stop'
-$InstanceName = $InstanceName.Trim() -replace '^(?i:devfleet-)+',''
-$InstanceName = "devfleet-$InstanceName"
-try {
- Import-Module (Join-Path $PSScriptRoot 'DevFleet.Common.psm1') -Force
- $config=Get-DevFleetConfig;$mp=Get-MultipassExe
- Assert-MultipassIsolation -InstanceNames @($InstanceName)
- Invoke-External $mp @('start',$InstanceName) -IgnoreExitCode
- Wait-MultipassReady $InstanceName 300
- $ip=Get-InstanceIPv4 $InstanceName -PreferTailscale
- if(-not $ip){throw 'Could not determine the DevFleet VM IP address.'}
- if($Mode -eq 'Dashboard'){
-  $port=[int]$config.Network.PortalPort
-  if(-not (Test-NetConnection -ComputerName $ip -Port $port -InformationLevel Quiet -WarningAction SilentlyContinue)){
-   throw "The DevFleet VM is running, but its dashboard is not reachable at http://${ip}:$port/. The DevFleet service may still be starting; wait one minute and try again."
-  }
-  Start-Process "http://${ip}:$port/"
- }else{
-  $sshDir=Join-Path $env:USERPROFILE '.ssh';New-Item -ItemType Directory $sshDir -Force|Out-Null
-  $cfg=Join-Path $sshDir 'config';$alias=$InstanceName
-  $block=@"
-Host $alias
-    HostName $ip
-    User devrunner
-    IdentityFile $(Get-O
+    if ([string]$vaultIdentity.deployment_id -ne [string]$hostIdentity.deployment_id -or [string]$liveVaultIdentity.deployment_id -ne [string]$hostIdentity.deployment_id -or [string]$liveVaultIdentity.no

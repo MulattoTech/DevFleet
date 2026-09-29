@@ -1,10 +1,28 @@
 # DevFleet source part 081
 
 Full-source UTF-8 byte interval [3720000, 3766500); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 9ee3e2495a8a809e0a9512f8da05f9d487aed4ffee80d423bf540b6721f1ebf5
+Payload SHA-256: 97f98b5d07edfa1861868a66c14ada4023a37c38bd52d1cd0ff263ead6eb9116
 
 <!-- BEGIN SOURCE SLICE -->
-="DESTROY {{ p.slug }}"></label><button class="button danger" type="submit">Delete project permanently</button></form></article></section>
+rong><p>{{ p.display_name|default(p.slug, true) }} is not currently running. Live metrics, application health, logs, and runtime actions are unavailable until the environment starts.</p></div>{{ project_action(p.slug,'start','Start Project','primary') }}</div>{% elif caps.runtime_transitioning %}<div class="project-state-banner transitioning" role="status"><div><strong>{{ lifecycle|replace('-', ' ')|title }}…</strong><p>Live tabs remain gated until the environment is running and ready.</p></div></div>{% elif lifecycle in ['unreachable','error'] %}<div class="project-state-banner error" role="alert"><div><strong>Runtime {{ lifecycle }}</strong><p>Live information is unavailable. Static configuration, backups, safety, activity, and settings remain usable.</p></div></div>{% endif %}<div class="project-hero-row"><span class="project-avatar huge">{{ (p.display_name|default(p.slug, true))[0]|upper }}</span><div><p class="eyebrow">PROJECT WORKSPACE</p><h2>{{ p.display_name|default(p.slug, true) }}</h2><p class="muted">{{ p.slug }} · {{ p.language|default('Existing project', true)|title }}{% if p.framework %} · {{ p.framework }}{% endif %}</p></div><div class="hero-status strong-state state-{{ lifecycle }}">{{ status_badge(lifecycle) }}<small>{{ caps.status_reason|default('Environment state is current.', true) }}</small></div></div><div class="quick-actions">{% if caps.can_stop %}{{ project_action(p.slug,'stop','Stop','ghost') }}{% elif caps.can_start %}{{ project_action(p.slug,'start','Start','primary') }}{% endif %}{% if caps.can_restart %}{{ project_action(p.slug,'restart','Restart','ghost') }}{% else %}<button class="button ghost disabled" type="button" disabled title="Start the project and wait for runtime readiness before restarting.">Restart unavailable</button>{% endif %}<a class="button ghost" href="/projects/{{ p.slug }}?tab=environment">Change environment</a><a class="button ghost" href="/projects/{{ p.slug }}?tab=settings">Project settings</a></div></section>
+    <nav class="tabs" aria-label="Project sections"><a class="{{ 'active' if request.query_params.get('tab','overview') == 'overview' else '' }}" href="/projects/{{ p.slug }}?tab=overview">Overview</a><a class="{{ 'active' if request.query_params.get('tab') == 'environment' else '' }}" href="/projects/{{ p.slug }}?tab=environment">Environment</a><a class="{{ 'active' if request.query_params.get('tab') == 'logs' else '' }}" href="/projects/{{ p.slug }}?tab=logs">Logs</a><a class="{{ 'active' if request.query_params.get('tab') == 'backups' else '' }}" href="/projects/{{ p.slug }}?tab=backups">Backups</a><a class="{{ 'active' if request.query_params.get('tab') == 'safety' else '' }}" href="/projects/{{ p.slug }}?tab=safety">Safety</a><a class="{{ 'active' if request.query_params.get('tab') == 'isolate' else '' }}" href="/projects/{{ p.slug }}?tab=isolate">Isolate</a><a class="{{ 'active' if request.query_params.get('tab') == 'activity' else '' }}" href="/projects/{{ p.slug }}?tab=activity">Activity</a><a class="{{ 'active' if request.query_params.get('tab') == 'settings' else '' }}" href="/projects/{{ p.slug }}?tab=settings#advanced-controls">Advanced</a></nav>
+    {% set project_tab = request.query_params.get('tab','overview') %}
+    {% if project_tab == 'environment' %}
+    <section class="panel environment-wizard-shell" data-existing-environment-wizard data-project-slug="{{ p.slug }}"><nav class="wizard-stage-nav" aria-label="Environment assignment stages"><button type="button" data-wizard-stage="environment">1. Environment</button><button type="button" data-wizard-stage="resources">2. Resources</button><button type="button" data-wizard-stage="review">3. Review</button><button type="button" data-wizard-stage="confirm">4. Confirm</button></nav><p class="muted" data-environment-preflight>Read-only preflight runs against the selected environment and resources.</p><fieldset class="custom-resource-controls" data-custom-resources><legend>Custom resources</legend><label>CPU<input type="number" name="custom_cpus" min="1" max="6" step="1" placeholder="CPU cores"></label><label>RAM GB<input type="number" name="custom_ram_gb" min="2" max="12" step="1" placeholder="RAM GB"></label><label>Disk GB<input type="number" name="custom_disk_gb" min="20" max="120" step="1" placeholder="Disk GB"></label><label>PID mode<select name="pid_mode"><option value="private">Private PID namespace</option></select></label><label>PID limit<input type="number" name="pid_limit" min="0" max="4096" value="4096"></label></fieldset><output data-environment-review aria-live="polite">CURRENT → NEW details will appear during Review.</output><div class="review-note"><strong>Confirm is deliberate</strong><span>Only a ready preflight enables the final assignment; a verified backup and fallback are retained if the operation rolls back.</span></div></section>
+    <section class="content-grid two-thirds"><article class="panel"><div class="eyebrow">CURRENT DETECTION</div><h2>Environment</h2><p class="muted">DevFleet detected this workspace as {{ runtime_label(p)|lower }}. Review the runtime assignment, exact actions, and fallback behavior before confirming.</p><div class="environment-summary"><div><small>Environment type</small><strong>{{ runtime_label(p) }}</strong></div><div><small>Resources</small><strong>{{ p.resource_profile|default('standard', true)|title }}</strong></div><div><small>Health</small><strong>{{ p.health_status|default('unknown', true)|replace('-', ' ')|title }}</strong></div></div><form method="post" action="/projects/{{ p.slug }}/environment" class="environment-form">{{ csrf() }}<label>Environment type<select name="runtime_isolation"><option value="container" {{ 'selected' if p.runtime_isolation|default('container', true) == 'container' else '' }}>Project-isolated containers on shared host</option><option value="vm" {{ 'selected' if p.runtime_isolation|default('container', true) == 'vm' else '' }}>Dedicated project VM</option></select></label><label>Resources<select name="resource_profile">{% for name, profile in resource_profiles.items() %}<option value="{{ name }}" {{ 'selected' if p.resource_profile|default('standard', true) == name else '' }}>{{ profile.label }} · {{ profile.cpus }} CPU · {{ profile.memory }} · {{ profile.disk_gb }} GB</option>{% endfor %}<option value="custom" {{ 'selected' if p.resource_profile|default('', true) == 'custom' else '' }}>Custom</option></select></label><div class="review-note"><strong>Migration safety</strong><span>DevFleet creates a verified backup, validates capacity, verifies the workspace, and rolls metadata back if provisioning or import fails. Existing projects are never migrated automatically.</span></div><button class="button primary" type="submit" data-environment-confirm>Continue to Resources</button></form></article><article class="panel"><div class="eyebrow">DESTINATION</div><h3>Move to another node</h3><p class="muted">Ownership transfer is separate from runtime type. Offline destinations cannot be selected.</p>{% if peer.ok %}<form method="post" action="/projects/{{ p.slug }}/transfer-to-peer">{{ csrf() }}<button class="button ghost" type="submit">Move to DevFleetFailover</button></form>{% else %}<button class="button disabled" disabled title="Destination is offline">DevFleetFailover offline</button><p class="error">The failover node is unavailable, so transfer is disabled.</p>{% endif %}<details class="advanced"><summary>Advanced runtime record</summary><pre>{{ {'provider':p.runtime_provider|default('docker-compose',true),'runtime_id':p.runtime_id|default('',true),'runtime_address':p.runtime_address|default('',true),'host_id':p.host_id|default('',true),'limits':p.resource_limits|default({},true),'migration_snapshot':p.runtime_migration_snapshot|default('',true)}|tojson(indent=2) }}</pre></details></article></section>
+    {{ resource_allocation(p) }}
+    {% elif project_tab == 'logs' %}
+     <section class="panel logs-panel"><div class="section-heading"><div><div class="eyebrow">RUNTIME LOGS</div><h2>Project logs</h2><p class="muted">Logs are fetched through the selected runtime provider; no host shell or machine API token is exposed.</p></div><span class="status-badge neutral">Session protected</span></div>{% if caps.can_query_logs %}<pre class="log-output" data-project-logs="{{ p.slug }}">Loading the latest bounded log tail…</pre>{% else %}<div class="runtime-unavailable" data-terminal-state="{{ lifecycle }}"><strong>Logs unavailable while {{ lifecycle }}</strong><p>{{ 'Start the project to view live logs.' if lifecycle == 'stopped' else 'Logs become available after the runtime reaches the ready state.' }}</p></div>{% endif %}<p class="muted">Stopped, transitioning, or unreachable runtimes use a terminal state instead of an indefinite spinner.</p></section>
+    {% elif project_tab == 'backups' %}
+    <section class="panel" data-backup-history data-project-slug="{{ p.slug }}"><div class="eyebrow">BACKUP HISTORY</div><h2>Verified restore points</h2><p class="muted">Each entry is identity-bound and re-hashed before restore. History loads through the session-authenticated endpoint.</p><div data-backup-list aria-live="polite">Loading backup history…</div></section>
+    <section class="content-grid two-thirds"><article class="panel"><div class="eyebrow">RECOVERY ARTIFACTS</div><h2>Backups</h2><p class="muted">A backup is verified only when a recoverable workspace archive exists outside the runtime and its SHA-256 matches.</p><div class="environment-summary"><div><small>Status</small><strong>{{ p.backup_status|default('not-verified', true)|replace('-', ' ')|title }}</strong></div><div><small>Backup ID</small><strong>{{ p.backup_id|default('None', true) }}</strong></div><div><small>SHA-256</small><strong class="truncate">{{ p.backup_sha256|default('Not available', true) }}</strong></div></div>{{ project_action(p.slug,'backup','Create verified backup','primary') }}{% if p.backup_status == 'verified' %}<p class="success">Verified artifact: <code>{{ p.backup_path|default('recorded') }}</code></p>{% else %}<p class="warning">No verified workspace archive is recorded yet.</p>{% endif %}</article><article class="panel"><div class="eyebrow">RECOVERY POLICY</div><h3>Safe restore and deletion</h3><p class="muted">Restore is identity-bound and refuses to overwrite a non-empty workspace. Permanent deletion is blocked unless this project has a specific verified backup artifact.</p>{{ project_action(p.slug,'restore-vault','Restore copy from vault','ghost') }}<p class="muted">A Vault recovery creates a new recovered copy and preserves the original workspace.</p><details class="advanced"><summary>Backup manifest details</summary><pre>{{ {'manifest':p.backup_manifest|default('',true),'path':p.backup_path|default('',true),'sha256':p.backup_sha256|default('',true)}|tojson(indent=2) }}</pre></details></article></section>
+    {% elif project_tab == 'safety' %}
+    <section class="content-grid two-thirds"><article class="panel"><div class="eyebrow">SAFETY PROFILE</div><h2>Safety controls</h2><p class="muted">Choose the narrowest profile that supports the project. GPU passthrough, firewall changes, and host driver changes remain outside DevFleet.</p><form method="post" action="/projects/{{ p.slug }}/profile" class="form-grid">{{ csrf() }}<label>Profile<select name="profile"><option value="strict" {{ 'selected' if p.profile|default('balanced', true) == 'strict' else '' }}>Strict</option><option value="balanced" {{ 'selected' if p.profile|default('balanced', true) == 'balanced' else '' }}>Balanced</option><option value="fast" {{ 'selected' if p.profile|default('balanced', true) == 'fast' else '' }}>Fast Trusted</option></select></label><label class="checkbox-label"><input type="checkbox" name="confirm_fast"> Acknowledge Fast Trusted only if required</label><button class="button primary" type="submit">Save safety profile</button></form><div class="safety-list"><p><strong>Workspace boundary</strong> · {{ 'Protected' if not p.blockers else 'Review required' }}</p><p><strong>Runtime health</strong> · {{ p.health_scope|default('not-checked', true)|replace('-', ' ') }}</p><p><strong>Backup gate</strong> · {{ p.backup_status|default('not-verified', true)|replace('-', ' ') }}</p></div></article><article class="panel"><div class="eyebrow">ANALYZER</div><h3>Findings</h3>{% for finding in p.findings|default([], true) %}<p class="{{ finding.severity|default('info') }}"><strong>{{ finding.severity|default('info')|title }}</strong> · {{ finding.message }}</p>{% else %}<p class="success">No analyzer findings were recorded.</p>{% endfor %}<details class="advanced"><summary>Raw analyzer details</summary><pre>{{ p.findings|default([], true)|tojson(indent=2) }}</pre></details></article></section>
+    <section class="panel advanced-permissions" data-fast-permissions><div class="eyebrow">FAST TRUSTED ADVANCED PERMISSIONS</div><h3>Explicit device and privileged access</h3><p class="muted">These permissions are inactive unless Fast Trusted is explicitly acknowledged. They remain disabled for Strict and Balanced profiles.</p><form method="post" action="/projects/{{ p.slug }}/profile" class="form-grid">{{ csrf() }}<input type="hidden" name="profile" value="fast"><label class="checkbox-label"><input type="checkbox" name="confirm_fast" required> I acknowledge Fast Trusted</label><label class="checkbox-label"><input type="checkbox" name="allow_devices" {{ 'checked' if p.allow_devices else '' }}> Allow devices</label><label class="checkbox-label"><input type="checkbox" name="allow_privileged" {{ 'checked' if p.allow_privileged else '' }}> Allow privileged runtime</label><button class="button ghost" type="submit">Save advanced permissions</button></form></section>
+    {% elif project_tab == 'activity' %}
+    <section class="panel"><div class="section-heading"><div><div class="eyebrow">PROJECT ACTIVITY</div><h2>Operations</h2></div><a href="/?view=activity">All activity →</a></div>{% for op in status.operations if op.project == p.slug %}<article class="operation-row" id="{{ op.id }}"><span class="activity-dot {{ 'bad' if op.state == 'failed' else 'ok' if op.state == 'completed' else 'warn' }}"></span><div><strong>{{ op.kind|replace('-', ' ')|title }}</strong><p class="muted">{{ op.message }} · {{ op.progress }}%</p></div><details class="advanced"><summary>Details</summary><pre>{{ op.log|tojson(indent=2) }}{{ op.result or op.error or '' }}</pre></details></article>{% else %}<p class="muted">No operations recorded for this project.</p>{% endfor %}</section>
+    {% elif project_tab == 'settings' %}
+     <section class="content-grid two-thirds"><article class="panel"><div class="eyebrow">SAFETY & SETUP</div><h2>Project settings</h2><div class="action-stack">{% if caps.can_run_runtime_action %}{{ project_action(p.slug,'runtime-health','Environment health','ghost') }}{{ project_action(p.slug,'bootstrap','Set up environment','ghost') }}{{ project_action(p.slug,'codexpro','Set up Codex','ghost') }}{% else %}<button class="button ghost disabled" type="button" disabled title="Runtime actions require a running, ready environment.">Runtime actions unavailable — {{ lifecycle }}</button>{% endif %}{{ project_action(p.slug,'analyze-force','Run safety scan','ghost') }}{{ project_action(p.slug,'backup','Create backup','ghost') }}</div><details class="advanced"><summary>Analyzer and runtime details</summary><pre>{{ {'capabilities':caps,'findings':p.findings|default([],true),'profile':p.profile|default('balanced',true),'analyzer_cache':p.analyzer_cache|default({},true),'backup_status':p.backup_status|default('not-verified',true),'lease':p.lease|default({},true)}|tojson(indent=2) }}</pre></details></article><article class="panel danger-panel"><div class="eyebrow danger-text">DANGER ZONE</div><h2>Delete project</h2><p class="muted">DevFleet will create and verify a backup before permanently deleting the project runtime and workspace.</p><form method="post" action="/projects/{{ p.slug }}/destroy" class="danger-form">{{ csrf() }}<label>Type the project slug<input name="confirm_slug" required placeholder="{{ p.slug }}"></label><label>Type the confirmation phrase<input name="confirm_phrase" required placeholder="DESTROY {{ p.slug }}"></label><button class="button danger" type="submit">Delete project permanently</button></form></article></section>
      {% elif project_tab == 'isolate' %}<section class="panel danger-panel"><div class="eyebrow danger-text">ISOLATE PROJECT</div><h2>Quarantine this workspace</h2><p class="muted">Creates and verifies a backup, then stops the project before isolating it. This control stays reviewable and requires explicit acknowledgement.</p><form method="post" action="/projects/{{ p.slug }}/quarantine" class="danger-form">{{ csrf() }}<label class="checkbox-label"><input type="checkbox" name="confirm_quarantine" required> I understand this will make the project unavailable until restored.</label><button class="button danger" type="submit">Create backup &amp; isolate</button></form></section>
      {% else %}
     <div class="panel preference-panel"><label class="checkbox-label preference-toggle"><input id="advanced-mode-toggle" type="checkbox"> Show advanced diagnostics and raw internal data</label><p class="muted help-text">Keep this off for normal operation. It is stored on this browser only.</p></div>
@@ -633,245 +651,4 @@ SHA256: b939c07de544806e87b8324c050a1a3aff6baac8b36fac57201d917ea8810b46 | Bytes
       "executableProbes": ["git.exe"],
       "registryProbes": ["HKLM:\\SOFTWARE\\GitForWindows", "HKCU:\\SOFTWARE\\GitForWindows"],
       "appPathsProbes": ["git.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\Git\\cmd\\git.exe", "%LocalAppData%\\Programs\\Git\\cmd\\git.exe"],
-      "wingetPackageId": "Git.Git",
-      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/git-for-windows/git/releases/latest", "allowedHosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"], "assetRegex": "^Git-[0-9.]+-64-bit\\.exe$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Johannes Schindelin, O=Johannes Schindelin, L=Bruehl, C=DE"], "extensions": [".exe"] },
-      "silentInstallArguments": ["/VERYSILENT", "/NORESTART", "/MERGETASKS=!runcode"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, App Paths, registry and known locations",
-      "postInstallVersionVerification": "git --version >= minimum"
-    },
-    {
-      "id": "openssh-client",
-      "displayName": "OpenSSH Client",
-      "classification": "CORE_REQUIRED",
-      "required": true,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["ssh", "guest-bootstrap"],
-      "minimumSupportedVersion": "8.1.0",
-      "maximumMajor": null,
-      "executableProbes": ["ssh.exe"],
-      "registryProbes": [],
-      "appPathsProbes": ["ssh.exe"],
-      "knownVendorInstallLocations": ["%WINDIR%\\System32\\OpenSSH\\ssh.exe"],
-      "wingetPackageId": null,
-      "directOfficialVendorResolver": { "type": "windows-capability", "metadataUri": "https://learn.microsoft.com/windows-server/administration/openssh/openssh_install_firstuse", "allowedHosts": ["learn.microsoft.com"], "assetRegex": null },
-      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".exe"] },
-      "silentInstallArguments": [],
-      "rebootSemantics": "capability-dependent",
-      "versionProbe": { "arguments": ["-V"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, App Paths, capability and known location",
-      "postInstallVersionVerification": "ssh -V >= minimum"
-    },
-    {
-      "id": "multipass",
-      "displayName": "Multipass",
-      "classification": "CORE_REQUIRED",
-      "required": true,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["virtualization", "ubuntu-provisioning"],
-      "minimumSupportedVersion": "1.13.0",
-      "maximumMajor": 1,
-      "executableProbes": ["multipass.exe"],
-      "registryProbes": ["HKLM:\\SOFTWARE\\Canonical\\Multipass"],
-      "appPathsProbes": ["multipass.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\Multipass\\bin\\multipass.exe", "%ProgramFiles(x86)%\\Multipass\\bin\\multipass.exe"],
-      "wingetPackageId": "Canonical.Multipass",
-      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/canonical/multipass/releases/latest", "allowedHosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"], "assetRegex": "(?i)^multipass.*win.*64.*\\.(msi|exe)$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=CANONICAL GROUP LIMITED, O=CANONICAL GROUP LIMITED, L=London, C=GB"], "installedExecutableTrust": "signed-installer-locked-path", "extensions": [".msi", ".exe"] },
-      "silentInstallArguments": ["/quiet", "/norestart"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["version"], "regex": "(?m)^multipass\\s+(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, App Paths, registry and known vendor locations",
-      "postInstallVersionVerification": "multipass version and multipass list both succeed"
-    },
-    {
-      "id": "virtualization-backend",
-      "displayName": "Virtualization backend",
-      "classification": "CORE_REQUIRED",
-      "required": true,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["multipass"],
-      "minimumSupportedVersion": "0.0.0",
-      "maximumMajor": null,
-      "executableProbes": ["systeminfo.exe"],
-      "registryProbes": [],
-      "appPathsProbes": [],
-      "knownVendorInstallLocations": [],
-      "wingetPackageId": null,
-      "directOfficialVendorResolver": { "type": "windows-feature-or-virtualbox", "metadataUri": "https://documentation.ubuntu.com/multipass/latest/how-to-guides/install-multipass", "allowedHosts": ["documentation.ubuntu.com"], "assetRegex": null },
-      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US", "CN=Oracle Corporation, O=Oracle Corporation, L=Redwood City, S=California, C=US"], "extensions": [] },
-      "silentInstallArguments": [],
-      "rebootSemantics": "feature-dependent",
-      "versionProbe": { "arguments": ["/FO", "LIST"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "verify Hyper-V capability or VirtualBox installation and Multipass driver",
-      "postInstallVersionVerification": "backend capability and selected driver are usable"
-    },
-    {
-      "id": "virtualbox",
-      "displayName": "Oracle VirtualBox",
-      "classification": "FEATURE_REQUIRED",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["multipass", "windows-home"],
-      "minimumSupportedVersion": "7.0.0",
-      "maximumMajor": null,
-      "executableProbes": ["VBoxManage.exe"],
-      "registryProbes": ["HKLM:\\SOFTWARE\\Oracle\\VirtualBox", "HKLM:\\SOFTWARE\\WOW6432Node\\Oracle\\VirtualBox"],
-      "appPathsProbes": ["VBoxManage.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\Oracle\\VirtualBox\\VBoxManage.exe", "%ProgramFiles(x86)%\\Oracle\\VirtualBox\\VBoxManage.exe"],
-      "wingetPackageId": "Oracle.VirtualBox",
-      "directOfficialVendorResolver": { "type": "official-download-page", "metadataUri": "https://www.virtualbox.org/wiki/Downloads", "allowedHosts": ["www.virtualbox.org", "download.virtualbox.org"], "assetRegex": "(?i)^VirtualBox-[0-9.]+-Win\\.exe$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Oracle Corporation, O=Oracle Corporation, L=Redwood City, S=California, C=US"], "extensions": [".exe"] },
-      "silentInstallArguments": ["--silent", "--msiparams", "REBOOT=ReallySuppress"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover VBoxManage from HKLM App Paths and canonical Oracle machine locations",
-      "postInstallVersionVerification": "VBoxManage --version >= minimum and Multipass virtualbox driver is selected"
-    },
-    {
-      "id": "tailscale",
-      "displayName": "Tailscale",
-      "classification": "ROLE_REQUIRED",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["network-pairing", "failover", "vault"],
-      "minimumSupportedVersion": "1.60.0",
-      "maximumMajor": 1,
-      "executableProbes": ["tailscale.exe"],
-      "registryProbes": ["HKLM:\\SOFTWARE\\Tailscale"],
-      "appPathsProbes": ["tailscale.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\Tailscale\\tailscale.exe", "%ProgramFiles(x86)%\\Tailscale\\tailscale.exe"],
-      "wingetPackageId": "Tailscale.Tailscale",
-      "directOfficialVendorResolver": { "type": "official-download-page", "metadataUri": "https://tailscale.com/download/windows", "allowedHosts": ["tailscale.com", "pkgs.tailscale.com"], "assetRegex": "(?i)^tailscale-setup-latest\\.(exe|msi)$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Tailscale Inc., O=Tailscale Inc., L=Toronto, S=Ontario, C=CA, SERIALNUMBER=1131559-5, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.3=CA"], "extensions": [".exe", ".msi"] },
-      "silentInstallArguments": ["/quiet"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, App Paths, registry and known locations",
-      "postInstallVersionVerification": "tailscale version succeeds; auth remains explicit/deferred"
-    },
-    {
-      "id": "vscode",
-      "displayName": "VS Code",
-      "classification": "RECOMMENDED",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["editor", "remote-development"],
-      "minimumSupportedVersion": "1.90.0",
-      "maximumMajor": null,
-      "executableProbes": ["code.cmd", "code.exe"],
-      "registryProbes": ["HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"],
-      "appPathsProbes": ["code.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\Microsoft VS Code\\bin\\code.cmd", "%LocalAppData%\\Programs\\Microsoft VS Code\\bin\\code.cmd"],
-      "wingetPackageId": "Microsoft.VisualStudioCode",
-      "directOfficialVendorResolver": { "type": "official-download-page", "metadataUri": "https://code.visualstudio.com/Download", "directUri": "https://update.code.visualstudio.com/latest/win32-x64/stable", "allowedHosts": ["code.visualstudio.com", "update.code.visualstudio.com", "vscode.download.prss.microsoft.com"], "assetRegex": "(?i)^VSCodeSetup-x64-[0-9.]+\\.exe$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".exe"] },
-      "silentInstallArguments": ["/VERYSILENT", "/NORESTART"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover code.cmd/code.exe via PATH, registry and known locations",
-      "postInstallVersionVerification": "code --version >= minimum"
-    },
-    {
-      "id": "github-cli",
-      "displayName": "GitHub CLI",
-      "classification": "RECOMMENDED",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["GitHub integration"],
-      "minimumSupportedVersion": "2.40.0",
-      "maximumMajor": null,
-      "executableProbes": ["gh.exe"],
-      "registryProbes": [],
-      "appPathsProbes": ["gh.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\GitHub CLI\\gh.exe", "%LocalAppData%\\Programs\\GitHub CLI\\gh.exe"],
-      "wingetPackageId": "GitHub.cli",
-      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/cli/cli/releases/latest", "allowedHosts": ["api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"], "assetRegex": "(?i)^gh_.*_windows_amd64\\.msi$" },
-      "installerAuthenticityPolicy": { "required": true, "allowedSignerSubjectsExact": ["CN=GitHub, Inc., O=GitHub, Inc., L=San Francisco, S=California, C=US"], "extensions": [".msi"] },
-      "silentInstallArguments": ["/qn", "/norestart"],
-      "rebootSemantics": "0-or-3010",
-      "versionProbe": { "arguments": ["--version"], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, App Paths and known locations",
-      "postInstallVersionVerification": "gh --version >= minimum"
-    },
-    {
-      "id": "sevenzip",
-      "displayName": "7-Zip",
-      "classification": "OPTIONAL",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["encrypted-transfer-bundle"],
-      "minimumSupportedVersion": "23.0.0",
-      "maximumMajor": null,
-      "executableProbes": ["7z.exe"],
-      "registryProbes": ["HKLM:\\SOFTWARE\\7-Zip", "HKLM:\\SOFTWARE\\WOW6432Node\\7-Zip"],
-      "appPathsProbes": ["7z.exe"],
-      "knownVendorInstallLocations": ["%ProgramFiles%\\7-Zip\\7z.exe", "%ProgramFiles(x86)%\\7-Zip\\7z.exe"],
-      "wingetPackageId": "7zip.7zip",
-      "directOfficialVendorResolver": { "type": "github-release", "metadataUri": "https://api.github.com/repos/ip7z/7zip/releases/latest", "officialPageUri": "https://www.7-zip.org/download.html", "expectedOwner": "ip7z", "expectedRepository": "7zip", "allowedHosts": ["api.github.com", "github.com", "release-assets.githubusercontent.com"], "assetRegex": "(?i)^7z\\d+-x64\\.exe$", "officialPageAssetRegex": "(?i)^7z\\d+-x64\\.exe$" },
-      "installerAuthenticityPolicy": { "strategy": "VendorReleaseSha256", "required": true, "allowedSignerSubjectsExact": ["CN=Igor Pavlov"], "extensions": [".exe"] },
-      "silentInstallArguments": ["/S"],
-      "rebootSemantics": "0",
-      "versionProbe": { "arguments": [], "regex": "(?<!\\d)(\\d+\\.\\d+(?:\\.\\d+){0,2})" },
-      "postInstallExecutableDiscovery": "rediscover command, registry and known locations",
-      "postInstallVersionVerification": "7z executable is present and responds"
-    },
-    {
-      "id": "remote-ssh-extension",
-      "displayName": "Remote SSH extension",
-      "classification": "FEATURE_REQUIRED",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["remote-development"],
-      "minimumSupportedVersion": "0.0.0",
-      "maximumMajor": null,
-      "executableProbes": ["code.cmd"],
-      "registryProbes": [],
-      "appPathsProbes": [],
-      "knownVendorInstallLocations": [],
-      "wingetPackageId": null,
-      "directOfficialVendorResolver": { "type": "vscode-extension", "metadataUri": "https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-ssh", "allowedHosts": ["marketplace.visualstudio.com"], "assetRegex": null },
-      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".vsix"] },
-      "silentInstallArguments": ["--install-extension", "ms-vscode-remote.remote-ssh", "--force"],
-      "rebootSemantics": "0",
-      "versionProbe": { "arguments": [], "regex": null },
-      "postInstallExecutableDiscovery": "resolve VS Code CLI and inspect extension list",
-      "postInstallVersionVerification": "code --list-extensions contains ms-vscode-remote.remote-ssh"
-    },
-    {
-      "id": "remote-explorer-extension",
-      "displayName": "Remote Explorer extension",
-      "classification": "FEATURE_REQUIRED",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["remote-development"],
-      "minimumSupportedVersion": "0.0.0",
-      "maximumMajor": null,
-      "executableProbes": ["code.cmd"],
-      "registryProbes": [],
-      "appPathsProbes": [],
-      "knownVendorInstallLocations": [],
-      "wingetPackageId": null,
-      "directOfficialVendorResolver": { "type": "vscode-extension", "metadataUri": "https://marketplace.visualstudio.com/items?itemName=ms-vscode.remote-explorer", "allowedHosts": ["marketplace.visualstudio.com"], "assetRegex": null },
-      "installerAuthenticityPolicy": { "required": false, "allowedSignerSubjectsExact": ["CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"], "extensions": [".vsix"] },
-      "silentInstallArguments": ["--install-extension", "ms-vscode.remote-explorer", "--force"],
-      "rebootSemantics": "0",
-      "versionProbe": { "arguments": [], "regex": null },
-      "postInstallExecutableDiscovery": "resolve VS Code CLI and inspect extension list",
-      "postInstallVersionVerification": "code --list-extensions contains ms-vscode.remote-explorer"
-    },
-    {
-      "id": "dev-containers-extension",
-      "displayName": "Dev Containers extension",
-      "classification": "FEATURE_REQUIRED",
-      "required": false,
-      "roles": ["Desktop", "Laptop"],
-      "features": ["remote-development", "containers"],
-      "minimumSupportedVersion": "0.0.0",
-      "maximumMajor": null,
-      "executableProbes": ["code.cmd"],
-      "registryProbes": [],
-      "appPath
+      "knownVendo

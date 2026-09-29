@@ -1,10 +1,120 @@
 # DevFleet source part 030
 
 Full-source UTF-8 byte interval [1348500, 1395000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 57ce20146d8ce639035e97c82074e1155f2f415c727b4013f1c9c2e1e6fa0f29
+Payload SHA-256: 16039afc830f6a54f695e72a96d36846622e069277d89d7fd92d4a15a9db2b98
 
 <!-- BEGIN SOURCE SLICE -->
- -LiteralPath $installPath).LastWriteTimeUtc.ToString('o')}else{$null};ownershipPresent=(Test-Path -LiteralPath $ownershipPath -PathType Leaf);nodeIdentityPresent=(Test-Path -LiteralPath 'C:\ProgramData\DevFleet\node-identity.json' -PathType Leaf);hostAgentPresent=(Test-Path -LiteralPath 'C:\ProgramData\DevFleetHostAgent' -PathType Container);hostAgentTaskPresent=[bool](Get-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue);listenerPresent=[bool](Get-NetTCPConnection -LocalPort 8790 -State Listen -ErrorAction SilentlyContinue);pendingCbs=(Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending');pendingWindowsUpdate=(Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired')}
+ck' -and [string]$existingFirewall[0].Enabled -ieq 'True' -and $profileMatches -and $existingPortFilters.Count -eq 1 -and $protocolMatches -and $localPortText -eq '65535')
+            if(-not $firewallMatches){throw 'Foreign firewall sentinel already exists.'}
+            # The exact run/phase-derived firewall can survive a product reboot
+            # while the other run-owned sentinel objects are torn down. Reuse
+            # it only when its immutable definition is exactly our sentinel;
+            # any mismatched rule remains a fail-closed collision.
+            $reuseExactFirewall=$true
+        }
+        $taskAction=New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\cmd.exe') -Argument '/d /c exit 0'
+        $taskSettings=New-ScheduledTaskSettingsSet -Disable
+        Register-ScheduledTask -TaskName $taskName -Action $taskAction -Settings $taskSettings -User 'SYSTEM' -RunLevel Highest -Force|Out-Null
+        if(-not $reuseExactService){& (Join-Path $env:SystemRoot 'System32\sc.exe') create $serviceName 'binPath=' $serviceCommand 'start=' 'disabled' 'DisplayName=' "DevFleet E2E Foreign Sentinel $suffix"|Out-Null;if($LASTEXITCODE -ne 0){throw 'Foreign service sentinel creation failed.'}}
+        if(-not $reuseExactFirewall){New-NetFirewallRule -Name $firewallName -DisplayName $firewallName -Group 'DevFleet E2E Foreign Sentinels' -Direction Inbound -Action Block -Protocol TCP -LocalPort 65535 -Profile Any|Out-Null}
+        New-Item -ItemType Directory -Path (Split-Path -Parent $filePath) -Force|Out-Null
+        New-Item -Path $registryPath -Force|Out-Null
+        New-ItemProperty -Path $registryPath -Name Value -Value $value -PropertyType String -Force|Out-Null
+        [IO.File]::WriteAllText($filePath,$value,[Text.UTF8Encoding]::new($false))
+        $sha256=[Security.Cryptography.SHA256]::Create()
+        try{$valueSha256=($sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($value))|ForEach-Object{$_.ToString('x2')})-join ''}finally{$sha256.Dispose()}
+        return [ordered]@{task=$taskName;service=$serviceName;firewall=$firewallName;registry=$registryPath;file=$filePath;valueSha256=$valueSha256;fileSha256=(Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant();serviceReused=$reuseExactService;firewallReused=$reuseExactFirewall}
+    } -ArgumentList $RunId,$PhaseId
+}
+
+function Test-GuestForeignSentinels {
+    param([Parameter(Mandatory)][System.Management.Automation.Runspaces.PSSession]$Session,[Parameter(Mandatory)][psobject]$Sentinels)
+    Invoke-Command -Session $Session -ScriptBlock {
+        param($sentinels)
+        $task=@(Get-ScheduledTask -TaskName ([string]$sentinels.task) -ErrorAction SilentlyContinue)
+        $service=@(Get-CimInstance Win32_Service -Filter "Name='$([string]$sentinels.service)'" -ErrorAction SilentlyContinue)
+        $firewall=@(Get-NetFirewallRule -Name ([string]$sentinels.firewall) -ErrorAction SilentlyContinue)
+        $value=[string](Get-ItemProperty -Path ([string]$sentinels.registry) -Name Value -ErrorAction Stop).Value
+        $sha256=[Security.Cryptography.SHA256]::Create()
+        try{$valueSha=($sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($value))|ForEach-Object{$_.ToString('x2')})-join ''}finally{$sha256.Dispose()}
+        $fileSha=if(Test-Path -LiteralPath ([string]$sentinels.file) -PathType Leaf){(Get-FileHash -LiteralPath ([string]$sentinels.file) -Algorithm SHA256).Hash.ToLowerInvariant()}else{''}
+        $checks=[ordered]@{scheduledTask=($task.Count -eq 1);service=($service.Count -eq 1 -and [string]$service[0].StartMode -eq 'Disabled');firewall=($firewall.Count -eq 1 -and [string]$firewall[0].Action -eq 'Block');registry=($valueSha -eq [string]$sentinels.valueSha256);file=($fileSha -eq [string]$sentinels.fileSha256)}
+        if(@($checks.GetEnumerator()|Where-Object{-not [bool]$_.Value}).Count){throw 'One or more unrelated Windows sentinels changed during the lifecycle action.'}
+        return [ordered]@{status='PASS';checks=$checks;unchanged=$true}
+    } -ArgumentList $Sentinels
+}
+
+function Remove-GuestForeignSentinels {
+    param([Parameter(Mandatory)][System.Management.Automation.Runspaces.PSSession]$Session,[Parameter(Mandatory)][psobject]$Sentinels)
+    Invoke-Command -Session $Session -ScriptBlock {
+        param($sentinels)
+        Unregister-ScheduledTask -TaskName ([string]$sentinels.task) -Confirm:$false -ErrorAction SilentlyContinue
+        if(Get-CimInstance Win32_Service -Filter "Name='$([string]$sentinels.service)'" -ErrorAction SilentlyContinue){& (Join-Path $env:SystemRoot 'System32\sc.exe') delete ([string]$sentinels.service)|Out-Null;$serviceDeadline=(Get-Date).AddSeconds(15);do{$serviceStillPresent=$null -ne (Get-CimInstance Win32_Service -Filter "Name='$([string]$sentinels.service)'" -ErrorAction SilentlyContinue);if($serviceStillPresent){Start-Sleep -Milliseconds 250}}while($serviceStillPresent -and (Get-Date)-lt $serviceDeadline)}
+        Get-NetFirewallRule -Name ([string]$sentinels.firewall) -ErrorAction SilentlyContinue|Remove-NetFirewallRule -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath ([string]$sentinels.registry) -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath ([string]$sentinels.file) -Force -ErrorAction SilentlyContinue
+        $remaining=[ordered]@{task=[bool](Get-ScheduledTask -TaskName ([string]$sentinels.task) -ErrorAction SilentlyContinue);service=[bool](Get-CimInstance Win32_Service -Filter "Name='$([string]$sentinels.service)'" -ErrorAction SilentlyContinue);firewall=[bool](Get-NetFirewallRule -Name ([string]$sentinels.firewall) -ErrorAction SilentlyContinue);registry=(Test-Path -LiteralPath ([string]$sentinels.registry));file=(Test-Path -LiteralPath ([string]$sentinels.file))}
+        if(@($remaining.GetEnumerator()|Where-Object{[bool]$_.Value}).Count){throw 'Run-owned Windows sentinel cleanup was incomplete.'}
+        return [ordered]@{status='PASS';absent=$true}
+    } -ArgumentList $Sentinels
+}
+
+function Invoke-RebootResumeWpfFallback {
+    param(
+        [Parameter(Mandatory)][psobject]$Context,
+        [Parameter(Mandatory)][System.Management.Automation.Runspaces.PSSession]$Session,
+        [Parameter(Mandatory)][psobject]$DriverReport
+    )
+    $expectedPayload = [string]$Context.candidate.tar.sha256
+    $expectedCandidatePath = Join-Path "C:\Users\Public\DevFleet-E2E\$($Context.runId)\$($Context.phaseId)" (Split-Path -Leaf ([string]$Context.candidate.candidate.path))
+    $candidatePid = 0
+    $candidateSessionId = -1
+    $driverProcessFound=$false;$driverProcess=Get-LifecycleProperty $DriverReport 'processId' ([ref]$driverProcessFound);if($driverProcessFound){$candidatePid=[int]$driverProcess}
+    $driverSessionFound=$false;$driverSession=Get-LifecycleProperty $DriverReport 'sessionId' ([ref]$driverSessionFound);if($driverSessionFound){$candidateSessionId=[int]$driverSession}
+    $observationSeconds = 180
+    $diagnosticSecondsFound=$false;$diagnosticSeconds=Get-LifecycleProperty $Context 'diagnosticObservationSeconds' ([ref]$diagnosticSecondsFound);if ($diagnosticSecondsFound) {
+        $requestedSeconds = 0
+        if ([int]::TryParse([string]$diagnosticSeconds, [ref]$requestedSeconds) -and $requestedSeconds -gt 180) {
+            $observationSeconds = [Math]::Min($requestedSeconds, 1800)
+        }
+    }
+    $observationPath = Join-Path ([string]$Context.runDir) 'durable-observation-samples.json'
+    $observationSamples = [System.Collections.Generic.List[object]]::new()
+    $deadline = (Get-Date).AddSeconds($observationSeconds)
+    $lastError = 'durable completion not yet observable'
+    do {
+        try {
+            $sample = Invoke-Command -Session $Session -ScriptBlock {
+                param($processId,$sessionId,$expectedPath)
+                # Preserve the bounded read-error record when completion removes
+                # the product checkpoint between the existence check and the
+                # file read; do not leak a remoting non-terminating error into
+                # the lifecycle observer.
+                $ErrorActionPreference='Stop'
+                $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+                $ids = [System.Collections.Generic.HashSet[int]]::new()
+                if ($processId -gt 0) { [void]$ids.Add($processId) }
+                do {
+                    $before = $ids.Count
+                    foreach ($row in $all) { if ($ids.Contains([int]$row.ParentProcessId)) { [void]$ids.Add([int]$row.ProcessId) } }
+                } while ($ids.Count -gt $before)
+                $root = $all | Where-Object { [int]$_.ProcessId -eq $processId } | Select-Object -First 1
+                $processMeta = $null
+                try {
+                    $p = Get-Process -Id $processId -ErrorAction Stop
+                    $processMeta = [ordered]@{hasExited=$false;responding=[bool]$p.Responding;mainWindowHandle=[int64]$p.MainWindowHandle;cpuSeconds=[double]$p.TotalProcessorTime.TotalSeconds;workingSetBytes=[int64]$p.WorkingSet64;threadCount=[int]$p.Threads.Count;handleCount=[int]$p.HandleCount;startTime=$p.StartTime.ToUniversalTime().ToString('o')}
+                } catch { $processMeta = [ordered]@{hasExited=$true} }
+                $checkpointPath = 'C:\ProgramData\M-TechLabs\DevFleet\Installer\resume-checkpoint.json'
+                $checkpoint = $null
+                if (Test-Path -LiteralPath $checkpointPath -PathType Leaf) {
+                    try { $v = Get-Content -LiteralPath $checkpointPath -Raw | ConvertFrom-Json; $checkpoint = [ordered]@{state=$v.state;action=$v.action;transactionId=$v.transactionId;payloadSha256=$v.payloadSha256;checkpointGeneration=$v.checkpointGeneration;completedStages=$v.completedStages;resumeStage=$v.resumeStage;createdUtc=$v.createdUtc;lastWriteUtc=(Get-Item -LiteralPath $checkpointPath).LastWriteTimeUtc.ToString('o')} } catch { $checkpoint = [ordered]@{readError=$_.Exception.Message} }
+                }
+                $consumedRoot = 'C:\ProgramData\M-TechLabs\DevFleet\Installer\resume-consumed'
+                $receipts = @()
+                if (Test-Path -LiteralPath $consumedRoot) { $receipts = @(Get-ChildItem -LiteralPath $consumedRoot -Filter '*.json' -File -ErrorAction SilentlyContinue | Select-Object Name,Length,LastWriteTimeUtc) }
+                $installPath = 'C:\ProgramData\M-TechLabs\DevFleet\Installer\install-state.json'
+                $ownershipPath = 'C:\ProgramData\DevFleetHostAgent\integration-ownership.json'
+                [ordered]@{timestampUtc=(Get-Date).ToUniversalTime().ToString('o');candidate=$processMeta;candidateRow=if($root){[ordered]@{processId=$root.ProcessId;parentProcessId=$root.ParentProcessId;executablePath=$root.ExecutablePath;commandLine=$root.CommandLine;sessionId=$root.SessionId}}else{$null};processTree=@($all | Where-Object { $ids.Contains([int]$_.ProcessId) } | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine,SessionId);checkpoint=$checkpoint;checkpointPresent=(Test-Path -LiteralPath $checkpointPath -PathType Leaf);receiptFiles=$receipts;installStatePresent=(Test-Path -LiteralPath $installPath -PathType Leaf);installStateLastWriteUtc=if(Test-Path -LiteralPath $installPath){(Get-Item -LiteralPath $installPath).LastWriteTimeUtc.ToString('o')}else{$null};ownershipPresent=(Test-Path -LiteralPath $ownershipPath -PathType Leaf);nodeIdentityPresent=(Test-Path -LiteralPath 'C:\ProgramData\DevFleet\node-identity.json' -PathType Leaf);hostAgentPresent=(Test-Path -LiteralPath 'C:\ProgramData\DevFleetHostAgent' -PathType Container);hostAgentTaskPresent=[bool](Get-ScheduledTask -TaskName 'DevFleet Host Agent' -ErrorAction SilentlyContinue);listenerPresent=[bool](Get-NetTCPConnection -LocalPort 8790 -State Listen -ErrorAction SilentlyContinue);pendingCbs=(Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending');pendingWindowsUpdate=(Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired')}
             } -ArgumentList $candidatePid,$candidateSessionId,$expectedCandidatePath
             [void]$observationSamples.Add($sample)
             Write-EvidenceJson -Path $observationPath -Value @($observationSamples)
@@ -275,120 +385,4 @@ function Invoke-TailscalePolicyPhase {
             $authConfig=$tailscaleConfig.Authentication
             $provider=if($authConfig.PSObject.Properties['Provider']){[string]$authConfig.Provider}else{''}
             if($provider-in @('OAuthClientSecretStore','OAuthAutomation','OAuthClientSecretDpapi')){
-                $authConfig|Add-Member -NotePropertyName Hostname -NotePropertyValue (Get-TailscaleE2EHostname -RunId ([string]$Context.runId) -Role 'windows') -Force
-            }
-            $tailscaleWaitSeconds=if($tailscaleConfig.PSObject.Properties['PollTimeoutSeconds'] -and [int]$tailscaleConfig.PollTimeoutSeconds -gt 0){[int]$tailscaleConfig.PollTimeoutSeconds}else{120}
-            $tailscaleOwnerDeadline=[datetime]::UtcNow.AddSeconds($tailscaleWaitSeconds+30)
-            $auth=Invoke-TailscaleAuthentication -Session $session -Config $tailscaleConfig -OwnerDeadlineUtc $tailscaleOwnerDeadline
-            if(-not [bool]$auth.authenticationAttempted -and [bool]$auth.userActionRequired) { Write-TailscaleOAuthActionRequired; throw "USER ACTION REQUIRED - TAILSCALE-AUTH: $([string]$auth.reason)." }
-            Assert-TailscaleAuthenticationResult -Result $auth | Out-Null
-            $productConfigPath=Join-Path ((Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path) 'source\config\devfleet.config.json'
-            if(-not(Test-Path -LiteralPath $productConfigPath -PathType Leaf)){throw 'TAILSCALE_CONTROL_PLANE_OFFLINE: product configuration is unavailable for readiness endpoint discovery.'}
-            $productConfig=Get-Content -LiteralPath $productConfigPath -Raw|ConvertFrom-Json -ErrorAction Stop
-            $expectedPeer=Get-TailscaleE2EHostname -RunId ([string]$Context.runId) -Role 'primary'
-            $servicePort=[int]$productConfig.Network.PortalPort
-            $servicePath='/healthz'
-            $expectedNode=if($provider-in @('OAuthClientSecretStore','OAuthAutomation','OAuthClientSecretDpapi')){Get-TailscaleE2EHostname -RunId ([string]$Context.runId) -Role 'windows'}else{[string]$Context.config.Tailscale.ExpectedGuestNodePattern}
-            $expectedTag=if($authConfig.PSObject.Properties['Tag']){[string]$authConfig.Tag}else{''}
-            $readiness=Get-TailscaleReadiness -Session $session -ExpectedNodePattern $expectedNode -ExpectedTag $expectedTag -ExpectedPeer $expectedPeer -ServicePort $servicePort -ServicePath $servicePath -OwnerDeadlineUtc $tailscaleOwnerDeadline
-            if(-not [bool]$readiness.ready){throw "$([string]$readiness.failureClass): TAILSCALE-AUTH structured readiness did not pass."}
-            return [ordered]@{status='REAL E2E PASS';phase=[string]$Context.phaseId;contract=if($provider-in @('OAuthClientSecretStore','OAuthAutomation','OAuthClientSecretDpapi')){'oauth-client-secret-provider-with-layered-readiness'}else{'auth-key-fallback-provider-with-layered-readiness'};configuredMode=$configuredMode;candidate=$candidate;guest=$readiness.layer2;readiness=$readiness;authenticationAttempted=[bool]$auth.authenticationAttempted;authenticationSucceeded=[bool]$auth.authenticationSucceeded;authProvider=$provider;expectedPeer=$expectedPeer;servicePort=$servicePort;servicePath=$servicePath;credentialsStoredInEvidence=$false;userActionRequired=$false}
-        }finally{if($session){Remove-DevFleetGuestSession $session -ErrorAction SilentlyContinue}}
-    }
-    if($configuredMode -ne 'Deferred'){throw 'USER ACTION REQUIRED - configured Tailscale policy requires the official interactive authentication boundary.'}
-    $session=$null
-    try{
-        $session=Connect-DevFleetGuest -VmId ([guid][string]$Context.vmId)
-        $status=Get-TailscaleGuestStatus -Session $session -ExpectedNodePattern ([string]$Context.config.Tailscale.ExpectedGuestNodePattern)
-        if([bool]$status.online -or -not[bool]$status.needsLogin){throw 'Deferred Tailscale policy expected an installed but unauthenticated guest.'}
-        if([string]::IsNullOrWhiteSpace([string]$status.version) -or [string]$status.version -match 'not recognized|not found'){throw 'Deferred Tailscale policy could not verify the installed Tailscale client.'}
-        return [ordered]@{status='REAL E2E PASS';phase=[string]$Context.phaseId;contract=if([string]$Context.phaseId -eq 'TAILSCALE-DEFERRED'){'installed-client-deferred-no-auth'}else{'authentication-explicitly-not-run-by-supported-deferred-policy'};configuredMode=$configuredMode;candidate=$candidate;guest=$status;authenticationAttempted=$false;credentialsStoredInEvidence=$false;userActionRequired=$false}
-    }finally{if($session){Remove-DevFleetGuestSession $session -ErrorAction SilentlyContinue}}
-}
-
-function ConvertTo-LfShellText([string]$Text) {
-    if ($null -eq $Text) { return '' }
-    return $Text.Replace("`r`n", "`n").Replace("`r", "`n")
-}
-
-function Invoke-LinuxBootstrapPhase {
-    param([Parameter(Mandatory)][string]$ContextJson)
-    $context = Read-PhaseContext $ContextJson
-    $candidate = Assert-ExactCandidate $context
-    $tarPath = [string]$context.candidate.tar.path
-    if (-not (Test-Path -LiteralPath $tarPath -PathType Leaf)) { throw "Linux phase TAR is missing: $tarPath" }
-    $tarHash = (Get-FileHash -LiteralPath $tarPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($tarHash -ne [string]$context.candidate.tar.sha256) { throw 'Linux phase TAR hash differs from the exact candidate tuple.' }
-    $aiBundle = $null
-    $aiBundleFound=$false;$aiBundleValue=Get-LifecycleProperty $context 'aiAuditZip' ([ref]$aiBundleFound);if ($aiBundleFound -and $aiBundleValue) {
-        $aiPathFound=$false;$aiPathValue=Get-LifecycleProperty $aiBundleValue 'path' ([ref]$aiPathFound);$aiHashFound=$false;$aiHashValue=Get-LifecycleProperty $aiBundleValue 'sha256' ([ref]$aiHashFound);$aiBundlePath = [string]$aiPathValue
-        $expectedAiBundleHash = ([string]$aiHashValue).ToLowerInvariant()
-        if (-not (Test-Path -LiteralPath $aiBundlePath -PathType Leaf)) { throw "Focused Linux AI audit bundle is missing: $aiBundlePath" }
-        if ($expectedAiBundleHash -notmatch '^[0-9a-f]{64}$') { throw 'Focused Linux AI audit bundle is missing an exact SHA-256 identity.' }
-        $actualAiBundleHash = (Get-FileHash -LiteralPath $aiBundlePath -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($actualAiBundleHash -ne $expectedAiBundleHash) { throw 'Focused Linux AI audit bundle hash differs from the supplied exact identity.' }
-        $aiBundle = [ordered]@{path=(Resolve-Path -LiteralPath $aiBundlePath).Path;sha256=$actualAiBundleHash;bytes=(Get-Item -LiteralPath $aiBundlePath).Length}
-    }
-    if ([string]$context.vmName -notlike 'DevFleet-E2E-*') { throw 'LINUX phase requires an ownership-scoped disposable L1.' }
-    if ($env:COMPUTERNAME -notmatch '^MULATTOTechBOX$|^MULATTOTECHBOX$' -or $env:COMPUTERNAME -match 'SURFACE') { throw 'LINUX phase is not running on the approved MULATTOTECHBOX host.' }
-    $l1 = Get-VM -Id ([guid][string]$context.vmId) -ErrorAction Stop
-    if ($l1.Name -cne [string]$context.vmName) { throw 'LINUX phase disposable L1 identity/name mismatch.' }
-    $vmProcessor = Get-VMProcessor -VM $l1 -ErrorAction Stop
-    if (-not [bool]$vmProcessor.ExposeVirtualizationExtensions) { throw 'Disposable L1 does not expose nested virtualization.' }
-    $nested = $context.config.NestedLinux
-    if (-not $nested) { throw 'E2E config is missing the NestedLinux resource policy.' }
-    $l2Name = [string]$nested.Name
-    $l2Image = [string]$nested.UbuntuImage
-    $l2Cpus = [int]$nested.Cpus
-    $l2Memory = [string]$nested.Memory
-    $l2Disk = [string]$nested.Disk
-    $budgetPolicy = Get-HarnessBudgetPolicy -Config $context.config
-    $l2BootstrapTimeout = [int]$budgetPolicy.operationMaximumsSeconds.guestBootstrap
-    if ($l2Name -notlike 'DevFleet-E2E-*' -or $l2Name -eq ([string]$context.vmName)) { throw 'Nested Linux identity is outside the disposable E2E namespace.' }
-    if ($l2Cpus -lt 1 -or $l2BootstrapTimeout -lt 1) { throw 'Nested Linux resource policy contains an invalid positive integer.' }
-    # Each FullRelease phase restores its declared checkpoint independently.
-    # The clean checkpoint intentionally has no product prerequisites, so the
-    # Linux phase must exercise the candidate's real install path in this same
-    # phase before asking the installed L1 to provide Multipass.
-    $productInstall = Invoke-SupportedFreshInstallLifecycle -Context $context -Role 'Primary / Desktop' -CompleteLifecycle
-    if ([string]$productInstall.status -ne 'REAL E2E PASS' -or -not [bool]$productInstall.guest.completionVerified) {
-        throw "LINUX requires a genuine supported FreshInstall lifecycle PASS before Multipass; observed $($productInstall.status)."
-    }
-    $bootstrapTransactionId = [string]$productInstall.transactionId
-    $bootstrapPayloadSha256 = [string]$context.candidate.tar.sha256
-    $bootstrapPackageVersion = [string]$context.candidate.releaseVersion
-    $bootstrapNodeRole = 'surrogate'
-    if ($bootstrapTransactionId -notmatch '^[0-9a-fA-F]{32}$' -or
-        $bootstrapPayloadSha256 -notmatch '^[0-9a-fA-F]{64}$' -or
-        $bootstrapPackageVersion -notmatch '^\d+\.\d+\.\d+$') {
-        throw 'LINUX product lifecycle did not return an exact bootstrap transaction, payload, or package identity.'
-    }
-    # The supported Desktop lifecycle leaves its exact product Multipass child
-    # running after completion. A fixed 16 GiB nested L1 cannot safely allocate
-    # that product child and the independent 4 GiB Linux L2 at the same time.
-    # Quiesce only the candidate-bound product identity after its completion
-    # authority has passed; never infer ownership from the harness L2 name.
-    $productComputeName = Get-DevFleetProductComputeInstanceName -Context $context -Role 'Primary / Desktop'
-    if ($productComputeName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$' -or $productComputeName -eq $l2Name -or $productComputeName -like 'DevFleet-E2E-*') {
-        throw 'LINUX product compute identity is malformed or overlaps the disposable L2 namespace.'
-    }
-    $session = $null
-    try {
-        $session = Connect-DevFleetGuest -VmId ([guid][string]$context.vmId)
-        $remoteRoot = "C:\Users\Public\DevFleet-E2E\$($context.runId)\$($context.phaseId)"
-        $remoteTar = Join-Path $remoteRoot (Split-Path -Leaf $tarPath)
-        Invoke-Command -Session $session -ScriptBlock { param($root) New-Item -ItemType Directory -Force -Path $root | Out-Null } -ArgumentList $remoteRoot
-        $stage = Get-StageIntegrity -LocalPath $tarPath -Session $session -RemotePath $remoteTar
-        if (-not $stage.equal) { throw 'Exact candidate TAR did not survive host-to-L1 staging.' }
-        $remoteAiBundle = $null
-        $aiBundleStage = $null
-        if ($aiBundle) {
-            $remoteAiBundle = Join-Path $remoteRoot (Split-Path -Leaf ([string]$aiBundle.path))
-            $aiBundleStage = Get-StageIntegrity -LocalPath ([string]$aiBundle.path) -Session $session -RemotePath $remoteAiBundle
-            if (-not $aiBundleStage.equal -or ([string]$aiBundleStage.remoteSha256).ToLowerInvariant() -ne [string]$aiBundle.sha256) { throw 'Exact AI audit ZIP did not survive host-to-L1 staging.' }
-        }
-        $secretJson = [ordered]@{
-            NodeName=$l2Name; NodeRole='surrogate'; FriendlyName='DevFleet E2E Linux'; PortalPort=8787
-            DeploymentId=("e2e-$($context.runId)"); NodeId=([guid]::NewGuid().ToString()); CoordinatorNodeId=''
-            ProtocolVersion=1; AdminUser='e2e-admin'; AdminPassword=('E2E-' + [guid]::NewGuid().ToString('N')); ApiToken=('e2e-token-' + [guid]::NewGuid().ToString('N'))
-            GitName='DevFleet E2E'; GitEmail='e2e@example.invalid'; OllamaBas
+                $authConfig|Add-Member -NotePropertyName Hostname -NotePropertyValue (Get-TailscaleE2EHo

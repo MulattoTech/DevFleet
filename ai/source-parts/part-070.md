@@ -1,10 +1,490 @@
 # DevFleet source part 070
 
 Full-source UTF-8 byte interval [3208500, 3255000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 9ace568a47140e969e69c7d8c4ba08c6d77a51839fb61bac35d9d6a83327fcac
+Payload SHA-256: 70a160b9e2b14a6b171bfad8a55e55725c0b251a52456fe0e8bb1c9980523fb7
 
 <!-- BEGIN SOURCE SLICE -->
-NGS.workspaces, slug)
+ect_kind=project_kind,
+        language=language,
+        framework=framework,
+    )
+    return {
+        "resource_profile": resource.name,
+        "resource_limits": resource.__dict__,
+        "runtime_isolation": recommend_runtime_isolation(
+            scale=scale, intent=intent, project_kind=project_kind
+        ),
+        "runtime_options": RUNTIME_ISOLATIONS,
+    }
+
+
+@app.post("/projects/create")
+def project_create(
+    request: Request,
+    slug: str = Form(...),
+    display_name: str = Form(""),
+    template: str = Form("auto"),
+    git_url: str = Form(""),
+    target: str = Form("local"),
+    language: str = Form(""),
+    framework: str = Form(""),
+    scale: str = Form("small"),
+    intent: str = Form("prototype"),
+    testing_level: str = Form("standard"),
+    profile: str = Form("balanced"),
+    resource_profile: str = Form(""),
+    runtime_isolation: str = Form(""),
+    use_ollama: bool = Form(False),
+    worktree_source: str = Form(""),
+    worktree_branch: str = Form(""),
+    project_kind: str = Form(""),
+    custom_cpus: str = Form(""),
+    custom_ram_gb: str = Form(""),
+    custom_disk_gb: str = Form(""),
+    pid_mode: str = Form("private"),
+    pid_limit: str = Form("4096"),
+    csrf_token: str = Form(""),
+):
+    ui(request, csrf_token)
+    payload = {
+        "slug": slug,
+        "display_name": display_name,
+        "template": template,
+        "git_url": git_url,
+        "language": language,
+        "framework": framework,
+        "scale": scale,
+        "intent": intent,
+        "testing_level": testing_level,
+        "profile": profile,
+        "resource_profile": resource_profile,
+        "resource_limits": _form_resource_limits(
+            resource_profile,
+            custom_cpus,
+            custom_ram_gb,
+            custom_disk_gb,
+            pid_limit,
+            pid_mode,
+        ),
+        "runtime_isolation": runtime_isolation,
+        "use_ollama": use_ollama,
+        "worktree_source": worktree_source,
+        "worktree_branch": worktree_branch,
+        "project_kind": project_kind,
+    }
+    if profile == "fast":
+        raise HTTPException(
+            400,
+            "Use the explicit Fast profile acknowledgement after creating the project in Balanced mode.",
+        )
+
+    def task(ctx):
+        ctx.update(10, "Validating project request", "validate")
+        result = (
+            peer_call("POST", "/api/projects/create", payload)
+            if target == "peer"
+            else create_project(operation_context=ctx, **payload)
+        )
+        ctx.update(90, "Project runtime provisioned", "verify")
+        return result
+
+    return redirect(
+        submit_operation("peer-create" if target == "peer" else "create", slug, task)
+    )
+
+
+@app.get("/projects/{slug}", response_class=HTMLResponse)
+def project_page(request: Request, slug: str):
+    ui(request)
+    return index(
+        request,
+        operation=request.query_params.get("operation", ""),
+        view="project",
+        project=slug,
+    )
+
+
+@app.get("/projects/{slug}/workspace")
+def project_workspace(request: Request, slug: str):
+    ui(request)
+    _require_owned_project_for_mutation(slug)
+    result = open_workspace(slug)
+    if not result.get("ok"):
+        raise HTTPException(
+            409, str(result.get("error") or "Workspace is not ready to open.")
+        )
+    return RedirectResponse(str(result["launcher_uri"]), status_code=307)
+
+
+@app.post("/projects/{slug}/environment")
+def project_environment(
+    request: Request,
+    slug: str,
+    runtime_isolation: str = Form("container"),
+    resource_profile: str = Form(""),
+    custom_cpus: str = Form(""),
+    custom_ram_gb: str = Form(""),
+    custom_disk_gb: str = Form(""),
+    pid_mode: str = Form("private"),
+    pid_limit: str = Form("4096"),
+    wizard_confirmed: bool = Form(False),
+    csrf_token: str = Form(""),
+):
+    ui(request, csrf_token)
+    if not wizard_confirmed:
+        raise HTTPException(
+            400,
+            "Complete the Environment, Resources, Review, and Confirm stages before applying this assignment.",
+        )
+    _require_owned_project_for_mutation(slug, allow_legacy_migration=True)
+    preflight = _preflight(
+        slug,
+        runtime_isolation,
+        resource_profile,
+        custom_cpus,
+        custom_ram_gb,
+        custom_disk_gb,
+        pid_mode,
+        pid_limit,
+    )
+    if not preflight["migration_ready"]:
+        raise HTTPException(
+            409,
+            "Environment preflight is not ready: " + "; ".join(preflight["blockers"]),
+        )
+    limits = _form_resource_limits(
+        resource_profile,
+        custom_cpus,
+        custom_ram_gb,
+        custom_disk_gb,
+        pid_limit,
+        pid_mode,
+    )
+
+    def task(ctx):
+        ctx.update(
+            8, "Validating the existing workspace and selected environment", "validate"
+        )
+        result = assign_project_runtime(
+            slug, runtime_isolation, resource_profile, limits, operation_context=ctx
+        )
+        ctx.log(json.dumps(result, default=str)[-4000:])
+        return result
+
+    operation_id = submit_operation(
+        "runtime-adoption",
+        slug,
+        task,
+        idempotency_key=f'runtime-adoption:{slug}:{runtime_isolation}:{resource_profile or "current"}',
+    )
+    if ui_wants_json(request):
+        return JSONResponse(
+            {
+                "ok": True,
+                "operation_id": operation_id,
+                "message": "Environment assignment queued.",
+            },
+            status_code=202,
+        )
+    return redirect(operation_id)
+
+
+@app.post("/projects/{slug}/{action}")
+def project_action(
+    request: Request,
+    slug: str,
+    action: str,
+    confirm_failover: bool = Form(False),
+    confirm_quarantine: bool = Form(False),
+    confirm_slug: str = Form(""),
+    confirm_phrase: str = Form(""),
+    backup_id: str = Form(""),
+    confirm_restore: bool = Form(False),
+    allow_overwrite: bool = Form(False),
+    csrf_token: str = Form(""),
+):
+    ui(request, csrf_token)
+    if action not in PROJECT_ACTIONS:
+        raise HTTPException(404, "Unknown project action.")
+    project = safe_child(SETTINGS.workspaces, slug)
+    if not project.is_dir() or project.is_symlink():
+        raise HTTPException(404, "Project not found.")
+    metadata = _require_owned_project_for_mutation(slug)
+    capabilities = project_capabilities(slug, metadata)
+    if (
+        action
+        in {
+            "restart",
+            "runtime-health",
+            "bootstrap",
+            "health",
+            "test",
+            "codexpro",
+            "logs",
+        }
+        and not capabilities["can_run_runtime_action"]
+    ):
+        raise HTTPException(
+            409,
+            f"Runtime action unavailable: {capabilities['status_reason'] or 'environment is not ready.'}",
+        )
+    if action == "quarantine" and not confirm_quarantine:
+        raise HTTPException(400, "Quarantine requires explicit acknowledgement.")
+    if action == "destroy" and (
+        confirm_slug != slug or confirm_phrase != f"DESTROY {slug}"
+    ):
+        raise HTTPException(400, "Permanent destruction requires exact confirmation.")
+    if action == "restore-backup" and (not confirm_restore or not backup_id):
+        raise HTTPException(400, "Backup restore requires an identified backup and explicit confirmation.")
+
+    payload = {
+        "confirm_failover": confirm_failover,
+        "confirm_quarantine": confirm_quarantine,
+        "confirm_slug": confirm_slug,
+        "confirm_phrase": confirm_phrase,
+        "backup_id": backup_id,
+        "confirm_restore": confirm_restore,
+        "allow_overwrite": allow_overwrite,
+    }
+    shared_task = _project_action_task(slug, action, payload)
+    def task(ctx):
+        return shared_task(ctx)
+
+    idempotency_key = _action_idempotency_key(slug, action, payload)
+    operation_id = submit_operation(action, slug, task, idempotency_key=idempotency_key)
+    if ui_wants_json(request):
+        return JSONResponse({"ok": True, "operation_id": operation_id}, status_code=202)
+    return redirect(operation_id)
+
+
+@app.post("/projects/{slug}/profile")
+def project_profile(
+    request: Request,
+    slug: str,
+    profile: str = Form(...),
+    confirm_fast: bool = Form(False),
+    allow_devices: bool = Form(False),
+    allow_privileged: bool = Form(False),
+    csrf_token: str = Form(""),
+):
+    ui(request, csrf_token)
+    profile = profile.lower()
+    if profile not in {"strict", "balanced", "fast"}:
+        raise HTTPException(400, "Unknown profile.")
+    if profile == "fast" and not confirm_fast:
+        raise HTTPException(400, "Fast Trusted mode requires explicit acknowledgement.")
+    if (allow_devices or allow_privileged) and (profile != "fast" or not confirm_fast):
+        raise HTTPException(
+            400, "Device or privileged access requires Fast Trusted acknowledgement."
+        )
+    project = safe_child(SETTINGS.workspaces, slug)
+    meta = _require_owned_project_for_mutation(slug)
+    previous = str(meta.get("profile") or SETTINGS.development_profile)
+    meta.setdefault("profile_history", []).append(
+        {
+            "from": previous,
+            "to": profile,
+            "time": __import__("time").strftime(
+                "%Y-%m-%dT%H:%M:%SZ", __import__("time").gmtime()
+            ),
+        }
+    )
+    meta["profile_history"] = meta["profile_history"][-50:]
+    meta["profile"] = profile
+    meta["allow_tailnet_ports"] = profile != "strict"
+    meta["allow_devices"] = bool(allow_devices) if profile == "fast" else False
+    meta["allow_privileged"] = bool(allow_privileged) if profile == "fast" else False
+    commit_project_metadata(project, meta)
+    analyze_project(project, profile, force=True)
+    return RedirectResponse("/", 303)
+
+
+@app.post("/peer/projects/{slug}/{action}")
+def peer_project_action(
+    request: Request,
+    slug: str,
+    action: str,
+    confirm_failover: bool = Form(False),
+    confirm_quarantine: bool = Form(False),
+    csrf_token: str = Form(""),
+):
+    ui(request, csrf_token)
+    payload = {
+        "confirm_failover": bool(confirm_failover),
+        "confirm_quarantine": bool(confirm_quarantine),
+    }
+
+    def task(ctx):
+        ctx.update(15, "Sending authenticated action to peer")
+        result = peer_call("POST", f"/api/projects/{slug}/{action}", payload)
+        ctx.log(str(result)[-4000:])
+        ctx.update(90, "Peer action completed")
+        return result
+
+    return redirect(submit_operation("peer-" + action, slug, task))
+
+
+@app.post("/repair")
+def repair(request: Request, csrf_token: str = Form("")):
+    ui(request, csrf_token)
+
+    def task(ctx):
+        ctx.update(20, "Running non-destructive node repair")
+        result = run(["/usr/local/bin/devfleet-user-repair"], timeout=600).stdout[
+            -8000:
+        ]
+        ctx.log(result)
+        ctx.update(90, "Repair health checks completed")
+        return result
+
+    return redirect(submit_operation("repair", "node", task))
+
+
+@app.post("/projects/{slug}/transfer-to-peer")
+def transfer(request: Request, slug: str, csrf_token: str = Form("")):
+    ui(request, csrf_token)
+    metadata = _require_owned_project_for_mutation(slug)
+    if metadata.get("runtime_isolation") == "vm":
+        raise HTTPException(
+            409,
+            "Dedicated-VM peer transfer is blocked until a verified node-to-node VM transfer protocol is available. The current VM remains the canonical owner.",
+        )
+    state = peer_node_status()
+    if not state.get("ok"):
+        raise HTTPException(
+            409,
+            "DevFleetFailover is offline or unavailable; ownership transfer is disabled.",
+        )
+    project_id = str(metadata.get("project_id") or "")
+    deployment_id = str(metadata.get("deployment_id") or "")
+    source_host_id = str(metadata.get("host_id") or "")
+    try:
+        validate_project_id(project_id)
+        validate_project_id(deployment_id)
+    except ValueError as exc:
+        raise HTTPException(409, "Project transfer identity is incomplete.") from exc
+    if not source_host_id:
+        raise HTTPException(409, "Project transfer source host identity is missing.")
+    if (
+        deployment_id != str(SETTINGS.deployment_id or "")
+        or source_host_id != SETTINGS.host_id
+    ):
+        raise HTTPException(
+            409, "Project transfer source is not owned by this node and deployment."
+        )
+    peer_node = state.get("node") if isinstance(state.get("node"), dict) else {}
+    peer_identity = (
+        peer_node.get("node_identity")
+        if isinstance(peer_node.get("node_identity"), dict)
+        else {}
+    )
+    destination_host_id = str(peer_node.get("node") or "")
+    if (
+        not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._-]{1,127}", destination_host_id
+        )
+        or destination_host_id == source_host_id
+        or str(peer_identity.get("deployment_id") or "") != deployment_id
+    ):
+        raise HTTPException(
+            409, "Peer transfer identity is not bound to this deployment."
+        )
+
+    def task(ctx):
+        with project_transfer_lock(slug):
+            return guided_transfer(
+                slug,
+                ctx,
+                stop=stop_project,
+                backup=backup_project,
+                assert_quiesced=assert_project_quiesced_for_transfer,
+                project_id=project_id,
+                deployment_id=deployment_id,
+                source_host_id=source_host_id,
+                destination_host_id=destination_host_id,
+                finalize_source=finalize_source_transfer,
+                peer_call=peer_call,
+            )
+
+    return redirect(
+        submit_operation(
+            "ownership-transfer",
+            slug,
+            task,
+            project_id=project_id,
+            runtime_id=str(metadata.get("runtime_id") or ""),
+            host_id=source_host_id,
+            idempotency_key=(
+                f"ownership-transfer:{slug}:{project_id}:{deployment_id}:"
+                f"{source_host_id}:{destination_host_id}"
+            ),
+        )
+    )
+
+
+@app.post("/quarantine/restore")
+def restore(request: Request, name: str = Form(...), csrf_token: str = Form("")):
+    ui(request, csrf_token)
+
+    def task(ctx):
+        ctx.update(20, "Restoring reversible quarantine entry")
+        result = restore_quarantine(name)
+        ctx.update(90, "Quarantine entry restored")
+        return result
+
+    return redirect(submit_operation("restore-quarantine", name, task))
+
+
+@app.get("/projects/{slug}/logs", response_class=HTMLResponse)
+def logs(request: Request, slug: str):
+    ui(request)
+    safe_child(SETTINGS.workspaces, slug)
+    return RedirectResponse(f"/projects/{slug}?tab=logs", 303)
+
+
+@app.get("/ui/projects/{slug}/logs")
+def ui_project_logs(request: Request, slug: str, tail: int = 150):
+    ui(request)
+    project = safe_child(SETTINGS.workspaces, slug)
+    if not project.is_dir():
+        raise HTTPException(404, "Project not found.")
+    meta = _require_owned_project_for_mutation(slug)
+    capabilities = project_capabilities(slug, meta)
+    if not capabilities["can_query_logs"]:
+        return JSONResponse(
+            {
+                "ok": False,
+                "slug": slug,
+                "state": capabilities["lifecycle_state"],
+                "terminal": True,
+                "logs": "Start the project to view live logs.",
+                "capabilities": capabilities,
+            },
+            status_code=409,
+        )
+    bounded = max(1, min(int(tail), 500))
+    try:
+        logs_value = project_logs(slug, tail=bounded)
+    except FileNotFoundError:
+        raise HTTPException(404, "Project not found.")
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(503, f"Project logs unavailable: {str(exc)[-500:]}")
+    return JSONResponse(
+        {
+            "ok": True,
+            "slug": slug,
+            "tail": bounded,
+            "provider": meta.get("runtime_provider")
+            or meta.get("runtime_isolation")
+            or "unknown",
+            "logs": str(logs_value)[-30000:],
+        }
+    )
+
+
+@app.get("/api/projects/{slug}/runtime", dependencies=[Depends(check_api)])
+def api_project_runtime(slug: str):
+    project = safe_child(SETTINGS.workspaces, slug)
     meta = _require_owned_project_for_mutation(slug)
     capabilities = project_capabilities(slug, meta)
     if not capabilities["can_query_live_metrics"]:
@@ -751,359 +1231,4 @@ class _MetadataLocation:
         )
 
     def assert_binding(self, expected: MetadataBinding) -> None:
-        self.assert_directories()
-        try:
-            current = self.stat_file()
-        except FileNotFoundError:
-            current = None
-        if current is not None:
-            _require_kind(current, stat.S_IFREG)
-        observed = self.binding(current)
-        if observed != expected:
-            raise MetadataSafetyError("Metadata identity or contents changed during the operation.")
-
-
-def read_project_metadata(project: Path) -> MetadataRecord:
-    with _MetadataLocation(project) as location:
-        observed = location.stat_file()
-        _require_kind(observed, stat.S_IFREG)
-        expected = location.binding(observed)
-        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0)
-        if POSIX_FD_HARDENING:
-            flags |= os.O_NOFOLLOW | os.O_NONBLOCK
-            fd = os.open("project.json", flags, dir_fd=location.directory_fd)
-        else:
-            fd = os.open(location.directory / "project.json", flags)
-        try:
-            actual = os.fstat(fd)
-            _require_kind(actual, stat.S_IFREG)
-            if _version(actual) != _version(observed):
-                raise MetadataSafetyError("Metadata file changed before it could be opened.")
-            with os.fdopen(fd, "rb", closefd=False) as handle:
-                raw = handle.read()
-            if _version(os.fstat(fd)) != _version(observed):
-                raise MetadataSafetyError("Metadata file changed while it was being read.")
-            location.assert_binding(expected)
-            value = json.loads(raw.decode("utf-8"))
-            location.assert_binding(expected)
-            if _version(os.fstat(fd)) != _version(observed):
-                raise MetadataSafetyError("Metadata file changed while it was being parsed.")
-            return MetadataRecord(value, raw, expected)
-        finally:
-            os.close(fd)
-
-
-def write_project_metadata(
-    project: Path, value: Any, *, expected: MetadataBinding | None = None,
-    create: bool = False,
-) -> MetadataBinding:
-    raw = (json.dumps(value, indent=2, sort_keys=True, default=str) + "\n").encode("utf-8")
-    return write_project_metadata_bytes(project, raw, expected=expected, create=create)
-
-
-def write_project_metadata_bytes(
-    project: Path, raw: bytes, *, expected: MetadataBinding | None = None,
-    create: bool = False,
-) -> MetadataBinding:
-    """Replace metadata inside pinned parents, preserving raw rollback bytes.
-
-    The prior binding is checked immediately before publication. Replacement is
-    not an inode compare-and-swap against a hostile writer of the same directory:
-    callers still serialize cooperating writers. Even a concurrent parent rename
-    cannot redirect the POSIX write into its replacement directory.
-    """
-    if not isinstance(raw, bytes):
-        raise TypeError("Metadata bytes must be bytes.")
-    with _MetadataLocation(project, create_directory=create) as location:
-        try:
-            current = location.stat_file()
-        except FileNotFoundError:
-            current = None
-        if current is not None:
-            _require_kind(current, stat.S_IFREG)
-        if expected is None:
-            if not create or current is not None:
-                raise MetadataSafetyError("Existing metadata writes require the prior identity binding.")
-            expected = location.binding(None)
-        location.assert_binding(expected)
-        temporary = f".project.json.{uuid.uuid4().hex}.tmp"
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0)
-        fd = None
-        temporary_identity = None
-        try:
-            if POSIX_FD_HARDENING:
-                fd = os.open(temporary, flags | os.O_NOFOLLOW, 0o600, dir_fd=location.directory_fd)
-            else:
-                fd = os.open(location.directory / temporary, flags, 0o600)
-            _require_kind(os.fstat(fd), stat.S_IFREG)
-            temporary_identity = _identity(os.fstat(fd))
-            with os.fdopen(fd, "wb", closefd=False) as handle:
-                handle.write(raw)
-                handle.flush()
-                enable_inherited_backup_read(fd, parent=location.directory_fd)
-                os.fsync(fd)
-            written = os.fstat(fd)
-            _require_kind(written, stat.S_IFREG)
-            written_version = _version(written)
-            location.assert_binding(expected)
-            staged = location.stat_file(temporary)
-            _require_kind(staged, stat.S_IFREG)
-            if _version(staged) != written_version or _version(os.fstat(fd)) != written_version:
-                raise MetadataSafetyError("Metadata temporary file changed before replacement.")
-            if POSIX_FD_HARDENING:
-                if expected.file_identity is None:
-                    # Atomic first publication must not overwrite a file that
-                    # appeared after the absence check. Link only if absent,
-                    # then drop the temporary name before the regular-file check.
-                    os.link(temporary, "project.json", src_dir_fd=location.directory_fd,
-                            dst_dir_fd=location.directory_fd, follow_symlinks=False)
-                    os.unlink(temporary, dir_fd=location.directory_fd)
-                else:
-                    os.replace(temporary, "project.json", src_dir_fd=location.directory_fd,
-                               dst_dir_fd=location.directory_fd)
-                os.fsync(location.directory_fd)
-            else:
-                # CRT descriptors deny file deletion; parent directory handles
-                # remain pinned while the temporary file is closed and renamed.
-                os.close(fd)
-                fd = None
-                replace = os.rename if expected.file_identity is None else os.replace
-                replace(location.directory / temporary, location.directory / "project.json")
-            location.assert_directories()
-            committed = location.stat_file()
-            _require_kind(committed, stat.S_IFREG)
-            if _identity(committed) != temporary_identity:
-                raise MetadataSafetyError("Committed metadata does not match the written file.")
-            binding = location.binding(committed)
-            location.assert_binding(binding)
-            return binding
-        finally:
-            if fd is not None:
-                os.close(fd)
-            if temporary_identity is not None:
-                with contextlib.suppress(OSError):
-                    if _identity(location.stat_file(temporary)) == temporary_identity:
-                        if POSIX_FD_HARDENING:
-                            os.unlink(temporary, dir_fd=location.directory_fd)
-                        else:
-                            os.unlink(location.directory / temporary)
-
-
-def metadata_identity_matches(
-    value: Any, slug: str, project_id: str,
-    deployment_id: str | None = None, host_id: str | None = None,
-) -> bool:
-    if not isinstance(value, dict) or isinstance(value.get("schema_version"), bool):
-        return False
-    try:
-        schema = int(value.get("schema_version"))
-    except (TypeError, ValueError, OverflowError):
-        return False
-    return bool(
-        schema >= 3
-        and value.get("managed_by") == "devfleet"
-        and value.get("slug") == slug
-        and (value.get("identity") if value.get("identity") is not None else slug) == slug
-        and value.get("project_id") == project_id
-        and (deployment_id is None or value.get("deployment_id") == deployment_id)
-        and (host_id is None or value.get("host_id") == host_id)
-    )
-
-
-def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    if len(args) not in {4, 5, 6} or args[0] != "--identity":
-        return 2
-    _action, workspace, slug, project_id, *optional = args
-    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,62}", slug) or not re.fullmatch(
-        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", project_id
-    ):
-        return 2
-    try:
-        record = read_project_metadata(Path(workspace))
-        return 0 if metadata_identity_matches(record.value, slug, project_id, *optional) else 1
-    except (OSError, ValueError, UnicodeError):
-        return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-```
-
-
-## FILE: source/app/devfleet/node_registry.py
-
-SHA256: ffd562d4c2685dacea1e183e708530ea4ccf04c20f19e2969d827190b286600b | Bytes: 5199 | Git mode: 100644
-
-```
-"""Durable Primary/Surrogate node identity registry without leader election."""
-from __future__ import annotations
-
-import json
-import uuid
-from pathlib import Path
-from typing import Any, Iterable
-
-from .core import SETTINGS, atomic_json, now_iso
-
-VALID_ROLES = {"primary", "surrogate", "server"}
-
-
-def _new_id() -> str:
-    return str(uuid.uuid4())
-
-
-class NodeRegistry:
-    def __init__(self, path: Path | None = None) -> None:
-        self.path = path or SETTINGS.runtime_root / "node-registry.json"
-
-    def _empty(self) -> dict[str, Any]:
-        return {"schema_version": 1, "deployment_id": "", "nodes": []}
-
-    def load(self) -> dict[str, Any]:
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return self._empty()
-        if not isinstance(data, dict) or not isinstance(data.get("nodes", []), list):
-            raise ValueError("Node registry is invalid; refusing to infer identities.")
-        data.setdefault("schema_version", 1)
-        data.setdefault("deployment_id", "")
-        return data
-
-    def _save(self, data: dict[str, Any]) -> None:
-        if not data.get("deployment_id"):
-            raise ValueError("A deployment identity is required.")
-        atomic_json(self.path, data)
-
-    def ensure_local(self, *, node_name: str, node_role: str, friendly_name: str = "", deployment_id: str | None = None, coordinator_node_id: str | None = None, capabilities: Iterable[str] = ()) -> dict[str, Any]:
-        role = str(node_role or "").strip().lower()
-        if role not in VALID_ROLES:
-            raise ValueError(f"Unsupported node role: {node_role}")
-        data = self.load()
-        requested_deployment = str(deployment_id or data.get("deployment_id") or "").strip()
-        if not requested_deployment:
-            requested_deployment = _new_id()
-        if data.get("deployment_id") and data["deployment_id"] != requested_deployment:
-            raise ValueError("Deployment identity mismatch; refusing to create a second deployment.")
-        data["deployment_id"] = requested_deployment
-        name = str(node_name or "").strip()
-        if not name:
-            raise ValueError("Node name is required.")
-        existing = next((n for n in data["nodes"] if isinstance(n, dict) and n.get("node_name") == name), None)
-        if existing is not None:
-            if existing.get("node_role") != role or existing.get("deployment_id") != requested_deployment:
-                raise ValueError("Existing node identity conflicts with the requested role or deployment.")
-            existing.update({"friendly_name": friendly_name or existing.get("friendly_name") or name, "capabilities": sorted({str(x) for x in capabilities} | set(existing.get("capabilities") or [])), "coordinator_node_id": coordinator_node_id or existing.get("coordinator_node_id"), "last_seen": now_iso(), "connectivity": "online"})
-            self._save(data)
-            return dict(existing)
-        if role == "surrogate" and not coordinator_node_id:
-            raise ValueError("A Surrogate requires an explicit coordinator_node_id.")
-        node = {"deployment_id": requested_deployment, "node_id": _new_id(), "node_name": name, "friendly_name": friendly_name or name, "node_role": role, "capabilities": sorted({str(x) for x in capabilities}), "coordinator_node_id": coordinator_node_id if role == "surrogate" else None, "protocol_version": 1, "devfleet_version": "", "health": "unknown", "connectivity": "online", "last_seen": now_iso(), "failover_priority": 100, "compute_capacity": {}, "vault_capability": False, "storage_capacity": {}, "tailscale": {"node": "", "ipv4": "", "ipv6": ""}, "registration_state": "registered"}
-        data["nodes"].append(node)
-        self._save(data)
-        return dict(node)
-
-    def register(self, node: dict[str, Any]) -> dict[str, Any]:
-        required = ("deployment_id", "node_id", "node_name", "node_role")
-        if any(not str(node.get(key) or "").strip() for key in required):
-            raise ValueError("Node registration requires deployment, node, name, and role identities.")
-        role = str(node["node_role"]).lower()
-        if role not in VALID_ROLES:
-            raise ValueError("Unsupported node role.")
-        data = self.load()
-        if data.get("deployment_id") and data["deployment_id"] != node["deployment_id"]:
-            raise ValueError("Node belongs to a different deployment.")
-        data["deployment_id"] = node["deployment_id"]
-        existing = next((n for n in data["nodes"] if n.get("node_id") == node["node_id"]), None)
-        if existing is not None:
-            if any(existing.get(key) != node.get(key) for key in ("node_name", "node_role", "deployment_id")):
-                raise ValueError("Duplicate node ID has conflicting identity.")
-            existing.update(node)
-            existing["last_seen"] = now_iso()
-            self._save(data)
-            return dict(existing)
-        data["nodes"].append(dict(node))
-        self._save(data)
-        return dict(node)
-
-    def list_nodes(self) -> list[dict[str, Any]]:
-        return [dict(item) for item in self.load()["nodes"] if isinstance(item, dict)]
-
-```
-
-
-## FILE: source/app/devfleet/ollama.py
-
-SHA256: 5805e067353f237924b00fff0b0c595db779ccea061b7ad5e34186052dec0e6e | Bytes: 943 | Git mode: 100644
-
-```
-from __future__ import annotations
-from typing import Any
-import httpx
-from .core import SETTINGS
-def ollama_health(*,queue_probe:bool=False)->dict[str,Any]:
- if not SETTINGS.ollama_base_url:return {'configured':False}
- base=SETTINGS.ollama_base_url.rstrip('/')
- try:
-  r=httpx.get(base+'/models',timeout=1.5);r.raise_for_status();models=r.json().get('data',[]);names=[str(x.get('id','')) for x in models]
-  out={'configured':True,'ok':True,'endpoint':base,'model':SETTINGS.ollama_model,'model_available':SETTINGS.ollama_model in names,'models':names[:20],'profile':SETTINGS.ollama_profile}
-  if queue_probe:
-   p=httpx.post(base+'/chat/completions',json={'model':SETTINGS.ollama_model,'messages':[{'role':'user','content':'Reply OK'}],'max_tokens':4},timeout=60);out['queue_response']=p.status_code
-  return out
- except Exception as exc:return {'configured':True,'ok':False,'endpoint':base,'error':str(exc),'profile':SETTINGS.ollama_profile}
-
-```
-
-
-## FILE: source/app/devfleet/operations.py
-
-SHA256: d60334d923abed24439342e38ce4061e702b76a64813082718d29946e6832437 | Bytes: 12217 | Git mode: 100644
-
-```
-"""Durable, bounded operation state with per-project serialization."""
-from __future__ import annotations
-
-import json
-import secrets
-import threading
-import time
-import traceback
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any, Callable
-
-from .core import SETTINGS, atomic_json, now_iso
-
-
-OP_ID_RE = r"^[a-z0-9][a-z0-9._-]{1,127}$"
-_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="devfleet-op")
-_ADMISSION = threading.BoundedSemaphore(2)
-_LOCK = threading.RLock()
-_ACTIVE_LOCKS: dict[str, threading.Lock] = {}
-_WORKER_INSTANCE_ID = secrets.token_hex(12)
-_LEASE_SECONDS = 45
-_QUEUED_SECONDS = 15
-_HEARTBEAT_INTERVAL_SECONDS = max(1, _LEASE_SECONDS // 3)
-
-
-def _lease_until() -> str:
-    return (datetime.now(timezone.utc) + timedelta(seconds=_LEASE_SECONDS)).isoformat()
-
-
-def _lease_expired(value: Any) -> bool:
-    if not value:
-        return True
-    try:
-        timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return True
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=timezone.utc)
-    return timestamp <= datetime.now(timezone.utc)
-
-
-def _queued_expired(data: di
+        self.asse

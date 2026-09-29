@@ -1,5 +1,9 @@
 # GitHub source import
 
+## 2026-09-29 current source synchronization
+
+The owner explicitly requested this GitHub push. The reviewed 13-path tooling/test delta advances the source snapshot to native HEAD `e9068790ae9b0f55baa25b258791cb14c9e7091f`. The regenerated inventory contains 981 publishable native tracked files and 131 complete text parts. Signed shipping bytes and original native HEAD/qualification/baseline were not changed by publication. New sanitized diagnostic findings are advisory; native status remains BLOCKED. The public Git history stays separate, with private ledgers, credentials, raw transcripts, VM state and native history excluded.
+
 ## 2026-09-28 publishable-source synchronization
 
 The published source snapshot is pinned at [c8073061dbea](https://github.com/MulattoTech/DevFleet/tree/c8073061dbea9a52ee52d9cda4a1f00d06a82857).
@@ -12,7 +16,7 @@ The owner authorized uploading the prepared source to https://github.com/Mulatto
 
 This import extends the repository's existing initial commit a668dfc7bb8796e78d2bbb432c87a70ec45f8287. Its original README description is preserved. No history is force-replaced.
 
-## Source provenance
+## Original September 27 import provenance
 
 - Original certification checkout HEAD: `110fc2ee4fe611518e302b0185e9499a8e8a7e40`.
 - Original standalone complete audit ZIP SHA-256: `236d8de6e929f5b0998954be7279ee52549569f5079c1081fd77fb2221106669` (80,835,299 bytes).

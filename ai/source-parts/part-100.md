@@ -1,10 +1,455 @@
 # DevFleet source part 100
 
 Full-source UTF-8 byte interval [4603500, 4650000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: e8441a5271292de2bdf21029427b4267d7ac6a4fb98b3bbc00456522721e77bf
+Payload SHA-256: 1dffba7e3fed60620b34a31197b7a0fbd5e74f4ead471e6f7d53b0f04567fba0
 
 <!-- BEGIN SOURCE SLICE -->
-project.json").write_text(
+lt-broker"' in bootstrap
+    assert "devfleet-vault-broker.socket" in bootstrap
+    assert "devfleet-vault-broker@.service" in bootstrap
+    assert "enable --now devfleet.service devfleet-backup.timer devfleet-vault-broker.socket" in bootstrap
+    assert "usermod --append --groups devfleet-backup devfleet-control" not in bootstrap
+    assert "NOPASSWD:ALL" not in bootstrap
+
+
+def test_rebootstrap_preserves_backup_only_restic_credentials():
+    bootstrap = read("linux/bootstrap-compute.sh")
+    update = read("windows/Update-DevFleet.ps1")
+    provision = read("windows/02-Provision-ComputeNode.ps1")
+
+    assert "02-Provision-ComputeNode.ps1" in update
+    assert "updating the DevFleet payload in place" in provision
+    assert "bootstrapBoundary.bootstrapCommand" in provision
+    assert "chown root:devfleet-control /etc/devfleet/*" not in bootstrap
+    assert "chmod 0640 /etc/devfleet/*" not in bootstrap
+    assert '[[ "$config_file" == "/etc/devfleet/restic.env" ]] && continue' in bootstrap
+    assert "chown root:devfleet-backup /etc/devfleet/restic.env" in bootstrap
+    assert "chmod 0640 /etc/devfleet/restic.env" in bootstrap
+    assert "setfacl -m u:devfleet-backup:--x /etc/devfleet" in bootstrap
+    assert "setfacl -m u:devfleet-backup:rwx /home/devrunner/.devfleet" not in bootstrap
+    assert "setfacl -x u:devfleet-backup /home/devrunner/.devfleet" in bootstrap
+    assert "setfacl -x d:u:devfleet-backup /home/devrunner/.devfleet" in bootstrap
+
+
+def test_vault_credentials_remain_readable_only_by_the_backup_identity():
+    configure = read("linux/devfleet-configure-backup")
+
+    assert "chown root:devfleet-backup /etc/devfleet/restic.env" in configure
+    assert "chmod 0640 /etc/devfleet/restic.env" in configure
+    assert "install -d -o devfleet-backup -g devfleet-backup -m 0700" in configure
+    assert "u:devfleet-control" not in configure
+
+
+def test_backup_and_restore_share_a_truthful_nonblocking_operation_lock():
+    backup = read("linux/devfleet-backup")
+    restore = read("linux/devfleet-restore-project")
+
+    lock = "/run/lock/devfleet-vault-operation.lock"
+    assert lock in backup
+    assert lock in restore
+    assert "exit 75" in backup
+    assert "exit 75" in restore
+
+
+def test_restore_copy_fails_closed_on_preexisting_or_racing_target():
+    restore = read("linux/devfleet-restore-project")
+
+    assert '[[ ! -e "$target" && ! -L "$target" ]]' in restore
+    assert 'mv -T --no-clobber -- "$source_dir" "$target"' in restore
+    assert '[[ ! -e "$source_dir" && -d "$target" && ! -L "$target" ]]' in restore
+
+
+def test_dashboard_exposes_only_restore_copy_from_vault():
+    template = read("app/templates/index.html")
+
+    assert "project_action(p.slug,'restore-vault','Restore copy from vault','ghost')" in template
+    assert "preserves the original workspace" in template
+
+
+def test_broker_success_is_bound_to_the_fixed_child_exit_not_mutable_telemetry(monkeypatch):
+    broker = load_broker_module(monkeypatch)
+    monkeypatch.setattr(broker.os, "access", lambda *_args: True)
+    monkeypatch.setattr(
+        broker,
+        "_run_child",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            ["/usr/local/bin/devfleet-backup"], 0, "", ""
+        ),
+    )
+
+    assert broker._run_fixed_operation("backup", "", "") == {
+        "ok": True,
+        "action": "backup",
+        "local_backup_status": "verified",
+        "vault_upload_status": "verified",
+        "durability_level": "vault",
+    }
+
+
+def test_broker_restore_uses_only_identity_bound_fixed_argv(monkeypatch, tmp_path):
+    broker = load_broker_module(monkeypatch)
+    project = "vault-source"
+    project_id = "12345678-1234-1234-1234-123456789abc"
+    target = tmp_path / "vault-source-recovered-20260916-123456-deadbeef"
+    (target / ".devfleet").mkdir(parents=True)
+    (target / ".devfleet/project.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "managed_by": "devfleet",
+                "slug": project,
+                "project_id": project_id,
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls = []
+    monkeypatch.setattr(broker, "WORKSPACES", tmp_path)
+    monkeypatch.setattr(broker.os, "access", lambda *_args: True)
+
+    returned_target = [target]
+
+    def run_child(command, timeout):
+        calls.append((command, timeout))
+        return subprocess.CompletedProcess(command, 0, str(returned_target[0]) + "\n", "")
+
+    monkeypatch.setattr(broker, "_run_child", run_child)
+    monkeypatch.setattr(broker, "_restored_identity_matches", lambda *_args: True)
+    receipt = broker._run_fixed_operation("restore-copy", project, project_id)
+
+    assert calls == [
+        (
+            ["/usr/local/bin/devfleet-restore-project", project, project_id],
+            3600,
+        )
+    ]
+    assert receipt == {
+        "ok": True,
+        "action": "restore-copy",
+        "project": project,
+        "project_id": project_id,
+        "target": str(target),
+    }
+
+    with pytest.raises(broker.ProtocolError):
+        broker._parse_request({"action": "restore-canonical", "project": project, "project_id": project_id})
+
+
+@pytest.mark.parametrize("action", ["restore-copy"])
+def test_broker_rejects_restored_metadata_parent_symlink(
+    monkeypatch, tmp_path, action
+):
+    broker = load_broker_module(monkeypatch)
+    project = "vault-source"
+    project_id = "12345678-1234-1234-1234-123456789abc"
+    target = tmp_path / "vault-source-recovered-20260916-123456-deadbeef"
+    target.mkdir()
+    external = tmp_path / f"external-{action}"
+    external.mkdir()
+    (external / "project.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "managed_by": "devfleet",
+                "slug": project,
+                "identity": project,
+                "project_id": project_id,
+            }
+        ),
+        encoding="utf-8",
+    )
+    try:
+        (target / ".devfleet").symlink_to(external, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    monkeypatch.setattr(broker, "WORKSPACES", tmp_path)
+    monkeypatch.setattr(broker.os, "access", lambda *_args: True)
+    monkeypatch.setattr(
+        broker,
+        "_run_child",
+        lambda command, timeout: subprocess.CompletedProcess(
+            command, 0, str(target) + "\n", ""
+        ),
+    )
+
+    receipt = broker._run_fixed_operation(action, project, project_id)
+
+    assert receipt == {
+        "ok": False,
+        "error": "Vault restore target is invalid.",
+        "exit_code": 5,
+    }
+
+
+def test_broker_rejects_extra_fields_and_wrong_project_id(monkeypatch):
+    broker = load_broker_module(monkeypatch)
+    with pytest.raises(broker.ProtocolError, match="not allowed"):
+        broker._parse_request(
+            {
+                "action": "restore-copy",
+                "project": "vault-source",
+                "project_id": "12345678-1234-1234-1234-123456789abc",
+                "path": "/attacker-controlled",
+            }
+        )
+    with pytest.raises(broker.ProtocolError, match="Project ID"):
+        broker._parse_request(
+            {
+                "action": "restore-copy",
+                "project": "vault-source",
+                "project_id": "wrong-id",
+            }
+        )
+
+
+def test_broker_rejects_oversized_and_second_frames(monkeypatch):
+    broker = load_broker_module(monkeypatch)
+    left, right = socket.socketpair()
+    try:
+        right.sendall(struct.pack("!I", broker.MAX_REQUEST_BYTES + 1))
+        right.shutdown(socket.SHUT_WR)
+        with pytest.raises(broker.ProtocolError, match="length"):
+            broker._receive_frame(left)
+    finally:
+        left.close()
+        right.close()
+
+    left, right = socket.socketpair()
+    try:
+        body = b'{"action":"backup"}'
+        right.sendall(struct.pack("!I", len(body)) + body + b"x")
+        right.shutdown(socket.SHUT_WR)
+        with pytest.raises(broker.ProtocolError, match="one request"):
+            broker._receive_frame(left)
+    finally:
+        left.close()
+        right.close()
+
+
+def test_broker_rejects_non_control_peer_before_parsing(monkeypatch):
+    broker = load_broker_module(monkeypatch)
+    monkeypatch.setattr(broker.socket, "SO_PEERCRED", 17, raising=False)
+
+    class ForeignPeer:
+        def getsockopt(self, *_args):
+            return struct.pack("3i", 99, 4321, 4321)
+
+    with pytest.raises(broker.ProtocolError, match="not authorized"):
+        broker._assert_peer(ForeignPeer())
+
+
+def test_broker_timeout_terminates_and_waits_for_the_owned_process_group(monkeypatch):
+    broker = load_broker_module(monkeypatch)
+    kills = []
+
+    class FakeProcess:
+        pid = 4242
+        returncode = None
+
+        def __init__(self):
+            self.calls = 0
+
+        def communicate(self, timeout=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired(["fixed-child"], timeout)
+            self.returncode = -signal.SIGTERM
+            return "", ""
+
+    process = FakeProcess()
+    monkeypatch.setattr(broker.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(
+        broker.os,
+        "killpg",
+        lambda pid, requested_signal: kills.append((pid, requested_signal)),
+        raising=False,
+    )
+
+    completed = broker._run_child(["fixed-child"], 1)
+
+    assert completed.returncode == 124
+    assert process.calls == 2
+    assert kills == [(4242, signal.SIGTERM)]
+
+
+def test_timeout_ownership_deadlines_are_strictly_nested():
+    service = read("app/systemd/devfleet-vault-broker@.service")
+    client = read("linux/devfleet-vault-request")
+    projects_source = read("app/devfleet/projects.py")
+    assert "timeout = 3600" in read("linux/devfleet-vault-broker")
+    assert "RuntimeMaxSec=3660" in service
+    assert "TimeoutStopSec=10" in service
+    assert "connection.settimeout(3690)" in client
+    assert "timeout=3720" in projects_source
+    assert 3600 < 3660 < 3660 + 10 < 3690 < 3720
+
+
+def test_broker_exposes_only_safe_failure_classes(monkeypatch):
+    broker = load_broker_module(monkeypatch)
+    monkeypatch.setattr(broker.os, "access", lambda *_args: True)
+    monkeypatch.setattr(
+        broker,
+        "_run_child",
+        lambda command, timeout: subprocess.CompletedProcess(
+            command, 75, "sensitive child stdout", "sensitive child stderr"
+        ),
+    )
+
+    receipt = broker._run_fixed_operation("backup", "", "")
+
+    assert receipt == {
+        "ok": False,
+        "error": "Another Vault operation is already in progress.",
+        "error_code": "vault-operation-busy",
+        "exit_code": 75,
+    }
+
+
+def test_restore_copy_preserves_source_identity_and_is_not_implicitly_adopted(monkeypatch, tmp_path):
+    settings = replace(
+        projects.SETTINGS,
+        workspaces=tmp_path,
+        node_name="test-node",
+        deployment_id="deployment-123",
+    )
+    monkeypatch.setattr(projects, "SETTINGS", settings)
+    source_slug = "vault-source"
+    recovered_slug = "vault-source-recovered-20260916-123456-deadbeef"
+    source = tmp_path / source_slug
+    recovered = tmp_path / recovered_slug
+    source_meta = {
+        "schema_version": 5,
+        "managed_by": "devfleet",
+        "project_id": "12345678-1234-1234-1234-123456789abc",
+        "slug": source_slug,
+        "identity": source_slug,
+        "display_name": "Vault source",
+        "runtime_provider": "docker-compose",
+        "runtime_isolation": "container",
+        "runtime_type": "container",
+        "runtime_id": projects.compose_name(source_slug),
+        "runtime_address": "stale-address",
+        "host_id": "test-node",
+        "deployment_id": "deployment-123",
+        "workspace_location": str(source),
+        "workspace_path": f"/home/devrunner/workspaces/{source_slug}",
+        "lifecycle_status": "running",
+        "runtime_status": "running",
+        "provisioning_status": "ready",
+        "health_status": "healthy",
+        "backup_status": "verified",
+        "backup_id": "source-backup",
+        "backup_sha256": "a" * 64,
+        "destructive_backup_binding": {"project_id": "stale"},
+    }
+    for project in (source, recovered):
+        (project / ".devfleet").mkdir(parents=True)
+        (project / ".devfleet/project.json").write_text(
+            json.dumps(source_meta), encoding="utf-8"
+        )
+        (project / "compose.yaml").write_text(
+            "services:\n  app:\n    image: ubuntu:24.04\n", encoding="utf-8"
+        )
+        (project / "fixture.txt").write_text("vault-fixture\n", encoding="utf-8")
+    (recovered / ".devfleet/ownership-lease.json").write_text(
+        json.dumps({"project_identity": source_slug, "active": True, "active_node": "test-node"}),
+        encoding="utf-8",
+    )
+    (recovered / ".devfleet/runtime-ownership.yaml").write_text(
+        f"services:\n  app:\n    labels:\n      io.devfleet.project-slug: {source_slug}\n",
+        encoding="utf-8",
+    )
+    original_metadata = (source / ".devfleet/project.json").read_bytes()
+    monkeypatch.setattr(
+        projects,
+        "_vault_request",
+        lambda action, slug, project_id, timeout: {
+            "ok": True,
+            "action": action,
+            "project": slug,
+            "project_id": project_id,
+            "target": str(recovered),
+        },
+    )
+
+    result = projects.restore_from_vault(source_slug)
+
+    assert result == str(recovered)
+    saved = json.loads((recovered / ".devfleet/project.json").read_text())
+    assert saved["slug"] == source_slug
+    assert saved["project_id"] == source_meta["project_id"]
+    with pytest.raises(ValueError, match="slug does not bind"):
+        projects.load_authoritative_project_identity_for_mutation(recovered)
+    assert (source / ".devfleet/project.json").read_bytes() == original_metadata
+    assert (source / "fixture.txt").read_text(encoding="utf-8") == "vault-fixture\n"
+
+
+@pytest.mark.parametrize(
+    "action", ["start", "stop", "rebuild", "bootstrap", "health", "test", "codexpro"]
+)
+def test_recovered_copy_mutations_are_rejected_before_operation_submission(
+    monkeypatch, tmp_path, action
+):
+    settings = replace(
+        projects.SETTINGS,
+        workspaces=tmp_path,
+        node_name="test-node",
+        deployment_id="deployment-123",
+    )
+    monkeypatch.setattr(projects, "SETTINGS", settings)
+    monkeypatch.setattr(main, "SETTINGS", settings)
+    source_slug = "vault-source"
+    recovered_slug = "vault-source-recovered-20260916-123456-deadbeef"
+    recovered = tmp_path / recovered_slug
+    (recovered / ".devfleet").mkdir(parents=True)
+    (recovered / ".devfleet/project.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "managed_by": "devfleet",
+                "project_id": "12345678-1234-1234-1234-123456789abc",
+                "slug": source_slug,
+                "identity": source_slug,
+                "runtime_provider": "docker-compose",
+                "runtime_id": projects.compose_name(source_slug),
+                "host_id": "test-node",
+                "deployment_id": "deployment-123",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        main,
+        "submit_operation",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("recovered copy reached operation submission")
+        ),
+    )
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            f"/api/projects/{recovered_slug}/{action}",
+            headers={"X-DevFleet-Token": "test-token"},
+            json={},
+        )
+
+    assert response.status_code == 409
+    assert "slug does not bind" in response.json()["detail"]
+
+
+def _recovered_vm_copy(monkeypatch, tmp_path):
+    settings = replace(
+        projects.SETTINGS,
+        workspaces=tmp_path,
+        node_name="test-node",
+        deployment_id="deployment-123",
+    )
+    monkeypatch.setattr(projects, "SETTINGS", settings)
+    monkeypatch.setattr(main, "SETTINGS", settings)
+    recovered_slug = "vault-source-recovered-20260916-123456-deadbeef"
+    recovered = tmp_path / recovered_slug
+    (recovered / ".devfleet").mkdir(parents=True)
+    (recovered / ".devfleet/project.json").write_text(
         json.dumps(
             {
                 "schema_version": 5,
@@ -806,449 +1251,4 @@ def test_recovered_copy_dashboard_renders_inert_recovery_panel(monkeypatch, tmp_
             follow_redirects=False,
         )
         assert signed_in.status_code == 303
-        response = client.get(f"/projects/{recovered_slug}")
-
-    assert response.status_code == 200
-    assert "RECOVERY ARTIFACT" in response.text
-    assert "This restored copy is intentionally inert" in response.text
-    assert f'action="/projects/{recovered_slug}/' not in response.text
-    assert f'href="/projects/{recovered_slug}?tab=' not in response.text
-
-
-DEPLOYMENT_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
-PROJECT_ID = "12345678-1234-4234-9234-123456789abc"
-
-
-def _canonical_project(monkeypatch, tmp_path, slug="canonical-transfer"):
-    settings = replace(
-        projects.SETTINGS,
-        workspaces=tmp_path / "workspaces",
-        quarantine=tmp_path / "quarantine",
-        runtime_root=tmp_path / "runtime",
-        node_name="devfleet-failover",
-        deployment_id=DEPLOYMENT_ID,
-    )
-    monkeypatch.setattr(projects, "SETTINGS", settings)
-    monkeypatch.setattr(main, "SETTINGS", settings)
-    project = settings.workspaces / slug
-    (project / ".devfleet").mkdir(parents=True)
-    (project / "compose.yaml").write_text(
-        "services:\n  app:\n    image: ubuntu:24.04\n", encoding="utf-8"
-    )
-    (project / ".devfleet/project.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 5,
-                "managed_by": "devfleet",
-                "slug": slug,
-                "identity": slug,
-                "project_id": PROJECT_ID,
-                "deployment_id": DEPLOYMENT_ID,
-                "host_id": "devfleet-primary",
-                "runtime_provider": "docker-compose",
-                "runtime_isolation": "container",
-                "runtime_id": projects.compose_name(slug),
-                "lifecycle_status": "stopped",
-                "runtime_status": "stopped",
-            }
-        ),
-        encoding="utf-8",
-    )
-    (project / ".devfleet/ownership-lease.json").write_text(
-        json.dumps(
-            {
-                "project_identity": slug,
-                "project_id": PROJECT_ID,
-                "active": False,
-                "active_node": "devfleet-primary",
-                "last_clean_shutdown": "2026-09-16T12:34:56Z",
-            }
-        ),
-        encoding="utf-8",
-    )
-    return settings, project
-
-
-@pytest.mark.parametrize(
-    ("lease_change", "docker_result", "message"),
-    [
-        ({"active": True}, (0, ""), "inactive ownership lease"),
-        ({"active": 0}, (0, ""), "inactive ownership lease"),
-        ({"project_id": "ffffffff-ffff-4fff-8fff-ffffffffffff"}, (0, ""), "inactive ownership lease"),
-        ({"last_clean_shutdown": "not-a-time"}, (0, ""), "verified clean shutdown"),
-        ({}, (1, ""), "Docker quiescence probe failed"),
-        ({}, (0, "container-id\n"), "runtime is still running"),
-    ],
-)
-def test_canonical_restore_quiescence_fails_closed_before_broker(
-    monkeypatch, tmp_path, lease_change, docker_result, message
-):
-    _, project = _canonical_project(monkeypatch, tmp_path)
-    lease_path = project / ".devfleet/ownership-lease.json"
-    lease = json.loads(lease_path.read_text(encoding="utf-8"))
-    lease.update(lease_change)
-    lease_path.write_text(json.dumps(lease), encoding="utf-8")
-    monkeypatch.setattr(
-        projects,
-        "run",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess(
-            _args[0] if _args else [], docker_result[0], docker_result[1], "probe-error"
-        ),
-    )
-    monkeypatch.setattr(
-        projects,
-        "_vault_request",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("unsafe canonical restore reached Vault broker")
-        ),
-    )
-
-    with pytest.raises((ValueError, RuntimeError), match=message):
-        projects._assert_canonical_restore_quiesced(
-            project.name, expected_project_id=PROJECT_ID
-        )
-
-
-def test_vm_canonical_restore_is_blocked_without_runtime_or_broker_probe(
-    monkeypatch, tmp_path
-):
-    _, project = _canonical_project(monkeypatch, tmp_path)
-    metadata_path = project / ".devfleet/project.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata.update(
-        {
-            "runtime_provider": "multipass-host-agent",
-            "runtime_isolation": "vm",
-            "runtime_id": "devfleet-project-canonical-transfer",
-        }
-    )
-    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
-    forbidden = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-        AssertionError("VM canonical restore probed a runtime or Vault broker")
-    )
-    monkeypatch.setattr(projects, "run", forbidden)
-    monkeypatch.setattr(projects, "_vault_request", forbidden)
-
-    with pytest.raises(ValueError, match="stopped-VM attestation"):
-        projects._assert_canonical_restore_quiesced(
-            project.name, expected_project_id=PROJECT_ID
-        )
-
-
-def _restore_transfer_fixture(
-    project: Path, source_slug: str, *, source_host="devfleet-primary"
-):
-    (project / ".devfleet").mkdir(parents=True, exist_ok=True)
-    (project / "compose.yaml").write_text(
-        "services:\n  app:\n    image: ubuntu:24.04\n", encoding="utf-8"
-    )
-    (project / ".devfleet/project.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 5,
-                "managed_by": "devfleet",
-                "slug": source_slug,
-                "identity": source_slug,
-                "project_id": PROJECT_ID,
-                "deployment_id": DEPLOYMENT_ID,
-                "host_id": source_host,
-                "runtime_provider": "docker-compose",
-                "runtime_isolation": "container",
-                "runtime_id": projects.compose_name(source_slug),
-                "lifecycle_status": "stopped",
-                "runtime_status": "stopped",
-            }
-        ),
-        encoding="utf-8",
-    )
-    (project / ".devfleet/ownership-lease.json").write_text(
-        json.dumps(
-            {
-                "project_identity": source_slug,
-                "project_id": PROJECT_ID,
-                "active": False,
-                "active_node": source_host,
-                "last_clean_shutdown": "2026-09-16T12:34:56Z",
-            }
-        ),
-        encoding="utf-8",
-    )
-
-
-def _received_pending_transfer_fixture(monkeypatch, tmp_path, slug):
-    settings = replace(
-        projects.SETTINGS,
-        workspaces=tmp_path / "workspaces",
-        runtime_root=tmp_path / "runtime",
-        quarantine=tmp_path / "quarantine",
-        node_name="devfleet-failover",
-        deployment_id=DEPLOYMENT_ID,
-    )
-    settings.workspaces.mkdir()
-    monkeypatch.setattr(projects, "SETTINGS", settings)
-    project = settings.workspaces / slug
-    staging = settings.workspaces / f"{slug}-recovered-20260916-123456-deadbeef"
-    control = {"fail_start": False, "fail_hook": False, "calls": []}
-
-    def runner(args, **_kwargs):
-        command = list(args)
-        control["calls"].append(command)
-        if control["fail_start"] and "up" in command:
-            raise RuntimeError("injected destination start failure")
-        return subprocess.CompletedProcess(command, 0, "", "")
-
-    def restore(*_args, **_kwargs):
-        _restore_transfer_fixture(staging, slug)
-        return {
-            "ok": True,
-            "action": "restore-transfer",
-            "project": slug,
-            "project_id": PROJECT_ID,
-            "deployment_id": DEPLOYMENT_ID,
-            "source_host_id": "devfleet-primary",
-            "target": str(staging),
-        }
-
-    def hook(*_args):
-        if control["fail_hook"]:
-            raise RuntimeError("injected destination hook failure")
-        return ""
-
-    monkeypatch.setattr(projects, "run", runner)
-    monkeypatch.setattr(projects, "_vault_request", restore)
-    monkeypatch.setattr(projects, "_assert_current_compose_safety", lambda *_args: None)
-    monkeypatch.setattr(projects, "_hook", hook)
-    projects.receive_transferred_project(
-        slug,
-        PROJECT_ID,
-        DEPLOYMENT_ID,
-        "devfleet-primary",
-        "devfleet-failover",
-    )
-    return project, control
-
-
-def _assert_pending_transfer_state(project):
-    metadata = json.loads(
-        (project / ".devfleet/project.json").read_text(encoding="utf-8")
-    )
-    lease = json.loads(
-        (project / ".devfleet/ownership-lease.json").read_text(encoding="utf-8")
-    )
-    assert metadata["transfer_state"] == "pending-source-finalization"
-    assert metadata["lifecycle_status"] == "ownership-transfer-pending"
-    assert metadata["runtime_status"] == "stopped"
-    assert lease["project_id"] == PROJECT_ID
-    assert lease["active"] is False
-    assert lease["active_node"] == "devfleet-failover"
-    assert projects._transfer_pending_marker_path(project).is_file()
-    with pytest.raises(ValueError, match="awaits source finalization"):
-        projects.load_authoritative_project_identity_for_mutation(project)
-
-
-def test_receive_transfer_restores_absent_project_and_rebinds_destination(
-    monkeypatch, tmp_path
-):
-    settings = replace(
-        projects.SETTINGS,
-        workspaces=tmp_path / "workspaces",
-        runtime_root=tmp_path / "runtime",
-        node_name="devfleet-failover",
-        deployment_id=DEPLOYMENT_ID,
-    )
-    settings.workspaces.mkdir()
-    monkeypatch.setattr(projects, "SETTINGS", settings)
-    monkeypatch.setattr(
-        projects,
-        "run",
-        lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, "", ""),
-    )
-    slug = "received-project"
-    project = settings.workspaces / slug
-    staging = settings.workspaces / f"{slug}-recovered-20260916-123456-deadbeef"
-
-    def restore(
-        action,
-        received_slug,
-        received_id,
-        *,
-        timeout,
-        deployment_id,
-        source_host_id,
-    ):
-        assert (action, received_slug, received_id, deployment_id, source_host_id) == (
-            "restore-transfer",
-            slug,
-            PROJECT_ID,
-            DEPLOYMENT_ID,
-            "devfleet-primary",
-        )
-        _restore_transfer_fixture(staging, slug)
-        return {
-            "ok": True,
-            "action": action,
-            "project": slug,
-            "project_id": PROJECT_ID,
-            "deployment_id": DEPLOYMENT_ID,
-            "source_host_id": "devfleet-primary",
-            "target": str(staging),
-        }
-
-    monkeypatch.setattr(projects, "_vault_request", restore)
-
-    result = projects.receive_transferred_project(
-        slug,
-        PROJECT_ID,
-        DEPLOYMENT_ID,
-        "devfleet-primary",
-        "devfleet-failover",
-    )
-
-    metadata = json.loads((project / ".devfleet/project.json").read_text())
-    lease = json.loads((project / ".devfleet/ownership-lease.json").read_text())
-    ownership = projects.ownership_override_path(project).read_text(encoding="utf-8")
-    assert result["state"] == "handoff-pending"
-    assert metadata["host_id"] == "devfleet-failover"
-    assert metadata["runtime_id"] == projects.compose_name(slug)
-    assert metadata["transfer_state"] == "pending-source-finalization"
-    assert metadata["lifecycle_status"] == "ownership-transfer-pending"
-    assert lease["active"] is False and lease["active_node"] == "devfleet-failover"
-    assert "devfleet-failover" in ownership and "devfleet-primary" not in ownership
-    assert projects._transfer_pending_marker_path(project).is_file()
-    with pytest.raises(ValueError, match="awaits source finalization"):
-        projects.start_project(slug, override_failover=True)
-
-    monkeypatch.setattr(projects, "_assert_current_compose_safety", lambda *_args: None)
-    monkeypatch.setattr(projects, "_hook", lambda *_args: "")
-    activated = projects.activate_transferred_project(
-        slug,
-        PROJECT_ID,
-        DEPLOYMENT_ID,
-        "devfleet-primary",
-        "devfleet-failover",
-    )
-    metadata = json.loads((project / ".devfleet/project.json").read_text())
-    lease = json.loads((project / ".devfleet/ownership-lease.json").read_text())
-    assert activated["state"] == "activated-running"
-    assert metadata["transfer_state"] == "completed"
-    assert metadata["lifecycle_status"] == "running"
-    assert lease["active"] is True and lease["active_node"] == "devfleet-failover"
-    assert not projects._transfer_pending_marker_path(project).exists()
-
-
-@pytest.mark.parametrize(
-    ("failure_key", "failure_message"),
-    [
-        ("fail_start", "injected destination start failure"),
-        ("fail_hook", "injected destination hook failure"),
-    ],
-)
-def test_activation_startup_failure_retains_pending_authority_and_is_retryable(
-    monkeypatch, tmp_path, failure_key, failure_message
-):
-    project, control = _received_pending_transfer_fixture(
-        monkeypatch, tmp_path, f"{failure_key.replace('_', '-')}-transfer"
-    )
-    control[failure_key] = True
-
-    with pytest.raises(RuntimeError, match=failure_message):
-        projects.activate_transferred_project(
-            project.name,
-            PROJECT_ID,
-            DEPLOYMENT_ID,
-            "devfleet-primary",
-            "devfleet-failover",
-        )
-
-    _assert_pending_transfer_state(project)
-    assert any(command[-2:] == ["down", "--remove-orphans"] for command in control["calls"])
-
-    control[failure_key] = False
-    activated = projects.activate_transferred_project(
-        project.name,
-        PROJECT_ID,
-        DEPLOYMENT_ID,
-        "devfleet-primary",
-        "devfleet-failover",
-    )
-    assert activated["state"] == "activated-running"
-    assert not projects._transfer_pending_marker_path(project).exists()
-
-
-def test_post_start_commit_failure_restores_pending_authority_and_is_retryable(
-    monkeypatch, tmp_path
-):
-    project, control = _received_pending_transfer_fixture(
-        monkeypatch, tmp_path, "commit-failure-transfer"
-    )
-    remove_pending = projects._remove_transfer_pending
-    failure = {"armed": True}
-
-    def fail_after_marker_removal(current_project, expected):
-        remove_pending(current_project, expected)
-        if failure["armed"]:
-            failure["armed"] = False
-            raise RuntimeError("injected post-start activation commit failure")
-
-    monkeypatch.setattr(projects, "_remove_transfer_pending", fail_after_marker_removal)
-
-    with pytest.raises(RuntimeError, match="injected post-start activation commit failure"):
-        projects.activate_transferred_project(
-            project.name,
-            PROJECT_ID,
-            DEPLOYMENT_ID,
-            "devfleet-primary",
-            "devfleet-failover",
-        )
-
-    _assert_pending_transfer_state(project)
-    assert any(command[-2:] == ["down", "--remove-orphans"] for command in control["calls"])
-
-    activated = projects.activate_transferred_project(
-        project.name,
-        PROJECT_ID,
-        DEPLOYMENT_ID,
-        "devfleet-primary",
-        "devfleet-failover",
-    )
-    assert activated["state"] == "activated-running"
-    assert not projects._transfer_pending_marker_path(project).exists()
-
-
-@pytest.mark.parametrize(
-    ("pending_field", "pending_value"),
-    [
-        ("transfer_state", "pending-source-finalization"),
-        ("lifecycle_status", "ownership-transfer-pending"),
-    ],
-)
-def test_pending_transfer_metadata_denies_mutation_when_marker_is_deleted(
-    monkeypatch, tmp_path, pending_field, pending_value
-):
-    settings, project = _canonical_project(
-        monkeypatch, tmp_path, slug=f"markerless-{pending_field.replace('_', '-')}"
-    )
-    metadata_path = project / ".devfleet/project.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata[pending_field] = pending_value
-    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
-    projects._record_transfer_pending(
-        project,
-        project_id=PROJECT_ID,
-        deployment_id=DEPLOYMENT_ID,
-        source_host_id="devfleet-primary",
-        destination_host_id="devfleet-failover",
-    )
-    marker_path = projects._transfer_pending_marker_path(project)
-    marker_path.unlink()
-    assert not marker_path.exists()
-    monkeypatch.setattr(
-        projects,
-        "run",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("markerless pending transfer reached runtime mutation")
-        ),
-    )
-
-    with pytest.raises(ValueError, match="awaits source finalization"):
- 
+    

@@ -1,10 +1,159 @@
 # DevFleet source part 042
 
 Full-source UTF-8 byte interval [1906500, 1953000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: 08c9d82f4fde3d3a50052b775a2be31458ae0251f03dfd82e30fc669c7af06b6
+Payload SHA-256: 3b39b3996a6ed537a7f1de8279501f4761e8ba88c09ac08e0d9c4c35db50e57c
 
 <!-- BEGIN SOURCE SLICE -->
-'11111111-1111-1111-1111-111111111111';State=if($case -eq 'off'){'Off'}else{'Running'}}}
+ixture.terminalL1Hash=Get-FixtureHash $l1Path;$postFixture.terminalL2Hash=Get-FixtureHash $l2Path;$postFixture.nestedL2ObservationSha256=$nestedHash
+    Write-FixtureJson $postPath $postFixture
+    $incompleteTupleRejected=$false;$incompleteTupleError=''
+    try{Invoke-FixtureNestedValidation -Root $fixtureRoot -RunId $fixtureRunId|Out-Null}catch{$incompleteTupleRejected=$true;$incompleteTupleError=$_.Exception.Message}
+    $rows.Add([ordered]@{case='incomplete-candidate-tuple-rejected';status=if($incompleteTupleRejected){'BLOCKED'}else{'PASS'};l2State='UNVERIFIED';safeWithoutNestedEvidence=($incompleteTupleRejected -and $incompleteTupleError -match 'candidate tuple is malformed or incomplete')})
+
+    $nestedFixture.candidate=$tuple;$l2Fixture.candidate=$tuple;$cleanupFixture.candidate=$tuple;$postFixture.candidate=$tuple;$stateFixture.candidateHashes=$tuple
+    Write-FixtureJson $nestedPath $nestedFixture;$nestedHash=Get-FixtureHash $nestedPath
+    $l2Fixture.sourceEvidenceSha256=$nestedHash;Write-FixtureJson $l2Path $l2Fixture
+    Write-FixtureJson $cleanupPath $cleanupFixture;Write-FixtureJson $statePath $stateFixture
+    $postFixture.cleanupEvidenceHash=Get-FixtureHash $cleanupPath;$postFixture.terminalL1Hash=Get-FixtureHash $l1Path;$postFixture.terminalL2Hash=Get-FixtureHash $l2Path;$postFixture.nestedL2ObservationSha256=$nestedHash
+    Write-FixtureJson $postPath $postFixture
+    $backendVerification='Multipass CLI absent; complete read-only inventories from every supported in-L1 virtualization backend'
+    $nestedFixture.verification=$backendVerification;$nestedFixture.inventoryCount=2
+    $nestedFixture.backendInventories=@([ordered]@{provider='Hyper-V';status='PASS';names=@('foreign-instance','foreign-instance');verification='bounded Hyper-V inventory'},[ordered]@{provider='VirtualBox';status='PASS';names=@();verification='bounded VirtualBox inventory'})
+    $l2Fixture.verificationMethod=$backendVerification;$l2Fixture.backendInventories=$nestedFixture.backendInventories
+    Write-FixtureJson $nestedPath $nestedFixture;$nestedHash=Get-FixtureHash $nestedPath
+    $l2Fixture.sourceEvidenceSha256=$nestedHash;Write-FixtureJson $l2Path $l2Fixture
+    $postFixture.terminalL2Hash=Get-FixtureHash $l2Path;$postFixture.nestedL2ObservationSha256=$nestedHash
+    Write-FixtureJson $postPath $postFixture
+    $malformedBackendRejected=$false;$malformedBackendError=''
+    try{Invoke-FixtureNestedValidation -Root $fixtureRoot -RunId $fixtureRunId|Out-Null}catch{$malformedBackendRejected=$true;$malformedBackendError=$_.Exception.Message}
+    $rows.Add([ordered]@{case='duplicate-backend-instance-name-rejected';status=if($malformedBackendRejected){'BLOCKED'}else{'PASS'};l2State='UNVERIFIED';safeWithoutNestedEvidence=($malformedBackendRejected -and $malformedBackendError -match 'duplicate instance name')})
+
+    $nestedFixture.verification='Bounded Multipass JSON inventory inside exact L1';$nestedFixture.inventoryCount=0;$nestedFixture.backendInventories=@()
+    $l2Fixture.verificationMethod=$nestedFixture.verification;$l2Fixture.backendInventories=@()
+    Write-FixtureJson $nestedPath $nestedFixture;$nestedHash=Get-FixtureHash $nestedPath
+    $l2Fixture.sourceEvidenceSha256=$nestedHash;Write-FixtureJson $l2Path $l2Fixture
+    $postFixture.terminalL2Hash=Get-FixtureHash $l2Path;$postFixture.nestedL2ObservationSha256=$nestedHash
+    Write-FixtureJson $postPath $postFixture
+    [IO.File]::AppendAllText($nestedPath,"`n",[Text.UTF8Encoding]::new($false))
+    $hashRejected=$false;$hashError=''
+    try{Invoke-FixtureNestedValidation -Root $fixtureRoot -RunId $fixtureRunId|Out-Null}catch{$hashRejected=$true;$hashError=$_.Exception.Message}
+    $rows.Add([ordered]@{case='changed-source-bytes-rejected-after-binding';status=if($hashRejected){'BLOCKED'}else{'PASS'};l2State='UNVERIFIED';safeWithoutNestedEvidence=($hashRejected -and $hashError -match 'hash bindings do not match')})
+}finally{if(Test-Path -LiteralPath $fixtureRoot){Remove-Item -LiteralPath $fixtureRoot -Recurse -Force}}
+
+$hostCases=@('empty-host-inventory','denied-host-query','present-host-name','native-host-name-absence')
+$failed = @($rows | Where-Object { -not [bool]$_.safeWithoutNestedEvidence -or ($_.case -in $hostCases -and (-not [bool]$_.hostAbsenceDidNotClaimNestedAbsent -or -not [bool]$_.nativeHostAbsenceClassified)) })
+$result = [ordered]@{
+    scope='VM_FREE_PRODUCTION_FUNCTION_REGRESSION'
+    productionSource='tools/Invoke-DevFleetFinalConvergence.ps1::Invoke-ExactTerminalCleanup'
+    productionSourceSha256=(Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+    certificationCredit=$false
+    vmOperations=0
+    passed=($rows.Count - $failed.Count)
+    total=$rows.Count
+    cases=@($rows)
+    status=if ($failed.Count) { 'FAIL' } else { 'PASS' }
+    failures=@($failed | ForEach-Object { $_.case })
+}
+$result | ConvertTo-Json -Depth 8
+if ($failed.Count) { exit 1 }
+
+```
+
+
+## FILE: automation/release-e2e/tests/Test-FinalizerProcessExitBoundary.ps1
+
+SHA256: 74f494d7d0b41f3bd657a9ac110302014229ca36b0119776f8f83a862d488207 | Bytes: 2539 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([string]$WorkspaceRoot)
+
+$ErrorActionPreference='Stop'
+if(-not $WorkspaceRoot){$WorkspaceRoot=(Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path}
+$entry=Join-Path $WorkspaceRoot 'automation\release-e2e\Invoke-DevFleetReleaseE2E.ps1'
+$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile($entry,[ref]$tokens,[ref]$errors)
+if(@($errors).Count){throw 'Release entrypoint failed PowerShell parser validation.'}
+$function=@($ast.FindAll({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Invoke-RequiredReleaseFinalizer'},$true))
+if($function.Count -ne 1){throw 'Expected one production finalizer process-boundary function.'}
+$functionText=$function[0].Extent.Text
+. ([scriptblock]::Create($functionText))
+$pwsh=(Get-Command pwsh.exe -CommandType Application -ErrorAction Stop|Select-Object -First 1).Source
+$temp=Join-Path ([IO.Path]::GetTempPath()) ('DevFleet-finalizer-exit-'+[guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $temp|Out-Null
+$checks=[Collections.Generic.List[object]]::new()
+try{
+    $success=Join-Path $temp 'success.ps1';$failure=Join-Path $temp 'failure.ps1'
+    [IO.File]::WriteAllText($success,"Write-Output 'safe completion'`nexit 0`n",[Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($failure,"Write-Output 'bounded child output'`nexit 17`n",[Text.UTF8Encoding]::new($false))
+    $successOutput=@(Invoke-RequiredReleaseFinalizer -PowerShellPath $pwsh -FinalizerPath $success)
+    $checks.Add([pscustomobject]@{name='successful finalizer child remains successful';pass=($LASTEXITCODE -eq 0 -and ($successOutput -join "`n") -match 'safe completion');detail="childOutput=$($successOutput -join ' ')"})
+    $failed=$false;$failureMessage=''
+    try{Invoke-RequiredReleaseFinalizer -PowerShellPath $pwsh -FinalizerPath $failure|Out-Null}catch{$failed=$true;$failureMessage=$_.Exception.Message}
+    $checks.Add([pscustomobject]@{name='nonzero finalizer child blocks the release caller';pass=($failed -and $failureMessage -match 'code 17');detail="blocked=$failed message=$failureMessage"})
+}finally{if(Test-Path -LiteralPath $temp){Remove-Item -LiteralPath $temp -Recurse -Force}}
+$bad=@($checks|Where-Object{-not $_.pass})
+[ordered]@{scope='VM_FREE_PRODUCTION_FINALIZER_PROCESS_EXIT_REGRESSION';certificationCredit=$false;status=if($bad.Count){'FAIL'}else{'PASS'};passed=$checks.Count-$bad.Count;total=$checks.Count;checks=@($checks)}|ConvertTo-Json -Depth 8
+if($bad.Count){exit 1}
+
+```
+
+
+## FILE: automation/release-e2e/tests/Test-FullReleaseFailureCleanup.ps1
+
+SHA256: f37f4d49ab794c36eb7298442b7dacb3c53a4e8bef0ae5a0c7b0822bc4f3f7a5 | Bytes: 5999 | Git mode: 100644
+
+```
+[CmdletBinding()]
+param([Parameter(Mandatory)][string]$WorkspaceRoot)
+$ErrorActionPreference='Stop'
+$checks=[Collections.Generic.List[object]]::new()
+function Check([string]$Name,[bool]$Pass){$checks.Add([pscustomobject]@{name=$Name;pass=$Pass})}
+$entry=Join-Path $WorkspaceRoot 'automation/release-e2e/Invoke-DevFleetReleaseE2E.ps1'
+$text=Get-Content -LiteralPath $entry -Raw
+$proofText=Get-Content -LiteralPath (Join-Path $WorkspaceRoot 'audit/run-exact-candidate-proof.ps1') -Raw
+Check 'exact proof cleanup records its RunId for native terminal-summary validation' ($proofText.Contains('$cleanup=[ordered]@{runId=$RunId;status='))
+$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile($entry,[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'Production entrypoint does not parse'}
+$importStart=$text.IndexOf('foreach($m in @(')
+$importEnd=$text.IndexOf('$script:DevFleetFinalConvergencePrimaryBlocker')
+if($importStart -lt 0 -or $importEnd -le $importStart){throw 'Cannot locate native import sequence'}
+$pipeline=[powershell]::Create()
+try {
+    $code="param(`$scriptRoot) "+$text.Substring($importStart,$importEnd-$importStart)+"`n[bool](Get-Command Clear-DevFleetE2EInteractiveLogonState -ErrorAction SilentlyContinue)"
+    $null=$pipeline.AddScript($code).AddArgument((Join-Path $WorkspaceRoot 'automation/release-e2e'))
+    $visibility=@($pipeline.Invoke())
+    Check 'cleanup API visible after actual entrypoint imports' (-not $pipeline.HadErrors -and $visibility.Count -gt 0 -and [bool]$visibility[-1])
+} finally {$pipeline.Dispose()}
+$catches=@($ast.FindAll({param($node)$node -is [Management.Automation.Language.CatchClauseAst] -and $node.Body.Extent.Text.Contains('$failureCleanup=New-CleanupManifest')},$true))
+if($catches.Count -ne 1){throw 'Native failure handler selection is ambiguous'}
+$body=$catches[0].Body.Extent.Text
+$handler=[scriptblock]::Create("try { throw 'PRIMARY_FIXTURE_FAILURE' } catch "+$body)
+$root=Join-Path ([IO.Path]::GetTempPath()) ('DevFleet-cleanup-handler-'+[guid]::NewGuid().ToString('N'))
+$global:DevFleetCleanupFixture=@{case='';logonCalls=0;stopCalls=0;terminalCalls=0;shown=''}
+try {
+    New-Item -ItemType Directory -Path (Join-Path $root 'tools') -Force|Out-Null
+    Set-Content (Join-Path $root 'tools/Update-CurrentReleaseAuthority.ps1') 'param($Workspace,$FullReleaseRunId)' -Encoding utf8
+    Import-Module (Join-Path $WorkspaceRoot 'automation/release-e2e/modules/Evidence.psm1') -Force
+    function New-CleanupManifest {param($Vm,$RunId) [pscustomobject]@{runId=$RunId}}
+    function Get-AssertedDisposableVm {param($ExpectedVm) $ExpectedVm}
+    function Clear-DevFleetE2EInteractiveLogonState {
+        param([guid]$VmId)
+        $global:DevFleetCleanupFixture.logonCalls++
+        if($global:DevFleetCleanupFixture.case -eq 'logon-throws'){throw 'PRIVATE_FIXTURE_SECRET_SHOULD_NOT_BE_PERSISTED'}
+        [pscustomobject]@{status='PASS';registryCleanupPersisted=($global:DevFleetCleanupFixture.case -ne 'not-durable');temporaryDefaultPasswordRemovalPersisted=$true;ordinaryDefaultPasswordPresent=$false}
+    }
+    function Stop-ManifestVm {param($Manifest) $global:DevFleetCleanupFixture.stopCalls++}
+    function Write-TerminalVmEvidence {param($Vm,$RunDir,$L2Name) $global:DevFleetCleanupFixture.terminalCalls++}
+    function Show-Result {param($label,$status,$detail) $global:DevFleetCleanupFixture.shown=$detail}
+    foreach($case in @('running-durable','off','not-durable','logon-throws','keep-lab','no-target')){
+        $global:DevFleetCleanupFixture.case=$case
+        $global:DevFleetCleanupFixture.logonCalls=0;$global:DevFleetCleanupFixture.stopCalls=0;$global:DevFleetCleanupFixture.terminalCalls=0;$global:DevFleetCleanupFixture.shown=''
+        $runId='failure-handler-fixture-'+$case
+        $runDir=Join-Path $root $case
+        New-Item -ItemType Directory -Path $runDir|Out-Null
+        $vm=if($case -eq 'no-target'){$null}else{[pscustomobject]@{Name='DevFleet-E2E-fixture';Id=[guid]'11111111-1111-1111-1111-111111111111';State=if($case -eq 'off'){'Off'}else{'Running'}}}
         $config=[pscustomobject]@{NestedLinux=[pscustomobject]@{Name='DevFleet-E2E-fixture-L2'}}
         $KeepLab=($case -eq 'keep-lab')
         $WorkspaceRoot=$root
@@ -408,80 +557,4 @@ Assert-That ($source -match 'pollProgress' -and $source -match 'pssession-unavai
 Assert-That ($source -notmatch 'Write-Host[^\r\n]*(?:Secret|Password|credential)' -and $source -notmatch 'ConvertTo-Json[^\r\n]*(?:plain|secureSecret)') 'credential material is not written to logs or evidence'
 Assert-That ($source -match 'function Get-DevFleetE2EPreLogonPolicyState' -and $source -match 'LegalNoticeCaption' -and $source -match 'LegalNoticeText' -and $source -match 'utf16leSha256') 'pre-logon banner policy captures structural UTF-16 evidence'
 Assert-That ($source -match 'function Remove-DevFleetE2EPreLogonPolicy' -and $source -match 'function Restore-DevFleetE2EPreLogonPolicy' -and $source -match 'RegistryValueKind' -and $source -match 'LOGON_BANNER_POLICY_REASSERTED') 'banner suppression is bounded and restores exact disposable-lab policy'
-$policyFixture=[ordered]@{caption=[ordered]@{present=$true;registryValueKind='String';utf16CodeUnitCount=1;stringLength=1;isZeroLength=$false;isOnlyNulCharacters=$false;isOnlyWhitespace=$false;utf16leSha256='fixture';rawValue='not-durable'};text=[ordered]@{present=$true;registryValueKind='String';utf16CodeUnitCount=1;stringLength=1;isZeroLength=$false;isOnlyNulCharacters=$false;isOnlyWhitespace=$false;utf16leSha256='fixture';rawValue='not-durable'};source='unknown';sourceEvidence=[ordered]@{localPolicyRegistryPath=$true;domainPolicyRegistryPath=$false;policyManagerPath=$false}}
-$policyStructure=Get-DevFleetE2EPreLogonPolicyStructure -State $policyFixture
-Assert-That ($source -match 'rawValue' -and $source -match 'function Get-PolicyStructure' -and $source -match 'preLogonPolicyRestored' -and -not ($policyStructure.caption.Keys -contains 'rawValue') -and -not ($policyStructure.text.Keys -contains 'rawValue')) 'banner contents remain transient and cleanup truth is exposed without durable plaintext'
-$armOrder=@($nativeArm.IndexOf('SetValue'),$nativeArm.IndexOf('GetValueNames'),$nativeArm.IndexOf('Invoke-DevFleetE2ERegistryPersistenceBarrier'),$nativeArm.IndexOf('Get-DevFleetE2EWinlogonBaseline'))
-Assert-That (($armOrder|Where-Object{$_ -ge 0}).Count -eq 4 -and $armOrder[0] -lt $armOrder[1] -and $armOrder[1] -lt $armOrder[2] -and $armOrder[2] -lt $armOrder[3]) 'Winlogon arm orders writes, readback, persistence barrier, and post-flush readback'
-$armFunction=$source.Substring($source.IndexOf('function Arm-DevFleetE2EInteractiveLogon'),$source.IndexOf('function Restart-DevFleetE2EL1')-$source.IndexOf('function Arm-DevFleetE2EInteractiveLogon'))
-Assert-That ($armFunction.IndexOf('registryPersistenceBarrier') -ge 0 -and $armFunction.IndexOf('Remove-PSSession') -gt $armFunction.IndexOf('registryPersistenceBarrier')) 'Winlogon persistence completes before arm session removal and host restart path'
-$policyRemove=$source.Substring($source.IndexOf('function Remove-DevFleetE2EPreLogonPolicy'),$source.IndexOf('function Restore-DevFleetE2EPreLogonPolicy')-$source.IndexOf('function Remove-DevFleetE2EPreLogonPolicy'))
-Assert-That ($policyRemove.IndexOf('DeleteValue') -lt $policyRemove.IndexOf('Invoke-DevFleetE2ERegistryPersistenceBarrier') -and $policyRemove.IndexOf('Invoke-DevFleetE2ERegistryPersistenceBarrier') -lt $policyRemove.IndexOf('Get-DevFleetE2EPreLogonPolicyState') -and $policyRemove -match 'preLogonPolicySuppressionPersisted') 'pre-logon suppression orders mutation, barrier, and verification with truthful persistence'
-$policyRestore=$source.Substring($source.IndexOf('function Restore-DevFleetE2EPreLogonPolicy'),$source.IndexOf('function Set-DevFleetE2EWinlogonAutologon')-$source.IndexOf('function Restore-DevFleetE2EPreLogonPolicy'))
-Assert-That ($policyRestore.IndexOf('SetValue') -lt $policyRestore.IndexOf('Invoke-DevFleetE2ERegistryPersistenceBarrier') -and $policyRestore.IndexOf('Invoke-DevFleetE2ERegistryPersistenceBarrier') -lt $policyRestore.IndexOf('Get-DevFleetE2EPreLogonPolicyState') -and $policyRestore -match 'preLogonPolicyRestorationPersisted') 'pre-logon restoration orders mutation, barrier, reread, and persistence evidence'
-$disarmFunction=$source.Substring($source.IndexOf('function Disarm-DevFleetE2EInteractiveLogon'),$source.IndexOf('function Clear-DevFleetE2EInteractiveLogonState')-$source.IndexOf('function Disarm-DevFleetE2EInteractiveLogon'))
-Assert-That ($disarmFunction.IndexOf('Restore-DevFleetE2EWinlogonBaseline') -lt $disarmFunction.IndexOf('Invoke-DevFleetE2EGuestLsa -Session $session -Clear') -and $disarmFunction.IndexOf('Invoke-DevFleetE2EGuestLsa -Session $session -Clear') -lt $disarmFunction.IndexOf('registryCleanupPersisted') -and $disarmFunction -match 'autologonBaselinePersistenceConfirmed' -and $disarmFunction -match 'preLogonPolicyRestorationPersisted') 'disarm removes ordinary registry state before durable LSA clear and PASS evidence'
-$clearFunction=$source.Substring($source.IndexOf('function Clear-DevFleetE2EInteractiveLogonState'),$source.IndexOf('function Assert-DevFleetE2EInteractiveDesktopAfterDisarm')-$source.IndexOf('function Clear-DevFleetE2EInteractiveLogonState'))
-Assert-That ($clearFunction.IndexOf('DeleteValue') -lt $clearFunction.IndexOf('Invoke-DevFleetE2ERegistryPersistenceBarrier') -and $clearFunction.IndexOf('Invoke-DevFleetE2ERegistryPersistenceBarrier') -lt $clearFunction.IndexOf('Get-DevFleetE2EWinlogonBaseline') -and $clearFunction -match 'temporaryDefaultPasswordRemovalPersisted') 'final clear orders transient removal, persistence barrier, reread, and force-stop evidence'
-
-$realPhase=Get-Content -LiteralPath (Join-Path $WorkspaceRoot 'automation\release-e2e\modules\executors\Invoke-RealProductPhase.psm1') -Raw
-$wpfDriver=Get-Content -LiteralPath (Join-Path $WorkspaceRoot 'automation\release-e2e\modules\executors\Invoke-WpfUiAutomation.ps1') -Raw
-Assert-That ($realPhase -match 'Arm-DevFleetE2EInteractiveLogon' -and $realPhase -match 'Restart-DevFleetE2EL1' -and $realPhase -match 'Wait-DevFleetE2EInteractiveDesktop' -and $realPhase -match 'Disarm-DevFleetE2EInteractiveLogon') 'legitimate product reboot re-arms one-shot autologon'
-Assert-That ($realPhase -match 'New-ScheduledTaskPrincipal -UserId \(\[string\]\$spec\.taskPrincipalUserId\)' -and $realPhase -match 'Resolve-TaskSid' -and $realPhase -match 'principalSidSha256' -and $realPhase -match 'driverIdentity' -and $realPhase -match 'candidateIdentity' -and $realPhase -match 'interactiveProof\.sessionId') 'driver and candidate share exact interactive Explorer session'
-Assert-That ($wpfDriver -match '\$driverPid\s*=\s*\[int\]\$PID' -and $wpfDriver -match 'driverSessionId' -and $wpfDriver -match 'processId=\[int\]\$process\.Id' -and $wpfDriver -match 'sessionId=\[int\]\$process\.SessionId') 'WPF driver records its own PID/session separately from candidate'
-$rebootStart=$realPhase.IndexOf('function Invoke-ProductRebootBoundary {');$rebootEnd=$realPhase.IndexOf('function New-ProductLifecycleCompletionAuthority {',$rebootStart);$rebootPath=$realPhase.Substring($rebootStart,$rebootEnd-$rebootStart)
-Assert-That ($rebootPath -notmatch 'Restart-Computer -Force' -and $rebootPath -notmatch 'AutoLogonCount.*100') 'product reboot path has no guest self-reboot or synthetic autologon retry'
-
-[pscustomobject]@{status=if($failures.Count -eq 0){'PASS'}else{'FAIL'};passed=$passed;total=$total;failures=@($failures)}|ConvertTo-Json -Depth 6
-
-```
-
-
-## FILE: automation/release-e2e/tests/Test-LifecycleObserverBehavior.ps1
-
-SHA256: 06eba1d0d13ede6fe3f63ff246d31b5bc725ef6901a430521e9641c2b4cb52f0 | Bytes: 99553 | Git mode: 100644
-
-```
-[CmdletBinding()]
-param([string]$WorkspaceRoot)
-$ErrorActionPreference='Stop'
-if(-not $WorkspaceRoot){$WorkspaceRoot=(Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path}
-$module=Join-Path $WorkspaceRoot 'automation\release-e2e\modules\executors\Invoke-RealProductPhase.psm1'
-Import-Module $module -Force
-Import-Module (Join-Path $WorkspaceRoot 'automation\release-e2e\modules\HarnessBudget.psm1') -Force
-Import-Module (Join-Path $WorkspaceRoot 'automation\release-e2e\modules\GuestSession.psm1') -Force
-$passed=0;$failed=[System.Collections.Generic.List[string]]::new();$script:testEvidenceDirs=[System.Collections.Generic.List[string]]::new();$lifeRoot=$null
-try {
-function Check([bool]$Condition,[string]$Name){if($Condition){$script:passed++}else{[void]$script:failed.Add($Name)}}
-$prior=[pscustomobject]@{checkpointGeneration=1;transactionId='a'*32;payloadSha256='b'*64;action='FreshInstall';role='Primary / Desktop';state='waiting-for-reboot'}
-function Obs([hashtable]$Values){$base=[ordered]@{checkpointPresent=$false;checkpoint=$null;matchingConsumedReceipt=$false;installStateValid=$false;canonicalOwnershipValid=$false;authenticatedHealthOk=$false;terminalFailure=$false};foreach($k in $Values.Keys){$base[$k]=$Values[$k]};[pscustomobject]$base}
-$next=Obs @{checkpointPresent=$true;checkpoint=[pscustomobject]@{checkpointGeneration=2;transactionId='a'*32;payloadSha256='b'*64;action='FreshInstall';role='Primary / Desktop';state='waiting-for-reboot'}}
-Check ((Get-DurableProgressClassification -Observation $next -PriorCheckpoint $prior -MaxGeneration 3) -eq 'NEXT_REBOOT') 'generation advancement returns NEXT_REBOOT'
-$gen1=Obs @{checkpointPresent=$true;checkpoint=$prior}
-Check ((Get-DurableProgressClassification -Observation $gen1 -PriorCheckpoint $prior -MaxGeneration 3) -eq 'NO_PROGRESS') 'generation 1 persistence is not another reboot'
-$complete=Obs @{matchingConsumedReceipt=$true;installStateValid=$true;canonicalOwnershipValid=$true;authenticatedHealthOk=$true}
-Check ((Get-DurableProgressClassification -Observation $complete -PriorCheckpoint $prior) -eq 'COMPLETED') 'matching receipt/install/ownership/authenticated health returns COMPLETED'
-$mismatch=Obs @{checkpointPresent=$true;checkpoint=[pscustomobject]@{checkpointGeneration=2;transactionId='c'*32;payloadSha256='b'*64;action='FreshInstall';role='Primary / Desktop';state='waiting-for-reboot'}}
-$mismatch.terminalFailure=$true
-Check ((Get-DurableProgressClassification -Observation $mismatch -PriorCheckpoint $prior) -eq 'TERMINAL_FAILURE') 'binding mismatch returns TERMINAL_FAILURE'
-$completedCheckpoint=Obs @{checkpointPresent=$true;checkpoint=$next.checkpoint;matchingConsumedReceipt=$true;installStateValid=$true;canonicalOwnershipValid=$true;authenticatedHealthOk=$true;status='COMPLETED'}
-Check ((Get-DurableProgressClassification -Observation $completedCheckpoint -PriorCheckpoint $prior -MaxGeneration 3) -eq 'TERMINAL_FAILURE') 'COMPLETED carrying an active checkpoint fails closed'
-$hiddenForeignCheckpoint=Obs @{checkpointPresent=$false;checkpoint=$mismatch.checkpoint}
-Check ((Get-DurableProgressClassification -Observation $hiddenForeignCheckpoint -PriorCheckpoint $prior -MaxGeneration 3) -eq 'TERMINAL_FAILURE') 'checkpointPresent false cannot hide a foreign checkpoint'
-$flagWithoutCheckpoint=Obs @{checkpointPresent=$true;checkpoint=$null}
-Check ((Get-DurableProgressClassification -Observation $flagWithoutCheckpoint -PriorCheckpoint $prior -MaxGeneration 3) -eq 'TERMINAL_FAILURE') 'checkpointPresent true with null checkpoint fails closed'
-$pending=Obs @{}
-Check ((Get-DurableProgressClassification -Observation $pending -PriorCheckpoint $prior) -ne 'NO_PROGRESS_TIMEOUT') 'DURABLE_PENDING is an intermediate observation, never timeout'
-Check ((Get-Command Wait-DevFleetProductLifecycleTransition).Name -eq 'Wait-DevFleetProductLifecycleTransition') 'observer is callable at runtime'
-$realPhaseModule=Get-Module Invoke-RealProductPhase
-# A source test must remain runnable while shipping edits await a new signed
-# candidate. Bind a temporary fixture inventory to an exact copy of this config;
-# never modify the live CURRENT-CANDIDATE authority to run a unit regression.
-$identityFixture=Join-Path ([IO.Path]::GetTempPath()) ('devfleet-observer-identity-'+[guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path (Join-Path $identityFixture 'source/config') -Force|Out-Null
-[void]$script:testEvidenceDirs.Add($identityFixture)
-$identityConfig=Join-Path $identityFixture 'source/config/devfleet.config.json'
-Copy-Item -LiteralPath (Join-Path $WorkspaceRoot 'source/config/devfleet.config.json') -Destination $identityConfig
-$identityHash=(Get-FileHash -LiteralPath $identityConfig).Hash.ToLowerInvariant()
-[ordered]@{candidateIsCurrent=$true;sourceChangedSinceCandidate=$false;rebuildRequired=$false;shippingInputIdentity=('c'*64);candidateShippingInputIdentity=('c'*64);candidateGitCommit=('d'*40);candidateShippingInputs=@([ordered]@{root='source';path='config/devfleet.config.json';sha256=$identityHash})}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $identityFixture 'CURRENT-CANDIDATE.json') -Encoding utf8NoBOM
-$productionContext=[pscustomobject]@{workspaceRoot=$identityFixture;r
+$policy

@@ -1,10 +1,304 @@
 # DevFleet source part 052
 
 Full-source UTF-8 byte interval [2371500, 2418000); read in order. This is a contiguous text slice, so a code fence/file may continue across parts.
-Payload SHA-256: ae8f574c65505f37e8fec69434b36744b49b58cfa122ef05970b9ee04e6d177a
+Payload SHA-256: c931ca382b7d6e4884f79626cc61f33511f8373e9eb717cbceb854ca6333b058
 
 <!-- BEGIN SOURCE SLICE -->
-()
+ethod == "GET":
+            body = self.form("/logout")
+            if "operation" in query:
+                op_id = query["operation"][0]
+                state = self.operations[op_id]["state"]
+                css = "complete" if state == "completed" else "failed" if state == "failed" else ""
+                if self.fault == "rendered-disagreement":
+                    css = "failed" if css == "complete" else "complete"
+                body += f'<section class="operation-banner {css}" data-operation-id="{op_id}"></section>'
+            if query.get("view") == ["projects"]:
+                body += self.form("/projects/create")
+            if query.get("view") == ["settings"]:
+                for path in self.quarantine.iterdir():
+                    if path.is_dir():
+                        body += self.form("/quarantine/restore", {"name": path.name})
+            if parsed.path.startswith("/projects/"):
+                slug = parsed.path.split("/")[2]
+                if (self.root / slug).is_dir() and (self.root / slug / ".devfleet/project.json").exists():
+                    meta = self.metadata(slug)
+                    body += f'<section data-project-state="{meta["lifecycle_status"]}"></section>'
+                    for action in ("start", "stop", "restart", "health", "test", "backup", "quarantine", "restore-vault"):
+                        body += self.form(f"/projects/{slug}/{action}")
+            return self.response(body)
+        assert method == "POST" and fields["csrf_token"] == self.csrf
+        if parsed.path.startswith("/projects/"):
+            slug = parsed.path.split("/")[2]
+            if "-recovered-" in slug and parsed.path.endswith("/start"):
+                if self.fault == "copy-admitted":
+                    return self.admit("start", slug, "completed", "")
+                if self.fault == "copy-operation-created":
+                    self.admit("start", slug, "failed", "")
+                return self.response("recovery-only", 409)
+        if parsed.path == "/projects/create":
+            kind, slug = "create", fields["slug"]
+        elif parsed.path == "/quarantine/restore":
+            kind, slug = "restore-quarantine", fields["name"]
+        else:
+            slug, kind = parsed.path.split("/")[2:4]
+        try:
+            value = self.action(kind, slug, fields)
+            return self.admit(kind, slug, "completed", value)
+        except ValueError as exc:
+            return self.admit(kind, slug, "failed", "", str(exc))
+
+    def admit(self, kind, slug, state, result, error=""):
+        self.sequence += 1
+        op_id = f"op-{self.sequence:08d}"
+        value = {"id": op_id, "kind": kind, "project": slug, "state": state,
+                 "result": result, "error": error, "log": [{"message": "private arbitrary log " + self.password}]}
+        self.operations[op_id] = value
+        write_json(self.runtime / "operations" / (op_id + ".json"), value)
+        return self.response("", 303, {"location": "/?operation=" + op_id})
+
+    def action(self, kind, slug, fields):
+        path = self.root / slug
+        if kind == "create":
+            assert fields["template"] == "generic"
+            assert fields["runtime_isolation"] == "container" and fields["git_url"] == ""
+            assert fields["profile"] == "balanced" and fields.get("use_ollama", "") == ""
+            path.mkdir()
+            (path / ".devfleet").mkdir()
+            (path / ".devcontainer").mkdir()
+            (path / "compose.yaml").write_text("services:\n  dev:\n    image: harmless\n")
+            (path / ".devcontainer/devcontainer.json").write_text("{}")
+            for name in ("smoke-test", "health-check"):
+                (path / ".devfleet" / (name + ".sh")).write_text("#!/bin/sh\ntrue\n")
+            meta = {"schema_version": 3, "managed_by": "devfleet", "slug": slug,
+                    "project_id": str(uuid.uuid4()), "runtime_id": "df_" + slug.replace("-", "_"),
+                    "runtime_provider": "docker-compose", "deployment_id": self.request_data["execution"]["deploymentId"],
+                    "host_id": self.request_data["execution"]["nodeName"], "template": "generic",
+                    "lifecycle_status": "ready", "health_status": "unknown"}
+            self.save_metadata(slug, meta)
+            write_json(path / ".devfleet/ownership-lease.json", {"active": False, "active_node": meta["host_id"]})
+            return meta
+        if kind == "restore-quarantine":
+            quarantined = self.quarantine / slug
+            meta = json.loads((quarantined / ".devfleet/project.json").read_text())
+            target = self.root / meta["slug"]
+            if target.exists():
+                raise ValueError("Quarantine restore blocked: path already exists.")
+            quarantined.rename(target)
+            return str(target)
+        meta = self.metadata(slug)
+        if kind == "start":
+            lease = json.loads((path / ".devfleet/ownership-lease.json").read_text())
+            if lease.get("active") and lease.get("active_node") != meta["host_id"]:
+                raise ValueError("Ownership lease belongs to a foreign node.")
+            if "future_execution_field" in (path / "compose.yaml").read_text():
+                raise ValueError("Security analyzer found blocking boundary violations.")
+            meta["lifecycle_status"] = "running"
+            self.save_metadata(slug, meta)
+            identifier = hashlib.sha256((slug + str(self.sequence)).encode()).hexdigest()
+            self.container_data[identifier] = {
+                "Id": identifier, "State": {"Running": True, "Health": {"Status": "healthy"}},
+                "Config": {"Labels": {
+                    **{label: meta[key] for key, label in driver.LABELS.items()},
+                    "com.docker.compose.project": meta["runtime_id"], "com.docker.compose.service": "dev",
+                }},
+            }
+            return "started"
+        if kind == "stop":
+            self.container_data = {key: item for key, item in self.container_data.items()
+                                   if item["Config"]["Labels"]["io.devfleet.project-id"] != meta["project_id"]}
+            meta["lifecycle_status"] = "stopped"
+            self.save_metadata(slug, meta)
+            return "stopped"
+        if kind in {"health", "test"}:
+            if self.fault == "health-failure" and kind == "health":
+                raise ValueError("health failure with " + self.password)
+            if kind == "health":
+                meta["health_status"] = "healthy"
+                self.save_metadata(slug, meta)
+            return "Template smoke test passed."
+        if kind == "backup":
+            backup_id = slug + "-20260916-000000-" + f"{self.sequence:08x}"
+            backup_dir = self.runtime / "workspace-backups" / backup_id
+            backup_dir.mkdir(parents=True)
+            archive = backup_dir / (slug + ".tar.gz")
+            archive.write_bytes(b"fake archive " + (path / driver.SENTINEL_FILE).read_bytes())
+            archive_hash = driver.digest(archive)
+            manifest = {"schema_version": 1, "backup_id": backup_id, "project_id": meta["project_id"], "slug": slug,
+                        "verification": {"status": "verified", "integrity_verified": True},
+                        "workspace": {"archive_sha256": archive_hash}}
+            write_json(backup_dir / "manifest.json", manifest)
+            meta.update(backup_id=backup_id, backup_path=str(archive), backup_sha256=archive_hash, backup_status="verified")
+            self.save_metadata(slug, meta)
+            snapshot = self.runtime / "fake-remote-snapshots" / backup_id
+            shutil.copytree(path, snapshot)
+            self.snapshots[slug] = snapshot
+            if self.fault == "broker-failed-after-archive":
+                raise ValueError("Vault broker unavailable")
+            return json.dumps({"ok": True, "backup_id": backup_id, "backup_sha256": archive_hash,
+                               "backup_status": "verified", "vault_upload_status": "verified",
+                               "durability_level": "local" if self.fault == "local-only-backup" else "vault"})
+        if kind == "quarantine":
+            assert fields["confirm_quarantine"] == "true"
+            self.action("stop", slug, {})
+            self.action("backup", slug, {})
+            destination = self.quarantine / ("20260916-000000-" + slug)
+            path.rename(destination)
+            return str(destination)
+        if kind == "restore-vault":
+            destination = self.root / (slug + "-recovered-20260916-000000-1234abcd")
+            shutil.copytree(self.snapshots[slug], destination)
+            if self.fault == "copy-content":
+                (destination / driver.SENTINEL_FILE).write_text("changed")
+            return str(destination)
+        raise AssertionError(kind)
+
+
+class FakeProbe:
+    def __init__(self, daemon):
+        self.daemon = daemon
+        self.generation = "a"
+        self.boot = str(uuid.uuid4())
+
+    def service(self):
+        return {"invocationId": self.generation * 32, "pid": 123 if self.generation == "a" else 124,
+                "active": True, "user": "devfleet-control", "bootId": self.boot}
+
+    def preflight(self, request):
+        return {"service": self.service(), "brokerAccessible": True, "vaultTransport": "tailscale-rest"}
+
+    def containers(self, project_id):
+        return [copy.deepcopy(item) for item in self.daemon.container_data.values()
+                if item["Config"]["Labels"]["io.devfleet.project-id"] == project_id]
+
+
+def make_runner(request, tmp_path):
+    daemon = FakeDaemon(request)
+    probe = FakeProbe(daemon)
+    ui = driver.Dashboard(daemon, driver.instant(request["deadlineUtc"]))
+    runner = driver.AcceptanceRunner(request, tmp_path / "state.json", ui, probe)
+    return runner, daemon, probe
+
+
+def resume_runner(request, runner, daemon, probe):
+    ui = driver.Dashboard(daemon, driver.instant(request["deadlineUtc"]))
+    return driver.AcceptanceRunner(request, runner.state_path, ui, probe, state=driver.read_json(runner.state_path))
+
+
+def test_two_stage_real_route_contract(request_data, tmp_path):
+    runner, daemon, probe = make_runner(request_data, tmp_path)
+    prepared = runner.execute("prepare", ("unit-admin", daemon.password))
+    assert prepared["status"] == "PREPARED", prepared
+    assert [row["status"] for row in prepared["journeys"]] == ["PASS", "PASS", "IN_PROGRESS", "NOT_RUN", "NOT_RUN"]
+    assert prepared["cleanup"]["status"] == "NOT_RUN"
+    probe.generation = "b"
+    resumed = resume_runner(request_data, runner, daemon, probe)
+    report = resumed.execute("resume", ("unit-admin", daemon.password))
+    assert report["status"] == "PASS", report
+    assert [row["id"] for row in report["journeys"]] == ["U01", "U02", "U03", "U04", "U05"]
+    assert all(row["assertions"] == {key: True for key in driver.ASSERTIONS[row["id"]]} for row in report["journeys"])
+    copy_start = report["journeys"][4]["observations"]["copyStart"]
+    assert copy_start["httpStatus"] == 409 and copy_start["operationCreated"] is False
+    assert copy_start["beforeInventorySha256"] == copy_start["afterInventorySha256"]
+    assert report["journeys"][4]["observations"]["copyAdopted"] is False
+    assert report["cleanup"]["status"] == "PASS"
+    assert not list(Path(request_data["paths"]["workspaces"]).iterdir())
+    assert not list(Path(request_data["paths"]["quarantine"]).iterdir())
+    assert daemon.container_data == {}
+    serialized = json.dumps(report)
+    for secret in (daemon.password, daemon.csrf, daemon.cookie, "unit-admin"):
+        assert secret not in serialized
+    assert "private arbitrary log" not in serialized
+    assert report["execution"]["browserJavascriptExercised"] is False
+    assert not any("/api/" in route for _, route, _ in daemon.requests)
+
+
+@pytest.mark.parametrize("fault,code", [
+    ("health-failure", "OPERATION_UNEXPECTED_TERMINAL"),
+    ("rendered-disagreement", "RENDERED_OPERATION_DISAGREES"),
+])
+def test_prepare_failures_cleanup_without_laundering_primary(request_data, tmp_path, fault, code):
+    runner, daemon, _ = make_runner(request_data, tmp_path)
+    daemon.fault = fault
+    report = runner.execute("prepare", ("unit-admin", daemon.password))
+    assert report["status"] == "BLOCKED"
+    assert report["failure"]["code"] == code
+    assert daemon.password not in json.dumps(report)
+    assert any(row["state"] in {"failed", "completed"} for row in report["operations"])
+    assert not any(row["status"] == "PASS" for row in report["journeys"] if row["id"] in {"U02", "U03", "U04", "U05"})
+
+
+@pytest.mark.parametrize("fault,code", [
+    ("local-only-backup", "VAULT_UPLOAD_NOT_VERIFIED"),
+    ("copy-content", "FIXTURE_SENTINEL_MISMATCH"),
+    ("copy-admitted", "RECOVERED_COPY_START_NOT_REJECTED"),
+    ("copy-operation-created", "RECOVERED_COPY_OPERATION_WAS_CREATED"),
+])
+def test_resume_rejects_false_recovery_proofs(request_data, tmp_path, fault, code):
+    runner, daemon, probe = make_runner(request_data, tmp_path)
+    assert runner.execute("prepare", ("unit-admin", daemon.password))["status"] == "PREPARED"
+    probe.generation = "b"
+    daemon.fault = fault
+    report = resume_runner(request_data, runner, daemon, probe).execute("resume", ("unit-admin", daemon.password))
+    assert report["status"] == "BLOCKED"
+    assert report["failure"]["code"] == code, report
+    assert report["journeys"][4]["status"] != "PASS"
+    assert daemon.password not in json.dumps(report)
+    if fault == "copy-content":
+        assert report["cleanup"]["status"] == "BLOCKED"
+        assert report["cleanupFailure"]["code"] == "CLEANUP_UNVERIFIED_RECOVERY_REQUIRES_PARENT"
+
+
+def test_failed_broker_archive_is_discovered_and_cleaned(request_data, tmp_path):
+    runner, daemon, probe = make_runner(request_data, tmp_path)
+    runner.execute("prepare", ("unit-admin", daemon.password))
+    probe.generation = "b"
+    daemon.fault = "broker-failed-after-archive"
+    report = resume_runner(request_data, runner, daemon, probe).execute("resume", ("unit-admin", daemon.password))
+    assert report["status"] == "BLOCKED"
+    assert report["failure"]["code"] == "OPERATION_UNEXPECTED_TERMINAL"
+    assert report["cleanup"]["status"] == "PASS", report
+    assert not list((Path(request_data["paths"]["runtimeRoot"]) / "workspace-backups").iterdir())
+    assert any(row["kind"] == "backup" and row["status"] == "REMOVED" for row in report["cleanup"]["resources"])
+
+
+@pytest.mark.parametrize("restart,reboot,code", [
+    (False, False, "SERVICE_RESTART_NOT_OBSERVED"),
+    (True, True, "UNEXPECTED_GUEST_REBOOT"),
+])
+def test_resume_requires_service_only_restart(request_data, tmp_path, restart, reboot, code):
+    runner, daemon, probe = make_runner(request_data, tmp_path)
+    runner.execute("prepare", ("unit-admin", daemon.password))
+    if restart:
+        probe.generation = "b"
+    if reboot:
+        probe.boot = str(uuid.uuid4())
+    report = resume_runner(request_data, runner, daemon, probe).execute("resume", ("unit-admin", daemon.password))
+    assert report["status"] == "BLOCKED"
+    assert report["failure"]["code"] == code
+
+
+def test_cleanup_failure_does_not_replace_primary(request_data, tmp_path, monkeypatch):
+    runner, daemon, _ = make_runner(request_data, tmp_path)
+    daemon.fault = "health-failure"
+    def bad_cleanup():
+        raise RuntimeError("cleanup leaked " + daemon.password)
+    monkeypatch.setattr(runner, "cleanup", bad_cleanup)
+    report = runner.execute("prepare", ("unit-admin", daemon.password))
+    assert report["failure"]["code"] == "OPERATION_UNEXPECTED_TERMINAL"
+    assert report["cleanupFailure"]["code"] == "UNEXPECTED_DRIVER_FAILURE"
+    assert report["cleanup"]["status"] == "BLOCKED"
+    assert daemon.password not in json.dumps(report)
+    assert "cleanup leaked" not in json.dumps(report)
+
+
+def test_owner_mismatch_refuses_cleanup(request_data, tmp_path):
+    runner, daemon, _ = make_runner(request_data, tmp_path)
+    runner.execute("prepare", ("unit-admin", daemon.password))
+    path = Path(runner.fixture["originalPath"])
+    write_json(path / driver.OWNER_FILE, {"runId": "someone-else"})
+    with pytest.raises(driver.AcceptanceError, match="FIXTURE_OWNER_MISMATCH"):
+        runner.cleanup()
     assert path.is_dir()
 
 
@@ -615,280 +909,4 @@ do not create a new environment solely because a session changed.
 | `automation/release-e2e/Invoke-FocusedMaintenanceSentinels.ps1` | `-WorkspaceRoot`, `-Candidate`, `-ConfigPath`, `-RunId`; existing RAM override not newly authorized |
 | `automation/release-e2e/Invoke-DevFleetReleaseE2E.ps1` | FullRelease via `-Mode FullRelease -ConfirmDisposableLab -ExecuteExpensive` plus verified workspace/candidate/RunId arguments; inspect current configuration and safety first |
 
-Do not turn on `-SyntheticResume`, `-KeepLab`, `-AllowRamPressure`, destructive operations,
-or alternate launch modes merely because a script exposes them. Existing script defaults
-are not permission to violate the safety fence. No blind `ResumeLast` onto historical evidence.
-
-## Candidate and packaging tools
-
-`tools/Finalize-CandidateEvidence.ps1` uses **`-Workspace`**, not `-WorkspaceRoot`.
-It regenerates authority and can clear validation/proof eligibility; use only when binding
-is actually required. It is not the normal command for every memory/status update.
-
-`tools/Update-CurrentReleaseAuthority.ps1`, `tools/Invoke-DevFleetFinalConvergence.ps1`,
-`tools/Build-AIAuditBundle.ps1`, and the native audit/release validators are existing tools.
-Inspect their live help/param/parser interface; use the correct DIAGNOSTIC or RELEASE mode.
-The uploaded ZIP remaps some native `tools/` files to `release-tooling/` for review: those
-archive paths do not supersede the live repository paths.
-
-The uploaded shipping identity code enumerates `source/` and `installer-source/`; its
-separate tooling fingerprint enumerates `tools/` and `automation/`. This package deliberately
-uses other locations. Verify the actual live rules, including dirty-file gates. Commit stable
-orchestration documents explicitly rather than weakening source-clean checks. Dynamic audit
-memory is not a reason to rebuild or run the finalizer repeatedly.
-
-## Observation fallback
-
-Use only an already available, supported read-only console/screenshot capability bound to
-the exact disposable L1. If unavailable, a concise request to Dylan for that VM window and
-last relevant non-secret log lines is the fallback. No new remote desktop service, global
-agent installation, whole-host screen capture or simulated computer-use evidence.
-
-````
-
-
-## FILE: docs/ai/devfleet-release/DONE.md
-
-SHA256: 6ac7bd826771941e6792d4efa16a135010b1f05ff9eb3a6337269330a3df2042 | Bytes: 4245 | Git mode: 100644
-
-```
-# Definition of done
-
-## D0 — scaffolding installed (administrative only)
-
-Root instruction discovery, this skill and memory paths are installed; existing instructions
-and memory preserved; stable additions classified and integrated. This earns no product,
-proof, FullRelease or promotion credit.
-
-## D1 — current blocker resolved
-
-S1 target-environment initial/resume launch acknowledgement passes, followed by a real
-exact signed installation that crosses required reboot boundaries and reaches matching
-durable completion, ownership and authenticated health. Correct reporting of a startup
-failure is useful regression evidence, not resolution of the whole product blocker.
-
-## D2 — PASS — INTERNAL RELEASE ELIGIBLE
-
-All following conditions hold for the same **current** candidate/shipping/release/material
-tooling identities and the required independent run lineage:
-
-- Coherent current signed candidate, actual required Authenticode identity, exact artifact
-  tuple; `candidateIsCurrent=true`, `sourceChangedSinceCandidate=false`, `rebuildRequired=false`.
-  Candidate build commit remains truthful even when repository HEAD contains newer tooling.
-- Proof #1 PASS and Proof #2 PASS, 2/2, independent RunIds/clean starts and required Desktop
-  and Laptop/Failover/Vault coverage. No smoke, ContractProbe, synthetic or manual-only substitute.
-- Maintenance/sentinels PASS; Repair, Clean Reinstall, Uninstall, Factory Reset and
-  Reboot/Resume each PASS, 5/5 under native acceptance semantics.
-- One coherent current FullRelease PASS, with Host Agent, real WPF/reboot, Linux, Windows
-  sentinels, ownership/recovery/destructive, Vault, surrogate and Tailscale gates resolved
-  in the form permitted by their actual contracts. No new waivers or historical stitching.
-- U01–U05 in TEST-PLAN have real evidence, or existing equivalent **current** runtime
-  evidence demonstrably covers the same supported behavior. Missing tests are not assumed passes.
-- Current RECONCILE PASS; durable CLEANUP PASS; positively established **L1 OFF / L2 ABSENT**;
-  no owned coordinator/worker/helper/build/proof execution left running.
-- New final `outputs/DevFleet-v1.2.13-AI-Audit-LATEST.zip` represents final state and exact
-  source/evidence; clean-extracted **RELEASE-mode** validation, source/artifact checks,
-  secret scan and bundle/live-state match PASS. SHA-256 sidecar produced after ZIP finalization.
-- Current machine authority truthfully reports `validationEvidenceCurrent=true`,
-  `fullReleasePassed=true`, `internalPromotionAllowed=true`, `publicPromotionAllowed=false`,
-  `publicPublisherTrust=false`.
-- `F-005 attempted: NO`, `formatter-only audit cleanup performed: NO`,
-  `F-005 structural refactoring performed: NO`. No safety violation hidden by a green test.
-
-Only native validators/generators may establish authority. These checkboxes and memory
-cannot set promotion flags. A validator/schema defect is fixed and tested separately;
-a forbidden manual PASS is never a workaround. Unknown, skipped, stale, dispatch-only,
-NOT_OBSERVED, NOT_RUN and BLOCKED are not PASS.
-
-## D3 — stable baseline ready for feature work
-
-After D2, record the verified stable source/tooling HEAD and original candidate build commit,
-artifact hashes/paths, exact passing RunIds, supported deployment/trust scope, recovery
-instructions and local immutable reference through the existing Git workflow. Do not move an
-existing release tag or alter signed bytes. Prepare FEATURE-HANDOFF with this identity.
-No GitHub push or automatic production installation is authorized.
-
-Astra features live on a separate feature branch/worktree, with no writes to release evidence
-or the certification lab. Before D2, only isolated design/prototype work is allowed, no merge
-into the release candidate. “Public stable release” would require a separately agreed scope;
-D2 is the user's private/internal milestone, not public publisher trust.
-
-## Blocked is an acceptable truthful closeout, not completion
-
-State the exact first failed boundary, last real observation, evidence, remaining gates,
-consumed authorization, what changed, safe terminal state and the next falsifiable action.
-Do not rename a good diagnostic archive or a valid signature as a release.
-
-```
-
-
-## FILE: docs/ai/devfleet-release/FEATURE-HANDOFF.md
-
-SHA256: ef5747b1322ad80a5a1e69ae07d6d1eead0a496d282b572dc95fb99d3f078c66 | Bytes: 3163 | Git mode: 100644
-
-```
-# Stable baseline and Astra feature track
-
-This file defines separation; it does not authorize adding a particular feature now or
-switching the active release root. Verify available model identifiers/capabilities when used.
-
-Before release: Astra can work on a separately requested specification/prototype in another
-feature worktree. It must not write the release worktree, artifacts, canonical evidence,
-shared runtime configuration, credentials or certification lab. Do not run concurrent heavy
-feature tests while the disposable release environment is using the host budget.
-
-After DONE/D2: Sol records the stable baseline below in a new evidence-backed handoff, preserves
-the signed candidate and known-good source/tooling reference with the native Git workflow,
-and leaves release artifacts untouched. Avoid moving tags, hard resets and pushes.
-
-## Handoff fields to populate only from proven release evidence
-
-- Release eligibility verdict and evidence time.
-- Stable source/tooling HEAD and original candidate build commit (not necessarily equal).
-- Shipping/release/tooling identities; signed EXE/TAR/portable/installer-source paths and hashes.
-- Two proof RunIds, role coverage, maintenance 5/5, FullRelease, real-use U01–U05 evidence.
-- RECONCILE/CLEANUP and final L1/L2 state; RELEASE-mode audit ZIP/sidecar.
-- Supported private/internal deployment scope and self-signed trust limitations.
-- Known nonblocking limitations with source; no unresolved release blocker hidden as a feature.
-- Exact read-only baseline/reference and separately chosen feature branch/worktree path.
-- Recovery/rollback instructions and baseline regression commands.
-
-No fields above are currently pre-populated with a release PASS.
-
-## One-feature acceptance contract
-
-Astra starts from the verified baseline and a single approved feature request. Define visible
-user behavior, non-goals, affected modules, data/config compatibility, failure behavior,
-security/ownership implications, tests and rollback before editing. Implement the smallest
-useful slice; keep unrelated installer, provisioning, reboot, Vault and ownership changes out
-unless that feature explicitly requires them. Do not rewrite the application to add one screen.
-
-Run existing impacted regressions and new feature acceptance. Before integration, compare
-shipping and tooling deltas and repeat the appropriate release qualification for the new
-version. Never carry v1.2.13's passing certification forward onto changed feature bytes.
-The stable baseline remains available even when the next version fails. Do not turn all future
-feature development into another unlimited audit campaign.
-
-## Release acceleration handoff
-
-The bounded future-release sequence and validation matrix are maintained in
-`audit/agent-memory/RELEASE-ACCELERATION.md`, `COMPONENT-MAP.md`, and
-`VALIDATION-MATRIX.md`. They are navigation only: Vault-broker restore,
-recovery-only identity/read boundaries, same-install REAL-USE U01-U05,
-standard-token immutable evidence, and immutable final RELEASE audit/acceptance
-remain required and currently unverified. Do not populate the release fields
-above from these planning documents.
-
-```
-
-
-## FILE: docs/ai/devfleet-release/MEMORY-PROTOCOL.md
-
-SHA256: 2d85fc7f367ea2702011623299830c3f8c6fce2b9acf76589619f95b4819695f | Bytes: 5093 | Git mode: 100644
-
-```
-# Durable Markdown memory — maintained by Codex
-
-Purpose: remember fixes, failures, decisions and next actions without re-reading giant
-transcripts or turning guesses into facts. This is an agent-maintained file workflow,
-not a database service, background daemon, automatic hook or guarantee of model compliance.
-No new subscriptions, MCP servers, embeddings or global Codex-memory edits are needed.
-
-## Where information belongs
-
-| Path relative to repo | Meaning / authority |
-|---|---|
-| `audit/agent-memory/CURRENT.md` | Short navigation snapshot; exact next action and pointers; never release authority |
-| `audit/agent-memory/INDEX.md` | Topic/keyword index into only relevant lessons |
-| `audit/agent-memory/EDGE-CASES.md` | Stable anti-regression invariants, scoped by evidence and condition |
-| `audit/agent-memory/DECISIONS.md` | Why an approach/policy was chosen and what would invalidate it |
-| `audit/agent-memory/ATTEMPTS.md` and `attempts/` | Historical ledger pointers and newly authorized reservations/results |
-| `audit/agent-memory/TEST-RESULTS.md` | Test IDs/inputs/outcome/evidence/limits; no inherited PASS without binding |
-| `audit/agent-memory/HELPERS.md` | Compact projection of the native shared helper allocation |
-| `audit/agent-memory/incidents/` | One durable record per meaningful failure class |
-| `audit/agent-memory/sessions/` | Compact pause/closeout notes, created only at meaningful boundaries |
-
-Use existing native JSON candidate/proof/release/attempt ledgers as the machine authority.
-If a native ledger schema lacks a field, a separate Markdown reservation can record policy
-accounting, but must not alter that schema or become a second release-authority generator.
-
-## Write triggers — no routine manual journaling by Dylan
-
-Sol updates memory in the same turn after: a test or live operation terminalizes; a cause is
-proven or a hypothesis falsified; a fix is validated; candidate/tooling changes; a reusable
-edge case is discovered; an authorized limit is consumed; or pause/blocker/release closeout.
-Before a risky/long operation write its reservation and next expected evidence. After it
-finishes reconcile result/counters before starting another. Do not add entries on every poll,
-command or unchanged observation. Helpers return findings; only Sol edits shared memory.
-
-A new fact record contains:
-`ID; observed UTC; status; scope/tuple; symptom; evidence path + SHA-256 or exact symbol;
-proven cause or hypothesis; action; regression; runtime validation level; invalidation trigger;
-next action/supersedes.` Use `templates/INCIDENT.md` and `templates/ATTEMPT.md`.
-
-Allowed labels: `HISTORICAL`, `HYPOTHESIS`, `PROVEN_SOURCE_DEFECT`, `FIX_IMPLEMENTED`,
-`LOCAL_TESTED`, `LIVE_VALIDATED`, `RELEASE_CERTIFIED`, `FALSIFIED`, `SUPERSEDED`, `UNKNOWN`.
-Do not flatten LOCAL_TESTED into LIVE_VALIDATED. The September 5 seed is offline and must
-remain explicitly identified as such until new observations exist.
-
-## Read and reuse rules
-
-At resume read CURRENT + INDEX, verify live tuple, then read only matched incident/edge sections.
-Before reopening a familiar issue, compare its exact symptom, validity scope and regression.
-Reopen only with a recorded current contradiction or missing qualifying evidence; missing
-release proof alone is not proof that every previously solved subproblem recurred.
-
-Reuse a passing test only when relevant production/test/dependency/environment inputs match
-its evidence. A recorded count without such provenance is informational, not certification.
-When source changes, mark dependent results stale with a reason; do not delete their history.
-A mutable summary cannot retroactively change the exact inputs of a completed proof.
-
-## Bounded maintenance and integrity
-
-Keep CURRENT approximately one screen (target <=150 lines) and INDEX <=100 lines. Put long
-explanations in incident files. When a topic file grows past about 250 lines, archive closed
-entries to a named incident/session and leave indexed summaries; do not lose provenance.
-These are readability targets, not a reason to truncate essential evidence.
-
-Write UTF-8 via temp file and atomic replace; Sol is the single writer. Preserve historical
-facts and append corrections with `supersedes`, rather than quietly rewriting a false claim.
-Use repo-relative links, UTC timestamps and explicit null/unknown values. No secrets, tokens,
-credential hashes, private keys, unrestricted dumps or unrelated personal information.
-Exclude installation backups/raw instructions from public or AI review bundles by default.
-
-Dynamic memory is under audit to avoid routine edits becoming shipping changes in the
-uploaded inventory model. Recheck live fingerprint rules. Freeze stable docs/skill/AGENTS
-before qualification. Do not commit/rebind after each memory sentence or modify fingerprint
-exclusions to hide material code changes. At closeout include sanitized relevant current
-memory in the canonical audit only using the existing validated packaging approach; add
-needed tooling coverage before certification if that builder does not already support it.
-
-```
-
-
-## FILE: docs/ai/devfleet-release/SAFETY-AND-AUTHORITY.md
-
-SHA256: 1c84b23f81d24c14a4590d182ceae85a55b39c774855396f89ac9d6a5bff42e9 | Bytes: 6519 | Git mode: 100644
-
-```
-# Safety, authority and working conditions
-
-This carries forward the user's original DEVFLEET-AI-OPERATING-RULES.md. The adopted
-workflow amends only model/delegation assignment and runtime-attempt authorization.
-It does not weaken safety, candidate binding, evidence standards, or release gates.
-Higher-priority platform instructions and actual authorization controls remain binding.
-
-## Sole operator and permitted environment
-
-Sol XHigh is the release coordinator, sole authoritative repository writer, committer,
-signing operator, Hyper-V mutator, proof owner and release decision maker. Continue the
-user-selected YOLO/default-tier/Fast-off session; these documents do not change CLI or
-Windows settings. YOLO is not an isolation boundary and grants no exception to this file.
-
-Use only `C:\Users\Dylan\Documents\Codex\2026-08-12\ex-2\work\DevFleet-v1.2.13-development`
-on MULATTOTECHBOX for the release campaign. Use existing repository-local runtimes.
-Do not install global tools or change host settings to make a test convenient.
-
-Never reboot/shut down MULATTOTECHBOX; change AMD/Radeon or BIOS/UEFI; touch
-MulattoTechSurface; mutate `devfleet-primary`, `devfleet-project-m-techlabs-job-finder`,
-`DevFleet-H10-Linux`, or other protected/foreign resour
+Do not tu
