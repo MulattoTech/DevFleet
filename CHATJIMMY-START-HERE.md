@@ -2,6 +2,8 @@
 
 DevFleet v1.2.13 certification is **INCOMPLETE / BLOCKED**. This public repository contains reviewed publishable source, installer payload, release tooling and review documents. It excludes native credentials, VM/checkpoints, private ledgers, signed release artifacts and certification authority. A public clone cannot inherit native qualification.
 
+Pinned public source commit: [389c2a42f200](https://github.com/MulattoTech/DevFleet/tree/389c2a42f200c783ac3a50c5de80d11ae2c11b94). The following guide-pin commit changes documentation only.
+
 Original source snapshot: e9068790ae9b0f55baa25b258791cb14c9e7091f. There are 981 indexed native source/tooling/docs files and 131 ordered source-text parts, each under 50,000 UTF-8 bytes. The full-source document is larger than that limit; retrieve by subsystem and report coverage honestly.
 
 Start with [source index](ai/INDEX.md), [file inventory](ai/ORIGINAL-SOURCE-INVENTORY.json), [certification handoff](ai/CERTIFICATION-HANDOFF.md), [latest diagnostic](ai/diagnostics/2026-09-29-image-remote.md), [build guide](BUILD-FROM-CLONE.md), [DONE](docs/ai/devfleet-release/DONE.md) and [test plan](docs/ai/devfleet-release/TEST-PLAN.md).

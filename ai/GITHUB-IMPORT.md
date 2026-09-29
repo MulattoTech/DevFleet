@@ -2,6 +2,8 @@
 
 ## 2026-09-29 current source synchronization
 
+Pinned current source commit: [389c2a42f200](https://github.com/MulattoTech/DevFleet/tree/389c2a42f200c783ac3a50c5de80d11ae2c11b94).
+
 The owner explicitly requested this GitHub push. The reviewed 13-path tooling/test delta advances the source snapshot to native HEAD `e9068790ae9b0f55baa25b258791cb14c9e7091f`. The regenerated inventory contains 981 publishable native tracked files and 131 complete text parts. Signed shipping bytes and original native HEAD/qualification/baseline were not changed by publication. New sanitized diagnostic findings are advisory; native status remains BLOCKED. The public Git history stays separate, with private ledgers, credentials, raw transcripts, VM state and native history excluded.
 
 ## 2026-09-28 publishable-source synchronization
