@@ -83,6 +83,11 @@ Legend: 🟩 current native PASS; 🟨 blocked or historical-only work; ⬜ not 
 
 The five maintenance phases (REPAIR, CLEAN-REINSTALL, UNINSTALL, FACTORY-RESET, REBOOT-RESUME) each passed only in an older blocked run; each needs current coherent FullRelease evidence. The complete gate definitions and pass conditions are in [TEST-PLAN.md](docs/ai/devfleet-release/TEST-PLAN.md) and [DONE.md](docs/ai/devfleet-release/DONE.md). A diagnostic ZIP, mock test, historical PASS or GitHub commit is not native certification.
 
+## Public source CI
+
+Pull requests and pushes to `main` run VM-free Python and PowerShell contract checks in [VM-free source checks](.github/workflows/vm-free-ci.yml). The Python job verifies the published original source export against its parts manifest, then checks causal accounting, Generation-6 lineage, bundle/proof readers and portable source contracts. The Windows job checks PowerShell observer, lineage, timing and proof-binding contracts. These jobs do not start Hyper-V, use native credentials or sign artifacts. Passing CI is public source validation only; current native authority determines certification and internal release eligibility.
+
+The original source inventory records the imported source snapshot. Later public edits intentionally change those files, so CI verifies the immutable exported source parts instead of comparing today's source against that historic inventory.
 ## Start here
 
 - [Build from a clean clone](BUILD-FROM-CLONE.md)
