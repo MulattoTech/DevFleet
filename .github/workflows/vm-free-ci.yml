@@ -81,3 +81,35 @@ jobs:
           }
           # Negative fixtures may leave LASTEXITCODE nonzero after a verified PASS.
           exit 0
+      - name: Run optional public issue regressions when present
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # These tests arrive in separate public PRs. Run them as each PR lands;
+          # their absence on this CI-only branch is reported explicitly.
+          $optionalPowerShell = @(
+            'automation/release-e2e/tests/Test-HostSafetyDiagnostics.ps1'
+            'automation/release-e2e/tests/Test-EvidenceWriterAtomicMove.ps1'
+          )
+          foreach ($test in $optionalPowerShell) {
+            if (-not (Test-Path -LiteralPath $test)) {
+              Write-Host "SKIP unmerged public test: $test"
+              continue
+            }
+            Write-Host "Running $test"
+            & $test
+            if (-not $?) { throw "Optional VM-free contract failed: $test" }
+          }
+          $optionalPython = @(
+            'tools/test_validate_public_push.py'
+            'tools/test_certification_command_center.py'
+          )
+          foreach ($test in $optionalPython) {
+            if (-not (Test-Path -LiteralPath $test)) {
+              Write-Host "SKIP unmerged public test: $test"
+              continue
+            }
+            Write-Host "Running $test"
+            python $test
+            if ($LASTEXITCODE -ne 0) { throw "Optional VM-free contract failed: $test" }
+          }
+          exit 0
