@@ -89,6 +89,15 @@ user authorization. No renamed campaign, hidden retries or changing limits insid
 
 ## Before every real operation
 
+If the earliest native gate is blocked, finish any already-started operation's
+terminalization and owned cleanup, then use the [release-control blocked-lane rule](../../../.agents/skills/devfleet-release-control/SKILL.md#blocked-lane-continuation).
+The fallback lane is public/source-only and grants no new runtime allowance. Record
+its issue or PR, VM-free verification, and next material native re-entry condition in
+the ongoing goal and current master tracker. Do not append fallback activity as a
+charged native attempt or alter the native ledger/private evidence during public work.
+Return to the earliest native gate only after that condition changes and current
+native authority, owner and HostSafety are freshly reconciled.
+
 Write a compact attempt entry with RunId; class; policy/counter reservation; question;
 exact candidate/shipping/release/tooling identities; actual entrypoint/parameters/script
 hash; expected semantic observations; operation and enclosing deadlines; cleanup owner;

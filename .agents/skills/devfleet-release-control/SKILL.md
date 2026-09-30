@@ -48,6 +48,32 @@ The primary/root agent is the single authoritative writer and lab operator. Help
 perform independent read-only analysis, code tracing, and focused review within the live
 delegation limits, but may not become competing owners of the lab or promotion state.
 
+## Blocked-lane continuation
+
+When the earliest native gate is blocked by HostSafety, ownership, credentials, an
+exhausted charge, or another unchanged prerequisite, finish any active run's native
+terminalization and exact-owned cleanup first. Persist its actual blocker, first
+technical failure, ledger result, and uncertain lab state under the installed native
+closeout contract. Do not reserve or start the next charged operation.
+
+The same root may then work a bounded, **non-certifying** public/source task from the
+current master tracker (Issue #9 for this continuation). Use an isolated public branch
+or worktree, reconcile that issue's acceptance criteria, and keep public Git history
+separate from the frozen native candidate. Permitted work includes VM-free tests,
+public PR review, read-only diagnostics, source documentation, and prepared patches.
+No blocked-lane task may reserve or consume a native attempt, change the signed
+candidate, native ledger, VM/checkpoint, security policy, or private evidence, or
+declare release PASS. Helpers remain read-only around the native lab.
+
+Record each fallback task in the ongoing goal and tracker with its issue/PR, tests,
+result, and explicit `certificationCredit=false`. Keep the last verified native blocker
+and tuple as context, with private details sanitized before posting publicly. Name the
+specific material change that would permit re-entry. Do not resample a known-false
+HostSafety gate or replay a failed charge merely because time passed, a chat changed,
+or a public CI job passed. After a material prerequisite change, quiesce conflicting
+source writers, reconcile ownership/authority/tuple/ledger anew, and take a fresh
+native HostSafety sample at the next prescribed boundary before considering admission.
+
 After a meaningful result, update durable memory and the next action in the same turn.
 On a real pause, blocker, or success, follow `CLOSEOUT.md`. Never create final acceptance
 or claim `PASS — INTERNAL RELEASE ELIGIBLE` unless current native authority itself says so.
