@@ -30,6 +30,13 @@ function Get-ProjectedHostMemorySafety {
     $projectedPostStartGiB = [math]::Round($AvailableMemoryGiB - $effectiveStartCostGiB, 2)
     $projectedCommitHeadroomGiB = [math]::Round($CommitLimitGiB - $CommittedGiB - $effectiveStartCostGiB, 2)
     $commitUsagePercent = if ($CommitLimitGiB -gt 0) { [math]::Round(($CommittedGiB / $CommitLimitGiB) * 100, 2) } else { 100 }
+    # Observation only: these predicates mirror the existing startSafe expression.
+    $blockingReasons = @(
+        if ($projectedPostStartGiB -lt $physicalFloorGiB) { 'PROJECTED_PHYSICAL_BELOW_FLOOR' }
+        if ($projectedCommitHeadroomGiB -lt $commitFloorGiB) { 'PROJECTED_COMMIT_BELOW_FLOOR' }
+        if ($commitUsagePercent -ge 80) { 'COMMIT_USAGE_LIMIT_REACHED' }
+        if ($ResourceExhaustion) { 'RESOURCE_EXHAUSTION_OBSERVED' }
+    )
     [pscustomobject]@{
         policyVersion = '1.0.0'
         expectedVmStartCostGiB = [math]::Round($effectiveStartCostGiB, 2)
@@ -38,6 +45,8 @@ function Get-ProjectedHostMemorySafety {
         commitHeadroomFloorGiB = [math]::Round($commitFloorGiB, 2)
         projectedCommitHeadroomGiB = $projectedCommitHeadroomGiB
         currentCommitUsagePercent = $commitUsagePercent
+        commitUsageLimitPercent = 80.0
+        blockingReasons = $blockingReasons
         resourceExhaustion = $ResourceExhaustion
         pagingPressureTelemetryOnly = $true
         startSafe = ($projectedPostStartGiB -ge $physicalFloorGiB -and $projectedCommitHeadroomGiB -ge $commitFloorGiB -and $commitUsagePercent -lt 80 -and -not $ResourceExhaustion)
@@ -68,17 +77,21 @@ function Get-HostSafetySnapshot {
     })
     [pscustomobject]@{
         host = $env:COMPUTERNAME
+        observedUtc = (Get-Date).ToUniversalTime().ToString('o')
          availableMemoryGiB = $availableMemoryGiB
          availableBytes = [int64]$memory.AvailableBytes
          totalMemoryGiB = $totalMemoryGiB
          commitLimitGiB = $commitLimitGiB
          committedGiB = $committedGiB
          currentCommitUsagePercent = $memorySafety.currentCommitUsagePercent
+         commitUsageLimitPercent = $memorySafety.commitUsageLimitPercent
+         blockingReasons = @($memorySafety.blockingReasons)
          physicalFloorGiB = $memorySafety.physicalFloorGiB
          commitHeadroomFloorGiB = $memorySafety.commitHeadroomFloorGiB
          minimumPreferredGiB = $memorySafety.physicalFloorGiB
         expectedVmStartCostGiB = $memorySafety.expectedVmStartCostGiB
         projectedPostStartAvailableMemoryGiB = $memorySafety.projectedPostStartAvailableMemoryGiB
+        projectedCommitHeadroomGiB = $memorySafety.projectedCommitHeadroomGiB
         minimumPostStartMemoryGiB = $memorySafety.physicalFloorGiB
         vm = [pscustomobject]@{
             name=$Vm.Name; id=$Vm.Id.ToString(); state=$Vm.State.ToString(); memoryStartupBytes=[int64]$Vm.MemoryStartup
