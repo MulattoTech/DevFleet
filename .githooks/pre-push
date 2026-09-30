@@ -1,0 +1,14 @@
+#!/bin/sh
+# Opt-in public-repository hook. Examine every outgoing commit, not the index.
+set -eu
+root=$(git rev-parse --show-toplevel)
+while read -r local_ref local_oid remote_ref remote_oid; do
+    case "$local_oid" in
+        0000000000000000000000000000000000000000) continue ;;
+    esac
+    base="$remote_oid"
+    case "$remote_oid" in
+        0000000000000000000000000000000000000000) base=origin/main ;;
+    esac
+    python "$root/tools/validate_public_push.py" --repo "$root" --base "$base" --head "$local_oid" || exit 1
+done
