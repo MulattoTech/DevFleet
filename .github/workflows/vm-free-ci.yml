@@ -74,3 +74,5 @@ jobs:
             }
             if (-not $?) { throw "VM-free contract failed: $test" }
           }
+          # Negative fixtures may leave LASTEXITCODE nonzero after a verified PASS.
+          exit 0
