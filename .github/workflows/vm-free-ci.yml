@@ -28,7 +28,7 @@ jobs:
           python ai/verify_source_parts.py
       - name: Run VM-free Python contracts
         run: |
-          python -m pytest -q \
+          python -m pytest -q -k "not powershell_reader" \
             .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_causal_successor.py \
             tools/test_baseline_lineage.py \
             tools/test_baseline_temporal_binding.py \
@@ -50,8 +50,12 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - name: Run Generation-6 Python and PowerShell reader contracts
-        run: python tools/test_baseline_generation6.py
+      - name: Run Generation-4 and Generation-6 Python and PowerShell reader contracts
+        run: |
+          python tools/test_baseline_generation4.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/test_baseline_generation6.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run VM-free PowerShell contracts
         run: |
           $ErrorActionPreference = 'Stop'

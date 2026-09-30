@@ -85,9 +85,10 @@ The five maintenance phases (REPAIR, CLEAN-REINSTALL, UNINSTALL, FACTORY-RESET, 
 
 ## Public source CI
 
-Pull requests and pushes to `main` run VM-free Python and PowerShell contract checks in [VM-free source checks](.github/workflows/vm-free-ci.yml). The Python job verifies the published original source export against its parts manifest, then checks causal accounting, portable lineage, bundle/proof readers and source contracts. The Windows job checks Generation-6 Python/PowerShell lineage plus PowerShell observer, timing and proof-binding contracts. These jobs do not start Hyper-V, use native credentials or sign artifacts. Passing CI is public source validation only; current native authority determines certification and internal release eligibility.
+Pull requests and pushes to `main` run VM-free Python and PowerShell contract checks in [VM-free source checks](.github/workflows/vm-free-ci.yml). The Python job verifies the published original source export against its parts manifest, then checks causal accounting, portable lineage, bundle/proof readers and source contracts. The Windows job checks Generation-4 and Generation-6 Python/PowerShell lineage plus PowerShell observer, timing and proof-binding contracts. These jobs do not start Hyper-V, use native credentials or sign artifacts. Passing CI is public source validation only; current native authority determines certification and internal release eligibility.
 
 The original source inventory records the imported source snapshot. Later public edits intentionally change those files, so CI verifies the immutable exported source parts instead of comparing today's source against that historic inventory.
+
 ## Start here
 
 - [Build from a clean clone](BUILD-FROM-CLONE.md)

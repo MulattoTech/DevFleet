@@ -88,7 +88,7 @@ class BaselineLineageTests(unittest.TestCase):
                                      'tuple': copy.deepcopy(TUPLE), 'exitCode': 0,
                                      'reservedUtc': stamp(now - timedelta(minutes=8)),
                                      'deadlineUtc': stamp(now + timedelta(minutes=5)),
-                                     'evidence': [str(self.root / 'auth.json')],
+                                     'evidence': [str((self.root / 'auth.json').resolve())],
                                      'terminalUtc': stamp(now - timedelta(minutes=2))}]}
 
     def write(self, name, value):
