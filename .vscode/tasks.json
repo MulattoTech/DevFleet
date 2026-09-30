@@ -1,0 +1,34 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "DevFleet: read-only Certification Command Center",
+      "type": "process",
+      "command": "python",
+      "args": [
+        "${workspaceFolder}/tools/certification_command_center.py",
+        "--native-root",
+        "${input:devfleetNativeRoot}",
+        "--ledger",
+        "${input:devfleetSuccessorLedger}",
+        "--public-root",
+        "${workspaceFolder}",
+        "--serve"
+      ],
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "devfleetNativeRoot",
+      "type": "promptString",
+      "description": "Absolute path to the native checkout (read only)"
+    },
+    {
+      "id": "devfleetSuccessorLedger",
+      "type": "promptString",
+      "description": "Successor ledger path relative to the native checkout"
+    }
+  ]
+}
