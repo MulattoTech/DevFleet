@@ -8,6 +8,7 @@ Import-Module (Join-Path $PSScriptRoot '..\InteractiveLogon.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\TailscaleE2E.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\HarnessBudget.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\MultipassDiagnostic.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\ProductLaunchTelemetry.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\RealUseAcceptance.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'WpfLaunchContract.psm1') -Force
 
@@ -612,6 +613,7 @@ function Get-ProductLifecycleObservation {
         [string]$ExpectedInstallerVersion,
         [int]$ObservationTimeoutSeconds=0,
         [string]$InvocationStartUtc,
+        [string]$ExpectedCandidateStartUtc,
         [string]$ExpectedComputeInstanceName,
         [string]$ExpectedVaultInstanceName,
         [string]$ExpectedNestedLinuxName,
@@ -635,8 +637,10 @@ function Get-ProductLifecycleObservation {
     if($ExpectedVaultInstanceName){$targets+=,[pscustomobject][ordered]@{instanceName=$ExpectedVaultInstanceName;nodeRole='vault';kind='vault'}}
     if($ExpectedNestedLinuxName -and $ExpectedNestedLinuxName -in @($targets.instanceName)){throw 'TERMINAL_FAILURE: product observation target overlaps the harness cleanup identity.'}
     $stageMarkerPattern=Get-DevFleetLifecycleStageMarkerPattern -ExpectedComputeInstanceName $ExpectedComputeInstanceName -ExpectedVaultInstanceName $ExpectedVaultInstanceName
+    $telemetryScriptText=(Get-DevFleetPassiveColdLaunchTelemetryScript).ToString()
+    $telemetryDeadline=if($observationDeadlineUtc -gt [datetime]::MinValue){$observationDeadlineUtc}else{[datetime]::UtcNow.AddSeconds(20)}
     $remoteScript = {
-        param($tx,$payload,$expectedAction,$expectedRole,$prior,$max,$candidatePid,$expectedVersion,$expectedInstaller,$invocationStart,$expectedNestedLinux,$allowedStageMarkerPattern,$expectedStageRole)
+        param($tx,$payload,$expectedAction,$expectedRole,$prior,$max,$candidatePid,$expectedVersion,$expectedInstaller,$invocationStart,$expectedNestedLinux,$allowedStageMarkerPattern,$expectedStageRole,$coldTelemetryScript,$expectedCompute,$coldTelemetryDeadline,$acknowledgedCandidateStart)
         # A completion race can remove the checkpoint after Test-Path but before
         # Get-Content/Get-Item. Make those reads terminating so the narrow race
         # handler below can convert only that proven disappearance into an
@@ -724,6 +728,13 @@ function Get-ProductLifecycleObservation {
         if(Test-Path -LiteralPath $activePath -PathType Leaf){
             try{$raw=Get-Content -LiteralPath $activePath -Raw;$activeValue=$raw|ConvertFrom-Json;$activeTransaction=[ordered]@{path=$activePath;transactionId=[string]$activeValue.transactionId;payloadSha256=[string]$activeValue.payloadSha256;action=[string]$activeValue.action;role=[string]$activeValue.role;preparedUtc=[string]$activeValue.preparedUtc;lastWriteUtc=(Get-Item -LiteralPath $activePath).LastWriteTimeUtc.ToString('o')};$activeHash=(Get-FileHash -LiteralPath $activePath -Algorithm SHA256).Hash.ToLowerInvariant()}catch{$activeTransaction=[ordered]@{path=$activePath;error='active transaction record is unreadable'}}
         }
+        $launchTelemetry=[ordered]@{kind='PASSIVE_COLD_LAUNCH_TELEMETRY';status='NOT_OBSERVED';certificationCredit=$false}
+        if($activeTransaction-and$candidatePid-gt0-and$coldTelemetryScript-and$invocationStart){
+            try{
+                $telemetryTx=if($tx){$tx}else{[string]$activeTransaction.transactionId}
+                $launchTelemetry=& ([scriptblock]::Create([string]$coldTelemetryScript)) -ActiveTransaction $activeTransaction -Processes $all -TransactionId $telemetryTx -PayloadSha256 $payload -RoleKind $expectedStageRole -Action $expectedAction -InvocationStartUtc $invocationStart -ExpectedCandidateStartUtc $acknowledgedCandidateStart -CandidateProcessId $candidatePid -ExpectedComputeInstanceName $expectedCompute -ObservationDeadlineUtc ([datetime]$coldTelemetryDeadline) -CaptureMilliseconds 750
+            }catch{$launchTelemetry=[ordered]@{kind='PASSIVE_COLD_LAUNCH_TELEMETRY';status='UNVERIFIED';certificationCredit=$false;errors=@('PASSIVE_COLLECTOR_UNVERIFIED')}}
+        }
         $stageMarkers=@();$stageMarkerErrors=@()
          foreach($stateRoot in @('C:\ProgramData\DevFleet','C:\ProgramData\M-TechLabs\DevFleet\Installer')){
             if(-not(Test-Path -LiteralPath $stateRoot -PathType Container)){continue}
@@ -758,7 +769,7 @@ function Get-ProductLifecycleObservation {
          $markerSet=(@($stageMarkers|ForEach-Object{"$($_.name):$($_.transactionId):$($_.payloadSha256):$($_.action):$($_.role):$($_.stage)"}|Sort-Object)-join '|')
         $servicingState=($servicing|ConvertTo-Json -Compress -Depth 8)
           $progress=[ordered]@{checkpointState=if($checkpoint){[string]$checkpoint.state}else{''};completedStages=if($checkpoint){@($checkpoint.completedStages)}else{@()};resumeStage=if($checkpoint){[string]$checkpoint.resumeStage}else{''};stages=$stages;productChildInstances=$instances;cpuSeconds=[math]::Round($cpu,3);candidateProcessPresent=[bool]$root;candidateResponsive=if($candidateCompact){[bool]$candidateCompact.responding}else{$false};activeTransactionSha256=$activeHash;stageMarkerSet=$markerSet;servicingState=$servicingState;installStateSha256=$installHash;ownershipSha256=$ownershipHash;receiptMatch=$receiptMatch;health=$healthOk;checkpointReadRaceRecovered=$checkpointReadRace;hostAgentTaskState=if($task){[string]$task.State}else{'ABSENT'};listener=$listener;guestProgressMarker=$progressGuestMarker;guestProgressMarkerStatus=$progressGuestMarkerStatus;guestProgressMarkerError=$progressGuestMarkerError};if($checkpoint){$progress.checkpointGeneration=[int]$checkpoint.checkpointGeneration}
-         [ordered]@{checkpointPresent=[bool]$checkpoint;checkpoint=$checkpoint;checkpointReadRaceRecovered=$checkpointReadRace;receipt=$receipt;matchingConsumedReceipt=$receiptMatch;installStateValid=$installValid;installLedger=$installLedger;installStateError=$installError;canonicalOwnershipValid=$ownershipValid;ownershipLedger=$ownershipLedger;ownershipStateError=$ownershipError;authenticatedHealthOk=$healthOk;authenticatedHealthError=$healthError;terminalFailure=$terminalFailure;failure=$failure;candidateProcessExited=$processExited;candidateProcess=$candidateCompact;processTree=$interesting;bootstrap=$bootstrap;activeTransaction=$activeTransaction;stageMarkers=$stageMarkers;stageMarkerErrors=$stageMarkerErrors;servicing=$servicing;hostAgentTaskState=if($task){[string]$task.State}else{'ABSENT'};hostAgentListener=$listener;progress=$progress;progressMarker=($progress|ConvertTo-Json -Compress -Depth 20);timestampUtc=(Get-Date).ToUniversalTime().ToString('o')}
+         [ordered]@{checkpointPresent=[bool]$checkpoint;checkpoint=$checkpoint;checkpointReadRaceRecovered=$checkpointReadRace;receipt=$receipt;matchingConsumedReceipt=$receiptMatch;installStateValid=$installValid;installLedger=$installLedger;installStateError=$installError;canonicalOwnershipValid=$ownershipValid;ownershipLedger=$ownershipLedger;ownershipStateError=$ownershipError;authenticatedHealthOk=$healthOk;authenticatedHealthError=$healthError;terminalFailure=$terminalFailure;failure=$failure;candidateProcessExited=$processExited;candidateProcess=$candidateCompact;processTree=$interesting;bootstrap=$bootstrap;activeTransaction=$activeTransaction;launchTelemetry=$launchTelemetry;stageMarkers=$stageMarkers;stageMarkerErrors=$stageMarkerErrors;servicing=$servicing;hostAgentTaskState=if($task){[string]$task.State}else{'ABSENT'};hostAgentListener=$listener;progress=$progress;progressMarker=($progress|ConvertTo-Json -Compress -Depth 20);timestampUtc=(Get-Date).ToUniversalTime().ToString('o')}
     }
     $readGuestMarker = {
         param(
@@ -844,10 +855,10 @@ function Get-ProductLifecycleObservation {
     }elseif($ObservationTimeoutSeconds -gt 0){
         $observationRemaining=&$remainingObservationSeconds
         if($observationRemaining -le 0){return [ordered]@{terminalFailure=$true;failure='observer remote call timeout';observerCallTimedOut=$true;timestampUtc=(Get-Date).ToUniversalTime().ToString('o');progress=[ordered]@{}}}
-        $job=Invoke-Command -Session $Session -ScriptBlock $remoteScript -ArgumentList $TransactionId,$PayloadSha256,$Action,$Role,$PriorGeneration,$MaxGeneration,$CandidateProcessId,$ExpectedDevFleetVersion,$ExpectedInstallerVersion,$InvocationStartUtc,$ExpectedNestedLinuxName,$stageMarkerPattern,$roleKind -AsJob
+        $job=Invoke-Command -Session $Session -ScriptBlock $remoteScript -ArgumentList $TransactionId,$PayloadSha256,$Action,$Role,$PriorGeneration,$MaxGeneration,$CandidateProcessId,$ExpectedDevFleetVersion,$ExpectedInstallerVersion,$InvocationStartUtc,$ExpectedNestedLinuxName,$stageMarkerPattern,$roleKind,$telemetryScriptText,$ExpectedComputeInstanceName,$telemetryDeadline.ToString('o'),$ExpectedCandidateStartUtc -AsJob
         if(-not (Wait-Job -Job $job -Timeout $observationRemaining)){Stop-Job -Job $job -ErrorAction SilentlyContinue;Remove-Job -Job $job -Force -ErrorAction SilentlyContinue;return [ordered]@{terminalFailure=$true;failure='observer remote call timeout';observerCallTimedOut=$true;timestampUtc=(Get-Date).ToUniversalTime().ToString('o');progress=[ordered]@{}}}
         try{$observation=Receive-Job -Job $job -ErrorAction Stop}finally{Remove-Job -Job $job -Force -ErrorAction SilentlyContinue}
-    }else{$observation=Invoke-Command -Session $Session -ScriptBlock $remoteScript -ArgumentList $TransactionId,$PayloadSha256,$Action,$Role,$PriorGeneration,$MaxGeneration,$CandidateProcessId,$ExpectedDevFleetVersion,$ExpectedInstallerVersion,$InvocationStartUtc,$ExpectedNestedLinuxName,$stageMarkerPattern,$roleKind}
+    }else{$observation=Invoke-Command -Session $Session -ScriptBlock $remoteScript -ArgumentList $TransactionId,$PayloadSha256,$Action,$Role,$PriorGeneration,$MaxGeneration,$CandidateProcessId,$ExpectedDevFleetVersion,$ExpectedInstallerVersion,$InvocationStartUtc,$ExpectedNestedLinuxName,$stageMarkerPattern,$roleKind,$telemetryScriptText,$ExpectedComputeInstanceName,$telemetryDeadline.ToString('o'),$ExpectedCandidateStartUtc}
     $observation=Resolve-DevFleetLifecycleStageMarkerObservation -Observation $observation -AllowedPattern $stageMarkerPattern -ExpectedStageRole $roleKind -TransactionId $TransactionId -PayloadSha256 $PayloadSha256 -Action $Action -InvocationStartUtc $InvocationStartUtc
     $deferral=Get-DevFleetProductLaunchProbeDeferral -Observation $observation -Targets $targets -TransactionId $TransactionId -PayloadSha256 $PayloadSha256 -Action $Action -RoleKind $roleKind -CandidateProcessId $CandidateProcessId -InvocationStartUtc $InvocationStartUtc
     if($deferral){
@@ -980,6 +991,7 @@ function ConvertTo-NormalizedLifecycleObservation {
      $progress=[ordered]@{checkpointState='';completedStages=@();resumeStage='';stages=@();productChildInstances=@();cpuSeconds=0.0;candidateProcessPresent=$false;candidateResponsive=$false;activeTransactionSha256=$null;stageMarkerSet='';servicingState='';installStateSha256=$null;ownershipSha256=$null;receiptMatch=$false;health=$false;hostAgentTaskState='';listener=$false;guestProgressMarker=$null;guestProgressMarkers=@();guestProgressMarkerOutcomes=@();guestProgressMarkerStatus='';guestProgressMarkerError=''}
     $normalized=[ordered]@{status='';checkpointPresent=$false;checkpoint=$null;checkpointReadRaceRecovered=$false;receipt=$null;matchingConsumedReceipt=$false;installStateValid=$false;installLedger=$null;installStateError='';canonicalOwnershipValid=$false;ownershipLedger=$null;ownershipStateError='';authenticatedHealthOk=$false;authenticatedHealthError='';productRoleIdentityValid=$null;terminalFailure=$false;failure='';error='';terminalReason='';observerCallTimedOut=$false;observerCallFailed=$false;candidateProcessExited=$false;candidateProcess=$null;processTree=@();bootstrap=@();activeTransaction=$null;stageMarkers=@();stageMarkerErrors=@();servicing=$null;hostAgentTaskState='ABSENT';hostAgentListener=$false;progress=$progress;progressMarker='';rawActiveLifecycleSignals=@();rawActiveLifecycleSignalCount=0;timestampUtc=$now}
     $normalized.failureLogSnapshot=$null
+    $normalized.launchTelemetry=$null
     $normalized.authenticatedHealthEvidence=$null
     if($Observation -is [array]){if($Observation.Count -eq 1){$Observation=$Observation[0]}else{$Failure=if($Failure){$Failure}else{'observation provider returned an ambiguous result set'}}}
     # Force array context around the conditional itself. PowerShell otherwise
@@ -1034,6 +1046,7 @@ function Wait-DevFleetProductLifecycleTransition {
         [string]$ExpectedInstallerVersion,
         [int]$ObservationTimeoutSeconds=0,
         [string]$InvocationStartUtc,
+        [string]$ExpectedCandidateStartUtc,
         [string]$AbsoluteDeadlineUtc,
         [string]$ExpectedComputeInstanceName,
         [string]$ExpectedVaultInstanceName,
@@ -1086,7 +1099,7 @@ function Wait-DevFleetProductLifecycleTransition {
         $created = $false
         try {
             if ($SessionProvider) { $sessionForObservation = & $SessionProvider; $created = $true }
-            return Get-ProductLifecycleObservation -Session $sessionForObservation -TransactionId $TransactionId -PayloadSha256 $PayloadSha256 -Action $Action -Role $Role -PriorGeneration $PriorGeneration -MaxGeneration $MaxGeneration -CandidateProcessId $CandidateProcessId -ExpectedDevFleetVersion $ExpectedDevFleetVersion -ExpectedInstallerVersion $ExpectedInstallerVersion -ObservationTimeoutSeconds $ObservationTimeoutSeconds -InvocationStartUtc $InvocationStartUtc -ExpectedComputeInstanceName $ExpectedComputeInstanceName -ExpectedVaultInstanceName $ExpectedVaultInstanceName -ExpectedNestedLinuxName $ExpectedNestedLinuxName -RemoteObservationProvider $RemoteObservationProvider -GuestMarkerReadProvider $GuestMarkerReadProvider -ObservationAdapterContext $ObservationAdapterContext
+            return Get-ProductLifecycleObservation -Session $sessionForObservation -TransactionId $TransactionId -PayloadSha256 $PayloadSha256 -Action $Action -Role $Role -PriorGeneration $PriorGeneration -MaxGeneration $MaxGeneration -CandidateProcessId $CandidateProcessId -ExpectedDevFleetVersion $ExpectedDevFleetVersion -ExpectedInstallerVersion $ExpectedInstallerVersion -ObservationTimeoutSeconds $ObservationTimeoutSeconds -InvocationStartUtc $InvocationStartUtc -ExpectedCandidateStartUtc $ExpectedCandidateStartUtc -ExpectedComputeInstanceName $ExpectedComputeInstanceName -ExpectedVaultInstanceName $ExpectedVaultInstanceName -ExpectedNestedLinuxName $ExpectedNestedLinuxName -RemoteObservationProvider $RemoteObservationProvider -GuestMarkerReadProvider $GuestMarkerReadProvider -ObservationAdapterContext $ObservationAdapterContext
         } finally {
             if ($created -and $sessionForObservation) { Remove-DevFleetGuestSession $sessionForObservation -ErrorAction SilentlyContinue }
         }
@@ -1549,10 +1562,10 @@ function Invoke-ProductFreshInstallLifecycle {
                 $observerSession=$null;$usingObservationAdapters=[bool]($RemoteObservationProvider -or $GuestMarkerReadProvider)
                 try {
                     $observerSession=if($usingObservationAdapters){[pscustomobject]@{fixture=$true}}else{Connect-DevFleetGuest -VmId ([guid][string]$lifeContext.vmId)}
-                    $guestFound=$false;$guestProcessId=Get-LifecycleProperty $currentGuest 'processId' ([ref]$guestFound);if(-not $guestFound){$guestProcessId=Get-LifecycleProperty $current 'processId' ([ref]$guestFound)};$candidateProcessId=if($guestFound){[int]$guestProcessId}else{0}
+                    $guestFound=$false;$guestProcessId=Get-LifecycleProperty $currentGuest 'processId' ([ref]$guestFound);if(-not $guestFound){$guestProcessId=Get-LifecycleProperty $current 'processId' ([ref]$guestFound)};$candidateProcessId=if($guestFound){[int]$guestProcessId}else{0};$startFound=$false;$candidateStart=Get-LifecycleProperty $currentGuest 'processStartTime' ([ref]$startFound);$acknowledgedStart=if($startFound){[string]$candidateStart}else{''}
                     $policy=Get-HarnessBudgetPolicy -Config $lifeContext.config;$transactionBudget=if($Role -ceq 'Laptop / Surrogate'){[int]$policy.transactionBudgetsSeconds.Laptop}else{[int]$policy.transactionBudgetsSeconds.Desktop};$observerAbsoluteBudget=if($Role -ceq 'Laptop / Surrogate'){[int]$policy.observerAbsoluteBudgetsSeconds.Laptop}else{[int]$policy.observerAbsoluteBudgetsSeconds.Desktop};$observerOwnerDeadline=(ConvertTo-WpfUtcInstant $invocationStart).AddSeconds($observerAbsoluteBudget)
                     $sessionProvider=if($usingObservationAdapters){$null}else{{Connect-DevFleetGuest -VmId ([guid][string]$lifeContext.vmId)}}
-                    $observer=Wait-DevFleetProductLifecycleTransition -Session $observerSession -SessionProvider $sessionProvider -TransactionId $tx -PayloadSha256 $expectedPayload -Action 'FreshInstall' -Role $Role -PriorGeneration $priorGeneration -MaxGeneration $max -BudgetSeconds $transactionBudget -NoProgressBudgetSeconds ([int]$policy.observerNoProgressBudgetSeconds) -AbsoluteBudgetSeconds $observerAbsoluteBudget -AbsoluteDeadlineUtc $observerOwnerDeadline.ToString('o') -CandidateProcessId $candidateProcessId -ExpectedDevFleetVersion $expectedVersion -ExpectedInstallerVersion $expectedInstaller -ObservationTimeoutSeconds 30 -EvidencePath (Join-Path ([string]$lifeContext.runDir) ("product-lifecycle-observer-generation-{0}.json" -f $priorGeneration)) -InvocationStartUtc $invocationStart -ExpectedComputeInstanceName ([string]$lifeContext.expectedProductComputeInstanceName) -ExpectedVaultInstanceName ([string]$lifeContext.expectedProductVaultInstanceName) -ExpectedNestedLinuxName ([string]$lifeContext.config.NestedLinux.Name) -RemoteObservationProvider $RemoteObservationProvider -GuestMarkerReadProvider $GuestMarkerReadProvider -ObservationAdapterContext $ObservationAdapterContext
+                    $observer=Wait-DevFleetProductLifecycleTransition -Session $observerSession -SessionProvider $sessionProvider -TransactionId $tx -PayloadSha256 $expectedPayload -Action 'FreshInstall' -Role $Role -PriorGeneration $priorGeneration -MaxGeneration $max -BudgetSeconds $transactionBudget -NoProgressBudgetSeconds ([int]$policy.observerNoProgressBudgetSeconds) -AbsoluteBudgetSeconds $observerAbsoluteBudget -AbsoluteDeadlineUtc $observerOwnerDeadline.ToString('o') -CandidateProcessId $candidateProcessId -ExpectedCandidateStartUtc $acknowledgedStart -ExpectedDevFleetVersion $expectedVersion -ExpectedInstallerVersion $expectedInstaller -ObservationTimeoutSeconds 30 -EvidencePath (Join-Path ([string]$lifeContext.runDir) ("product-lifecycle-observer-generation-{0}.json" -f $priorGeneration)) -InvocationStartUtc $invocationStart -ExpectedComputeInstanceName ([string]$lifeContext.expectedProductComputeInstanceName) -ExpectedVaultInstanceName ([string]$lifeContext.expectedProductVaultInstanceName) -ExpectedNestedLinuxName ([string]$lifeContext.config.NestedLinux.Name) -RemoteObservationProvider $RemoteObservationProvider -GuestMarkerReadProvider $GuestMarkerReadProvider -ObservationAdapterContext $ObservationAdapterContext
                 } finally {if(-not $usingObservationAdapters -and $observerSession){Remove-DevFleetGuestSession $observerSession -ErrorAction SilentlyContinue}}
             } catch {$caught=$_.Exception;$safeFailure=Get-SafeGuestSessionFailureMetadata -Exception $caught;return &$providerFailure 'TransitionObserver' $caught.Message ("generation-{0}" -f $priorGeneration) $null $safeFailure}
             $observerCheckpointFound=$false;$observerCheckpoint=Get-LifecycleProperty $observer 'checkpoint' ([ref]$observerCheckpointFound);if($observerCheckpointFound -and $observerCheckpoint){$checkpoint=$observerCheckpoint}

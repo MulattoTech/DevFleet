@@ -130,6 +130,8 @@ def accepted_baseline(root, current_tuple=None):
         return {'name': OLD_NAME, 'id': OLD_ID, 'vmName': VM_NAME, 'vmId': VM_ID,
                 'predecessorId': None, 'receiptSha256': None, 'legacyOriginal': True}
     pointer = read_json(pointer_path)
+    if pointer.get('generation') == 6:
+        return _accepted_rebound_v6(root, pointer, current_tuple)
     if pointer.get('generation') == 5:
         return _accepted_rebound_v5(root, pointer, current_tuple)
     if pointer.get('generation') == 4:
@@ -672,6 +674,231 @@ def rebind_gen5(root, tuple_path, approval_path, ledger_path, live_path):
         _write_exclusive(receipt_path, _json_bytes(receipt))
         current = {'schemaVersion': 5, 'contract': 'devfleet-accepted-baseline-v5',
                    'generation': 5, 'status': 'ACCEPTED',
+                   'receiptFile': filename, 'receiptSha256': digest(receipt_path),
+                   'previousPointerSha256': previous_hash,
+                   'checkpoint': pointer['checkpoint']}
+        _atomic_replace(pointer_path, _json_bytes(current))
+        return accepted_baseline(root, new_tuple)
+
+
+def _accepted_rebound_v6(root, pointer, current_tuple=None):
+    """Validate a same-shipping tooling rebind on the complete gen1–gen5 chain."""
+    state = _state(root)
+    require(pointer.get('schemaVersion') == 6
+            and pointer.get('contract') == 'devfleet-accepted-baseline-v6'
+            and pointer.get('generation') == 6 and pointer.get('status') == 'ACCEPTED',
+            'Generation-6 baseline pointer contract is invalid')
+    filename = pointer.get('receiptFile')
+    previous_hash = pointer.get('previousPointerSha256')
+    require(isinstance(filename, str) and re.fullmatch(r'[0-9a-f]{32}\.json', filename)
+            and isinstance(previous_hash, str) and HEX64.fullmatch(previous_hash),
+            'Generation-6 lineage reference is invalid')
+    history_path = state / 'history' / (previous_hash + '.json')
+    require(digest(history_path) == previous_hash,
+            'Generation-5 predecessor pointer hash differs')
+    previous = read_json(history_path)
+    require(previous.get('generation') == 5, 'Generation-6 predecessor is not generation 5')
+    receipt_path = state / 'receipts' / filename
+    require(digest(receipt_path) == pointer.get('receiptSha256'),
+            'Generation-6 receipt hash differs')
+    receipt = read_json(receipt_path)
+    old_tuple = exact_tuple(receipt.get('previousCandidate'))
+    new_tuple = exact_tuple(receipt.get('candidate'))
+    prior = _accepted_rebound_v5(root, previous, old_tuple)
+    require(receipt.get('schemaVersion') == 6
+            and receipt.get('contract') == 'devfleet-baseline-rebind-receipt-v6'
+            and receipt.get('status') == 'REBOUND'
+            and receipt.get('certificationCredit') is False
+            and receipt.get('secretValuesRecorded') is False
+            and 'artifactReceiptSha256' not in receipt
+            and isinstance(receipt.get('receiptId'), str)
+            and receipt['receiptId'] + '.json' == filename
+            and receipt.get('previousPointerSha256') == previous_hash
+            and receipt.get('previousReceiptSha256') == prior['receiptSha256']
+            and receipt.get('replacement') == pointer.get('checkpoint')
+            and receipt.get('replacement') == previous.get('checkpoint'),
+            'Generation-6 receipt lineage differs')
+    for key in ('candidateBuildCommit', 'shippingInputIdentity',
+                'releaseFingerprintId', 'candidateSha256'):
+        require(old_tuple[key] == new_tuple[key],
+                'Generation-6 binding changed signed shipping identity: ' + key)
+    require(old_tuple['repositoryHead'] != new_tuple['repositoryHead']
+            and old_tuple['toolingFingerprintId'] != new_tuple['toolingFingerprintId'],
+            'Generation-6 binding lacks changed HEAD and tooling identity')
+    approval = receipt.get('approval') or {}
+    require(approval.get('schemaVersion') == 5
+            and approval.get('contract') == 'devfleet-baseline-rebind-approval-v5'
+            and approval.get('decision') == 'APPROVE'
+            and approval.get('approvedBy') == 'ACCOUNT_OWNER'
+            and approval.get('shippingChangeApproved') is False
+            and approval.get('previousCandidate') == old_tuple
+            and approval.get('candidate') == new_tuple
+            and approval.get('replacement') == pointer['checkpoint']
+            and approval.get('previousReceiptSha256') == prior['receiptSha256']
+            and approval.get('sourceSha256') == receipt.get('approvalSha256')
+            and isinstance(receipt.get('approvalSha256'), str)
+            and HEX64.fullmatch(receipt['approvalSha256']),
+            'Generation-6 owner approval differs')
+    ledger_sha = receipt.get('successorLedgerSha256')
+    inventory_sha = receipt.get('nativeInventorySha256')
+    require(receipt.get('finalL1') == {'name': VM_NAME, 'id': VM_ID, 'state': 'Off'}
+            and receipt.get('successorPolicyId') == 'DF-FRESH-CERTIFICATION-20260929-CAUSAL-1'
+            and isinstance(ledger_sha, str) and HEX64.fullmatch(ledger_sha)
+            and isinstance(inventory_sha, str) and HEX64.fullmatch(inventory_sha),
+            'Generation-6 terminal lab or successor lineage differs')
+    sources = state / 'sources'
+    for source_hash in (ledger_sha, inventory_sha):
+        source = sources / (source_hash + '.json')
+        require(source.is_file() and not source.is_symlink() and digest(source) == source_hash,
+                'Generation-6 qualification or native inventory source differs')
+    ledger = read_json(sources / (ledger_sha + '.json'))
+    inventory = read_json(sources / (inventory_sha + '.json'))
+    attempts = ledger.get('attempts') or []
+    require(ledger.get('policyId') == receipt['successorPolicyId']
+            and ledger.get('limits') == {'standard-token': 1, 'diagnostic': 1,
+                                         'laptop-proof': 1, 'desktop-proof': 1,
+                                         'fullrelease': 1, 'maintenance': 0,
+                                         'build-sign': 0}
+            and ledger.get('activeRunId') is None
+            and isinstance(attempts, list) and len(attempts) == 1
+            and attempts[0].get('operation') == 'standard-token'
+            and attempts[0].get('state') == 'TERMINAL'
+            and attempts[0].get('exitCode') == 0
+            and attempts[0].get('classification') == 'PASS_NATIVE_STANDARD_TOKEN'
+            and attempts[0].get('tuple') == new_tuple
+            and attempts[0].get('certificationCredit') is False
+            and isinstance(attempts[0].get('evidence'), list)
+            and bool(attempts[0]['evidence']),
+            'Generation-6 qualification source lacks exact causal standard token')
+    snapshots = inventory.get('snapshots')
+    named = ([row for row in snapshots if isinstance(row, dict)
+              and row.get('name') == NEW_NAME] if isinstance(snapshots, list) else [])
+    require(inventory.get('scope') == 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
+            and inventory.get('vm') == receipt['finalL1']
+            and len(named) == 1
+            and named[0].get('id') == prior['id']
+            and named[0].get('vmId') == VM_ID
+            and named[0].get('parentSnapshotId') == OLD_ID,
+            'Generation-6 inventory does not prove accepted checkpoint and L1 Off')
+    if current_tuple is not None:
+        require(new_tuple == exact_tuple(current_tuple),
+                'Generation-6 baseline is bound to another candidate/material tuple')
+    return {**prior, 'receiptSha256': pointer['receiptSha256'],
+            'receiptFile': filename, 'previousReceiptSha256': prior['receiptSha256'],
+            'generation': 6}
+
+
+def rebind_gen6(root, tuple_path, approval_path, ledger_path, live_path):
+    """Append one owner-approved same-shipping binding to accepted generation 5."""
+    state = _state(root)
+    with lock(state / '.adoption.lock'), lock(Path(str(ledger_path) + '.lock')):
+        pointer_path = state / 'CURRENT.json'
+        pointer = read_json(pointer_path)
+        require(pointer.get('generation') == 5,
+                'Generation-6 binding requires accepted generation 5')
+        old_receipt = read_json(state / 'receipts' / pointer['receiptFile'])
+        old_tuple = exact_tuple(old_receipt.get('candidate'))
+        prior = _accepted_rebound_v5(root, pointer, old_tuple)
+        tuple_sha_before = digest(tuple_path)
+        new_tuple = exact_tuple(read_json(tuple_path))
+        for key in ('candidateBuildCommit', 'shippingInputIdentity',
+                    'releaseFingerprintId', 'candidateSha256'):
+            require(old_tuple[key] == new_tuple[key],
+                    'Generation-6 binding changed signed shipping identity: ' + key)
+        require(old_tuple['repositoryHead'] != new_tuple['repositoryHead']
+                and old_tuple['toolingFingerprintId'] != new_tuple['toolingFingerprintId'],
+                'Generation-6 binding requires changed HEAD and tooling identity')
+        approval_sha_before = digest(approval_path)
+        approval = read_json(approval_path)
+        require(approval.get('schemaVersion') == 5
+                and approval.get('contract') == 'devfleet-baseline-rebind-approval-v5'
+                and approval.get('decision') == 'APPROVE'
+                and approval.get('approvedBy') == 'ACCOUNT_OWNER'
+                and approval.get('shippingChangeApproved') is False
+                and approval.get('previousCandidate') == old_tuple
+                and approval.get('candidate') == new_tuple
+                and approval.get('replacement') == pointer['checkpoint']
+                and approval.get('previousReceiptSha256') == prior['receiptSha256'],
+                'Exact generation-6 account-owner approval is absent')
+        ledger_sha_before = digest(ledger_path)
+        ledger = read_json(ledger_path)
+        journal = Path(root).resolve(strict=True) / '.agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py'
+        require(journal.is_file(), 'Native causal successor journal is absent')
+        checked = subprocess.run([sys.executable, str(journal), 'status', '--ledger',
+                                  str(Path(ledger_path).resolve(strict=True))],
+                                 text=True, capture_output=True, timeout=20)
+        require(checked.returncode == 0, 'Native causal successor journal rejected binding')
+        journal_status = json.loads(checked.stdout)
+        remaining = {'standard-token': 0, 'diagnostic': 1, 'laptop-proof': 1,
+                     'desktop-proof': 1, 'fullrelease': 1, 'maintenance': 0,
+                     'build-sign': 0}
+        attempts = ledger.get('attempts') or []
+        require(ledger.get('policyId') == 'DF-FRESH-CERTIFICATION-20260929-CAUSAL-1'
+                and journal_status.get('policyId') == ledger['policyId']
+                and ledger.get('activeRunId') is None
+                and journal_status.get('active') is None
+                and journal_status.get('attemptCount') == 1
+                and journal_status.get('remaining') == remaining
+                and isinstance(attempts, list) and len(attempts) == 1
+                and attempts[0].get('operation') == 'standard-token'
+                and attempts[0].get('state') == 'TERMINAL'
+                and attempts[0].get('exitCode') == 0
+                and attempts[0].get('classification') == 'PASS_NATIVE_STANDARD_TOKEN'
+                and attempts[0].get('tuple') == new_tuple
+                and attempts[0].get('certificationCredit') is False
+                and isinstance(attempts[0].get('evidence'), list)
+                and bool(attempts[0]['evidence']),
+                'Native causal successor lacks exact terminal Developer qualification')
+        inventory_sha_before = digest(live_path)
+        live = read_json(live_path)
+        named = [x for x in live.get('snapshots', [])
+                 if isinstance(x, dict) and x.get('name') == NEW_NAME]
+        require(live.get('scope') == 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
+                and live.get('vm') == {'name': VM_NAME, 'id': VM_ID, 'state': 'Off'}
+                and timedelta(seconds=0) <= datetime.now(timezone.utc) - instant(live.get('observedUtc')) <= timedelta(minutes=2)
+                and len(named) == 1 and named[0].get('id') == prior['id']
+                and named[0].get('vmId') == VM_ID
+                and named[0].get('parentSnapshotId') == OLD_ID,
+                'Exact accepted checkpoint is not present with L1 Off')
+        ledger_bytes = Path(ledger_path).read_bytes()
+        inventory_bytes = Path(live_path).read_bytes()
+        ledger_sha = hashlib.sha256(ledger_bytes).hexdigest()
+        inventory_sha = hashlib.sha256(inventory_bytes).hexdigest()
+        require(inventory_sha == inventory_sha_before,
+                'Native inventory changed during generation-6 binding')
+        require(digest(tuple_path) == tuple_sha_before,
+                'Candidate tuple changed during generation-6 binding')
+        require(digest(approval_path) == approval_sha_before,
+                'Owner approval changed during generation-6 binding')
+        require(ledger_sha == ledger_sha_before,
+                'Successor ledger changed during generation-6 binding')
+        sources = state / 'sources'
+        sources.mkdir(parents=True, exist_ok=True)
+        _write_exclusive(sources / (ledger_sha + '.json'), ledger_bytes)
+        _write_exclusive(sources / (inventory_sha + '.json'), inventory_bytes)
+        previous_hash = digest(pointer_path)
+        history = state / 'history'
+        history.mkdir(parents=True, exist_ok=True)
+        _write_exclusive(history / (previous_hash + '.json'), pointer_path.read_bytes())
+        receipt_id = uuid.uuid4().hex
+        receipt = {'schemaVersion': 6, 'contract': 'devfleet-baseline-rebind-receipt-v6',
+                   'receiptId': receipt_id, 'status': 'REBOUND',
+                   'reboundUtc': datetime.now(timezone.utc).isoformat(),
+                   'certificationCredit': False, 'secretValuesRecorded': False,
+                   'previousPointerSha256': previous_hash,
+                   'previousReceiptSha256': prior['receiptSha256'],
+                   'previousCandidate': old_tuple, 'candidate': new_tuple,
+                   'replacement': pointer['checkpoint'],
+                   'approval': {**approval, 'sourceSha256': approval_sha_before},
+                   'approvalSha256': approval_sha_before,
+                   'successorPolicyId': ledger['policyId'],
+                   'successorLedgerSha256': ledger_sha,
+                   'finalL1': live['vm'], 'nativeInventorySha256': inventory_sha}
+        filename = receipt_id + '.json'
+        receipt_path = state / 'receipts' / filename
+        _write_exclusive(receipt_path, _json_bytes(receipt))
+        current = {'schemaVersion': 6, 'contract': 'devfleet-accepted-baseline-v6',
+                   'generation': 6, 'status': 'ACCEPTED',
                    'receiptFile': filename, 'receiptSha256': digest(receipt_path),
                    'previousPointerSha256': previous_hash,
                    'checkpoint': pointer['checkpoint']}
@@ -1227,6 +1454,9 @@ def main():
     binding5 = sub.add_parser('rebind-gen5')
     for flag in ('root', 'tuple', 'approval', 'ledger', 'live'):
         binding5.add_argument('--' + flag, required=True)
+    binding6 = sub.add_parser('rebind-gen6')
+    for flag in ('root', 'tuple', 'approval', 'ledger', 'live'):
+        binding6.add_argument('--' + flag, required=True)
     args = parser.parse_args()
     if args.command == 'inspect':
         value = accepted_baseline(args.root, read_json(args.tuple) if args.tuple else None)
@@ -1237,6 +1467,8 @@ def main():
         value = rebind(args.root, args.tuple, args.approval, args.ledger, args.live)
     elif args.command == 'rebind-gen4':
         value = rebind_gen4(args.root, args.tuple, args.approval, args.ledger, args.live)
+    elif args.command == 'rebind-gen6':
+        value = rebind_gen6(args.root, args.tuple, args.approval, args.ledger, args.live)
     elif args.command == 'rebind-gen5':
         value = rebind_gen5(args.root, args.tuple, args.approval, args.ledger, args.live)
     else:

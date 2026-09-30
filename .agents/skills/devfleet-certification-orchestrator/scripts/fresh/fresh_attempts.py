@@ -22,6 +22,7 @@ REPAIR2_ID = POLICY_ID + '-R2-REPAIR-2'
 REPAIR3_ID = POLICY_ID + '-R2-REPAIR-3'
 REPAIR4_ID = POLICY_ID + '-R2-REPAIR-4'
 REPAIR5_ID = POLICY_ID + '-R2-REPAIR-5'
+CAUSAL_ID = 'DF-FRESH-CERTIFICATION-20260929-CAUSAL-1'
 REPAIR3_CANDIDATE_COMMIT = 'be0f1473838b4c2255d22efd99b25a58fd588a78'
 REPAIR3_SHIPPING_SHA256 = '4d7d2dcfd486adb622e413ed9abe894df6d105457e91aa0f96779d776a5e4b44'
 REPAIR3_SIGNED_EXE_SHA256 = '1ee8059ea9ae253ab358b9aec5241aae1019676cb54544b5f352080cdf132908'
@@ -81,6 +82,8 @@ def limits_for(policy_id):
     if policy_id == REPAIR4_ID:
         return REPAIR4_LIMITS
     if policy_id == REPAIR5_ID:
+        return REPAIR5_LIMITS
+    if policy_id == CAUSAL_ID:
         return REPAIR5_LIMITS
     if policy_id in (POLICY_ID, POLICY_ID + '-R2'):
         return LIMITS
@@ -195,9 +198,59 @@ def _load_repair3_receipt(path):
     return path
 
 
+def _validate_causal_sources(ledger, authorization, predecessors):
+    """Preserve both owner-reviewed terminal histories; never carry slots forward."""
+    paths = [safe_path(p) for p in predecessors]
+    ledger, authorization = safe_path(ledger), safe_path(authorization)
+    if len(paths) != 4 or len(set(paths)) != 4 or ledger in paths or authorization in (*paths, ledger):
+        raise ValueError('Causal successor requires distinct R5/D1 snapshot, live and authorization paths')
+    approval = strict_json(authorization)
+    if (approval.get('schemaVersion') != 1
+            or approval.get('kind') != 'DEVFLEET_CAUSAL_SUCCESSOR_AUTHORIZATION'
+            or approval.get('policyId') != CAUSAL_ID or approval.get('approved') is not True):
+        raise ValueError('Explicit causal successor owner approval is required')
+    limits = approval.get('limits')
+    if (not isinstance(limits, dict) or set(limits) != set(REPAIR5_LIMITS)
+            or any(type(limits[k]) is not int or limits[k] != REPAIR5_LIMITS[k] for k in REPAIR5_LIMITS)):
+        raise ValueError('Causal successor approval cannot widen the finite sequence')
+    hashes = approval.get('predecessorSha256')
+    if (not isinstance(hashes, dict) or set(hashes) != {'r5', 'imageD1'}
+            or any(not isinstance(v, str) or not re.fullmatch('[a-f0-9]{64}', v) for v in hashes.values())):
+        raise ValueError('Owner-reviewed R5 and D1 hashes are required')
+    for first, expected in ((0, hashes['r5']), (2, hashes['imageD1'])):
+        if digest(paths[first]) != expected or digest(paths[first + 1]) != expected:
+            raise ValueError('Causal predecessor snapshot/live bytes differ from owner review')
+    expected_policies = (REPAIR5_ID, REPAIR5_ID, ONE_DIAGNOSTIC_ID, ONE_DIAGNOSTIC_ID)
+    if any(strict_json(path).get('policyId') != policy for path, policy in zip(paths, expected_policies)):
+        raise ValueError('Causal predecessor policy is not the reviewed R5/D1 history')
+    parents = [load(path) for path in paths]
+    if any(parent.get('activeRunId') is not None for parent in parents):
+        raise ValueError('Causal successor cannot replace active owned execution')
+    r5_results = (('standard-token', 0, 'PASS_NATIVE_STANDARD_TOKEN'),
+                  ('diagnostic', 0, 'PASS_READY_FOR_PROOF_RESERVATION'),
+                  ('laptop-proof', 2, 'NATIVE_LAPTOP_PROOF_BLOCKED'))
+    for parent in parents[:2]:
+        attempts = parent.get('attempts', [])
+        if len(attempts) != 3 or any(
+                a.get('state') != 'TERMINAL' or a.get('operation') != op
+                or a.get('exitCode') != code or a.get('classification') != result
+                for a, (op, code, result) in zip(attempts, r5_results)):
+            raise ValueError('Causal predecessor must preserve the charged blocked R5 Laptop')
+    for parent in parents[2:]:
+        attempts = parent.get('attempts', [])
+        if (len(attempts) != 1 or attempts[0].get('state') != 'TERMINAL'
+                or attempts[0].get('operation') != 'diagnostic' or attempts[0].get('exitCode') != 0
+                or attempts[0].get('classification') != 'DIAGNOSTIC_IMAGE_REMOTE_FAILURE_NOT_REPRODUCED'):
+            raise ValueError('Causal predecessor must preserve the exhausted IMAGE-D1 diagnostic')
+    if any(parent['authorization']['sha256'] == digest(authorization) for parent in parents):
+        raise ValueError('Causal successor requires a new explicit owner authorization source')
+
+
 def initialize(ledger, authorization, predecessors, policy_id=POLICY_ID, artifact_receipt=None):
     limits = limits_for(policy_id)
-    if policy_id == REPAIR5_ID:
+    if policy_id == CAUSAL_ID:
+        _validate_causal_sources(ledger, authorization, predecessors)
+    elif policy_id == REPAIR5_ID:
         if len(predecessors) != 2 or safe_path(predecessors[0]) == safe_path(predecessors[1]):
             raise ValueError('Fifth repair successor requires distinct terminal snapshot and live repair4 predecessor')
         if safe_path(authorization) in (safe_path(predecessors[0]), safe_path(predecessors[1]), safe_path(ledger)):
@@ -312,7 +365,7 @@ def initialize(ledger, authorization, predecessors, policy_id=POLICY_ID, artifac
 
 def load(ledger):
     data = strict_json(ledger)
-    if not isinstance(data,dict) or type(data.get('schemaVersion')) is not int or data['schemaVersion'] != 1 or data.get('policyId') not in (POLICY_ID, POLICY_ID+'-R2', ONE_DIAGNOSTIC_ID, REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID):
+    if not isinstance(data,dict) or type(data.get('schemaVersion')) is not int or data['schemaVersion'] != 1 or data.get('policyId') not in (POLICY_ID, POLICY_ID+'-R2', ONE_DIAGNOSTIC_ID, REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID, CAUSAL_ID):
         raise ValueError('Unsupported campaign schema/identity')
     if data.get('certificationCredit') is not False:
         raise ValueError('Attempt accounting cannot grant certification credit')
@@ -323,6 +376,13 @@ def load(ledger):
     auth = data.get('authorization',{})
     if digest(safe_path(auth['path'])) != auth.get('sha256'):
         raise ValueError('Authorization source changed')
+    if data['policyId'] == CAUSAL_ID:
+        predecessors = data.get('predecessors')
+        if not isinstance(predecessors, list) or len(predecessors) != 4:
+            raise ValueError('Causal predecessors are missing')
+        if any(digest(safe_path(p['path'])) != p.get('sha256') for p in predecessors):
+            raise ValueError('Causal predecessor changed')
+        _validate_causal_sources(ledger, auth['path'], [p['path'] for p in predecessors])
     if data['policyId'] == REPAIR3_ID:
         receipt = data.get('artifactReceipt')
         if not isinstance(receipt, dict) or set(receipt) != {'path', 'sha256'}:
@@ -493,7 +553,7 @@ def load(ledger):
         raise ValueError('Ambiguous active attempt')
     if any(sum(a['operation']==op for a in attempts)>limit for op,limit in expected_limits.items()):
         raise ValueError('Campaign allowance exceeded')
-    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID):
+    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID, CAUSAL_ID):
         sequence = sequence_for(data['policyId'])
         if len(attempts) > len(sequence):
             raise ValueError('Repair successor has too many phases')
@@ -530,7 +590,7 @@ def prepare(data, request):
     if data['activeRunId'] is not None: raise ValueError('Active attempt must be reconciled; crash is not a free replay')
     if any(a['runId']==request['runId'] for a in data['attempts']): raise ValueError('RunId has already been charged')
     if sum(a['operation']==request['operation'] for a in data['attempts'])>=limits[request['operation']]: raise ValueError('Operation allowance exhausted')
-    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID):
+    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID, CAUSAL_ID):
         sequence = sequence_for(data['policyId'])
         prior = data['attempts']
         if (len(prior) >= len(sequence)
@@ -569,7 +629,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command',choices=['initialize','status','reserve','finish'])
     parser.add_argument('--ledger',required=True); parser.add_argument('--authorization'); parser.add_argument('--predecessor',action='append',default=[])
-    parser.add_argument('--policy-id',choices=[POLICY_ID,POLICY_ID+'-R2',ONE_DIAGNOSTIC_ID,REPAIR_ID,REPAIR2_ID,REPAIR3_ID,REPAIR4_ID,REPAIR5_ID],default=POLICY_ID)
+    parser.add_argument('--policy-id',choices=[POLICY_ID,POLICY_ID+'-R2',ONE_DIAGNOSTIC_ID,REPAIR_ID,REPAIR2_ID,REPAIR3_ID,REPAIR4_ID,REPAIR5_ID,CAUSAL_ID],default=POLICY_ID)
     parser.add_argument('--artifact-receipt')
     parser.add_argument('--request'); parser.add_argument('--dry-run',action='store_true')
     args=parser.parse_args()
