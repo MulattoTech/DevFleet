@@ -30,7 +30,6 @@ jobs:
         run: |
           python -m pytest -q \
             .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_causal_successor.py \
-            tools/test_baseline_generation6.py \
             tools/test_baseline_lineage.py \
             tools/test_baseline_temporal_binding.py \
             tools/test_validate_release_bundle_generation5.py \
@@ -51,6 +50,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+      - name: Run Generation-6 Python and PowerShell reader contracts
+        run: python tools/test_baseline_generation6.py
       - name: Run VM-free PowerShell contracts
         run: |
           $ErrorActionPreference = 'Stop'
