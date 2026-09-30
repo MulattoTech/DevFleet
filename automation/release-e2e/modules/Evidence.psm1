@@ -22,7 +22,7 @@ function Write-EvidenceJson {
         try {
             $tmp="$Path.$([guid]::NewGuid().ToString('N')).tmp"
             [IO.File]::WriteAllText($tmp,$json,(New-Object Text.UTF8Encoding($false)))
-            Move-Item -LiteralPath $tmp -Destination $Path -Force
+            Move-Item -LiteralPath $tmp -Destination $Path -Force -ErrorAction Stop
             return
         } catch {
             if($attempt -eq 4){throw}
