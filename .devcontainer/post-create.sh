@@ -59,8 +59,8 @@ else
   fi
 fi
 
-log "Verifying the published source snapshot."
-"$venv_python" ai/verify_source_export.py
+log "Verifying the published original source export."
+"$venv_python" ai/verify_source_parts.py
 
 mkdir -p "$HOME/.cache"
 cat > "$HOME/.cache/devfleet-codespace-bootstrap.txt" <<EOF
