@@ -1,0 +1,116 @@
+name: VM-free source checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python-source:
+    name: Python source and export (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: |
+          python -m pip install --require-hashes -r tools/release-tooling-requirements.txt
+          python -m pip install pytest
+      - name: Verify published source export
+        run: |
+          python -m unittest ai/test_verify_source_parts.py
+          python ai/verify_source_parts.py
+      - name: Run VM-free Python contracts
+        run: |
+          python -m pytest -q -k "not powershell_reader" \
+            .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_causal_successor.py \
+            tools/test_baseline_lineage.py \
+            tools/test_baseline_temporal_binding.py \
+            tools/test_validate_release_bundle_generation5.py \
+            tools/test_validate_native_proof.py \
+            source/tests/test_dependency_advisories.py \
+            source/tests/test_release_fingerprint.py \
+            source/tests/test_posix_zip_writer.py
+
+  powershell-contracts:
+    name: PowerShell contracts (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Run Generation-4 and Generation-6 Python and PowerShell reader contracts
+        run: |
+          python tools/test_baseline_generation4.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/test_baseline_generation6.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run VM-free PowerShell contracts
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tests = @(
+            'automation/release-e2e/tests/Test-BaselineLineage.ps1'
+            'automation/release-e2e/tests/Test-ColdLaunchTelemetryObserver.ps1'
+            'automation/release-e2e/tests/Test-PassiveColdLaunchTelemetry.ps1'
+            'automation/release-e2e/tests/Test-ProductLaunchObserverDeferral.ps1'
+            'automation/release-e2e/tests/Test-AuthorityTimestampRoundTrip.ps1'
+            'automation/release-e2e/tests/Test-BoundedProcessOutput.ps1'
+            'automation/release-e2e/tests/Test-CorrectionInventoryOrdering.ps1'
+            'automation/release-e2e/tests/Test-ExactProofBinding.ps1'
+            'automation/release-e2e/tests/Test-FinalizerProcessExitBoundary.ps1'
+          )
+          foreach ($test in $tests) {
+            Write-Host "Running $test"
+            if ($test -like '*Test-ProductLaunchObserverDeferral.ps1') {
+              & $test -WorkspaceRoot $PWD.Path
+            } else {
+              & $test
+            }
+            if (-not $?) { throw "VM-free contract failed: $test" }
+          }
+          # Negative fixtures may leave LASTEXITCODE nonzero after a verified PASS.
+          exit 0
+      - name: Run optional public issue regressions when present
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # These tests arrive in separate public PRs. Run them as each PR lands;
+          # their absence on this CI-only branch is reported explicitly.
+          $optionalPowerShell = @(
+            'automation/release-e2e/tests/Test-HostSafetyDiagnostics.ps1'
+            'automation/release-e2e/tests/Test-EvidenceWriterAtomicMove.ps1'
+            'automation/release-e2e/tests/Test-WpfAtomicWriteCollision.ps1'
+          )
+          foreach ($test in $optionalPowerShell) {
+            if (-not (Test-Path -LiteralPath $test)) {
+              Write-Host "SKIP unmerged public test: $test"
+              continue
+            }
+            Write-Host "Running $test"
+            & $test
+            if (-not $?) { throw "Optional VM-free contract failed: $test" }
+          }
+          $optionalPython = @(
+            'tools/test_validate_public_push.py'
+            'tools/test_certification_command_center.py'
+          )
+          foreach ($test in $optionalPython) {
+            if (-not (Test-Path -LiteralPath $test)) {
+              Write-Host "SKIP unmerged public test: $test"
+              continue
+            }
+            Write-Host "Running $test"
+            python $test
+            if ($LASTEXITCODE -ne 0) { throw "Optional VM-free contract failed: $test" }
+          }
+          exit 0

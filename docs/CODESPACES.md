@@ -13,7 +13,7 @@ On first creation, `.devcontainer/post-create.sh`:
 - installs the hash-pinned DevFleet Python runtime dependencies;
 - installs the hash-pinned release-tooling Python dependencies plus pytest;
 - installs Codex CLI from the official npm package if `codex` is not already present;
-- runs `ai/verify_source_export.py`;
+- verifies the immutable original source export with `ai/verify_source_parts.py`;
 - leaves a bootstrap summary at `~/.cache/devfleet-codespace-bootstrap.txt`;
 - does **not** run native certification, Hyper-V, WPF, signing, or private evidence operations.
 
