@@ -92,6 +92,7 @@ The original source inventory records the imported source snapshot. Later public
 ## Start here
 
 - [Build from a clean clone](BUILD-FROM-CLONE.md)
+- [VS Code public/native source boundary](docs/VS-CODE-SOURCE-BOUNDARY.md)
 - [Product guide](source/README-FIRST.md)
 - [Current AI certification handoff](ai/CERTIFICATION-HANDOFF.md)
 - [Small AI source-access guide](ai/CHATJIMMY-START-HERE.md)

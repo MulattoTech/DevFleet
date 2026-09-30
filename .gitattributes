@@ -3,3 +3,4 @@
 /source/** text eol=lf
 /tools/** text eol=lf
 /audit/run-exact-candidate-proof.ps1 text eol=lf
+/.githooks/* text eol=lf

@@ -1,0 +1,7 @@
+{
+  "git.confirmSync": true,
+  "git.enableSmartCommit": false,
+  "git.suggestSmartCommit": false,
+  "git.enableStatusBarSync": false,
+  "git.autofetch": false
+}
