@@ -89,6 +89,7 @@ jobs:
           $optionalPowerShell = @(
             'automation/release-e2e/tests/Test-HostSafetyDiagnostics.ps1'
             'automation/release-e2e/tests/Test-EvidenceWriterAtomicMove.ps1'
+            'automation/release-e2e/tests/Test-WpfAtomicWriteCollision.ps1'
           )
           foreach ($test in $optionalPowerShell) {
             if (-not (Test-Path -LiteralPath $test)) {
