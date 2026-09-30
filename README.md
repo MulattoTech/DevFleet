@@ -93,5 +93,6 @@ The five maintenance phases (REPAIR, CLEAN-REINSTALL, UNINSTALL, FACTORY-RESET, 
 - [Current publishable-source inventory](ai/ORIGINAL-SOURCE-INVENTORY.json)
 - [Source import and synchronization provenance](ai/GITHUB-IMPORT.md)
 - [Release completion requirements](docs/ai/devfleet-release/DONE.md)
+- [Read-only local Certification Command Center](docs/ai/devfleet-release/COMMAND-CENTER.md)
 
 The installer payload and 981 reviewed original tracked publishable source/tooling/docs files are included. Dependencies, licensed guest images, private credentials, private signing keys, VM/checkpoint state, signed release binary and private attempt ledgers remain outside this public repository. GitHub commit identity differs from the original host's source HEAD and cannot grant release or public publisher trust.
