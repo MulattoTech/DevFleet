@@ -89,13 +89,19 @@ try {
         Remove-DevFleetHttpHostileExtraction -Path $extractRoot
     } catch {
         $cleanupFailure = $_
-        [ordered]@{
-            schemaVersion = 1
-            phase = 'HTTP-HOSTILE'
-            cleanupStatus = 'FAILED'
-            primaryPhaseFailure = if ($phaseFailure) { [string]$phaseFailure.Exception.Message } else { $null }
-            cleanupFailure = [string]$cleanupFailure.Exception.Message
-        } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $cleanupErrorPath -Encoding utf8
+        try {
+            [ordered]@{
+                schemaVersion = 1
+                phase = 'HTTP-HOSTILE'
+                cleanupStatus = 'FAILED'
+                primaryPhaseFailure = if ($phaseFailure) { [string]$phaseFailure.Exception.Message } else { $null }
+                cleanupFailure = [string]$cleanupFailure.Exception.Message
+            } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $cleanupErrorPath -Encoding utf8 -ErrorAction Stop
+        } catch {
+            # Evidence-envelope persistence must never replace the actual phase or
+            # cleanup failure that controls the FullRelease result.
+            Write-Warning "HTTP-HOSTILE cleanup failure envelope could not be written: $($_.Exception.Message)"
+        }
     }
 
     if ($phaseFailure) { throw $phaseFailure }
