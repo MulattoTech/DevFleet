@@ -25,7 +25,9 @@ class BaselineLineageTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        # Hosted Windows may expose the temp root through an 8.3 path alias;
+        # evidence references must use the canonical filesystem path.
+        self.root = Path(self.tmp.name).resolve()
         predecessor = self.root / 'audit/agent-memory/attempts/DF-FRESH-CERTIFICATION-20260926-R2/readiness-predecessor.json'
         predecessor.parent.mkdir(parents=True, exist_ok=True)
         predecessor.write_text(json.dumps({'lab': {'l1Id': VM, 'cleanId': OLD},

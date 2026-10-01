@@ -24,11 +24,19 @@ REPAIR4_ID = POLICY_ID + '-R2-REPAIR-4'
 REPAIR5_ID = POLICY_ID + '-R2-REPAIR-5'
 CAUSAL_ID = 'DF-FRESH-CERTIFICATION-20260929-CAUSAL-1'
 COLLISION_ID = 'DF-FRESH-CERTIFICATION-20260930-COLLISION-1'
+HTTP_CLEANUP_ID = 'DF-FRESH-CERTIFICATION-20261001-HTTP-CLEANUP-1'
 COLLISION_PREDECESSOR_SHA256 = '6deb98ab9dd165798e31538772f01e23eceeb333b10e0067a066685952f680e1'
 COLLISION_OWNER_AUTH_SHA256 = 'f9eec666193447810089ffbd1ad249aba8f8e8a7d13e5220d10ef5ac2c64af16'
 COLLISION_FIRST_ERROR = 'Cannot create a file when that file already exists.'
 COLLISION_LEDGER_PATH = Path(r'C:\Users\Dylan\Documents\Codex\2026-08-12\ex-2\work\DevFleet-v1.2.13-development\audit\agent-memory\attempts\DF-FRESH-CERTIFICATION-20260930-COLLISION-1\ledger.json')
 COLLISION_LIVE_CAUSAL_PATH = Path(r'C:\Users\Dylan\Documents\Codex\2026-08-12\ex-2\work\DevFleet-v1.2.13-development\audit\agent-memory\attempts\DF-FRESH-CERTIFICATION-20260929-CAUSAL-1\ledger.json')
+HTTP_CLEANUP_PREDECESSOR_SHA256 = '2bede7d9944502898b919d4a29ed73f99c2009a819850349d5b08bfd6e8bb1c4'
+HTTP_CLEANUP_LIVE_PREDECESSOR_PATH = Path(r'C:\Users\Dylan\Documents\Codex\2026-08-12\ex-2\work\DevFleet-v1.2.13-development\audit\agent-memory\attempts\DF-FRESH-CERTIFICATION-20260930-COLLISION-1\ledger.json')
+HTTP_CLEANUP_LEDGER_PATH = Path(r'C:\Users\Dylan\Documents\Codex\2026-08-12\ex-2\work\DevFleet-v1.2.13-development\audit\agent-memory\attempts\DF-FRESH-CERTIFICATION-20261001-HTTP-CLEANUP-1\ledger.json')
+HTTP_CLEANUP_GEN7_POINTER_SHA256 = '2fdd83acea55f9acc5ee2755de85d9144d026e365640f9ba36e8f7310979888d'
+HTTP_CLEANUP_GEN7_RECEIPT_SHA256 = 'c10e200f68f6392aaa8c963f730e67aafc74e252af47a12facd7ef9bfcbcbd34'
+HTTP_CLEANUP_GEN7_RECEIPT_FILE = '000feeb05be149088e8e07954282e80f.json'
+HTTP_CLEANUP_CLEAN_R2_ID = '1e84fdaf-45f9-417e-a93c-354d05b4c766'
 TUPLE_KEYS = ('repositoryHead', 'candidateBuildCommit', 'shippingInputIdentity',
               'releaseFingerprintId', 'toolingFingerprintId', 'candidateSha256')
 REPAIR3_CANDIDATE_COMMIT = 'be0f1473838b4c2255d22efd99b25a58fd588a78'
@@ -65,6 +73,10 @@ REPAIR4_SEQUENCE = REPAIR_SEQUENCE
 REPAIR5_LIMITS = dict(REPAIR4_LIMITS)
 REPAIR5_SEQUENCE = REPAIR_SEQUENCE
 COLLISION_LIMITS = dict(REPAIR5_LIMITS)
+HTTP_CLEANUP_LIMITS = {'standard-token': 1, 'diagnostic': 1,
+                       'laptop-proof': 1, 'desktop-proof': 1,
+                       'fullrelease': 1, 'maintenance': 0, 'build-sign': 0}
+HTTP_CLEANUP_SEQUENCE = REPAIR_SEQUENCE
 
 
 def sequence_for(policy_id):
@@ -76,6 +88,8 @@ def sequence_for(policy_id):
         return REPAIR4_SEQUENCE
     if policy_id in (REPAIR5_ID, COLLISION_ID):
         return REPAIR5_SEQUENCE
+    if policy_id == HTTP_CLEANUP_ID:
+        return HTTP_CLEANUP_SEQUENCE
     return REPAIR_SEQUENCE
 
 
@@ -94,6 +108,8 @@ def limits_for(policy_id):
         return REPAIR5_LIMITS
     if policy_id == COLLISION_ID:
         return COLLISION_LIMITS
+    if policy_id == HTTP_CLEANUP_ID:
+        return HTTP_CLEANUP_LIMITS
     if policy_id == CAUSAL_ID:
         return REPAIR5_LIMITS
     if policy_id in (POLICY_ID, POLICY_ID + '-R2'):
@@ -481,9 +497,212 @@ def _validate_collision_sources(ledger, authorization, predecessors):
     return approval, set(old_run_ids) | ancestor_run_ids
 
 
+def _validate_http_cleanup_sources(ledger, authorization, predecessors):
+    """Validate exact terminal COLLISION-1 and the owner-reviewed HTTP successor."""
+    def require(condition, message):
+        if not condition:
+            raise ValueError('HTTP-CLEANUP-1 ' + message)
+
+    def source_ref(value, label):
+        try:
+            return _collision_ref(value)
+        except (ValueError, KeyError, TypeError, OSError) as exc:
+            raise ValueError('HTTP-CLEANUP-1 ' + label + ' reference is invalid') from exc
+
+    ledger = Path(ledger).absolute()
+    authorization = _collision_path(str(authorization))
+    require(ledger == safe_path(HTTP_CLEANUP_LEDGER_PATH),
+            'ledger path differs from its canonical owner-bound path')
+    require(isinstance(predecessors, list) and len(predecessors) == 2,
+            'requires exactly one immutable snapshot and one live predecessor')
+    snapshot = _collision_path(str(predecessors[0]))
+    live = _collision_path(str(predecessors[1]))
+    expected_live = _collision_path(str(HTTP_CLEANUP_LIVE_PREDECESSOR_PATH))
+    expected_snapshot = _collision_path(str(ledger.parent / 'predecessors' / 'COLLISION-1-ledger.json'))
+    require(snapshot == expected_snapshot and live == expected_live and snapshot != live,
+            'predecessor paths are missing, aliased, or noncanonical')
+    require(len({ledger, authorization, snapshot, live}) == 4,
+            'ledger, authorization, snapshot, and live predecessor must be distinct')
+    expected_hash = HTTP_CLEANUP_PREDECESSOR_SHA256
+    require(re.fullmatch(r'[a-f0-9]{64}', expected_hash) is not None,
+            'configured predecessor hash is malformed')
+    require(digest(snapshot) == expected_hash and digest(live) == expected_hash
+            and digest(snapshot) == digest(live),
+            'immutable snapshot and exact live predecessor differ')
+
+    approval = strict_json(authorization)
+    required = {'schemaVersion', 'kind', 'policyId', 'approved', 'approvedBy',
+                'ownerAuthorization', 'successorLedgerPath', 'predecessorSha256',
+                'previousCandidate', 'candidate', 'limits', 'shippingChangeApproved',
+                'publicMainSha', 'reviewedSources', 'failureEvidence', 'generation7'}
+    require(isinstance(approval, dict) and set(approval) == required
+            and type(approval.get('schemaVersion')) is int and approval['schemaVersion'] == 1
+            and approval.get('kind') == 'DEVFLEET_HTTP_CLEANUP_SUCCESSOR_AUTHORIZATION'
+            and approval.get('policyId') == HTTP_CLEANUP_ID
+            and approval.get('approved') is True
+            and approval.get('approvedBy') == 'ACCOUNT_OWNER'
+            and approval.get('shippingChangeApproved') is False,
+            'exact account-owner authorization schema is required')
+    require(_collision_path(approval.get('successorLedgerPath'), existing=False) == ledger,
+            'authorization names another successor ledger')
+    limits = approval.get('limits')
+    require(isinstance(limits, dict) and set(limits) == set(HTTP_CLEANUP_LIMITS)
+            and all(type(limits.get(key)) is int and limits[key] == value
+                    for key, value in HTTP_CLEANUP_LIMITS.items()),
+            'finite limits are widened, noninteger, missing, or extra')
+    require(approval.get('predecessorSha256') == {'collision1': expected_hash},
+            'authorization predecessor hash differs')
+    require(isinstance(approval.get('publicMainSha'), str)
+            and re.fullmatch(r'[a-f0-9]{40}', approval['publicMainSha']) is not None,
+            'reviewed public main commit is malformed')
+
+    old_tuple = _collision_tuple(approval.get('previousCandidate'))
+    new_tuple = _collision_tuple(approval.get('candidate'))
+    for key in ('candidateBuildCommit', 'shippingInputIdentity',
+                'releaseFingerprintId', 'candidateSha256'):
+        require(old_tuple[key] == new_tuple[key], 'signed shipping changed: ' + key)
+    require(old_tuple['repositoryHead'] != new_tuple['repositoryHead']
+            and old_tuple['toolingFingerprintId'] != new_tuple['toolingFingerprintId'],
+            'repository HEAD and tooling fingerprint must both change')
+
+    owner = source_ref(approval.get('ownerAuthorization'), 'owner authorization')
+    require(owner not in {ledger, authorization, snapshot, live},
+            'owner authorization source aliases another bound source')
+    owner_text = owner.read_text(encoding='utf-8-sig')
+    owner_requirements = [HTTP_CLEANUP_ID,
+                          'standard-token = 1', 'diagnostic/readiness = 1',
+                          'laptop-proof = 1', 'desktop-proof = 1', 'fullrelease = 1',
+                          'maintenance = 0', 'build-sign = 0',
+                          'No signed-shipping change is authorized.',
+                          f'publicMainSha={approval["publicMainSha"]}',
+                          f'predecessorSha256={expected_hash}']
+    require(all(value in owner_text for value in owner_requirements)
+            and all(f'previousCandidate.{key}={value}' in owner_text
+                    for key, value in old_tuple.items())
+            and all(f'candidate.{key}={value}' in owner_text
+                    for key, value in new_tuple.items()),
+            'owner source does not approve the exact tuple and finite scope')
+
+    gen7 = approval.get('generation7')
+    require(isinstance(gen7, dict) and set(gen7) == {'pointer', 'receipt', 'checkpoint'},
+            'Generation-7 lineage references are incomplete')
+    pointer_path = source_ref(gen7.get('pointer'), 'Generation-7 pointer')
+    receipt_path = source_ref(gen7.get('receipt'), 'Generation-7 receipt')
+    require(digest(pointer_path) == HTTP_CLEANUP_GEN7_POINTER_SHA256
+            and digest(receipt_path) == HTTP_CLEANUP_GEN7_RECEIPT_SHA256
+            and receipt_path.name == HTTP_CLEANUP_GEN7_RECEIPT_FILE,
+            'Generation-7 pointer or receipt differs from the accepted baseline')
+    pointer = strict_json(pointer_path)
+    receipt = strict_json(receipt_path)
+    checkpoint = gen7.get('checkpoint')
+    require(isinstance(checkpoint, dict)
+            and checkpoint.get('name') == 'DevFleet-E2E-CLEAN-R2'
+            and checkpoint.get('id') == HTTP_CLEANUP_CLEAN_R2_ID,
+            'Generation-7 CLEAN-R2 checkpoint identity is absent')
+    require(pointer.get('schemaVersion') == 7
+            and pointer.get('contract') == 'devfleet-accepted-baseline-v7'
+            and pointer.get('generation') == 7 and pointer.get('status') == 'ACCEPTED'
+            and pointer.get('receiptFile') == receipt_path.name
+            and pointer.get('receiptSha256') == gen7['receipt']['sha256']
+            and pointer.get('checkpoint') == checkpoint,
+            'accepted Generation-7 pointer or receipt link differs')
+    require(receipt.get('schemaVersion') == 7
+            and receipt.get('contract') == 'devfleet-baseline-rebind-receipt-v7'
+            and receipt.get('status') == 'REBOUND'
+            and receipt.get('candidate') == old_tuple
+            and receipt.get('replacement') == checkpoint,
+            'Generation-7 receipt does not bind the predecessor tuple and checkpoint')
+
+    refs = approval.get('reviewedSources')
+    failure = approval.get('failureEvidence')
+    require(isinstance(refs, dict) and set(refs) == {'httpHostileExecutor', 'httpHostileRegression'}
+            and isinstance(failure, dict)
+            and set(failure) == {'fullReleaseWrapper', 'runState', 'error',
+                                 'failureCleanup', 'requestAdmission'},
+            'reviewed HTTP correction or FullRelease blocker evidence is incomplete')
+    source_paths = [source_ref(refs[key], 'reviewed source')
+                    for key in ('httpHostileExecutor', 'httpHostileRegression')]
+    failure_paths = [source_ref(failure[key], 'FullRelease failure evidence') for key in
+                     ('fullReleaseWrapper', 'runState', 'error', 'failureCleanup',
+                      'requestAdmission')]
+    all_paths = [ledger, authorization, snapshot, live, owner, pointer_path,
+                 receipt_path, *source_paths, *failure_paths]
+    require(len(all_paths) == len(set(all_paths)),
+            'bound paths contain aliases or a second live ledger')
+    require(source_paths[0].suffix.lower() == '.ps1'
+            and source_paths[1].suffix.lower() == '.ps1',
+            'reviewed executor and regression must be pinned source files')
+
+    # Load only the canonical live ledger as COLLISION-1. The snapshot is a
+    # byte-identical immutable copy, not a second campaign ledger to dispatch.
+    predecessor = load(live)
+    attempts = predecessor.get('attempts')
+    expected_sequence = (('standard-token', 0, 'PASS_NATIVE_STANDARD_TOKEN'),
+                         ('diagnostic', 0, 'PASS_READY_FOR_PROOF_RESERVATION'),
+                         ('laptop-proof', 0, 'NATIVE_LAPTOP_PROOF_PASS'),
+                         ('desktop-proof', 0, 'NATIVE_DESKTOP_PROOF_PASS'),
+                         ('fullrelease', 2, 'NATIVE_FULLRELEASE_BLOCKED'))
+    require(predecessor.get('policyId') == COLLISION_ID
+            and predecessor.get('activeRunId') is None
+            and predecessor.get('certificationCredit') is False
+            and predecessor.get('limits') == COLLISION_LIMITS
+            and isinstance(attempts, list) and len(attempts) == len(expected_sequence),
+            'predecessor is not exact inactive exhausted COLLISION-1')
+    require(all(isinstance(attempt, dict) and attempt.get('state') == 'TERMINAL'
+                and attempt.get('operation') == operation
+                and attempt.get('exitCode') == exit_code
+                and attempt.get('classification') == classification
+                and attempt.get('tuple') == old_tuple
+                for attempt, (operation, exit_code, classification)
+                in zip(attempts, expected_sequence)),
+            'predecessor terminal history differs from exact five-attempt sequence')
+    run_ids = [attempt.get('runId') for attempt in attempts]
+    require(all(isinstance(run_id, str) and run_id for run_id in run_ids)
+            and len(set(run_ids)) == len(run_ids),
+            'predecessor RunIds are missing or duplicated')
+    fullrelease_run = run_ids[-1]
+    wrapper = strict_json(failure['fullReleaseWrapper']['path'])
+    run_state = strict_json(failure['runState']['path'])
+    cleanup = strict_json(failure['failureCleanup']['path'])
+    admission = strict_json(failure['requestAdmission']['path'])
+    error_text = failure_paths[2].read_text(encoding='utf-8-sig')
+    require(wrapper.get('runId') == fullrelease_run
+            and wrapper.get('classification') == 'NATIVE_FULLRELEASE_BLOCKED'
+            and wrapper.get('exitCode') == 2
+            and wrapper.get('currentPhase') == 'HTTP-HOSTILE'
+            and isinstance(wrapper.get('firstTechnicalFailure'), str)
+            and wrapper['firstTechnicalFailure'] in error_text
+            and wrapper.get('observerTerminal') != wrapper.get('firstTechnicalFailure')
+            and run_state.get('runId') == fullrelease_run
+            and run_state.get('currentPhase') == 'HTTP-HOSTILE'
+            and fullrelease_run in error_text
+            and 'sharing violation' in error_text.lower()
+            and 'ruby-rails' in error_text.lower(),
+            'FullRelease blocker evidence does not bind the HTTP-HOSTILE cleanup failure')
+    require(admission.get('runId') == fullrelease_run
+            and admission.get('phase') == 'HTTP-HOSTILE'
+            and admission.get('classification') == 'PASS_HTTP_HOSTILE_REQUEST_ADMISSION'
+            and type(admission.get('passedTests')) is int and admission['passedTests'] == 10
+            and type(admission.get('failedTests')) is int and admission['failedTests'] == 0,
+            'HTTP-HOSTILE request-admission evidence is not an exact ten-test PASS')
+    l1, l2 = cleanup.get('l1'), cleanup.get('l2')
+    require(cleanup.get('runId') == fullrelease_run
+            and isinstance(l1, dict) and l1.get('state') == 'Off'
+            and isinstance(l2, dict) and l2.get('status') == 'UNVERIFIED',
+            'failure cleanup must preserve L1 Off and L2 UNVERIFIED')
+
+    protected = {ledger, authorization, snapshot, live, owner, pointer_path,
+                 receipt_path, *source_paths, *failure_paths}
+    historical_run_ids = set(run_ids)
+    historical_run_ids.update(_collision_ancestor_run_ids(predecessor, protected))
+    return approval, historical_run_ids
+
+
 def initialize(ledger, authorization, predecessors, policy_id=POLICY_ID, artifact_receipt=None):
     limits = limits_for(policy_id)
-    if policy_id == COLLISION_ID:
+    if policy_id == HTTP_CLEANUP_ID:
+        _validate_http_cleanup_sources(ledger, authorization, predecessors)
+    elif policy_id == COLLISION_ID:
         _validate_collision_sources(ledger, authorization, predecessors)
     elif policy_id == CAUSAL_ID:
         _validate_causal_sources(ledger, authorization, predecessors)
@@ -579,7 +798,7 @@ def initialize(ledger, authorization, predecessors, policy_id=POLICY_ID, artifac
             raise ValueError('One-diagnostic successor requires exhausted R2 diagnostics')
         if parents[0]['authorization']['sha256'] == digest(authorization):
             raise ValueError('One-diagnostic successor requires separate explicit authorization')
-    elif policy_id != POLICY_ID:
+    elif policy_id not in (POLICY_ID, HTTP_CLEANUP_ID):
         parents=[load(p) for p in predecessors]
         if len(parents)!=1 or parents[0]['policyId']!=POLICY_ID or parents[0]['activeRunId'] is not None:
             raise ValueError('Successor requires one terminal predecessor campaign')
@@ -602,7 +821,7 @@ def initialize(ledger, authorization, predecessors, policy_id=POLICY_ID, artifac
 
 def load(ledger):
     data = strict_json(ledger)
-    if not isinstance(data,dict) or type(data.get('schemaVersion')) is not int or data['schemaVersion'] != 1 or data.get('policyId') not in (POLICY_ID, POLICY_ID+'-R2', ONE_DIAGNOSTIC_ID, REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID, CAUSAL_ID, COLLISION_ID):
+    if not isinstance(data,dict) or type(data.get('schemaVersion')) is not int or data['schemaVersion'] != 1 or data.get('policyId') not in (POLICY_ID, POLICY_ID+'-R2', ONE_DIAGNOSTIC_ID, REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID, CAUSAL_ID, COLLISION_ID, HTTP_CLEANUP_ID):
         raise ValueError('Unsupported campaign schema/identity')
     if data.get('certificationCredit') is not False:
         raise ValueError('Attempt accounting cannot grant certification credit')
@@ -629,6 +848,20 @@ def load(ledger):
             raise ValueError('Post-collision predecessor ledger binding is missing')
         approval, historical_run_ids = _validate_collision_sources(
             ledger, auth['path'], [predecessors[0]['path']])
+    elif data['policyId'] == HTTP_CLEANUP_ID:
+        predecessors = data.get('predecessors')
+        if (safe_path(ledger) != safe_path(HTTP_CLEANUP_LEDGER_PATH)
+                or not isinstance(predecessors, list) or len(predecessors) != 2
+                or any(not isinstance(row, dict) or set(row) != {'path', 'sha256'}
+                       for row in predecessors)):
+            raise ValueError('HTTP-CLEANUP-1 canonical ledger or predecessor references are malformed')
+        paths = [_collision_path(row['path']) for row in predecessors]
+        if any(digest(path) != row['sha256'] for path, row in zip(paths, predecessors)):
+            raise ValueError('HTTP-CLEANUP-1 predecessor source hash changed')
+        approval, historical_run_ids = _validate_http_cleanup_sources(
+            ledger, auth['path'], [str(path) for path in paths])
+        if digest(safe_path(auth['path'])) != auth['sha256']:
+            raise ValueError('HTTP-CLEANUP-1 authorization source changed')
     if data['policyId'] == REPAIR3_ID:
         receipt = data.get('artifactReceipt')
         if not isinstance(receipt, dict) or set(receipt) != {'path', 'sha256'}:
@@ -799,11 +1032,12 @@ def load(ledger):
         raise ValueError('Ambiguous active attempt')
     if any(sum(a['operation']==op for a in attempts)>limit for op,limit in expected_limits.items()):
         raise ValueError('Campaign allowance exceeded')
-    if data['policyId'] == COLLISION_ID:
+    if data['policyId'] in (COLLISION_ID, HTTP_CLEANUP_ID):
         if any(a['runId'] in historical_run_ids or a.get('tuple') != approval['candidate']
                for a in attempts):
-            raise ValueError('Post-collision RunId replay or candidate tuple drift')
-    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID, CAUSAL_ID, COLLISION_ID):
+            raise ValueError('Successor RunId replay or candidate tuple drift')
+    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID,
+                            REPAIR5_ID, CAUSAL_ID, COLLISION_ID, HTTP_CLEANUP_ID):
         sequence = sequence_for(data['policyId'])
         if len(attempts) > len(sequence):
             raise ValueError('Repair successor has too many phases')
@@ -842,6 +1076,15 @@ def prepare(data, request):
             raise ValueError('Historical CAUSAL-1 RunId cannot be replayed')
         if _collision_tuple(request['tuple']) != approval['candidate']:
             raise ValueError('Post-collision reservation tuple differs from owner authorization')
+    if data['policyId'] == HTTP_CLEANUP_ID:
+        auth_path = data['authorization']['path']
+        predecessor_paths = [row['path'] for row in data['predecessors']]
+        approval, historical_run_ids = _validate_http_cleanup_sources(
+            HTTP_CLEANUP_LEDGER_PATH, auth_path, predecessor_paths)
+        if request['runId'] in historical_run_ids:
+            raise ValueError('HTTP-CLEANUP-1 historical RunId cannot be replayed')
+        if _collision_tuple(request['tuple']) != approval['candidate']:
+            raise ValueError('HTTP-CLEANUP-1 reservation tuple differs from owner authorization')
     if not isinstance(request['entrypoint'],str) or not request['entrypoint'].strip() or not re.fullmatch('[a-f0-9]{64}',str(request['entrypointSha256'])): raise ValueError('Reviewed entrypoint identity required')
     if not isinstance(request['arguments'],list) or any(not isinstance(s,str) for s in request['arguments']): raise ValueError('Arguments must be a string array')
     if not isinstance(request['changedCondition'],str) or not request['changedCondition'].strip(): raise ValueError('Actual changed condition must be recorded')
@@ -850,7 +1093,8 @@ def prepare(data, request):
     if data['activeRunId'] is not None: raise ValueError('Active attempt must be reconciled; crash is not a free replay')
     if any(a['runId']==request['runId'] for a in data['attempts']): raise ValueError('RunId has already been charged')
     if sum(a['operation']==request['operation'] for a in data['attempts'])>=limits[request['operation']]: raise ValueError('Operation allowance exhausted')
-    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID, CAUSAL_ID, COLLISION_ID):
+    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID,
+                            REPAIR5_ID, CAUSAL_ID, COLLISION_ID, HTTP_CLEANUP_ID):
         sequence = sequence_for(data['policyId'])
         prior = data['attempts']
         if (len(prior) >= len(sequence)
@@ -889,7 +1133,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command',choices=['initialize','status','reserve','finish'])
     parser.add_argument('--ledger',required=True); parser.add_argument('--authorization'); parser.add_argument('--predecessor',action='append',default=[])
-    parser.add_argument('--policy-id',choices=[POLICY_ID,POLICY_ID+'-R2',ONE_DIAGNOSTIC_ID,REPAIR_ID,REPAIR2_ID,REPAIR3_ID,REPAIR4_ID,REPAIR5_ID,CAUSAL_ID,COLLISION_ID],default=POLICY_ID)
+    parser.add_argument('--policy-id',choices=[POLICY_ID,POLICY_ID+'-R2',ONE_DIAGNOSTIC_ID,REPAIR_ID,REPAIR2_ID,REPAIR3_ID,REPAIR4_ID,REPAIR5_ID,CAUSAL_ID,COLLISION_ID,HTTP_CLEANUP_ID],default=POLICY_ID)
     parser.add_argument('--artifact-receipt')
     parser.add_argument('--request'); parser.add_argument('--dry-run',action='store_true')
     args=parser.parse_args()

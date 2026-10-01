@@ -130,6 +130,8 @@ def accepted_baseline(root, current_tuple=None):
         return {'name': OLD_NAME, 'id': OLD_ID, 'vmName': VM_NAME, 'vmId': VM_ID,
                 'predecessorId': None, 'receiptSha256': None, 'legacyOriginal': True}
     pointer = read_json(pointer_path)
+    if pointer.get('generation') == 8:
+        return _accepted_rebound_v8(root, pointer, current_tuple)
     if pointer.get('generation') == 7:
         return _accepted_rebound_v7(root, pointer, current_tuple)
     if pointer.get('generation') == 6:
@@ -916,6 +918,12 @@ COLLISION_FIRST_ERROR = 'Cannot create a file when that file already exists.'
 COLLISION_LIMITS = {'standard-token': 1, 'diagnostic': 1, 'laptop-proof': 1,
                     'desktop-proof': 1, 'fullrelease': 1, 'maintenance': 0,
                     'build-sign': 0}
+HTTP_CLEANUP_POLICY = 'DF-FRESH-CERTIFICATION-20261001-HTTP-CLEANUP-1'
+HTTP_CLEANUP_PREDECESSOR_SHA256 = '2bede7d9944502898b919d4a29ed73f99c2009a819850349d5b08bfd6e8bb1c4'
+HTTP_CLEANUP_LEDGER_PATH = Path(r'C:\Users\Dylan\Documents\Codex\2026-08-12\ex-2\work\DevFleet-v1.2.13-development\audit\agent-memory\attempts\DF-FRESH-CERTIFICATION-20261001-HTTP-CLEANUP-1\ledger.json')
+HTTP_CLEANUP_LIMITS = {'standard-token': 1, 'diagnostic': 1, 'laptop-proof': 1,
+                       'desktop-proof': 1, 'fullrelease': 1, 'maintenance': 0,
+                       'build-sign': 0}
 TOKEN_CHECKS = {'pass', 'payloadExtraction', 'bootstrapEntrypoint',
                 'parameterContract', 'embeddedTarCount', 'factoryResetBackupGate',
                 'planSafety', 'devfleetVersion', 'installerVersion', 'payloadSha'}
@@ -930,14 +938,21 @@ def _gen7_source(state, source_hash, extension):
     return path
 
 
-def _gen7_token(root, pointer_path, candidate, frozen=None):
+def _gen7_token(root, pointer_path, candidate, frozen=None, historical=False):
     """Validate exact current Developer evidence, then optionally frozen copies."""
     root = Path(root).resolve(strict=True)
     require(not Path(pointer_path).is_symlink(), 'Generation-7 token pointer is linked')
     pointer_path = Path(pointer_path).resolve(strict=True)
     require(pointer_path == root / 'evidence/CURRENT-STANDARD-TOKEN.json',
             'Generation-7 token pointer is not canonical')
-    pointer = read_json(pointer_path)
+    frozen_pointer_path = None
+    if historical:
+        require(isinstance(frozen, dict),
+                'Generation-7 historical token receipt reference is absent')
+        frozen_pointer_path = _gen7_source(_state(root), frozen.get('pointerSha256'), '.json')
+        pointer = read_json(frozen_pointer_path)
+    else:
+        pointer = read_json(pointer_path)
     run_id = pointer.get('runId')
     require(isinstance(run_id, str) and re.fullmatch(r'standard-token-[A-Za-z0-9-]+', run_id),
             'Generation-7 token RunId is malformed')
@@ -989,7 +1004,8 @@ def _gen7_token(root, pointer_path, candidate, frozen=None):
             and re.search(r'(?m)^PASS\s*$', raw) is not None
             and 'payload=' + tar['sha256'] in raw,
             'Generation-7 raw report lacks exact PASS and payload')
-    refs = {'runId': run_id, 'pointerSha256': digest(pointer_path),
+    refs = {'runId': run_id,
+            'pointerSha256': digest(frozen_pointer_path) if historical else digest(pointer_path),
             'canonicalSha256': digest(canonical_path),
             'rawReportSha256': digest(raw_path),
             'pointerPath': 'evidence/CURRENT-STANDARD-TOKEN.json',
@@ -1003,12 +1019,15 @@ def _gen7_token(root, pointer_path, candidate, frozen=None):
             source = _gen7_source(state, refs[key], ext)
             current = {'pointerSha256': pointer_path, 'canonicalSha256': canonical_path,
                        'rawReportSha256': raw_path}[key]
+            if historical and key == 'pointerSha256':
+                continue
             require(source.read_bytes() == current.read_bytes(),
                     'Generation-7 frozen token bytes differ from current')
     return refs, (pointer_path, canonical_path, raw_path)
 
 
-def _gen7_validation(root, pointer, receipt, previous, prior, old_tuple, new_tuple):
+def _gen7_validation(root, pointer, receipt, previous, prior, old_tuple, new_tuple,
+                     historical=False):
     state = _state(root)
     approval = receipt.get('approval') or {}
     require(receipt.get('schemaVersion') == 7
@@ -1110,7 +1129,8 @@ def _gen7_validation(root, pointer, receipt, previous, prior, old_tuple, new_tup
             'Generation-7 native inventory lacks accepted CLEAN-R2 with L1 Off')
     token_ref = receipt.get('standardTokenEvidence')
     require(isinstance(token_ref, dict), 'Generation-7 token receipt reference is absent')
-    _gen7_token(root, Path(root) / 'evidence/CURRENT-STANDARD-TOKEN.json', new_tuple, token_ref)
+    _gen7_token(root, Path(root) / 'evidence/CURRENT-STANDARD-TOKEN.json', new_tuple,
+                token_ref, historical=historical)
     _gen7_outer_inner(attempts[0], Path(root), token_ref)
 
 
@@ -1186,7 +1206,7 @@ def _gen7_collision_failure(predecessor, old_tuple, auth, failures):
             'Generation-7 first failure, later observer, or cleanup differs')
 
 
-def _accepted_rebound_v7(root, pointer, current_tuple=None):
+def _accepted_rebound_v7(root, pointer, current_tuple=None, historical=False):
     state = _state(root)
     require(pointer.get('schemaVersion') == 7
             and pointer.get('contract') == 'devfleet-accepted-baseline-v7'
@@ -1212,12 +1232,69 @@ def _accepted_rebound_v7(root, pointer, current_tuple=None):
     old_tuple = exact_tuple(receipt.get('previousCandidate'))
     new_tuple = exact_tuple(receipt.get('candidate'))
     prior = _accepted_rebound_v6(root, previous, old_tuple)
-    _gen7_validation(root, pointer, receipt, previous, prior, old_tuple, new_tuple)
+    _gen7_validation(root, pointer, receipt, previous, prior, old_tuple, new_tuple,
+                     historical=_gen7_historical_token(root, new_tuple, historical))
     if current_tuple is not None:
         require(new_tuple == exact_tuple(current_tuple),
                 'Generation-7 baseline is bound to another candidate/material tuple')
     return {**prior, 'receiptSha256': pointer['receiptSha256'], 'receiptFile': filename,
             'previousReceiptSha256': prior['receiptSha256'], 'generation': 7}
+
+
+def _gen7_historical_token(root, candidate, explicitly_historical=False):
+    """Keep Gen7 readable during a genuine same-shipping successor qualification."""
+    if explicitly_historical:
+        return True
+    pointer_path = Path(root) / 'evidence/CURRENT-STANDARD-TOKEN.json'
+    token = read_json(pointer_path)
+    current_values = dict(candidate)
+    current_values.update({key: token.get(key) for key in TUPLE_KEYS
+                           if key != 'candidateSha256'})
+    current = exact_tuple(current_values)
+    if current == candidate:
+        return False
+    require(all(candidate[key] == current[key] for key in
+                ('candidateBuildCommit', 'shippingInputIdentity',
+                 'releaseFingerprintId', 'candidateSha256'))
+            and candidate['repositoryHead'] != current['repositoryHead']
+            and candidate['toolingFingerprintId'] != current['toolingFingerprintId'],
+            'Generation-7 current token differs outside a same-shipping successor tuple')
+    _gen7_token(root, pointer_path, current)
+    return True
+
+
+def _accepted_rebound_v8(root, pointer, current_tuple=None):
+    """Validate the immutable Generation-8 append and its exact Gen-7 parent."""
+    state = _state(root)
+    require(set(pointer) == {'schemaVersion', 'contract', 'generation', 'status',
+                             'receiptFile', 'receiptSha256', 'previousPointerSha256',
+                             'checkpoint'}
+            and pointer.get('schemaVersion') == 8
+            and pointer.get('contract') == 'devfleet-accepted-baseline-v8'
+            and pointer.get('generation') == 8 and pointer.get('status') == 'ACCEPTED',
+            'Generation-8 pointer contract differs')
+    filename, previous_hash = pointer.get('receiptFile'), pointer.get('previousPointerSha256')
+    require(isinstance(filename, str) and re.fullmatch(r'[0-9a-f]{32}\.json', filename)
+            and isinstance(previous_hash, str) and HEX64.fullmatch(previous_hash),
+            'Generation-8 lineage reference is malformed')
+    previous_path = state / 'history' / (previous_hash + '.json')
+    require(previous_path.is_file() and not previous_path.is_symlink()
+            and digest(previous_path) == previous_hash,
+            'Generation-8 predecessor pointer is absent or changed')
+    previous = read_json(previous_path)
+    require(previous.get('generation') == 7,
+            'Generation-8 predecessor must be the accepted Generation-7 pointer')
+    prior = _accepted_rebound_v7(root, previous, historical=True)
+    receipt_path = state / 'receipts' / filename
+    require(receipt_path.is_file() and not receipt_path.is_symlink()
+            and digest(receipt_path) == pointer.get('receiptSha256'),
+            'Generation-8 receipt is absent or hash-mismatched')
+    receipt = read_json(receipt_path)
+    require(receipt.get('schemaVersion') == 8
+            and receipt.get('contract') == 'devfleet-baseline-rebind-receipt-v8',
+            'Generation-8 receipt contract differs')
+    return _gen8_validate(root, pointer, receipt, previous, prior,
+                          current_tuple)
 
 
 def rebind_gen7(root, tuple_path, approval_path, ledger_path, live_path, token_pointer_path):
@@ -1403,6 +1480,506 @@ def _gen7_validate_prewrite(root, pointer, receipt, previous, prior,
             and exact[0].get('vmId') == VM_ID
             and exact[0].get('parentSnapshotId') == OLD_ID,
             'Generation-7 native inventory lacks exact CLEAN-R2 and L1 Off')
+
+
+def _gen8_frozen_source(state, source_hash, extension):
+    require(isinstance(source_hash, str) and HEX64.fullmatch(source_hash),
+            'Generation-8 frozen source hash is malformed')
+    path = state / 'sources' / (source_hash + extension)
+    require(path.is_file() and not path.is_symlink() and path.stat().st_size <= 4_000_000
+            and digest(path) == source_hash, 'Generation-8 frozen source is missing or changed')
+    return path
+
+
+def _gen8_collect_closure(roots):
+    """Hash-pin a bounded recursive closure of JSON path/hash references."""
+    pending = [Path(path).absolute() for path in roots]
+    queued_paths = set(pending)
+    seen_paths, sources = set(), {}
+    total_bytes = 0
+    while pending:
+        path = pending.pop().absolute()
+        queued_paths.discard(path)
+        require(path not in seen_paths, 'Generation-8 source closure contains a path alias')
+        seen_paths.add(path)
+        require(path.is_file() and not path.is_symlink() and path.resolve(strict=True) == path,
+                'Generation-8 source closure contains an absent, linked or noncanonical file')
+        size = path.stat().st_size
+        require(size <= 4_000_000, 'Generation-8 source closure member exceeds size limit')
+        total_bytes += size
+        require(total_bytes <= 32_000_000 and len(seen_paths) <= 512,
+                'Generation-8 source closure exceeds bounded size')
+        source_hash, extension = digest(path), path.suffix.lower() or '.bin'
+        key = (source_hash, extension)
+        prior = sources.get(key)
+        if prior is not None:
+            require(prior.read_bytes() == path.read_bytes(),
+                    'Generation-8 equal-hash source collision detected')
+        else:
+            sources[key] = path
+        if extension != '.json':
+            continue
+        document = read_json(path)
+        references = []
+        def visit(value):
+            if isinstance(value, dict):
+                if (isinstance(value.get('path'), str)
+                        and isinstance(value.get('sha256'), str)
+                        and HEX64.fullmatch(value['sha256'])):
+                    references.append((value['path'], value['sha256']))
+                for nested in value.values():
+                    visit(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    visit(nested)
+        visit(document)
+        for raw_path, expected_hash in references:
+            referenced = Path(raw_path).absolute()
+            require(referenced.is_file() and not referenced.is_symlink()
+                    and referenced.resolve(strict=True) == referenced
+                    and digest(referenced) == expected_hash,
+                    f'Generation-8 referenced source is absent, noncanonical or hash-mismatched: {raw_path}')
+            if referenced in seen_paths or referenced in queued_paths:
+                continue
+            queued_paths.add(referenced)
+            pending.append(referenced)
+    return [{'sha256': source_hash, 'extension': extension}
+            for source_hash, extension in sorted(sources)] , sources
+
+
+def _gen8_close_frozen_sources(state, source_closure):
+    require(isinstance(source_closure, list) and 1 <= len(source_closure) <= 512,
+            'Generation-8 source closure manifest is malformed')
+    sources = {}
+    total_bytes = 0
+    for row in source_closure:
+        require(isinstance(row, dict) and set(row) == {'sha256', 'extension'}
+                and isinstance(row.get('extension'), str)
+                and re.fullmatch(r'\.[a-z0-9]{1,8}', row['extension'])
+                and isinstance(row.get('sha256'), str) and HEX64.fullmatch(row['sha256']),
+                'Generation-8 source closure entry is malformed')
+        key = (row['sha256'], row['extension'])
+        require(key not in sources, 'Generation-8 source closure repeats an entry')
+        path = _gen8_frozen_source(state, row['sha256'], row['extension'])
+        total_bytes += path.stat().st_size
+        require(total_bytes <= 32_000_000, 'Generation-8 frozen closure exceeds bounded size')
+        sources[key] = path
+    require(len(sources) == len(source_closure), 'Generation-8 frozen closure is incomplete')
+    return sources
+
+
+def _gen8_validate_frozen_graph(state, source_closure, sources):
+    """Require every frozen JSON path/hash reference to have frozen bytes."""
+    visited = set()
+    pending = [key for key in sources if key[1] == '.json']
+    while pending:
+        key = pending.pop()
+        if key in visited:
+            continue
+        visited.add(key)
+        document = read_json(sources[key])
+        def visit(value):
+            if isinstance(value, dict):
+                if (isinstance(value.get('path'), str)
+                        and isinstance(value.get('sha256'), str)
+                        and HEX64.fullmatch(value['sha256'])):
+                    matched = [source_key for source_key in sources
+                               if source_key[0] == value['sha256']]
+                    require(bool(matched),
+                            'Generation-8 frozen JSON references an unfrozen source')
+                    for source_key in matched:
+                        if source_key[1] == '.json':
+                            pending.append(source_key)
+                for nested in value.values():
+                    visit(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    visit(nested)
+        visit(document)
+    return True
+
+
+def _gen8_frozen_token(root, receipt, sources, new_tuple, outer_attempt):
+    token_ref = receipt.get('standardTokenEvidence')
+    require(isinstance(token_ref, dict)
+            and set(token_ref) == {'runId', 'pointerSha256', 'canonicalSha256',
+                                   'rawReportSha256', 'pointerPath', 'canonicalPath',
+                                   'rawReportPath'},
+            'Generation-8 frozen Developer token reference is malformed')
+    def source(hash_value, extension):
+        key = (hash_value, extension)
+        require(key in sources, 'Generation-8 token source is not in frozen closure')
+        return sources[key]
+    pointer_path = source(token_ref['pointerSha256'], '.json')
+    canonical_path = source(token_ref['canonicalSha256'], '.json')
+    raw_path = source(token_ref['rawReportSha256'], '.txt')
+    pointer, token = read_json(pointer_path), read_json(canonical_path)
+    require(pointer == token,
+            'Generation-8 frozen token pointer and canonical record differ')
+    run_id = token_ref.get('runId')
+    relative = 'evidence/standard-token/' + str(run_id)
+    require(isinstance(run_id, str) and re.fullmatch(r'standard-token-[A-Za-z0-9-]+', run_id)
+            and token_ref.get('pointerPath') == 'evidence/CURRENT-STANDARD-TOKEN.json'
+            and token_ref.get('canonicalPath') == relative + '/standard-token-evidence.json'
+            and token_ref.get('rawReportPath') == relative + '/installer-self-test-raw.txt',
+            'Generation-8 frozen token paths or RunId differ')
+    require(token.get('runDirectory') == relative
+            and token.get('canonicalEvidencePath') == token_ref['canonicalPath']
+            and token.get('rawReportPath') == token_ref['rawReportPath'],
+            'Generation-8 frozen token document paths differ from its references')
+    actual = {key: token.get(key) for key in TUPLE_KEYS if key != 'candidateSha256'}
+    identity = token.get('token') or {}
+    checks = token.get('requiredChecks')
+    require(token.get('schemaVersion') == 1 and token.get('runId') == run_id
+            and token.get('status') == 'PASS'
+            and token.get('standardNonAdministratorToken') is True
+            and token.get('exitCode') == 0 and token.get('residualSelfTestScratchCount') == 0
+            and actual == {key: new_tuple[key] for key in TUPLE_KEYS if key != 'candidateSha256'}
+            and isinstance(checks, dict) and set(checks) == TOKEN_CHECKS
+            and all(value is True for value in checks.values())
+            and isinstance(identity, dict)
+            and isinstance(identity.get('userName'), str)
+            and re.fullmatch(r'[^\\]+\\Developer', identity['userName'], re.IGNORECASE)
+            and identity.get('standardNonAdministratorToken') is True
+            and identity.get('isAdministratorMember') is False
+            and identity.get('isAdministratorEnabled') is False
+            and identity.get('isElevated') is False
+            and identity.get('integrityLevel') == 'Medium',
+            'Generation-8 frozen token is not an exact current-tuple Developer PASS')
+    exe, tar = token.get('exe') or {}, token.get('tar') or {}
+    require(exe.get('sha256') == new_tuple['candidateSha256']
+            and type(exe.get('bytes')) is int and exe['bytes'] > 0
+            and isinstance(tar.get('sha256'), str) and HEX64.fullmatch(tar['sha256'])
+            and type(tar.get('bytes')) is int and tar['bytes'] > 0,
+            'Generation-8 frozen token signed artifacts differ')
+    runner = token.get('runner') or {}
+    runner_key = (runner.get('sha256'), '.ps1')
+    require(runner.get('path') == 'automation/release-e2e/tests/Test-InstallerSelfTestStandardToken.ps1'
+            and runner_key in sources, 'Generation-8 token runner source is not frozen')
+    raw = raw_path.read_text(encoding='utf-8-sig')
+    require(token.get('reportSha256') == digest(raw_path)
+            and re.search(r'(?m)^PASS\s*$', raw) is not None
+            and 'payload=' + tar['sha256'] in raw,
+            'Generation-8 frozen raw token report lacks exact PASS/payload')
+    evidence = outer_attempt.get('evidence')
+    require(outer_attempt.get('runId') != run_id
+            and isinstance(evidence, list)
+            and any(isinstance(item, str)
+                    and item.replace('\\', '/').endswith(token_ref['canonicalPath'])
+                    for item in evidence),
+            'Generation-8 charged attempt does not cite its distinct inner token')
+    token_instant = instant(token.get('generatedAtUtc'))
+    require(_gen7_journal_instant(outer_attempt.get('reservedUtc')) <= token_instant
+            <= _gen7_journal_instant(outer_attempt.get('terminalUtc')),
+            'Generation-8 token is outside its charged outer attempt')
+    return token_ref
+
+
+def _gen8_validate(root, pointer, receipt, previous, prior, current_tuple=None):
+    root, state = Path(root).resolve(strict=True), _state(root)
+    require(pointer.get('schemaVersion') == 8
+            and pointer.get('contract') == 'devfleet-accepted-baseline-v8'
+            and pointer.get('generation') == 8 and pointer.get('status') == 'ACCEPTED'
+            and receipt.get('schemaVersion') == 8
+            and receipt.get('contract') == 'devfleet-baseline-rebind-receipt-v8'
+            and receipt.get('status') == 'REBOUND'
+            and receipt.get('certificationCredit') is False
+            and receipt.get('secretValuesRecorded') is False,
+            'Generation-8 pointer or receipt contract differs')
+    require(receipt.get('receiptId') + '.json' == pointer.get('receiptFile')
+            and receipt.get('previousPointerSha256') == pointer.get('previousPointerSha256')
+            and receipt.get('previousReceiptSha256') == prior.get('receiptSha256')
+            and receipt.get('replacement') == previous.get('checkpoint') == pointer.get('checkpoint')
+            and receipt.get('successorPolicyId') == HTTP_CLEANUP_POLICY
+            and receipt.get('predecessorLedgerSha256') == HTTP_CLEANUP_PREDECESSOR_SHA256
+            and pointer.get('checkpoint', {}).get('name') == NEW_NAME
+            and pointer.get('checkpoint', {}).get('id') == prior.get('id'),
+            'Generation-8 lineage, checkpoint or successor predecessor differs')
+    old_tuple = exact_tuple(receipt.get('previousCandidate'))
+    new_tuple = exact_tuple(receipt.get('candidate'))
+    if current_tuple is not None:
+        require(new_tuple == exact_tuple(current_tuple),
+                'Generation-8 baseline is bound to another candidate/material tuple')
+    require(receipt.get('approvalSha256') == receipt.get('approval', {}).get('sourceSha256')
+            and isinstance(receipt.get('approvalSha256'), str)
+            and HEX64.fullmatch(receipt['approvalSha256']),
+            'Generation-8 approval source link is malformed')
+    sources = _gen8_close_frozen_sources(state, receipt.get('sourceClosure'))
+    _gen8_validate_frozen_graph(state, receipt['sourceClosure'], sources)
+    require((receipt['approvalSha256'], '.json') in sources,
+            'Generation-8 frozen approval is absent from source closure')
+    approval_source = _gen8_frozen_source(state, receipt['approvalSha256'], '.json')
+    approval = read_json(approval_source)
+    require('sourceSha256' not in approval
+            and {**approval, 'sourceSha256': receipt['approvalSha256']} == receipt['approval'],
+            'Generation-8 frozen owner approval differs')
+    require(approval.get('schemaVersion') == 8
+            and approval.get('contract') == 'devfleet-baseline-rebind-approval-v8'
+            and approval.get('decision') == 'APPROVE'
+            and approval.get('approvedBy') == 'ACCOUNT_OWNER'
+            and approval.get('shippingChangeApproved') is False
+            and approval.get('previousCandidate') == old_tuple
+            and approval.get('candidate') == new_tuple
+            and approval.get('replacement') == previous.get('checkpoint')
+            and approval.get('previousReceiptSha256') == prior.get('receiptSha256')
+            and approval.get('successorPolicyId') == HTTP_CLEANUP_POLICY
+            and approval.get('successorLedgerSha256') == receipt.get('successorLedgerSha256')
+            and approval.get('successorAuthorizationSha256') == receipt.get('successorAuthorizationSha256')
+            and approval.get('ownerAuthorization', {}).get('sha256') == receipt.get('ownerAuthorizationSha256')
+            and all(old_tuple[key] == new_tuple[key] for key in
+                    ('candidateBuildCommit', 'shippingInputIdentity',
+                     'releaseFingerprintId', 'candidateSha256'))
+            and old_tuple['repositoryHead'] != new_tuple['repositoryHead']
+            and old_tuple['toolingFingerprintId'] != new_tuple['toolingFingerprintId'],
+            'Generation-8 owner approval or unchanged shipping tuple differs')
+    def source(hash_value, extension='.json'):
+        key = (hash_value, extension)
+        require(key in sources, 'Generation-8 evidence is absent from frozen source closure')
+        return sources[key]
+    ledger_hash = receipt.get('successorLedgerSha256')
+    auth_hash = receipt.get('successorAuthorizationSha256')
+    owner_hash = receipt.get('ownerAuthorizationSha256')
+    inventory_hash = receipt.get('nativeInventorySha256')
+    require(approval.get('ownerAuthorization', {}).get('sha256') == owner_hash
+            and approval.get('publicMainSha') == receipt.get('publicMainSha'),
+            'Generation-8 approval public source or owner reference differs')
+    ledger = read_json(source(ledger_hash))
+    auth = read_json(source(auth_hash))
+    owner_source = source(owner_hash, '.txt').read_text(encoding='utf-8-sig')
+    live = read_json(source(inventory_hash))
+    require(ledger.get('schemaVersion') == 1
+            and ledger.get('policyId') == HTTP_CLEANUP_POLICY
+            and ledger.get('limits') == HTTP_CLEANUP_LIMITS
+            and ledger.get('activeRunId') is None
+            and ledger.get('certificationCredit') is False
+            and ledger.get('authorization', {}).get('sha256') == auth_hash
+            and isinstance(ledger.get('attempts'), list) and len(ledger['attempts']) == 1,
+            'Generation-8 frozen successor ledger differs')
+    attempt = ledger['attempts'][0]
+    require(attempt.get('operation') == 'standard-token'
+            and attempt.get('state') == 'TERMINAL'
+            and attempt.get('exitCode') == 0
+            and attempt.get('classification') == 'PASS_NATIVE_STANDARD_TOKEN'
+            and attempt.get('tuple') == new_tuple
+            and attempt.get('certificationCredit') is False
+            and isinstance(attempt.get('evidence'), list) and bool(attempt['evidence']),
+            'Generation-8 frozen successor lacks exactly one terminal token PASS')
+    require(auth.get('policyId') == HTTP_CLEANUP_POLICY
+            and auth.get('approved') is True and auth.get('approvedBy') == 'ACCOUNT_OWNER'
+            and auth.get('candidate') == new_tuple
+            and auth.get('previousCandidate') == old_tuple
+            and auth.get('limits') == HTTP_CLEANUP_LIMITS
+            and auth.get('shippingChangeApproved') is False
+            and auth.get('publicMainSha') == receipt.get('publicMainSha')
+            and auth.get('predecessorSha256') == {'collision1': HTTP_CLEANUP_PREDECESSOR_SHA256}
+            and auth.get('generation7', {}).get('receipt', {}).get('sha256') == prior.get('receiptSha256'),
+            'Generation-8 frozen successor authorization differs')
+    owner_requirements = [HTTP_CLEANUP_POLICY,
+                          f'publicMainSha={receipt["publicMainSha"]}',
+                          f'predecessorSha256={HTTP_CLEANUP_PREDECESSOR_SHA256}']
+    require(all(text in owner_source for text in owner_requirements)
+            and all(f'candidate.{key}={value}' in owner_source
+                    for key, value in new_tuple.items()),
+            'Generation-8 frozen owner source does not bind exact tuple and public main')
+    predecessor_rows = ledger.get('predecessors')
+    require(isinstance(predecessor_rows, list) and len(predecessor_rows) == 2
+            and all(isinstance(row, dict) and row.get('sha256') == HTTP_CLEANUP_PREDECESSOR_SHA256
+                    for row in predecessor_rows),
+            'Generation-8 frozen successor predecessor references differ')
+    require(live.get('scope') == 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
+            and live.get('vm') == {'name': VM_NAME, 'id': VM_ID, 'state': 'Off'}
+            and receipt.get('finalL1') == live['vm'],
+            'Generation-8 frozen inventory does not prove exact L1 Off')
+    snapshots = live.get('snapshots')
+    exact = [row for row in snapshots if isinstance(row, dict) and row.get('name') == NEW_NAME] if isinstance(snapshots, list) else []
+    require(len(exact) == 1 and exact[0].get('id') == prior.get('id')
+            and exact[0].get('vmId') == VM_ID and exact[0].get('parentSnapshotId') == OLD_ID,
+            'Generation-8 frozen inventory does not prove exact CLEAN-R2')
+    token_refs = _gen8_frozen_token(root, receipt, sources, new_tuple, attempt)
+    require(receipt.get('standardTokenEvidence') == token_refs,
+            'Generation-8 token reference differs')
+    return {**prior, 'receiptSha256': pointer['receiptSha256'],
+            'receiptFile': pointer['receiptFile'],
+            'previousReceiptSha256': prior['receiptSha256'], 'generation': 8,
+            'candidate': new_tuple}
+
+
+def rebind_gen8(root, tuple_path, approval_path, ledger_path, live_path,
+                token_pointer_path):
+    """Append Gen-8 from exact accepted Gen-7, freezing token and journal evidence."""
+    root = Path(root).resolve(strict=True)
+    state = _state(root)
+    ledger_input = Path(ledger_path).absolute()
+    require(not ledger_input.is_symlink()
+            and ledger_input == HTTP_CLEANUP_LEDGER_PATH.absolute()
+            and ledger_input.resolve(strict=True) == HTTP_CLEANUP_LEDGER_PATH.resolve(),
+            'Generation-8 successor ledger path is not the canonical authorized ledger')
+    with lock(state / '.adoption.lock'), lock(Path(str(ledger_path) + '.lock')):
+        pointer_path = state / 'CURRENT.json'
+        previous = read_json(pointer_path)
+        require(previous.get('generation') == 7,
+                'Generation-8 requires the exact currently accepted Generation-7 parent')
+        prior = _accepted_rebound_v7(root, previous, historical=True)
+        old_tuple = exact_tuple(read_json(state / 'receipts' / previous['receiptFile']).get('candidate'))
+        tuple_sha, approval_sha, ledger_sha, live_sha = map(digest,
+            (tuple_path, approval_path, ledger_path, live_path))
+        new_tuple = exact_tuple(read_json(tuple_path))
+        approval = read_json(approval_path)
+        ledger = read_json(ledger_path)
+        require('sourceSha256' not in approval,
+                'Generation-8 owner approval may not predeclare its source hash')
+        auth_path = Path((ledger.get('authorization') or {}).get('path', ''))
+        require(auth_path.is_file() and not auth_path.is_symlink(),
+                'Generation-8 successor authorization source is missing')
+        auth_sha = digest(auth_path)
+        auth = read_json(auth_path)
+        owner_ref = auth.get('ownerAuthorization') or {}
+        owner_path = Path(owner_ref.get('path', ''))
+        require(owner_path.is_file() and not owner_path.is_symlink()
+                and digest(owner_path) == owner_ref.get('sha256'),
+                'Generation-8 successor owner authorization source is missing or changed')
+        owner_sha = digest(owner_path)
+        predecessor_rows = ledger.get('predecessors')
+        require(isinstance(predecessor_rows, list) and len(predecessor_rows) == 2,
+                'Generation-8 successor predecessor snapshot/live references are missing')
+        predecessor_paths = [Path(row.get('path', '')) for row in predecessor_rows]
+        require(all(path.is_file() and not path.is_symlink() for path in predecessor_paths),
+                'Generation-8 exact COLLISION-1 snapshot/live sources are missing')
+        predecessor_hashes = [digest(path) for path in predecessor_paths]
+        require(predecessor_hashes == [HTTP_CLEANUP_PREDECESSOR_SHA256] * 2
+                and predecessor_hashes[0] == predecessor_hashes[1],
+                'Generation-8 successor is not bound to exact terminal COLLISION-1')
+        token_refs, token_paths = _gen7_token(root, token_pointer_path, new_tuple)
+        journal = root / '.agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py'
+        require(journal.is_file(), 'Generation-8 successor journal is absent')
+        checked = subprocess.run([sys.executable, str(journal), 'status', '--ledger',
+                                  str(Path(ledger_path).resolve(strict=True))],
+                                 text=True, capture_output=True, timeout=20)
+        require(checked.returncode == 0,
+                'HTTP-CLEANUP-1 journal rejected Generation-8 binding')
+        journal_status = json.loads(checked.stdout)
+        attempts = ledger.get('attempts')
+        require(journal_status.get('policyId') == HTTP_CLEANUP_POLICY
+                and journal_status.get('active') is None
+                and journal_status.get('attemptCount') == 1
+                and journal_status.get('remaining') ==
+                    {**HTTP_CLEANUP_LIMITS, 'standard-token': 0}
+                and ledger.get('activeRunId') is None
+                and isinstance(attempts, list) and len(attempts) == 1
+                and attempts[0].get('operation') == 'standard-token'
+                and attempts[0].get('state') == 'TERMINAL'
+                and attempts[0].get('exitCode') == 0
+                and attempts[0].get('classification') == 'PASS_NATIVE_STANDARD_TOKEN'
+                and attempts[0].get('tuple') == new_tuple,
+                'Generation-8 successor lacks one exact current-tuple token PASS')
+        live = read_json(live_path)
+        require(timedelta(seconds=0) <= datetime.now(timezone.utc) - instant(live.get('observedUtc'))
+                <= timedelta(minutes=2),
+                'Generation-8 exact L1 inventory is not fresh')
+        require(live.get('scope') == 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
+                and live.get('vm') == {'name': VM_NAME, 'id': VM_ID, 'state': 'Off'},
+                'Generation-8 live inventory does not prove exact L1 Off')
+        snapshots = live.get('snapshots')
+        exact = [row for row in snapshots if isinstance(row, dict) and row.get('name') == NEW_NAME] if isinstance(snapshots, list) else []
+        require(len(exact) == 1 and exact[0].get('id') == prior.get('id')
+                and exact[0].get('vmId') == VM_ID and exact[0].get('parentSnapshotId') == OLD_ID,
+                'Generation-8 live inventory does not prove exact CLEAN-R2')
+        require(approval.get('schemaVersion') == 8
+                and approval.get('contract') == 'devfleet-baseline-rebind-approval-v8'
+                and approval.get('decision') == 'APPROVE'
+                and approval.get('approvedBy') == 'ACCOUNT_OWNER'
+                and approval.get('shippingChangeApproved') is False
+                and approval.get('previousCandidate') == old_tuple
+                and approval.get('candidate') == new_tuple
+                and approval.get('replacement') == previous.get('checkpoint')
+                and approval.get('previousReceiptSha256') == prior.get('receiptSha256')
+                and approval.get('successorPolicyId') == HTTP_CLEANUP_POLICY
+                and approval.get('successorLedgerPath') == str(Path(ledger_path).resolve())
+                and approval.get('successorLedgerSha256') == ledger_sha
+                and approval.get('successorAuthorizationSha256') == auth_sha
+                and approval.get('ownerAuthorization') == {'path': str(owner_path), 'sha256': owner_sha}
+                and approval.get('publicMainSha') == auth.get('publicMainSha'),
+                'Exact Generation-8 account-owner approval is absent or mismatched')
+        require(auth.get('policyId') == HTTP_CLEANUP_POLICY
+                and auth.get('approved') is True and auth.get('approvedBy') == 'ACCOUNT_OWNER'
+                and auth.get('candidate') == new_tuple and auth.get('previousCandidate') == old_tuple
+                and auth.get('limits') == HTTP_CLEANUP_LIMITS
+                and auth.get('shippingChangeApproved') is False
+                and auth.get('generation7', {}).get('pointer', {}).get('sha256') == digest(pointer_path)
+                and auth.get('generation7', {}).get('receipt', {}).get('sha256') == prior.get('receiptSha256'),
+                'HTTP-CLEANUP-1 authorization differs from accepted Gen-7/current tuple')
+        require(all(old_tuple[key] == new_tuple[key] for key in
+                    ('candidateBuildCommit', 'shippingInputIdentity',
+                     'releaseFingerprintId', 'candidateSha256'))
+                and old_tuple['repositoryHead'] != new_tuple['repositoryHead']
+                and old_tuple['toolingFingerprintId'] != new_tuple['toolingFingerprintId'],
+                'Generation-8 binding changed signed shipping or lacks tuple changes')
+        approval_owner_text = owner_path.read_text(encoding='utf-8-sig')
+        require(all(f'candidate.{key}={value}' in approval_owner_text
+                    for key, value in new_tuple.items())
+                and f'publicMainSha={auth["publicMainSha"]}' in approval_owner_text,
+                'Generation-8 owner authorization does not bind public main and exact tuple')
+        provisional = {'previousPointerSha256': digest(pointer_path),
+                       'checkpoint': previous['checkpoint']}
+        closure_roots = [tuple_path, approval_path, ledger_path, live_path,
+                         auth_path, owner_path, *predecessor_paths, *token_paths]
+        source_closure, source_paths = _gen8_collect_closure(closure_roots)
+        receipt = {'schemaVersion': 8, 'contract': 'devfleet-baseline-rebind-receipt-v8',
+                   'receiptId': uuid.uuid4().hex, 'status': 'REBOUND',
+                   'reboundUtc': datetime.now(timezone.utc).isoformat(),
+                   'certificationCredit': False, 'secretValuesRecorded': False,
+                   'previousPointerSha256': provisional['previousPointerSha256'],
+                   'previousReceiptSha256': prior['receiptSha256'],
+                   'previousCandidate': old_tuple, 'candidate': new_tuple,
+                   'replacement': previous['checkpoint'],
+                   'approval': {**approval, 'sourceSha256': approval_sha},
+                   'approvalSha256': approval_sha,
+                   'successorPolicyId': HTTP_CLEANUP_POLICY,
+                   'successorLedgerSha256': ledger_sha,
+                   'successorAuthorizationSha256': auth_sha,
+                   'ownerAuthorizationSha256': owner_sha,
+                   'predecessorLedgerSha256': HTTP_CLEANUP_PREDECESSOR_SHA256,
+                   'nativeInventorySha256': live_sha,
+                   'finalL1': live['vm'], 'publicMainSha': auth['publicMainSha'],
+                   'standardTokenEvidence': token_refs,
+                   'sourceClosure': source_closure}
+        # Recheck every input before the immutable sources or pointer are written.
+        require(all(digest(path) == expected for path, expected in
+                    ((tuple_path, tuple_sha), (approval_path, approval_sha),
+                     (ledger_path, ledger_sha), (live_path, live_sha),
+                     (auth_path, auth_sha), (owner_path, owner_sha),
+                     *((path, expected) for path, expected in zip(predecessor_paths, predecessor_hashes)),
+                     *((path, token_refs[key]) for path, key in zip(
+                         token_paths, ('pointerSha256', 'canonicalSha256', 'rawReportSha256'))))),
+                'Generation-8 source changed during binding')
+        sources_dir = state / 'sources'
+        sources_dir.mkdir(parents=True, exist_ok=True)
+        for key, path in source_paths.items():
+            destination = sources_dir / (key[0] + key[1])
+            if destination.exists():
+                require(digest(destination) == key[0],
+                        'Existing Generation-8 frozen source differs')
+            else:
+                _write_exclusive(destination, path.read_bytes())
+        _gen8_validate(root, {**provisional, 'schemaVersion': 8,
+                              'contract': 'devfleet-accepted-baseline-v8',
+                              'generation': 8, 'status': 'ACCEPTED',
+                              'receiptFile': receipt['receiptId'] + '.json',
+                              'receiptSha256': '0' * 64},
+                       receipt, previous, prior)
+        history = state / 'history'
+        history.mkdir(parents=True, exist_ok=True)
+        _write_exclusive(history / (provisional['previousPointerSha256'] + '.json'),
+                         pointer_path.read_bytes())
+        receipt_path = state / 'receipts' / (receipt['receiptId'] + '.json')
+        _write_exclusive(receipt_path, _json_bytes(receipt))
+        current = {'schemaVersion': 8, 'contract': 'devfleet-accepted-baseline-v8',
+                   'generation': 8, 'status': 'ACCEPTED',
+                   'receiptFile': receipt_path.name, 'receiptSha256': digest(receipt_path),
+                   'previousPointerSha256': provisional['previousPointerSha256'],
+                   'checkpoint': previous['checkpoint']}
+        _atomic_replace(pointer_path, _json_bytes(current))
+        return accepted_baseline(root, new_tuple)
 
 
 def _validate_v4_successor(ledger, new_tuple, journal_status):
@@ -1959,6 +2536,9 @@ def main():
     binding7 = sub.add_parser('rebind-gen7')
     for flag in ('root', 'tuple', 'approval', 'ledger', 'live', 'token-pointer'):
         binding7.add_argument('--' + flag, required=True)
+    binding8 = sub.add_parser('rebind-gen8')
+    for flag in ('root', 'tuple', 'approval', 'ledger', 'live', 'token-pointer'):
+        binding8.add_argument('--' + flag, required=True)
     args = parser.parse_args()
     if args.command == 'inspect':
         value = accepted_baseline(args.root, read_json(args.tuple) if args.tuple else None)
@@ -1973,6 +2553,9 @@ def main():
         value = rebind_gen6(args.root, args.tuple, args.approval, args.ledger, args.live)
     elif args.command == 'rebind-gen7':
         value = rebind_gen7(args.root, args.tuple, args.approval, args.ledger,
+                            args.live, args.token_pointer)
+    elif args.command == 'rebind-gen8':
+        value = rebind_gen8(args.root, args.tuple, args.approval, args.ledger,
                             args.live, args.token_pointer)
     elif args.command == 'rebind-gen5':
         value = rebind_gen5(args.root, args.tuple, args.approval, args.ledger, args.live)
