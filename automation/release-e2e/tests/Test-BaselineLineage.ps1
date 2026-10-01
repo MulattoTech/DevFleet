@@ -70,6 +70,12 @@ try{
     $reboundPointer.schemaVersion=7;$reboundPointer.contract='devfleet-accepted-baseline-v7';$reboundPointer.generation=7
     [IO.File]::WriteAllText($pointerPath,($reboundPointer|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
     Assert-Rejected {Get-DevFleetAcceptedBaseline -WorkspaceRoot $root -Fingerprint $newFingerprint} 'Generation 7 accepted a non-generation-6 predecessor or stale receipt.'
+    $reboundPointer.schemaVersion=8;$reboundPointer.contract='devfleet-accepted-baseline-v8';$reboundPointer.generation=8
+    [IO.File]::WriteAllText($pointerPath,($reboundPointer|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
+    $gen8Failure=$null
+    try {Get-DevFleetAcceptedBaseline -WorkspaceRoot $root -Fingerprint $newFingerprint|Out-Null}
+    catch {$gen8Failure=$_.Exception.Message}
+    Assert-True ($gen8Failure -ceq 'Native rebound baseline lineage rejected.') 'Generation 8 did not dispatch through the strict Python lineage reader.'
     "PASS $count baseline lineage PowerShell assertions"
 }finally{
     Remove-Item Function:\Get-VM,Function:\Get-VMSnapshot -ErrorAction SilentlyContinue

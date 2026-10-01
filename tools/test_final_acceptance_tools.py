@@ -50,10 +50,10 @@ def main() -> None:
         "BaselineArchiveClosure.psm1", "Copy-DevFleetBaselineArchiveClosure",
     ), "audit builder")
     require(closure, (
-        "function Copy-DevFleetBaselineArchiveClosure", "-gt 7",
+        "function Copy-DevFleetBaselineArchiveClosure", "-gt 8",
         "previousPointerSha256", "previousReceiptSha256",
         "artifactReceiptSha256", "ownerAuthorizationSha256",
-        "approvalSha256", "standardTokenEvidence",
+        "approvalSha256", "standardTokenEvidence", "Generation-8 source closure",
     ), "complete baseline archive staging")
     for label, wrapper in (("codebase wrapper", codebase), ("ChatGPT wrapper", chatgpt)):
         require(wrapper, ("Build-AIAuditBundle.ps1", "-Workspace $Workspace"), label)
@@ -64,6 +64,8 @@ def main() -> None:
         "pre-acceptance audit contains post-audit evidence (cycle)",
         "devfleet-accepted-baseline-v7", "COLLISION_PREDECESSOR_SHA256",
         "_validate_generation7_token", "_load_generation7_source",
+        "devfleet-accepted-baseline-v8", "_validate_generation8_token",
+        "_load_generation8_source",
     ), "release-bundle validator")
     if authority.find("--check final-acceptance") > authority.find("$candidateFlags ="):
         raise AssertionError("authority reads candidate promotion flags before validating FINAL-ACCEPTANCE")

@@ -33,14 +33,17 @@ jobs:
             .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_fresh_attempts.py \
             .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_causal_successor.py \
             .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_post_collision_successor.py \
+            .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_http_cleanup_successor.py \
             tools/test_baseline_lineage.py \
             tools/test_baseline_temporal_binding.py \
             tools/test_baseline_generation5_input_integrity.py \
             tools/test_baseline_generation6.py \
             tools/test_baseline_generation7.py \
+            tools/test_baseline_generation8.py \
             tools/test_validate_release_bundle.py \
             tools/test_validate_release_bundle_generation5.py \
             tools/test_validate_release_bundle_generation7.py \
+            tools/test_validate_release_bundle_generation8.py \
             tools/test_validate_public_push.py \
             tools/test_validate_native_proof.py \
             source/tests/test_dependency_advisories.py \
@@ -61,9 +64,9 @@ jobs:
           python-version: '3.12'
       - name: Install Python test dependencies
         run: python -m pip install pytest
-      - name: Run Generation-4, Generation-6 and Generation-7 readers and packaging contracts
+      - name: Run Generation-4, Generation-6, Generation-7 and Generation-8 readers and packaging contracts
         run: |
-          python -m pytest -q tools/test_baseline_generation4.py tools/test_baseline_generation6.py tools/test_baseline_generation7.py tools/test_validate_release_bundle_generation7.py
+          python -m pytest -q tools/test_baseline_generation4.py tools/test_baseline_generation6.py tools/test_baseline_generation7.py tools/test_baseline_generation8.py tools/test_validate_release_bundle_generation7.py tools/test_validate_release_bundle_generation8.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run VM-free PowerShell contracts
         run: |

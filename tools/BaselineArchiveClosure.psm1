@@ -46,7 +46,7 @@ function Copy-BaselineArchiveSource([string]$BaselineRoot, [string]$StagedRoot, 
 
 function Assert-BaselineArchiveGeneration($Pointer) {
     $generation = $Pointer.generation
-    if (($generation -isnot [int] -and $generation -isnot [long]) -or $generation -lt 1 -or $generation -gt 7) {
+    if (($generation -isnot [int] -and $generation -isnot [long]) -or $generation -lt 1 -or $generation -gt 8) {
         throw 'Unsupported accepted baseline generation.'
     }
     if (($Pointer.schemaVersion -isnot [int] -and $Pointer.schemaVersion -isnot [long]) -or
@@ -149,6 +149,35 @@ function Copy-DevFleetBaselineArchiveClosure {
                 [void](Copy-BaselineArchiveSource $baselineRoot $stagedRoot ([string]$token.pointerSha256) 'json' 'standard token pointer')
                 [void](Copy-BaselineArchiveSource $baselineRoot $stagedRoot ([string]$token.canonicalSha256) 'json' 'standard token canonical evidence')
                 [void](Copy-BaselineArchiveSource $baselineRoot $stagedRoot ([string]$token.rawReportSha256) 'txt' 'standard token raw report')
+            }
+            if ($generation -eq 8) {
+                $closure = $receipt.sourceClosure
+                if ($closure -isnot [array] -or $closure.Count -lt 1 -or $closure.Count -gt 512) {
+                    throw 'Generation-8 source closure manifest is malformed.'
+                }
+                $seen = @{}
+                $totalBytes = [long]0
+                foreach ($source in $closure) {
+                    $hash = [string]$source.sha256
+                    $extension = [string]$source.extension
+                    if ($hash -cnotmatch '^[0-9a-f]{64}$' -or $extension -cnotmatch '^\.[a-z0-9]{1,8}$') {
+                        throw 'Generation-8 source closure entry is malformed.'
+                    }
+                    $key = "$hash$extension"
+                    if ($seen.ContainsKey($key)) { throw 'Generation-8 source closure repeats an entry.' }
+                    $seen[$key] = $true
+                    $sourcePath = Join-Path $baselineRoot "sources\$key"
+                    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+                        throw "Generation-8 source closure member is missing: $key"
+                    }
+                    $sourceLength = (Get-Item -LiteralPath $sourcePath -Force).Length
+                    if ($sourceLength -gt 4000000) {
+                        throw "Generation-8 source closure member exceeds 4 MB: $key"
+                    }
+                    $totalBytes += $sourceLength
+                    if ($totalBytes -gt 32000000) { throw 'Generation-8 source closure exceeds its size limit.' }
+                    Copy-BaselineArchiveFile $sourcePath (Join-Path $stagedRoot "sources\$key") $hash
+                }
             }
         }
 

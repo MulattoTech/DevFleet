@@ -88,6 +88,14 @@ COLLISION_LEDGER_PATH = (r'C:\Users\Dylan\Documents\Codex\2026-08-12\ex-2\work'
 COLLISION_LIMITS = {'standard-token': 1, 'diagnostic': 1, 'laptop-proof': 1,
                     'desktop-proof': 1, 'fullrelease': 1, 'maintenance': 0,
                     'build-sign': 0}
+HTTP_CLEANUP_POLICY = 'DF-FRESH-CERTIFICATION-20261001-HTTP-CLEANUP-1'
+HTTP_CLEANUP_PREDECESSOR_SHA256 = '2bede7d9944502898b919d4a29ed73f99c2009a819850349d5b08bfd6e8bb1c4'
+HTTP_CLEANUP_LEDGER_PATH = (r'C:\Users\Dylan\Documents\Codex\2026-08-12\ex-2\work'
+                            r'\DevFleet-v1.2.13-development\audit\agent-memory\attempts'
+                            r'\DF-FRESH-CERTIFICATION-20261001-HTTP-CLEANUP-1\ledger.json')
+HTTP_CLEANUP_LIMITS = {'standard-token': 1, 'diagnostic': 1, 'laptop-proof': 1,
+                       'desktop-proof': 1, 'fullrelease': 1, 'maintenance': 0,
+                       'build-sign': 0}
 BASELINE_TUPLE_KEYS = ('repositoryHead', 'candidateBuildCommit', 'shippingInputIdentity',
                        'releaseFingerprintId', 'toolingFingerprintId', 'candidateSha256')
 
@@ -234,7 +242,7 @@ def _load_generation7_source(root: Path, source_hash: object, extension: str,
 
 
 def _validate_generation7_token(root: Path, candidate: dict, reference: object,
-                                attempt: dict, strict_json) -> None:
+                                attempt: dict, strict_json, historical: bool = False) -> None:
     if not isinstance(reference, dict) or set(reference) != {
             'runId', 'pointerSha256', 'canonicalSha256', 'rawReportSha256',
             'pointerPath', 'canonicalPath', 'rawReportPath'}:
@@ -250,20 +258,23 @@ def _validate_generation7_token(root: Path, candidate: dict, reference: object,
         raise ValueError('generation-7 token paths are not canonical')
     pointer_path, canonical_path, raw_path = (root / relative[key] for key in
         ('pointerPath', 'canonicalPath', 'rawReportPath'))
+    frozen_paths = {}
     for path, key in ((pointer_path, 'pointerSha256'),
                       (canonical_path, 'canonicalSha256'),
                       (raw_path, 'rawReportSha256')):
-        if (not path.is_file() or path.is_symlink() or path.stat().st_size > 4_000_000
-                or sha(path) != reference[key]):
-            raise ValueError('generation-7 current token evidence differs')
         frozen = _load_generation7_source(root, reference[key],
                                            '.txt' if key == 'rawReportSha256' else '.json')
-        if frozen.read_bytes() != path.read_bytes():
-            raise ValueError('generation-7 token source differs from current evidence')
-    token = strict_json(pointer_path)
-    if token != strict_json(canonical_path) or token != _load_generation7_source(
-            root, reference['canonicalSha256'], '.json', strict_json):
-        raise ValueError('generation-7 token pointer, canonical and frozen copy differ')
+        if historical:
+            frozen_paths[key] = frozen
+            continue
+        if (not path.is_file() or path.is_symlink() or path.stat().st_size > 4_000_000
+                or sha(path) != reference[key] or frozen.read_bytes() != path.read_bytes()):
+            raise ValueError('generation-7 current token evidence differs')
+        frozen_paths[key] = path
+    token = strict_json(frozen_paths['pointerSha256'])
+    canonical = strict_json(frozen_paths['canonicalSha256'])
+    if token != canonical:
+        raise ValueError('generation-7 token pointer and canonical evidence differ')
     fields = {key: token.get(key) for key in BASELINE_TUPLE_KEYS if key != 'candidateSha256'}
     exact = {key: candidate[key] for key in BASELINE_TUPLE_KEYS if key != 'candidateSha256'}
     identity = token.get('token')
@@ -291,7 +302,7 @@ def _validate_generation7_token(root: Path, candidate: dict, reference: object,
             or not isinstance(tar.get('bytes'), int) or tar['bytes'] <= 0
             or token.get('reportSha256') != reference['rawReportSha256']):
         raise ValueError('generation-7 current Developer token is not a genuine exact PASS')
-    raw = raw_path.read_text(encoding='utf-8-sig')
+    raw = frozen_paths['rawReportSha256'].read_text(encoding='utf-8-sig')
     if not re.search(r'(?m)^PASS\s*$', raw) or f"payload={tar['sha256']}" not in raw:
         raise ValueError('generation-7 raw token report lacks exact PASS and payload')
     runner_relative = 'automation/release-e2e/tests/Test-InstallerSelfTestStandardToken.ps1'
@@ -313,6 +324,135 @@ def _validate_generation7_token(root: Path, candidate: dict, reference: object,
         return datetime.fromisoformat(value.replace('Z', '+00:00')).astimezone(timezone.utc)
     if not instant(attempt.get('reservedUtc')) <= instant(token.get('generatedAtUtc')) <= instant(attempt.get('terminalUtc')):
         raise ValueError('generation-7 token is outside charged outer attempt')
+
+
+def _load_generation8_source(root: Path, source_hash: object, extension: object,
+                             strict_json=None):
+    if (not isinstance(source_hash, str) or not re.fullmatch(r'[0-9a-f]{64}', source_hash)
+            or not isinstance(extension, str) or not re.fullmatch(r'\.[a-z0-9]{1,8}', extension)):
+        raise ValueError('generation-8 frozen source reference is malformed')
+    path = root / 'evidence/baselines/sources' / (source_hash + extension)
+    if (not path.is_file() or path.is_symlink() or path.stat().st_size > 4_000_000
+            or sha(path) != source_hash):
+        raise ValueError('generation-8 frozen source is absent or hash mismatched')
+    return strict_json(path) if strict_json else path
+
+
+def _validate_generation8_closure(root: Path, rows: object, strict_json):
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 512:
+        raise ValueError('generation-8 source closure manifest is invalid')
+    sources, total = {}, 0
+    for row in rows:
+        if (not isinstance(row, dict) or set(row) != {'sha256', 'extension'}
+                or not isinstance(row.get('sha256'), str)
+                or not re.fullmatch(r'[0-9a-f]{64}', row['sha256'])
+                or not isinstance(row.get('extension'), str)
+                or not re.fullmatch(r'\.[a-z0-9]{1,8}', row['extension'])):
+            raise ValueError('generation-8 source closure entry is malformed')
+        key = (row['sha256'], row['extension'])
+        if key in sources:
+            raise ValueError('generation-8 source closure repeats a source')
+        path = _load_generation8_source(root, *key)
+        total += path.stat().st_size
+        if total > 32_000_000:
+            raise ValueError('generation-8 source closure exceeds its size limit')
+        sources[key] = path
+    for (source_hash, extension), path in sources.items():
+        if extension != '.json':
+            continue
+        document = strict_json(path)
+        pending = [document]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, dict):
+                referenced_hash = value.get('sha256')
+                if (isinstance(value.get('path'), str)
+                        and isinstance(referenced_hash, str)
+                        and re.fullmatch(r'[0-9a-f]{64}', referenced_hash)
+                        and not any(key[0] == referenced_hash for key in sources)):
+                    raise ValueError('generation-8 source closure omits a referenced hash')
+                pending.extend(value.values())
+            elif isinstance(value, list):
+                pending.extend(value)
+    return sources
+
+
+def _validate_generation8_token(root: Path, candidate: dict, reference: object,
+                                 sources: dict, attempt: dict, strict_json) -> None:
+    required = {'runId', 'pointerSha256', 'canonicalSha256', 'rawReportSha256',
+                'pointerPath', 'canonicalPath', 'rawReportPath'}
+    if not isinstance(reference, dict) or set(reference) != required:
+        raise ValueError('generation-8 frozen token reference is incomplete')
+    run_id = reference.get('runId')
+    if not isinstance(run_id, str) or not re.fullmatch(r'standard-token-[A-Za-z0-9-]+', run_id):
+        raise ValueError('generation-8 frozen token RunId is invalid')
+    relative = 'evidence/standard-token/' + run_id
+    expected_paths = {'pointerPath': 'evidence/CURRENT-STANDARD-TOKEN.json',
+                      'canonicalPath': relative + '/standard-token-evidence.json',
+                      'rawReportPath': relative + '/installer-self-test-raw.txt'}
+    if any(reference.get(key) != value for key, value in expected_paths.items()):
+        raise ValueError('generation-8 frozen token paths are not canonical')
+    pointer_path = _load_generation8_source(root, reference['pointerSha256'], '.json')
+    canonical_path = _load_generation8_source(root, reference['canonicalSha256'], '.json')
+    raw_path = _load_generation8_source(root, reference['rawReportSha256'], '.txt')
+    for hash_key, extension in (('pointerSha256', '.json'),
+                                ('canonicalSha256', '.json'),
+                                ('rawReportSha256', '.txt')):
+        if (reference[hash_key], extension) not in sources:
+            raise ValueError('generation-8 frozen token source is outside the closure')
+    token, canonical = strict_json(pointer_path), strict_json(canonical_path)
+    if token != canonical:
+        raise ValueError('generation-8 frozen token pointer and canonical evidence differ')
+    fields = {key: token.get(key) for key in BASELINE_TUPLE_KEYS
+              if key != 'candidateSha256'}
+    exact = {key: candidate[key] for key in BASELINE_TUPLE_KEYS
+             if key != 'candidateSha256'}
+    identity, checks = token.get('token') or {}, token.get('requiredChecks')
+    exe, tar = token.get('exe') or {}, token.get('tar') or {}
+    if (token.get('schemaVersion') != 1 or token.get('runId') != run_id
+            or token.get('status') != 'PASS' or token.get('exitCode') != 0
+            or token.get('standardNonAdministratorToken') is not True
+            or token.get('residualSelfTestScratchCount') != 0 or fields != exact
+            or token.get('runDirectory') != relative
+            or token.get('canonicalEvidencePath') != expected_paths['canonicalPath']
+            or token.get('rawReportPath') != expected_paths['rawReportPath']
+            or not isinstance(identity, dict)
+            or not re.fullmatch(r'[^\\]+\\Developer', str(identity.get('userName', '')), re.I)
+            or identity.get('standardNonAdministratorToken') is not True
+            or identity.get('isAdministratorMember') is not False
+            or identity.get('isAdministratorEnabled') is not False
+            or identity.get('isElevated') is not False or identity.get('integrityLevel') != 'Medium'
+            or not isinstance(checks, dict) or set(checks) != STANDARD_TOKEN_CHECKS
+            or any(value is not True for value in checks.values())
+            or exe.get('sha256') != candidate['candidateSha256']
+            or type(exe.get('bytes')) is not int or exe['bytes'] <= 0
+            or not re.fullmatch(r'[0-9a-f]{64}', str(tar.get('sha256')))
+            or type(tar.get('bytes')) is not int or tar['bytes'] <= 0
+            or token.get('reportSha256') != reference['rawReportSha256']):
+        raise ValueError('generation-8 frozen token is not an exact Developer standard-token PASS')
+    raw = raw_path.read_text(encoding='utf-8-sig')
+    if not re.search(r'(?m)^PASS\s*$', raw) or 'payload=' + tar['sha256'] not in raw:
+        raise ValueError('generation-8 frozen token report lacks exact PASS and payload')
+    runner = token.get('runner') or {}
+    runner_key = (runner.get('sha256'), '.ps1')
+    if (runner.get('path') != 'automation/release-e2e/tests/Test-InstallerSelfTestStandardToken.ps1'
+            or runner_key not in sources):
+        raise ValueError('generation-8 token runner is outside the frozen closure')
+    evidence = attempt.get('evidence')
+    if (attempt.get('runId') == run_id or not isinstance(evidence, list)
+            or not any(isinstance(item, str)
+                       and item.replace('\\', '/').endswith(expected_paths['canonicalPath'])
+                       for item in evidence)):
+        raise ValueError('generation-8 charged attempt lacks distinct inner token evidence')
+    def instant(value):
+        if not isinstance(value, str):
+            raise ValueError('generation-8 token chronology is absent')
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if parsed.tzinfo is None:
+            raise ValueError('generation-8 token chronology lacks timezone')
+        return parsed.astimezone(timezone.utc)
+    if not instant(attempt.get('reservedUtc')) <= instant(token.get('generatedAtUtc')) <= instant(attempt.get('terminalUtc')):
+        raise ValueError('generation-8 token is outside its charged attempt')
 
 
 def _validate_generation7_predecessor(predecessor: dict, failed_run_id: object,
@@ -352,7 +492,8 @@ def _validate_generation7_predecessor(predecessor: dict, failed_run_id: object,
 
 
 def load_accepted_baseline(root: Path, expected: dict[str, str], artifacts: dict[str, str],
-                           _pointer: dict | None = None) -> dict[str, str | None]:
+                           _pointer: dict | None = None,
+                           _historical: bool = False) -> dict[str, str | None]:
     """Resolve only the original CLEAN or a packaged, immutable adoption receipt."""
     def strict_baseline_json(path: Path) -> dict:
         if not path.is_file() or path.is_symlink() or path.stat().st_size > 4_000_000:
@@ -374,6 +515,265 @@ def load_accepted_baseline(root: Path, expected: dict[str, str], artifacts: dict
     if not pointer_path.exists():
         return {"id": old_id, "name": "DevFleet-E2E-CLEAN", "receiptSha256": None}
     pointer = _pointer if _pointer is not None else strict_baseline_json(pointer_path)
+    if pointer.get('generation') == 8:
+        required_pointer = {'schemaVersion', 'contract', 'generation', 'status',
+                            'receiptFile', 'receiptSha256', 'previousPointerSha256',
+                            'checkpoint'}
+        if (set(pointer) != required_pointer or pointer.get('schemaVersion') != 8
+                or pointer.get('contract') != 'devfleet-accepted-baseline-v8'
+                or pointer.get('status') != 'ACCEPTED'):
+            raise ValueError('generation-8 baseline pointer contract is invalid')
+        old_hash, name = pointer.get('previousPointerSha256'), pointer.get('receiptFile')
+        if (not isinstance(old_hash, str) or not re.fullmatch(r'[0-9a-f]{64}', old_hash)
+                or not isinstance(name, str) or not re.fullmatch(r'[0-9a-f]{32}\.json', name)):
+            raise ValueError('generation-8 baseline lineage reference is invalid')
+        state = root / 'evidence/baselines'
+        history_path = state / 'history' / (old_hash + '.json')
+        receipt_path = state / 'receipts' / name
+        if (not history_path.is_file() or history_path.is_symlink() or sha(history_path) != old_hash
+                or not receipt_path.is_file() or receipt_path.is_symlink()
+                or sha(receipt_path) != pointer.get('receiptSha256')):
+            raise ValueError('generation-8 baseline chain is absent or hash mismatched')
+        previous = strict_baseline_json(history_path)
+        if previous.get('generation') != 7:
+            raise ValueError('generation-8 predecessor is not generation 7')
+        receipt = strict_baseline_json(receipt_path)
+        old_tuple, new_tuple = receipt.get('previousCandidate'), receipt.get('candidate')
+        if (not isinstance(old_tuple, dict) or set(old_tuple) != set(BASELINE_TUPLE_KEYS)
+                or not isinstance(new_tuple, dict) or set(new_tuple) != set(BASELINE_TUPLE_KEYS)):
+            raise ValueError('generation-8 candidate tuple is incomplete')
+        prior_expected = {key: old_tuple[key] for key in
+                          ('repositoryHead', 'shippingInputIdentity',
+                           'releaseFingerprintId', 'toolingFingerprintId')}
+        prior_expected['candidateCommit'] = old_tuple['candidateBuildCommit']
+        prior = load_accepted_baseline(
+            root, prior_expected, {'exe': old_tuple['candidateSha256']}, previous,
+            _historical=True)
+        prior_receipt = strict_baseline_json(state / 'receipts' / previous['receiptFile'])
+        actual = {'repositoryHead': expected['repositoryHead'],
+                  'candidateBuildCommit': expected['candidateCommit'],
+                  'shippingInputIdentity': expected['shippingInputIdentity'],
+                  'releaseFingerprintId': expected['releaseFingerprintId'],
+                  'toolingFingerprintId': expected['toolingFingerprintId'],
+                  'candidateSha256': artifacts['exe']}
+        if (receipt.get('schemaVersion') != 8
+                or receipt.get('contract') != 'devfleet-baseline-rebind-receipt-v8'
+                or receipt.get('status') != 'REBOUND'
+                or receipt.get('certificationCredit') is not False
+                or receipt.get('secretValuesRecorded') is not False
+                or receipt.get('receiptId') + '.json' != name
+                or receipt.get('previousPointerSha256') != old_hash
+                or receipt.get('previousReceiptSha256') != prior['receiptSha256']
+                or old_tuple != prior_receipt.get('candidate')
+                or receipt.get('replacement') != previous.get('checkpoint')
+                or pointer.get('checkpoint') != previous.get('checkpoint')
+                or receipt.get('successorPolicyId') != HTTP_CLEANUP_POLICY
+                or any(old_tuple[key] != new_tuple[key] for key in
+                       ('candidateBuildCommit', 'shippingInputIdentity',
+                        'releaseFingerprintId', 'candidateSha256'))
+                or old_tuple['repositoryHead'] == new_tuple['repositoryHead']
+                or old_tuple['toolingFingerprintId'] == new_tuple['toolingFingerprintId']
+                or new_tuple != actual):
+            raise ValueError('generation-8 receipt, predecessor, or signed shipping tuple differs')
+        if (not isinstance(pointer.get('checkpoint'), dict)
+                or pointer['checkpoint'].get('name') != 'DevFleet-E2E-CLEAN-R2'
+                or pointer['checkpoint'].get('id') != prior['id']):
+            raise ValueError('generation-8 CLEAN-R2 checkpoint differs from accepted Gen7')
+        sources = _validate_generation8_closure(
+            root, receipt.get('sourceClosure'), strict_baseline_json)
+        def source(source_hash, extension):
+            key = (source_hash, extension)
+            if key not in sources:
+                raise ValueError('generation-8 required evidence is outside the frozen closure')
+            return sources[key]
+        approval_hash = receipt.get('approvalSha256')
+        approval_source = source(approval_hash, '.json')
+        approval = strict_baseline_json(approval_source)
+        receipt_approval = receipt.get('approval')
+        if ('sourceSha256' in approval or receipt_approval !=
+                {**approval, 'sourceSha256': approval_hash}):
+            raise ValueError('generation-8 frozen owner approval differs from receipt')
+        ledger_hash = receipt.get('successorLedgerSha256')
+        auth_hash = receipt.get('successorAuthorizationSha256')
+        owner_hash = receipt.get('ownerAuthorizationSha256')
+        inventory_hash = receipt.get('nativeInventorySha256')
+        ledger = strict_baseline_json(source(ledger_hash, '.json'))
+        auth = strict_baseline_json(source(auth_hash, '.json'))
+        owner_text = source(owner_hash, '.txt').read_text(encoding='utf-8-sig')
+        inventory = strict_baseline_json(source(inventory_hash, '.json'))
+        if (approval.get('schemaVersion') != 8
+                or approval.get('contract') != 'devfleet-baseline-rebind-approval-v8'
+                or approval.get('decision') != 'APPROVE'
+                or approval.get('approvedBy') != 'ACCOUNT_OWNER'
+                or approval.get('shippingChangeApproved') is not False
+                or approval.get('previousCandidate') != old_tuple
+                or approval.get('candidate') != new_tuple
+                or approval.get('replacement') != previous.get('checkpoint')
+                or approval.get('previousReceiptSha256') != prior['receiptSha256']
+                or approval.get('successorPolicyId') != HTTP_CLEANUP_POLICY
+                or approval.get('successorLedgerSha256') != ledger_hash
+                or approval.get('successorAuthorizationSha256') != auth_hash
+                or (approval.get('ownerAuthorization') or {}).get('sha256') != owner_hash
+                or approval.get('publicMainSha') != receipt.get('publicMainSha')):
+            raise ValueError('generation-8 owner approval contract differs')
+        expected_ledger_path = str(HTTP_CLEANUP_LEDGER_PATH).replace('/', '\\').casefold()
+        actual_ledger_path = str(auth.get('successorLedgerPath', '')).replace('/', '\\').casefold()
+        attempt_rows = ledger.get('attempts')
+        if (ledger.get('schemaVersion') != 1
+                or ledger.get('policyId') != HTTP_CLEANUP_POLICY
+                or ledger.get('limits') != HTTP_CLEANUP_LIMITS
+                or ledger.get('activeRunId') is not None
+                or ledger.get('certificationCredit') is not False
+                or actual_ledger_path != expected_ledger_path
+                or (ledger.get('authorization') or {}).get('sha256') != auth_hash
+                or not isinstance(attempt_rows, list) or len(attempt_rows) != 1):
+            raise ValueError('generation-8 successor ledger is stale, noncanonical, or widened')
+        attempt = attempt_rows[0]
+        if (attempt.get('operation') != 'standard-token'
+                or attempt.get('state') != 'TERMINAL' or attempt.get('exitCode') != 0
+                or attempt.get('classification') != 'PASS_NATIVE_STANDARD_TOKEN'
+                or attempt.get('tuple') != new_tuple
+                or attempt.get('certificationCredit') is not False):
+            raise ValueError('generation-8 successor lacks one exact token qualification')
+        predecessor_rows = ledger.get('predecessors')
+        if (not isinstance(predecessor_rows, list) or len(predecessor_rows) != 2
+                or any(not isinstance(row, dict)
+                       or row.get('sha256') != HTTP_CLEANUP_PREDECESSOR_SHA256
+                       for row in predecessor_rows)):
+            raise ValueError('generation-8 COLLISION-1 predecessor references differ')
+        if (auth.get('policyId') != HTTP_CLEANUP_POLICY or auth.get('approved') is not True
+                or auth.get('approvedBy') != 'ACCOUNT_OWNER'
+                or auth.get('candidate') != new_tuple or auth.get('previousCandidate') != old_tuple
+                or auth.get('limits') != HTTP_CLEANUP_LIMITS
+                or auth.get('shippingChangeApproved') is not False
+                or auth.get('publicMainSha') != receipt.get('publicMainSha')
+                or auth.get('predecessorSha256') !=
+                   {'collision1': HTTP_CLEANUP_PREDECESSOR_SHA256}
+                or (auth.get('generation7') or {}).get('pointer', {}).get('sha256') != old_hash
+                or (auth.get('generation7') or {}).get('receipt', {}).get('sha256') != prior['receiptSha256']):
+            raise ValueError('generation-8 frozen successor authorization differs')
+        if (not isinstance(auth.get('ownerAuthorization'), dict)
+                or auth['ownerAuthorization'].get('sha256') != owner_hash
+                or (approval.get('ownerAuthorization') or {}).get('sha256') != owner_hash
+                or receipt.get('predecessorLedgerSha256') != HTTP_CLEANUP_PREDECESSOR_SHA256
+                or not all(text in owner_text for text in
+                           (HTTP_CLEANUP_POLICY, f'publicMainSha={receipt.get("publicMainSha")}',
+                            f'predecessorSha256={HTTP_CLEANUP_PREDECESSOR_SHA256}'))
+                or any(f'candidate.{key}={value}' not in owner_text
+                       for key, value in new_tuple.items())):
+            raise ValueError('generation-8 frozen owner authorization does not bind exact inputs')
+        collision = strict_baseline_json(source(HTTP_CLEANUP_PREDECESSOR_SHA256, '.json'))
+        expected_attempts = [
+            ('standard-token', 'PASS_NATIVE_STANDARD_TOKEN', 0),
+            ('diagnostic', 'PASS_READY_FOR_PROOF_RESERVATION', 0),
+            ('laptop-proof', 'NATIVE_LAPTOP_PROOF_PASS', 0),
+            ('desktop-proof', 'NATIVE_DESKTOP_PROOF_PASS', 0),
+            ('fullrelease', 'NATIVE_FULLRELEASE_BLOCKED', 2),
+        ]
+        prior_attempts = collision.get('attempts')
+        if (collision.get('policyId') != 'DF-FRESH-CERTIFICATION-20260930-COLLISION-1'
+                or collision.get('activeRunId') is not None
+                or collision.get('limits') != COLLISION_LIMITS
+                or collision.get('certificationCredit') is not False
+                or not isinstance(prior_attempts, list) or len(prior_attempts) != 5
+                or any(row.get('state') != 'TERMINAL' or row.get('operation') != operation
+                       or row.get('classification') != classification
+                       or row.get('exitCode') != exit_code
+                       or row.get('tuple') != old_tuple
+                       for row, (operation, classification, exit_code)
+                       in zip(prior_attempts, expected_attempts))
+                or len({row.get('runId') for row in prior_attempts}) != 5):
+            raise ValueError('generation-8 predecessor is not exact terminal COLLISION-1')
+        def ancestor_run_ids(document, visited=None):
+            visited = set() if visited is None else visited
+            found = set()
+            if isinstance(document, dict):
+                run_id = document.get('runId')
+                if isinstance(run_id, str):
+                    found.add(run_id)
+                reference_hash = document.get('sha256')
+                if (isinstance(document.get('path'), str)
+                        and isinstance(reference_hash, str)
+                        and re.fullmatch(r'[0-9a-f]{64}', reference_hash)
+                        and reference_hash not in visited):
+                    visited.add(reference_hash)
+                    matches = [path for (digest_value, extension), path in sources.items()
+                               if digest_value == reference_hash and extension == '.json']
+                    if matches:
+                        found |= ancestor_run_ids(strict_baseline_json(matches[0]), visited)
+                for nested in document.values():
+                    found |= ancestor_run_ids(nested, visited)
+            elif isinstance(document, list):
+                for nested in document:
+                    found |= ancestor_run_ids(nested, visited)
+            return found
+        historical_run_ids = ancestor_run_ids(collision)
+        token_reference = receipt.get('standardTokenEvidence')
+        if (attempt.get('runId') in historical_run_ids
+                or not isinstance(token_reference, dict)
+                or token_reference.get('runId') in historical_run_ids
+                or token_reference.get('runId') == attempt.get('runId')):
+            raise ValueError('generation-8 successor reuses an ancestor or inner RunId')
+        reviewed = auth.get('reviewedSources')
+        if not isinstance(reviewed, dict):
+            raise ValueError('generation-8 reviewed HTTP-HOSTILE sources are absent')
+        for key, suffix in (('httpHostileExecutor', 'Invoke-HttpHostilePhase.ps1'),
+                            ('httpHostileRegression', 'Test-HttpHostileCleanup.ps1')):
+            ref = reviewed.get(key)
+            if (not isinstance(ref, dict) or not isinstance(ref.get('path'), str)
+                    or not ref['path'].replace('\\', '/').endswith(suffix)
+                    or not any(source_hash == ref.get('sha256')
+                               for source_hash, _ in sources)):
+                raise ValueError('generation-8 reviewed HTTP-HOSTILE correction source differs')
+        failures = auth.get('failureEvidence')
+        if not isinstance(failures, dict):
+            raise ValueError('generation-8 FullRelease blocker evidence is absent')
+        failure_records = {}
+        for key in ('fullReleaseWrapper', 'runState', 'error', 'failureCleanup', 'requestAdmission'):
+            ref = failures.get(key)
+            extension = '.txt' if key == 'error' else '.json'
+            if (not isinstance(ref, dict) or not isinstance(ref.get('path'), str)
+                    or not any(source_hash == ref.get('sha256') and ext == extension
+                               for source_hash, ext in sources)):
+                raise ValueError('generation-8 FullRelease blocker source is outside the closure')
+            failure_records[key] = (source(ref['sha256'], extension).read_text(encoding='utf-8-sig')
+                                    if key == 'error'
+                                    else strict_baseline_json(source(ref['sha256'], extension)))
+        blocker_run = prior_attempts[-1]['runId']
+        wrapper = failure_records['fullReleaseWrapper']
+        admission = failure_records['requestAdmission']
+        cleanup = failure_records['failureCleanup']
+        if (wrapper.get('runId') != blocker_run
+                or wrapper.get('classification') != 'NATIVE_FULLRELEASE_BLOCKED'
+                or wrapper.get('exitCode') != 2
+                or wrapper.get('currentPhase') != 'HTTP-HOSTILE'
+                or wrapper.get('firstTechnicalFailure') != 'Windows sharing violation at templates/ruby-rails'
+                or wrapper.get('observerTerminal') == wrapper.get('firstTechnicalFailure')
+                or admission.get('runId') != blocker_run
+                or admission.get('classification') != 'PASS_HTTP_HOSTILE_REQUEST_ADMISSION'
+                or admission.get('passedTests') != 10 or admission.get('failedTests') != 0
+                or failure_records['runState'].get('runId') != blocker_run
+                or blocker_run not in failure_records['error']
+                or wrapper.get('firstTechnicalFailure') not in failure_records['error']
+                or cleanup.get('runId') != blocker_run
+                or (cleanup.get('l1') or {}).get('state') != 'Off'
+                or (cleanup.get('l2') or {}).get('status') != 'UNVERIFIED'):
+            raise ValueError('generation-8 HTTP-HOSTILE blocker chronology or cleanup differs')
+        final_l1 = {'name': 'DevFleet-E2E-Win11-01',
+                    'id': '84b7d8b8-ee6c-4085-aa29-4b0adc316de2', 'state': 'Off'}
+        snapshots = inventory.get('snapshots')
+        exact = [row for row in snapshots if isinstance(row, dict)
+                 and row.get('name') == 'DevFleet-E2E-CLEAN-R2'] if isinstance(snapshots, list) else []
+        if (inventory.get('scope') != 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
+                or inventory.get('vm') != final_l1 or receipt.get('finalL1') != final_l1
+                or len(exact) != 1 or exact[0].get('id') != prior['id']
+                or exact[0].get('vmId') != final_l1['id']
+                or exact[0].get('parentSnapshotId') != '19865b76-4c3a-44f7-ba39-841e9d3c40c9'):
+            raise ValueError('generation-8 native inventory does not prove exact CLEAN-R2 and L1 Off')
+        _validate_generation8_token(root, new_tuple, receipt.get('standardTokenEvidence'),
+                                    sources, attempt, strict_baseline_json)
+        return {'id': prior['id'], 'name': prior['name'],
+                'receiptSha256': pointer['receiptSha256']}
     if pointer.get('generation') == 7:
         if (pointer.get('schemaVersion') != 7
                 or pointer.get('contract') != 'devfleet-accepted-baseline-v7'
@@ -513,7 +913,8 @@ def load_accepted_baseline(root: Path, expected: dict[str, str], artifacts: dict
                 or exact[0].get('parentSnapshotId') != old_id):
             raise ValueError('generation-7 inventory does not prove CLEAN-R2 and L1 Off')
         _validate_generation7_token(root, new_tuple, binding.get('standardTokenEvidence'),
-                                    attempts[0], strict_baseline_json)
+                                    attempts[0], strict_baseline_json,
+                                    historical=_historical)
         return {'id': prior['id'], 'name': prior['name'],
                 'receiptSha256': pointer['receiptSha256']}
     if pointer.get('generation') == 6:
