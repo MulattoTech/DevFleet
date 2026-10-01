@@ -18,6 +18,9 @@ def main() -> None:
     complete = (ROOT / "tools/Complete-DevFleetInternalAcceptance.ps1").read_text(encoding="utf-8-sig")
     authority = (ROOT / "tools/Update-CurrentReleaseAuthority.ps1").read_text(encoding="utf-8-sig")
     builder = (ROOT / "tools/Build-AIAuditBundle.ps1").read_text(encoding="utf-8-sig")
+    closure = (ROOT / "tools/BaselineArchiveClosure.psm1").read_text(encoding="utf-8-sig")
+    codebase = (ROOT / "tools/Build-AI-CodebaseBundle.ps1").read_text(encoding="utf-8-sig")
+    chatgpt = (ROOT / "tools/Build-ChatGPT-AuditBundle.ps1").read_text(encoding="utf-8-sig")
     validator = (ROOT / "tools/validate_release_bundle.py").read_text(encoding="utf-8-sig")
 
     require(complete, (
@@ -44,12 +47,23 @@ def main() -> None:
         "release-audits", "CURRENT-RELEASE-AUDIT.json",
         "devfleet-pre-acceptance-release-audit-v1",
         "releaseEligible=$false", "internalPromotionAllowed=$false",
+        "BaselineArchiveClosure.psm1", "Copy-DevFleetBaselineArchiveClosure",
     ), "audit builder")
+    require(closure, (
+        "function Copy-DevFleetBaselineArchiveClosure", "-gt 7",
+        "previousPointerSha256", "previousReceiptSha256",
+        "artifactReceiptSha256", "ownerAuthorizationSha256",
+        "approvalSha256", "standardTokenEvidence",
+    ), "complete baseline archive staging")
+    for label, wrapper in (("codebase wrapper", codebase), ("ChatGPT wrapper", chatgpt)):
+        require(wrapper, ("Build-AIAuditBundle.ps1", "-Workspace $Workspace"), label)
     require(validator, (
         '"pre-acceptance"', "validate_final_acceptance",
         "CURRENT-STANDARD-TOKEN.json", "FINAL-ACCEPTANCE.json",
         "REAL-USE-ACCEPTANCE", "U01", "U05",
         "pre-acceptance audit contains post-audit evidence (cycle)",
+        "devfleet-accepted-baseline-v7", "COLLISION_PREDECESSOR_SHA256",
+        "_validate_generation7_token", "_load_generation7_source",
     ), "release-bundle validator")
     if authority.find("--check final-acceptance") > authority.find("$candidateFlags ="):
         raise AssertionError("authority reads candidate promotion flags before validating FINAL-ACCEPTANCE")
@@ -60,7 +74,7 @@ def main() -> None:
         raise AssertionError("completion tool must stage, validate, then atomically publish FINAL")
     if "Write-AtomicJson $finalPath $final" in complete:
         raise AssertionError("completion tool publishes FINAL before independent validation")
-    print(json.dumps({"status": "PASS", "checks": 4}, sort_keys=True))
+    print(json.dumps({"status": "PASS", "checks": 7}, sort_keys=True))
 
 
 if __name__ == "__main__":

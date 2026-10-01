@@ -23,6 +23,14 @@ REPAIR3_ID = POLICY_ID + '-R2-REPAIR-3'
 REPAIR4_ID = POLICY_ID + '-R2-REPAIR-4'
 REPAIR5_ID = POLICY_ID + '-R2-REPAIR-5'
 CAUSAL_ID = 'DF-FRESH-CERTIFICATION-20260929-CAUSAL-1'
+COLLISION_ID = 'DF-FRESH-CERTIFICATION-20260930-COLLISION-1'
+COLLISION_PREDECESSOR_SHA256 = '6deb98ab9dd165798e31538772f01e23eceeb333b10e0067a066685952f680e1'
+COLLISION_OWNER_AUTH_SHA256 = 'f9eec666193447810089ffbd1ad249aba8f8e8a7d13e5220d10ef5ac2c64af16'
+COLLISION_FIRST_ERROR = 'Cannot create a file when that file already exists.'
+COLLISION_LEDGER_PATH = Path(r'C:\Users\Dylan\Documents\Codex\2026-08-12\ex-2\work\DevFleet-v1.2.13-development\audit\agent-memory\attempts\DF-FRESH-CERTIFICATION-20260930-COLLISION-1\ledger.json')
+COLLISION_LIVE_CAUSAL_PATH = Path(r'C:\Users\Dylan\Documents\Codex\2026-08-12\ex-2\work\DevFleet-v1.2.13-development\audit\agent-memory\attempts\DF-FRESH-CERTIFICATION-20260929-CAUSAL-1\ledger.json')
+TUPLE_KEYS = ('repositoryHead', 'candidateBuildCommit', 'shippingInputIdentity',
+              'releaseFingerprintId', 'toolingFingerprintId', 'candidateSha256')
 REPAIR3_CANDIDATE_COMMIT = 'be0f1473838b4c2255d22efd99b25a58fd588a78'
 REPAIR3_SHIPPING_SHA256 = '4d7d2dcfd486adb622e413ed9abe894df6d105457e91aa0f96779d776a5e4b44'
 REPAIR3_SIGNED_EXE_SHA256 = '1ee8059ea9ae253ab358b9aec5241aae1019676cb54544b5f352080cdf132908'
@@ -56,6 +64,7 @@ REPAIR4_LIMITS = dict(REPAIR3_LIMITS)
 REPAIR4_SEQUENCE = REPAIR_SEQUENCE
 REPAIR5_LIMITS = dict(REPAIR4_LIMITS)
 REPAIR5_SEQUENCE = REPAIR_SEQUENCE
+COLLISION_LIMITS = dict(REPAIR5_LIMITS)
 
 
 def sequence_for(policy_id):
@@ -65,7 +74,7 @@ def sequence_for(policy_id):
         return REPAIR3_SEQUENCE
     if policy_id == REPAIR4_ID:
         return REPAIR4_SEQUENCE
-    if policy_id == REPAIR5_ID:
+    if policy_id in (REPAIR5_ID, COLLISION_ID):
         return REPAIR5_SEQUENCE
     return REPAIR_SEQUENCE
 
@@ -83,6 +92,8 @@ def limits_for(policy_id):
         return REPAIR4_LIMITS
     if policy_id == REPAIR5_ID:
         return REPAIR5_LIMITS
+    if policy_id == COLLISION_ID:
+        return COLLISION_LIMITS
     if policy_id == CAUSAL_ID:
         return REPAIR5_LIMITS
     if policy_id in (POLICY_ID, POLICY_ID + '-R2'):
@@ -246,9 +257,235 @@ def _validate_causal_sources(ledger, authorization, predecessors):
         raise ValueError('Causal successor requires a new explicit owner authorization source')
 
 
+def _collision_tuple(value):
+    if not isinstance(value, dict) or set(value) != set(TUPLE_KEYS):
+        raise ValueError('Post-collision candidate tuple must contain six exact fields')
+    for key in TUPLE_KEYS:
+        width = 40 if key in ('repositoryHead', 'candidateBuildCommit') else 64
+        if not isinstance(value[key], str) or not re.fullmatch(f'[a-f0-9]{{{width}}}', value[key]):
+            raise ValueError('Post-collision candidate tuple is malformed: ' + key)
+    return value
+
+
+def _collision_path(value, *, existing=True):
+    if not isinstance(value, str) or not value or not Path(value).is_absolute():
+        raise ValueError('Post-collision source path must be canonical and absolute')
+    path = safe_path(value)
+    resolved = path.resolve(strict=existing)
+    if path != resolved or (existing and not path.is_file()):
+        raise ValueError('Post-collision source path is not canonical or is absent')
+    return path
+
+
+def _collision_ref(value):
+    if not isinstance(value, dict) or set(value) != {'path', 'sha256'}:
+        raise ValueError('Post-collision source reference is malformed')
+    path = _collision_path(value['path'])
+    if not isinstance(value['sha256'], str) or not re.fullmatch(r'[a-f0-9]{64}', value['sha256']):
+        raise ValueError('Post-collision source hash is malformed')
+    if digest(path) != value['sha256']:
+        raise ValueError('Post-collision source bytes changed')
+    return path
+
+
+def _collision_record_run(record, expected, *, required=False):
+    """Check fields when a native record exposes them; hash still binds every byte."""
+    if not isinstance(record, dict):
+        raise ValueError('Post-collision evidence must be a JSON object')
+    keys = ('runId', 'attemptRunId', 'proofRunId')
+    if required and not any(key in record for key in keys):
+        raise ValueError('Post-collision evidence lacks a failed RunId')
+    for key in keys:
+        if key in record and record[key] != expected:
+            raise ValueError('Post-collision evidence belongs to another RunId')
+
+
+def _collision_ancestor_run_ids(root, protected):
+    """Hash-check every referenced ancestor, including both historical snapshot/live copies."""
+    seen = set()
+    run_ids = set()
+    pending = [root]
+    while pending:
+        current = pending.pop()
+        references = current.get('predecessors', [])
+        if not isinstance(references, list):
+            raise ValueError('Post-collision ancestor lineage is malformed')
+        for reference in references:
+            path = _collision_ref(reference)
+            if path in protected:
+                raise ValueError('Post-collision ancestor location collides with successor source')
+            if path in seen:
+                continue
+            seen.add(path)
+            if len(seen) > 128:
+                raise ValueError('Post-collision ancestor lineage exceeds bounded size')
+            ancestor = strict_json(path)
+            if not isinstance(ancestor, dict) or ancestor.get('activeRunId') is not None:
+                raise ValueError('Post-collision ancestor is malformed or active')
+            attempts = ancestor.get('attempts', [])
+            if not isinstance(attempts, list):
+                raise ValueError('Post-collision ancestor attempts are malformed')
+            for attempt in attempts:
+                if (not isinstance(attempt, dict) or attempt.get('state') != 'TERMINAL'
+                        or not isinstance(attempt.get('runId'), str) or not attempt['runId']):
+                    raise ValueError('Post-collision ancestor has an unterminalized RunId')
+                run_ids.add(attempt['runId'])
+            pending.append(ancestor)
+    return run_ids
+
+
+def _validate_collision_sources(ledger, authorization, predecessors):
+    """Bind exact terminal CAUSAL-1, owner words, correction and failure evidence."""
+    if not isinstance(predecessors, list) or len(predecessors) != 1:
+        raise ValueError('Post-collision successor requires one terminal CAUSAL-1 predecessor')
+    ledger = _collision_path(str(ledger), existing=False)
+    authorization = _collision_path(str(authorization))
+    predecessor = _collision_path(str(predecessors[0]))
+    live_causal = _collision_path(str(COLLISION_LIVE_CAUSAL_PATH))
+    if (ledger != _collision_path(str(COLLISION_LEDGER_PATH), existing=False)
+            or len({ledger, authorization, predecessor, live_causal}) != 4):
+        raise ValueError('Post-collision ledger, approval and predecessor must be distinct')
+    approval = strict_json(authorization)
+    required = {'schemaVersion', 'kind', 'policyId', 'approved', 'approvedBy',
+                'ownerAuthorization', 'successorLedgerPath', 'predecessorSha256',
+                'failedRunId', 'previousCandidate', 'candidate', 'generation6',
+                'reviewedSources', 'failureEvidence', 'limits'}
+    if (not isinstance(approval, dict) or set(approval) != required
+            or type(approval['schemaVersion']) is not int or approval['schemaVersion'] != 1
+            or approval['kind'] != 'DEVFLEET_POST_COLLISION_SUCCESSOR_AUTHORIZATION'
+            or approval['policyId'] != COLLISION_ID or approval['approved'] is not True
+            or approval['approvedBy'] != 'ACCOUNT_OWNER'
+            or _collision_path(approval['successorLedgerPath'], existing=False) != ledger):
+        raise ValueError('Exact post-collision owner authorization is required')
+    limits = approval['limits']
+    if (not isinstance(limits, dict) or set(limits) != set(COLLISION_LIMITS)
+            or any(type(limits[key]) is not int or limits[key] != value
+                   for key, value in COLLISION_LIMITS.items())):
+        raise ValueError('Post-collision finite limits were widened or malformed')
+    old_tuple = _collision_tuple(approval['previousCandidate'])
+    new_tuple = _collision_tuple(approval['candidate'])
+    for key in ('candidateBuildCommit', 'shippingInputIdentity',
+                'releaseFingerprintId', 'candidateSha256'):
+        if old_tuple[key] != new_tuple[key]:
+            raise ValueError('Post-collision shipping identity changed: ' + key)
+    if (old_tuple['repositoryHead'] == new_tuple['repositoryHead']
+            or old_tuple['toolingFingerprintId'] == new_tuple['toolingFingerprintId']):
+        raise ValueError('Post-collision successor requires changed HEAD and tooling')
+    owner_source = _collision_ref(approval['ownerAuthorization'])
+    if digest(owner_source) != COLLISION_OWNER_AUTH_SHA256:
+        raise ValueError('Post-collision owner message differs from exact authorization')
+    owner_words = owner_source.read_text(encoding='utf-8-sig')
+    if (COLLISION_ID not in owner_words
+            or any(f'{label} = {value}' not in owner_words for label, value in
+                   [('standard-token', 1), ('diagnostic/readiness', 1), ('laptop-proof', 1),
+                    ('desktop-proof', 1), ('fullrelease', 1), ('maintenance', 0), ('build-sign', 0)])
+            or 'no signed-shipping change' not in owner_words):
+        raise ValueError('Post-collision owner message does not authorize this exact scope')
+    if (not isinstance(approval['predecessorSha256'], dict) or approval['predecessorSha256'] != {
+            'causal1': COLLISION_PREDECESSOR_SHA256} or digest(predecessor) != COLLISION_PREDECESSOR_SHA256
+            or digest(live_causal) != COLLISION_PREDECESSOR_SHA256):
+        raise ValueError('Exact terminal CAUSAL-1 predecessor changed')
+    prior = strict_json(predecessor)
+    attempts = prior.get('attempts') if isinstance(prior, dict) else None
+    expected = (('standard-token', 0, 'PASS_NATIVE_STANDARD_TOKEN'),
+                ('diagnostic', 0, 'PASS_READY_FOR_PROOF_RESERVATION'),
+                ('laptop-proof', 2, 'NATIVE_LAPTOP_PROOF_BLOCKED'))
+    if (prior.get('schemaVersion') != 1 or prior.get('policyId') != CAUSAL_ID
+            or prior.get('certificationCredit') is not False
+            or prior.get('limits') != REPAIR5_LIMITS or prior.get('activeRunId') is not None
+            or not isinstance(attempts, list) or len(attempts) != 3
+            or any(not isinstance(a, dict) or a.get('operation') != op
+                   or a.get('state') != 'TERMINAL' or a.get('exitCode') != code
+                   or a.get('classification') != result or a.get('tuple') != old_tuple
+                   for a, (op, code, result) in zip(attempts, expected))):
+        raise ValueError('CAUSAL-1 predecessor is not the exact terminal three-attempt history')
+    old_run_ids = [a.get('runId') for a in attempts]
+    if (any(not isinstance(run, str) or not run for run in old_run_ids)
+            or len(set(old_run_ids)) != 3 or approval['failedRunId'] != old_run_ids[-1]):
+        raise ValueError('Post-collision failed RunId does not bind CAUSAL-1 history')
+    direct = prior.get('predecessors')
+    if (not isinstance(direct, list) or len(direct) != 4
+            or any(not isinstance(row, dict) or set(row) != {'path', 'sha256'} for row in direct)
+            or direct[0]['sha256'] != direct[1]['sha256']
+            or direct[2]['sha256'] != direct[3]['sha256']):
+        raise ValueError('Post-collision CAUSAL-1 R5/D1 ancestor references differ')
+    ancestor_run_ids = _collision_ancestor_run_ids(
+        prior, {ledger, authorization, predecessor, live_causal, owner_source})
+    for index, expected_policy in enumerate((REPAIR5_ID, REPAIR5_ID,
+                                              ONE_DIAGNOSTIC_ID, ONE_DIAGNOSTIC_ID)):
+        if strict_json(direct[index]['path']).get('policyId') != expected_policy:
+            raise ValueError('Post-collision CAUSAL-1 ancestor policy differs')
+    if (not isinstance(prior.get('authorization'), dict)
+            or prior['authorization'].get('sha256') == digest(authorization)):
+        raise ValueError('Post-collision authorization repeats predecessor source')
+    generation6 = approval['generation6']
+    if not isinstance(generation6, dict) or set(generation6) != {'receiptPath', 'receiptSha256', 'checkpoint'}:
+        raise ValueError('Generation-6 lineage reference is malformed')
+    receipt_path = _collision_ref({'path': generation6['receiptPath'], 'sha256': generation6['receiptSha256']})
+    receipt = strict_json(receipt_path)
+    if (receipt.get('schemaVersion') != 6
+            or receipt.get('contract') != 'devfleet-baseline-rebind-receipt-v6'
+            or receipt.get('status') != 'REBOUND' or receipt.get('certificationCredit') is not False
+            or receipt.get('candidate') != old_tuple
+            or receipt.get('replacement') != generation6['checkpoint']
+            or not isinstance(generation6['checkpoint'], dict)
+            or not generation6['checkpoint'].get('id')):
+        raise ValueError('Generation-6 receipt/checkpoint differs from predecessor tuple')
+    refs = approval['reviewedSources']
+    evidence = approval['failureEvidence']
+    if (not isinstance(refs, dict) or set(refs) != {'proposal', 'source'}
+            or not isinstance(evidence, dict) or set(evidence) != {'wrapper', 'proofError', 'cleanup'}):
+        raise ValueError('Reviewed proposal/source or collision evidence is incomplete')
+    paths = [ledger, authorization, predecessor, live_causal, owner_source, receipt_path]
+    for group, names in ((refs, ('proposal', 'source')),
+                         (evidence, ('wrapper', 'proofError', 'cleanup'))):
+        paths.extend(_collision_ref(group[name]) for name in names)
+    if len(paths) != len(set(paths)):
+        raise ValueError('Post-collision evidence locations must be distinct')
+    for name in ('proposal', 'source'):
+        path = _collision_path(refs[name]['path'])
+        if path.suffix.lower() == '.json':
+            reviewed = strict_json(path)
+            _collision_record_run(reviewed, approval['failedRunId'])
+            if 'previousCandidate' in reviewed and reviewed['previousCandidate'] != old_tuple:
+                raise ValueError('Reviewed source predecessor tuple differs')
+            if 'candidate' in reviewed and reviewed['candidate'] != new_tuple:
+                raise ValueError('Reviewed source candidate tuple differs')
+    wrapper = strict_json(evidence['wrapper']['path'])
+    proof_error = strict_json(evidence['proofError']['path'])
+    cleanup = strict_json(evidence['cleanup']['path'])
+    for record in (wrapper, proof_error, cleanup):
+        _collision_record_run(record, approval['failedRunId'], required=True)
+    l1, l2 = cleanup.get('l1'), cleanup.get('l2')
+    if (wrapper.get('classification') != 'NATIVE_LAPTOP_PROOF_BLOCKED'
+            or wrapper.get('exitCode') != 2
+            or wrapper.get('firstTechnicalFailure') != COLLISION_FIRST_ERROR
+            or proof_error.get('status') != 'BLOCKED'
+            or proof_error.get('error') != COLLISION_FIRST_ERROR
+            or cleanup.get('status') != 'PASS'
+            or cleanup.get('runOwnedOnly') is not True
+            or not isinstance(l1, dict)
+            or l1.get('name') != 'DevFleet-E2E-Win11-01'
+            or l1.get('id') != '84b7d8b8-ee6c-4085-aa29-4b0adc316de2'
+            or l1.get('status') != 'OFF'
+            or not isinstance(l2, dict)
+            or l2.get('expectedName') != 'DevFleet-E2E-Linux-01'
+            or l2.get('present') is not False
+            or type(l2.get('exactMatchCount')) is not int or l2['exactMatchCount'] != 0
+            or type(l2.get('inventoryCount')) is not int or l2['inventoryCount'] != 0
+            or l2.get('status') != 'ABSENT'
+            or cleanup.get('l2Present') is not False):
+        raise ValueError('Collision failure/cleanup evidence contradicts terminal predecessor')
+    if wrapper.get('observerTerminal') == COLLISION_FIRST_ERROR:
+        raise ValueError('Collision first failure is absent or conflated with observer terminal')
+    return approval, set(old_run_ids) | ancestor_run_ids
+
+
 def initialize(ledger, authorization, predecessors, policy_id=POLICY_ID, artifact_receipt=None):
     limits = limits_for(policy_id)
-    if policy_id == CAUSAL_ID:
+    if policy_id == COLLISION_ID:
+        _validate_collision_sources(ledger, authorization, predecessors)
+    elif policy_id == CAUSAL_ID:
         _validate_causal_sources(ledger, authorization, predecessors)
     elif policy_id == REPAIR5_ID:
         if len(predecessors) != 2 or safe_path(predecessors[0]) == safe_path(predecessors[1]):
@@ -365,7 +602,7 @@ def initialize(ledger, authorization, predecessors, policy_id=POLICY_ID, artifac
 
 def load(ledger):
     data = strict_json(ledger)
-    if not isinstance(data,dict) or type(data.get('schemaVersion')) is not int or data['schemaVersion'] != 1 or data.get('policyId') not in (POLICY_ID, POLICY_ID+'-R2', ONE_DIAGNOSTIC_ID, REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID, CAUSAL_ID):
+    if not isinstance(data,dict) or type(data.get('schemaVersion')) is not int or data['schemaVersion'] != 1 or data.get('policyId') not in (POLICY_ID, POLICY_ID+'-R2', ONE_DIAGNOSTIC_ID, REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID, CAUSAL_ID, COLLISION_ID):
         raise ValueError('Unsupported campaign schema/identity')
     if data.get('certificationCredit') is not False:
         raise ValueError('Attempt accounting cannot grant certification credit')
@@ -383,6 +620,15 @@ def load(ledger):
         if any(digest(safe_path(p['path'])) != p.get('sha256') for p in predecessors):
             raise ValueError('Causal predecessor changed')
         _validate_causal_sources(ledger, auth['path'], [p['path'] for p in predecessors])
+    if data['policyId'] == COLLISION_ID:
+        predecessors = data.get('predecessors')
+        if (not isinstance(predecessors, list) or len(predecessors) != 1
+                or not isinstance(predecessors[0], dict)
+                or set(predecessors[0]) != {'path', 'sha256'}
+                or predecessors[0]['sha256'] != COLLISION_PREDECESSOR_SHA256):
+            raise ValueError('Post-collision predecessor ledger binding is missing')
+        approval, historical_run_ids = _validate_collision_sources(
+            ledger, auth['path'], [predecessors[0]['path']])
     if data['policyId'] == REPAIR3_ID:
         receipt = data.get('artifactReceipt')
         if not isinstance(receipt, dict) or set(receipt) != {'path', 'sha256'}:
@@ -553,7 +799,11 @@ def load(ledger):
         raise ValueError('Ambiguous active attempt')
     if any(sum(a['operation']==op for a in attempts)>limit for op,limit in expected_limits.items()):
         raise ValueError('Campaign allowance exceeded')
-    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID, CAUSAL_ID):
+    if data['policyId'] == COLLISION_ID:
+        if any(a['runId'] in historical_run_ids or a.get('tuple') != approval['candidate']
+               for a in attempts):
+            raise ValueError('Post-collision RunId replay or candidate tuple drift')
+    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID, CAUSAL_ID, COLLISION_ID):
         sequence = sequence_for(data['policyId'])
         if len(attempts) > len(sequence):
             raise ValueError('Repair successor has too many phases')
@@ -582,6 +832,16 @@ def prepare(data, request):
     if not isinstance(owner,dict) or set(owner)!={'pid','startUtc'} or type(owner['pid']) is not int or owner['pid']<=0 or not isinstance(owner['startUtc'],str) or not owner['startUtc']:
         raise ValueError('Exact owner PID and start identity required')
     if not isinstance(request['tuple'],dict) or not re.fullmatch('[a-f0-9]{40}',str(request['tuple'].get('repositoryHead',''))): raise ValueError('Current repository identity required')
+    if data['policyId'] == COLLISION_ID:
+        approval_path = data['authorization']['path']
+        declared_ledger = strict_json(approval_path)['successorLedgerPath']
+        approval, historical_run_ids = _validate_collision_sources(
+            declared_ledger, approval_path,
+            [row['path'] for row in data['predecessors']])
+        if request['runId'] in historical_run_ids:
+            raise ValueError('Historical CAUSAL-1 RunId cannot be replayed')
+        if _collision_tuple(request['tuple']) != approval['candidate']:
+            raise ValueError('Post-collision reservation tuple differs from owner authorization')
     if not isinstance(request['entrypoint'],str) or not request['entrypoint'].strip() or not re.fullmatch('[a-f0-9]{64}',str(request['entrypointSha256'])): raise ValueError('Reviewed entrypoint identity required')
     if not isinstance(request['arguments'],list) or any(not isinstance(s,str) for s in request['arguments']): raise ValueError('Arguments must be a string array')
     if not isinstance(request['changedCondition'],str) or not request['changedCondition'].strip(): raise ValueError('Actual changed condition must be recorded')
@@ -590,7 +850,7 @@ def prepare(data, request):
     if data['activeRunId'] is not None: raise ValueError('Active attempt must be reconciled; crash is not a free replay')
     if any(a['runId']==request['runId'] for a in data['attempts']): raise ValueError('RunId has already been charged')
     if sum(a['operation']==request['operation'] for a in data['attempts'])>=limits[request['operation']]: raise ValueError('Operation allowance exhausted')
-    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID, CAUSAL_ID):
+    if data['policyId'] in (REPAIR_ID, REPAIR2_ID, REPAIR3_ID, REPAIR4_ID, REPAIR5_ID, CAUSAL_ID, COLLISION_ID):
         sequence = sequence_for(data['policyId'])
         prior = data['attempts']
         if (len(prior) >= len(sequence)
@@ -629,7 +889,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command',choices=['initialize','status','reserve','finish'])
     parser.add_argument('--ledger',required=True); parser.add_argument('--authorization'); parser.add_argument('--predecessor',action='append',default=[])
-    parser.add_argument('--policy-id',choices=[POLICY_ID,POLICY_ID+'-R2',ONE_DIAGNOSTIC_ID,REPAIR_ID,REPAIR2_ID,REPAIR3_ID,REPAIR4_ID,REPAIR5_ID,CAUSAL_ID],default=POLICY_ID)
+    parser.add_argument('--policy-id',choices=[POLICY_ID,POLICY_ID+'-R2',ONE_DIAGNOSTIC_ID,REPAIR_ID,REPAIR2_ID,REPAIR3_ID,REPAIR4_ID,REPAIR5_ID,CAUSAL_ID,COLLISION_ID],default=POLICY_ID)
     parser.add_argument('--artifact-receipt')
     parser.add_argument('--request'); parser.add_argument('--dry-run',action='store_true')
     args=parser.parse_args()
