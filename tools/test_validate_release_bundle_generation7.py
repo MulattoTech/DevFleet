@@ -45,6 +45,18 @@ class Generation7ReleaseReaderTests(unittest.TestCase):
     def test_accepts_complete_generation_seven_chain(self):
         self.assertEqual(self.read()['receiptSha256'], self.bound['receiptSha256'])
 
+    def test_accepts_equivalent_canonical_path_separator_spelling(self):
+        with (patch.object(bundle, 'COLLISION_PREDECESSOR_SHA256',
+                           self.receipt['predecessorLedgerSha256']),
+              patch.object(bundle, 'COLLISION_OWNER_AUTH_SHA256',
+                           self.receipt['ownerAuthorizationSha256']),
+              patch.object(bundle, 'COLLISION_LEDGER_PATH',
+                           self.fixture.ledger.as_posix())):
+            result = bundle.load_accepted_baseline(
+                self.root, self.expected,
+                {'exe': self.fixture.new['candidateSha256']})
+        self.assertEqual(result['receiptSha256'], self.bound['receiptSha256'])
+
     def test_clean_extracted_chain_accepts(self):
         with tempfile.TemporaryDirectory(prefix='devfleet-gen7-archive-') as scratch:
             zip_path = Path(scratch) / 'synthetic-gen7.zip'

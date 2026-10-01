@@ -477,7 +477,7 @@ def load_accepted_baseline(root: Path, expected: dict[str, str], artifacts: dict
                 or auth.get('approved') is not True
                 or auth.get('approvedBy') != 'ACCOUNT_OWNER'
                 or str(auth.get('successorLedgerPath', '')).replace('/', '\\').casefold()
-                   != COLLISION_LEDGER_PATH.casefold()
+                   != str(COLLISION_LEDGER_PATH).replace('/', '\\').casefold()
                 or auth.get('previousCandidate') != old_tuple
                 or auth.get('candidate') != new_tuple
                 or (auth.get('predecessorSha256') or {}).get('causal1') != hashes['predecessorLedgerSha256']
