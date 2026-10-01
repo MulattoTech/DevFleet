@@ -188,7 +188,8 @@ class Generation7Tests(unittest.TestCase):
         before = self.pointer_path.read_bytes()
         original = lineage._atomic_replace
         def fail_pointer(path, content):
-            if Path(path) == self.pointer_path:
+            target = Path(path)
+            if target.name.lower() == 'current.json' and target.parent.name.lower() == 'baselines':
                 raise OSError('synthetic pointer publish interruption')
             return original(path, content)
         with patch.object(lineage, '_atomic_replace', side_effect=fail_pointer):

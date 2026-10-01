@@ -9,13 +9,13 @@ from unittest.mock import patch
 import zipfile
 
 import baseline_lineage
-from test_baseline_generation7 import Generation7Tests
+from test_baseline_generation7 import Generation7Tests as _Generation7Fixture
 import validate_release_bundle as bundle
 
 
 class Generation7ReleaseReaderTests(unittest.TestCase):
     def setUp(self):
-        self.fixture = Generation7Tests(methodName='runTest')
+        self.fixture = _Generation7Fixture(methodName='runTest')
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
         self.root = self.fixture.root
