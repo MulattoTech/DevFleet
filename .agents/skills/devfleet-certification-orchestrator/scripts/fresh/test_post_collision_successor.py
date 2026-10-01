@@ -34,7 +34,9 @@ class PostCollisionSuccessorTests(unittest.TestCase):
         spec.loader.exec_module(self.j)
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        self.root = Path(temp.name)
+        # GetTempPath on hosted Windows can return an 8.3 alias; the source
+        # validator intentionally rejects noncanonical evidence paths.
+        self.root = Path(temp.name).resolve()
         self.ledger = self.root / 'successor.json'
         self.auth = self.root / 'owner.json'
         self.parent = self.root / 'causal-terminal.json'
