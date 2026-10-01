@@ -67,6 +67,9 @@ try{
     $reboundPointer.receiptSha256='0'*64
     [IO.File]::WriteAllText($pointerPath,($reboundPointer|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
     Assert-Rejected {Get-DevFleetAcceptedBaseline -WorkspaceRoot $root -Fingerprint $newFingerprint} 'Tampered rebound receipt pointer was accepted.'
+    $reboundPointer.schemaVersion=7;$reboundPointer.contract='devfleet-accepted-baseline-v7';$reboundPointer.generation=7
+    [IO.File]::WriteAllText($pointerPath,($reboundPointer|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
+    Assert-Rejected {Get-DevFleetAcceptedBaseline -WorkspaceRoot $root -Fingerprint $newFingerprint} 'Generation 7 accepted a non-generation-6 predecessor or stale receipt.'
     "PASS $count baseline lineage PowerShell assertions"
 }finally{
     Remove-Item Function:\Get-VM,Function:\Get-VMSnapshot -ErrorAction SilentlyContinue

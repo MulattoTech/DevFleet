@@ -130,6 +130,8 @@ def accepted_baseline(root, current_tuple=None):
         return {'name': OLD_NAME, 'id': OLD_ID, 'vmName': VM_NAME, 'vmId': VM_ID,
                 'predecessorId': None, 'receiptSha256': None, 'legacyOriginal': True}
     pointer = read_json(pointer_path)
+    if pointer.get('generation') == 7:
+        return _accepted_rebound_v7(root, pointer, current_tuple)
     if pointer.get('generation') == 6:
         return _accepted_rebound_v6(root, pointer, current_tuple)
     if pointer.get('generation') == 5:
@@ -906,6 +908,503 @@ def rebind_gen6(root, tuple_path, approval_path, ledger_path, live_path):
         return accepted_baseline(root, new_tuple)
 
 
+COLLISION_POLICY = 'DF-FRESH-CERTIFICATION-20260930-COLLISION-1'
+OWNER_AUTH_SHA256 = 'f9eec666193447810089ffbd1ad249aba8f8e8a7d13e5220d10ef5ac2c64af16'
+COLLISION_PREDECESSOR_SHA256 = '6deb98ab9dd165798e31538772f01e23eceeb333b10e0067a066685952f680e1'
+COLLISION_LEDGER_PATH = Path(r'C:\Users\Dylan\Documents\Codex\2026-08-12\ex-2\work\DevFleet-v1.2.13-development\audit\agent-memory\attempts\DF-FRESH-CERTIFICATION-20260930-COLLISION-1\ledger.json')
+COLLISION_FIRST_ERROR = 'Cannot create a file when that file already exists.'
+COLLISION_LIMITS = {'standard-token': 1, 'diagnostic': 1, 'laptop-proof': 1,
+                    'desktop-proof': 1, 'fullrelease': 1, 'maintenance': 0,
+                    'build-sign': 0}
+TOKEN_CHECKS = {'pass', 'payloadExtraction', 'bootstrapEntrypoint',
+                'parameterContract', 'embeddedTarCount', 'factoryResetBackupGate',
+                'planSafety', 'devfleetVersion', 'installerVersion', 'payloadSha'}
+
+
+def _gen7_source(state, source_hash, extension):
+    require(isinstance(source_hash, str) and HEX64.fullmatch(source_hash),
+            'Generation-7 source hash is malformed')
+    path = state / 'sources' / (source_hash + extension)
+    require(path.is_file() and not path.is_symlink() and path.stat().st_size <= 4_000_000
+            and digest(path) == source_hash, 'Generation-7 frozen source differs')
+    return path
+
+
+def _gen7_token(root, pointer_path, candidate, frozen=None):
+    """Validate exact current Developer evidence, then optionally frozen copies."""
+    root = Path(root).resolve(strict=True)
+    require(not Path(pointer_path).is_symlink(), 'Generation-7 token pointer is linked')
+    pointer_path = Path(pointer_path).resolve(strict=True)
+    require(pointer_path == root / 'evidence/CURRENT-STANDARD-TOKEN.json',
+            'Generation-7 token pointer is not canonical')
+    pointer = read_json(pointer_path)
+    run_id = pointer.get('runId')
+    require(isinstance(run_id, str) and re.fullmatch(r'standard-token-[A-Za-z0-9-]+', run_id),
+            'Generation-7 token RunId is malformed')
+    relative = 'evidence/standard-token/' + run_id
+    canonical_path = root / relative / 'standard-token-evidence.json'
+    raw_path = root / relative / 'installer-self-test-raw.txt'
+    canonical = read_json(canonical_path)
+    require(pointer == canonical, 'Generation-7 token pointer and canonical evidence differ')
+    require(raw_path.is_file() and not raw_path.is_symlink()
+            and raw_path.stat().st_size <= 4_000_000,
+            'Generation-7 raw token evidence is absent, linked, or oversized')
+    actual = {key: pointer.get(key) for key in TUPLE_KEYS if key != 'candidateSha256'}
+    token = pointer.get('token') or {}
+    checks = pointer.get('requiredChecks')
+    require(pointer.get('schemaVersion') == 1 and pointer.get('status') == 'PASS'
+            and pointer.get('standardNonAdministratorToken') is True
+            and pointer.get('exitCode') == 0
+            and pointer.get('residualSelfTestScratchCount') == 0
+            and actual == {key: candidate[key] for key in TUPLE_KEYS if key != 'candidateSha256'}
+            and pointer.get('runDirectory') == relative
+            and pointer.get('rawReportPath') == relative + '/installer-self-test-raw.txt'
+            and pointer.get('canonicalEvidencePath') == relative + '/standard-token-evidence.json'
+            and isinstance(checks, dict) and set(checks) == TOKEN_CHECKS
+            and all(value is True for value in checks.values())
+            and isinstance(token, dict)
+            and isinstance(token.get('userName'), str)
+            and re.fullmatch(r'[^\\]+\\Developer', token['userName'], re.IGNORECASE)
+            and token.get('standardNonAdministratorToken') is True
+            and token.get('isAdministratorMember') is False
+            and token.get('isAdministratorEnabled') is False
+            and token.get('isElevated') is False
+            and token.get('integrityLevel') == 'Medium',
+            'Generation-7 token is not an exact Developer standard-token PASS')
+    exe, tar = pointer.get('exe') or {}, pointer.get('tar') or {}
+    require(exe.get('sha256') == candidate['candidateSha256']
+            and isinstance(exe.get('bytes'), int) and exe['bytes'] > 0
+            and isinstance(tar.get('sha256'), str) and HEX64.fullmatch(tar['sha256'])
+            and isinstance(tar.get('bytes'), int) and tar['bytes'] > 0,
+            'Generation-7 token signed artifacts differ')
+    runner = pointer.get('runner') or {}
+    runner_relative = 'automation/release-e2e/tests/Test-InstallerSelfTestStandardToken.ps1'
+    runner_path = root / runner_relative
+    require(runner.get('path') == runner_relative and runner_path.is_file()
+            and not runner_path.is_symlink()
+            and runner.get('sha256') == digest(runner_path),
+            'Generation-7 standard-token runner source differs')
+    raw = raw_path.read_text(encoding='utf-8-sig')
+    require(pointer.get('reportSha256') == digest(raw_path)
+            and re.search(r'(?m)^PASS\s*$', raw) is not None
+            and 'payload=' + tar['sha256'] in raw,
+            'Generation-7 raw report lacks exact PASS and payload')
+    refs = {'runId': run_id, 'pointerSha256': digest(pointer_path),
+            'canonicalSha256': digest(canonical_path),
+            'rawReportSha256': digest(raw_path),
+            'pointerPath': 'evidence/CURRENT-STANDARD-TOKEN.json',
+            'canonicalPath': relative + '/standard-token-evidence.json',
+            'rawReportPath': relative + '/installer-self-test-raw.txt'}
+    if frozen is not None:
+        require(refs == frozen, 'Generation-7 current token evidence differs from receipt')
+        state = _state(root)
+        for key, ext in (('pointerSha256', '.json'), ('canonicalSha256', '.json'),
+                         ('rawReportSha256', '.txt')):
+            source = _gen7_source(state, refs[key], ext)
+            current = {'pointerSha256': pointer_path, 'canonicalSha256': canonical_path,
+                       'rawReportSha256': raw_path}[key]
+            require(source.read_bytes() == current.read_bytes(),
+                    'Generation-7 frozen token bytes differ from current')
+    return refs, (pointer_path, canonical_path, raw_path)
+
+
+def _gen7_validation(root, pointer, receipt, previous, prior, old_tuple, new_tuple):
+    state = _state(root)
+    approval = receipt.get('approval') or {}
+    require(receipt.get('schemaVersion') == 7
+            and receipt.get('contract') == 'devfleet-baseline-rebind-receipt-v7'
+            and receipt.get('status') == 'REBOUND'
+            and receipt.get('certificationCredit') is False
+            and receipt.get('secretValuesRecorded') is False
+            and 'artifactReceiptSha256' not in receipt
+            and receipt.get('previousPointerSha256') == pointer['previousPointerSha256']
+            and receipt.get('previousReceiptSha256') == prior['receiptSha256']
+            and receipt.get('replacement') == previous['checkpoint'] == pointer['checkpoint']
+            and receipt.get('successorPolicyId') == COLLISION_POLICY
+            and receipt.get('finalL1') == {'name': VM_NAME, 'id': VM_ID, 'state': 'Off'}
+            and all(old_tuple[key] == new_tuple[key] for key in
+                    ('candidateBuildCommit', 'shippingInputIdentity',
+                     'releaseFingerprintId', 'candidateSha256'))
+            and old_tuple['repositoryHead'] != new_tuple['repositoryHead']
+            and old_tuple['toolingFingerprintId'] != new_tuple['toolingFingerprintId'],
+            'Generation-7 receipt or signed shipping identity differs')
+    require(approval.get('schemaVersion') == 7
+            and approval.get('contract') == 'devfleet-baseline-rebind-approval-v7'
+            and approval.get('decision') == 'APPROVE'
+            and approval.get('approvedBy') == 'ACCOUNT_OWNER'
+            and approval.get('shippingChangeApproved') is False
+            and approval.get('previousCandidate') == old_tuple
+            and approval.get('candidate') == new_tuple
+            and approval.get('replacement') == pointer['checkpoint']
+            and approval.get('previousReceiptSha256') == prior['receiptSha256']
+            and approval.get('successorAuthorizationSha256') == receipt.get('successorAuthorizationSha256')
+            and approval.get('sourceSha256') == receipt.get('approvalSha256')
+            and isinstance(receipt.get('approvalSha256'), str)
+            and HEX64.fullmatch(receipt['approvalSha256']),
+            'Generation-7 account-owner approval differs')
+    approval_source = read_json(_gen7_source(state, receipt['approvalSha256'], '.json'))
+    require('sourceSha256' not in approval_source
+            and {**approval_source, 'sourceSha256': receipt['approvalSha256']} == approval,
+            'Generation-7 frozen account-owner approval source differs')
+    hashes = {key: receipt.get(key) for key in
+              ('successorLedgerSha256', 'nativeInventorySha256',
+               'successorAuthorizationSha256', 'predecessorLedgerSha256')}
+    sources = {key: read_json(_gen7_source(state, value, '.json'))
+               for key, value in hashes.items()}
+    failures = receipt.get('failureEvidenceSha256')
+    require(isinstance(failures, dict) and set(failures) == {'wrapper', 'proofError', 'cleanup'},
+            'Generation-7 collision failure source refs are incomplete')
+    failure_records = {key: read_json(_gen7_source(state, value, '.json'))
+                       for key, value in failures.items()}
+    auth = sources['successorAuthorizationSha256']
+    ledger = sources['successorLedgerSha256']
+    predecessor = sources['predecessorLedgerSha256']
+    live = sources['nativeInventorySha256']
+    require(receipt.get('ownerAuthorizationSha256') == OWNER_AUTH_SHA256
+            and (auth.get('ownerAuthorization') or {}).get('sha256') == OWNER_AUTH_SHA256,
+            'Generation-7 exact owner authorization hash differs')
+    _gen7_source(state, OWNER_AUTH_SHA256, '.txt')
+    require(auth.get('schemaVersion') == 1
+            and auth.get('kind') == 'DEVFLEET_POST_COLLISION_SUCCESSOR_AUTHORIZATION'
+            and auth.get('policyId') == COLLISION_POLICY
+            and auth.get('approved') is True
+            and auth.get('approvedBy') == 'ACCOUNT_OWNER'
+            and isinstance(auth.get('successorLedgerPath'), str)
+            and Path(auth['successorLedgerPath']).resolve() == COLLISION_LEDGER_PATH.resolve()
+            and auth.get('previousCandidate') == old_tuple
+            and auth.get('candidate') == new_tuple
+            and (auth.get('predecessorSha256') or {}).get('causal1') == COLLISION_PREDECESSOR_SHA256
+            and hashes['predecessorLedgerSha256'] == COLLISION_PREDECESSOR_SHA256
+            and (auth.get('generation6') or {}).get('receiptSha256') == prior['receiptSha256']
+            and (auth.get('generation6') or {}).get('checkpoint') == pointer['checkpoint']
+            and auth.get('limits') == COLLISION_LIMITS
+            and all((auth.get('failureEvidence') or {}).get(key, {}).get('sha256') == value
+                    for key, value in failures.items())
+            and predecessor.get('policyId') == 'DF-FRESH-CERTIFICATION-20260929-CAUSAL-1',
+            'Generation-7 collision authorization or predecessor differs')
+    _gen7_collision_failure(predecessor, old_tuple, auth, failure_records)
+    attempts = ledger.get('attempts')
+    require(ledger.get('policyId') == COLLISION_POLICY
+            and ledger.get('limits') == COLLISION_LIMITS
+            and ledger.get('activeRunId') is None
+            and (ledger.get('authorization') or {}).get('sha256') == hashes['successorAuthorizationSha256']
+            and len(ledger.get('predecessors') or []) == 1
+            and ledger['predecessors'][0].get('sha256') == hashes['predecessorLedgerSha256']
+            and isinstance(attempts, list) and len(attempts) == 1
+            and attempts[0].get('operation') == 'standard-token'
+            and attempts[0].get('state') == 'TERMINAL'
+            and attempts[0].get('exitCode') == 0
+            and attempts[0].get('classification') == 'PASS_NATIVE_STANDARD_TOKEN'
+            and attempts[0].get('tuple') == new_tuple
+            and attempts[0].get('certificationCredit') is False
+            and isinstance(attempts[0].get('evidence'), list)
+            and bool(attempts[0]['evidence']),
+            'Generation-7 ledger lacks one exact terminal standard-token PASS')
+    snapshots = live.get('snapshots')
+    exact = [x for x in snapshots if isinstance(x, dict) and x.get('name') == NEW_NAME] if isinstance(snapshots, list) else []
+    require(live.get('scope') == 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
+            and live.get('vm') == receipt['finalL1']
+            and len(exact) == 1 and exact[0].get('id') == prior['id']
+            and exact[0].get('vmId') == VM_ID
+            and exact[0].get('parentSnapshotId') == OLD_ID,
+            'Generation-7 native inventory lacks accepted CLEAN-R2 with L1 Off')
+    token_ref = receipt.get('standardTokenEvidence')
+    require(isinstance(token_ref, dict), 'Generation-7 token receipt reference is absent')
+    _gen7_token(root, Path(root) / 'evidence/CURRENT-STANDARD-TOKEN.json', new_tuple, token_ref)
+    _gen7_outer_inner(attempts[0], Path(root), token_ref)
+
+
+def _gen7_outer_inner(attempt, root, token_ref):
+    """Join charged outer attempt to the immutable inner self-test record."""
+    canonical = (root / token_ref['canonicalPath']).resolve(strict=True)
+    evidence = attempt.get('evidence')
+    require(attempt.get('runId') != token_ref.get('runId')
+            and isinstance(evidence, list) and any(isinstance(item, str)
+            and Path(item).resolve() == canonical for item in evidence),
+            'Generation-7 charged attempt does not cite inner token evidence')
+    token = read_json(canonical)
+    require(token.get('runId') == token_ref['runId']
+            and digest(canonical) == token_ref['canonicalSha256']
+            and _gen7_journal_instant(attempt.get('reservedUtc')) <= instant(token.get('generatedAtUtc'))
+            <= _gen7_journal_instant(attempt.get('terminalUtc')),
+            'Generation-7 inner token is not within charged outer attempt')
+
+
+def _gen7_journal_instant(value):
+    require(isinstance(value, str) and value, 'Generation-7 journal timestamp is missing')
+    parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    require(parsed.tzinfo is not None, 'Generation-7 journal timestamp lacks timezone')
+    return parsed.astimezone(timezone.utc)
+
+
+def _gen7_collision_failure(predecessor, old_tuple, auth, failures):
+    attempts = predecessor.get('attempts')
+    sequence = (('standard-token', 0, 'PASS_NATIVE_STANDARD_TOKEN'),
+                ('diagnostic', 0, 'PASS_READY_FOR_PROOF_RESERVATION'),
+                ('laptop-proof', 2, 'NATIVE_LAPTOP_PROOF_BLOCKED'))
+    require(predecessor.get('schemaVersion') == 1
+            and predecessor.get('policyId') == 'DF-FRESH-CERTIFICATION-20260929-CAUSAL-1'
+            and predecessor.get('certificationCredit') is False
+            and predecessor.get('limits') == COLLISION_LIMITS
+            and predecessor.get('activeRunId') is None
+            and isinstance(attempts, list) and len(attempts) == 3
+            and all(isinstance(row, dict) and row.get('operation') == operation
+                    and row.get('state') == 'TERMINAL'
+                    and row.get('exitCode') == exit_code
+                    and row.get('classification') == classification
+                    and row.get('tuple') == old_tuple
+                    for row, (operation, exit_code, classification) in zip(attempts, sequence))
+            and len({row.get('runId') for row in attempts}) == 3
+            and auth.get('failedRunId') == attempts[-1]['runId'],
+            'Generation-7 causal predecessor history differs')
+    failed_run = auth['failedRunId']
+    require(all(isinstance(failures[key], dict)
+                and failures[key].get('runId') == failed_run
+                and all(failures[key][field] == failed_run for field in
+                        ('runId', 'attemptRunId', 'proofRunId') if field in failures[key])
+                for key in ('wrapper', 'proofError', 'cleanup')),
+            'Generation-7 collision records differ from failed RunId')
+    wrapper, proof, cleanup = (failures[key] for key in
+                               ('wrapper', 'proofError', 'cleanup'))
+    l1, l2 = cleanup.get('l1') or {}, cleanup.get('l2') or {}
+    require(wrapper.get('classification') == 'NATIVE_LAPTOP_PROOF_BLOCKED'
+            and wrapper.get('exitCode') == 2
+            and wrapper.get('firstTechnicalFailure') == COLLISION_FIRST_ERROR
+            and wrapper.get('observerTerminal') != COLLISION_FIRST_ERROR
+            and proof.get('status') == 'BLOCKED'
+            and proof.get('error') == COLLISION_FIRST_ERROR
+            and cleanup.get('status') == 'PASS'
+            and cleanup.get('runOwnedOnly') is True
+            and l1.get('name') == VM_NAME and l1.get('id') == VM_ID
+            and l1.get('status') == 'OFF'
+            and l2.get('expectedName') == L2_NAME
+            and l2.get('status') == 'ABSENT'
+            and l2.get('present') is False
+            and l2.get('exactMatchCount') == 0
+            and l2.get('inventoryCount') == 0
+            and cleanup.get('l2Present') is False,
+            'Generation-7 first failure, later observer, or cleanup differs')
+
+
+def _accepted_rebound_v7(root, pointer, current_tuple=None):
+    state = _state(root)
+    require(pointer.get('schemaVersion') == 7
+            and pointer.get('contract') == 'devfleet-accepted-baseline-v7'
+            and pointer.get('generation') == 7 and pointer.get('status') == 'ACCEPTED',
+            'Generation-7 pointer contract differs')
+    filename, previous_hash = pointer.get('receiptFile'), pointer.get('previousPointerSha256')
+    require(isinstance(filename, str) and re.fullmatch(r'[0-9a-f]{32}\.json', filename)
+            and isinstance(previous_hash, str) and HEX64.fullmatch(previous_hash),
+            'Generation-7 lineage reference is malformed')
+    previous_path = state / 'history' / (previous_hash + '.json')
+    require(previous_path.is_file() and not previous_path.is_symlink() and digest(previous_path) == previous_hash,
+            'Generation-7 predecessor pointer differs')
+    previous = read_json(previous_path)
+    require(previous.get('generation') == 6, 'Generation-7 predecessor must be accepted Gen6')
+    receipt_path = state / 'receipts' / filename
+    require(receipt_path.is_file() and not receipt_path.is_symlink()
+            and digest(receipt_path) == pointer.get('receiptSha256'),
+            'Generation-7 receipt hash differs')
+    receipt = read_json(receipt_path)
+    require(isinstance(receipt.get('receiptId'), str)
+            and receipt['receiptId'] + '.json' == filename,
+            'Generation-7 receipt filename differs')
+    old_tuple = exact_tuple(receipt.get('previousCandidate'))
+    new_tuple = exact_tuple(receipt.get('candidate'))
+    prior = _accepted_rebound_v6(root, previous, old_tuple)
+    _gen7_validation(root, pointer, receipt, previous, prior, old_tuple, new_tuple)
+    if current_tuple is not None:
+        require(new_tuple == exact_tuple(current_tuple),
+                'Generation-7 baseline is bound to another candidate/material tuple')
+    return {**prior, 'receiptSha256': pointer['receiptSha256'], 'receiptFile': filename,
+            'previousReceiptSha256': prior['receiptSha256'], 'generation': 7}
+
+
+def rebind_gen7(root, tuple_path, approval_path, ledger_path, live_path, token_pointer_path):
+    """Append a hash-bound Gen7 after genuine Developer qualification, no proof credit."""
+    state = _state(root)
+    with lock(state / '.adoption.lock'), lock(Path(str(ledger_path) + '.lock')):
+        pointer_path = state / 'CURRENT.json'
+        previous = read_json(pointer_path)
+        require(previous.get('generation') == 6, 'Generation-7 requires accepted Gen6')
+        old_receipt = read_json(state / 'receipts' / previous['receiptFile'])
+        old_tuple = exact_tuple(old_receipt.get('candidate'))
+        prior = _accepted_rebound_v6(root, previous, old_tuple)
+        tuple_sha, approval_sha, ledger_sha, live_sha = map(digest,
+            (tuple_path, approval_path, ledger_path, live_path))
+        new_tuple = exact_tuple(read_json(tuple_path))
+        approval = read_json(approval_path)
+        require('sourceSha256' not in approval,
+                'Generation-7 owner approval may not predeclare a source hash')
+        ledger = read_json(ledger_path)
+        auth_path = Path((ledger.get('authorization') or {}).get('path', ''))
+        require(auth_path.is_file() and not auth_path.is_symlink(),
+                'Generation-7 owner authorization source is missing')
+        auth_sha = digest(auth_path)
+        auth = read_json(auth_path)
+        owner_ref = auth.get('ownerAuthorization') or {}
+        owner_path = Path(owner_ref.get('path', ''))
+        require(owner_path.is_file() and not owner_path.is_symlink(),
+                'Generation-7 owner authorization attachment is missing')
+        owner_sha = digest(owner_path)
+        predecessor_path = Path((ledger.get('predecessors') or [{}])[0].get('path', ''))
+        require(predecessor_path.is_file() and not predecessor_path.is_symlink(),
+                'Generation-7 causal predecessor source is missing')
+        predecessor_sha = digest(predecessor_path)
+        failure_paths = {key: Path((auth.get('failureEvidence') or {}).get(key, {}).get('path', ''))
+                         for key in ('wrapper', 'proofError', 'cleanup')}
+        failure_hashes = {key: digest(path) for key, path in failure_paths.items()}
+        token_refs, token_paths = _gen7_token(root, token_pointer_path, new_tuple)
+        journal = Path(root).resolve(strict=True) / '.agents/skills/devfleet-certification-orchestrator/scripts/fresh/fresh_attempts.py'
+        require(journal.is_file(), 'Native collision successor journal is absent')
+        checked = subprocess.run([sys.executable, str(journal), 'status', '--ledger',
+                                  str(Path(ledger_path).resolve(strict=True))],
+                                 text=True, capture_output=True, timeout=20)
+        require(checked.returncode == 0, 'Native collision successor journal rejected binding')
+        status = json.loads(checked.stdout)
+        remaining = {**COLLISION_LIMITS, 'standard-token': 0}
+        require(status.get('policyId') == COLLISION_POLICY and status.get('active') is None
+                and status.get('attemptCount') == 1 and status.get('remaining') == remaining,
+                'Native collision successor does not have one terminal qualification')
+        live = read_json(live_path)
+        require(timedelta(seconds=0) <= datetime.now(timezone.utc) - instant(live.get('observedUtc')) <= timedelta(minutes=2),
+                'Generation-7 native inventory is not fresh')
+        provisional = {'previousPointerSha256': digest(pointer_path),
+                       'checkpoint': previous['checkpoint']}
+        receipt = {'schemaVersion': 7, 'contract': 'devfleet-baseline-rebind-receipt-v7',
+                   'receiptId': uuid.uuid4().hex, 'status': 'REBOUND',
+                   'reboundUtc': datetime.now(timezone.utc).isoformat(),
+                   'certificationCredit': False, 'secretValuesRecorded': False,
+                   'previousPointerSha256': provisional['previousPointerSha256'],
+                   'previousReceiptSha256': prior['receiptSha256'],
+                   'previousCandidate': old_tuple, 'candidate': new_tuple,
+                   'replacement': previous['checkpoint'],
+                   'approval': {**approval, 'sourceSha256': approval_sha},
+                   'approvalSha256': approval_sha,
+                   'successorPolicyId': COLLISION_POLICY,
+                   'successorLedgerSha256': ledger_sha,
+                   'successorAuthorizationSha256': auth_sha,
+                   'ownerAuthorizationSha256': owner_sha,
+                   'predecessorLedgerSha256': predecessor_sha,
+                   'failureEvidenceSha256': failure_hashes,
+                   'standardTokenEvidence': token_refs,
+                   'finalL1': live['vm'], 'nativeInventorySha256': live_sha}
+        # Validate the exact same semantics before any source or pointer write.
+        sources = state / 'sources'
+        require(all(Path(path).is_file() and not Path(path).is_symlink() for path in
+                    (tuple_path, approval_path, ledger_path, live_path, auth_path,
+                     predecessor_path, owner_path, *failure_paths.values(), *token_paths)),
+                'Generation-7 source path changed before binding')
+        require(all(digest(path) == expected for path, expected in
+                    ((tuple_path, tuple_sha), (approval_path, approval_sha),
+                     (ledger_path, ledger_sha), (live_path, live_sha),
+                     (auth_path, auth_sha), (predecessor_path, predecessor_sha),
+                     (owner_path, owner_sha),
+                     *((failure_paths[key], failure_hashes[key]) for key in failure_paths),
+                     *((token_paths[i], token_refs[key]) for i, key in enumerate(
+                         ('pointerSha256', 'canonicalSha256', 'rawReportSha256'))))),
+                'Generation-7 source changed during binding')
+        _gen7_validate_prewrite(root, provisional, receipt, previous, prior,
+                                old_tuple, new_tuple, ledger, auth, live,
+                                predecessor_sha)
+        sources.mkdir(parents=True, exist_ok=True)
+        to_freeze = [(approval_path, approval_sha, '.json'),
+                     (ledger_path, ledger_sha, '.json'), (live_path, live_sha, '.json'),
+                     (auth_path, auth_sha, '.json'), (predecessor_path, predecessor_sha, '.json'),
+                     (owner_path, owner_sha, '.txt')]
+        to_freeze += [(failure_paths[key], failure_hashes[key], '.json') for key in failure_paths]
+        to_freeze += [(token_paths[i], token_refs[key], '.json' if i < 2 else '.txt')
+                      for i, key in enumerate(('pointerSha256', 'canonicalSha256', 'rawReportSha256'))]
+        for path, sha, ext in to_freeze:
+            destination = sources / (sha + ext)
+            if destination.exists():
+                require(digest(destination) == sha, 'Existing frozen source differs')
+            else:
+                _write_exclusive(destination, Path(path).read_bytes())
+        history = state / 'history'
+        history.mkdir(parents=True, exist_ok=True)
+        _write_exclusive(history / (provisional['previousPointerSha256'] + '.json'), pointer_path.read_bytes())
+        filename = receipt['receiptId'] + '.json'
+        receipt_path = state / 'receipts' / filename
+        _write_exclusive(receipt_path, _json_bytes(receipt))
+        current = {'schemaVersion': 7, 'contract': 'devfleet-accepted-baseline-v7',
+                   'generation': 7, 'status': 'ACCEPTED', 'receiptFile': filename,
+                   'receiptSha256': digest(receipt_path),
+                   'previousPointerSha256': provisional['previousPointerSha256'],
+                   'checkpoint': previous['checkpoint']}
+        _atomic_replace(pointer_path, _json_bytes(current))
+        return accepted_baseline(root, new_tuple)
+
+
+def _gen7_validate_prewrite(root, pointer, receipt, previous, prior,
+                            old_tuple, new_tuple, ledger, auth, live, predecessor_sha):
+    """Preflight invariants also enforced by the immutable reader."""
+    approval = receipt['approval']
+    require(all(old_tuple[key] == new_tuple[key] for key in
+                ('candidateBuildCommit', 'shippingInputIdentity',
+                 'releaseFingerprintId', 'candidateSha256'))
+            and old_tuple['repositoryHead'] != new_tuple['repositoryHead']
+            and old_tuple['toolingFingerprintId'] != new_tuple['toolingFingerprintId'],
+            'Generation-7 binding changed shipping or lacks tooling change')
+    require(approval.get('schemaVersion') == 7
+            and approval.get('contract') == 'devfleet-baseline-rebind-approval-v7'
+            and approval.get('decision') == 'APPROVE'
+            and approval.get('approvedBy') == 'ACCOUNT_OWNER'
+            and approval.get('shippingChangeApproved') is False
+            and approval.get('previousCandidate') == old_tuple
+            and approval.get('candidate') == new_tuple
+            and approval.get('replacement') == previous['checkpoint']
+            and approval.get('previousReceiptSha256') == prior['receiptSha256']
+            and approval.get('successorAuthorizationSha256') == receipt['successorAuthorizationSha256'],
+            'Exact generation-7 account-owner approval is absent')
+    require((ledger.get('authorization') or {}).get('sha256') == receipt['successorAuthorizationSha256']
+            and (ledger.get('predecessors') or [{}])[0].get('sha256') == predecessor_sha
+            and receipt['ownerAuthorizationSha256'] == OWNER_AUTH_SHA256
+            and (auth.get('ownerAuthorization') or {}).get('sha256') == OWNER_AUTH_SHA256
+            and auth.get('schemaVersion') == 1
+            and auth.get('kind') == 'DEVFLEET_POST_COLLISION_SUCCESSOR_AUTHORIZATION'
+            and auth.get('policyId') == COLLISION_POLICY
+            and auth.get('approved') is True and auth.get('approvedBy') == 'ACCOUNT_OWNER'
+            and isinstance(auth.get('successorLedgerPath'), str)
+            and Path(auth['successorLedgerPath']).resolve() == COLLISION_LEDGER_PATH.resolve()
+            and auth.get('previousCandidate') == old_tuple and auth.get('candidate') == new_tuple
+            and (auth.get('predecessorSha256') or {}).get('causal1') == COLLISION_PREDECESSOR_SHA256
+            and predecessor_sha == COLLISION_PREDECESSOR_SHA256
+            and (auth.get('generation6') or {}).get('receiptSha256') == prior['receiptSha256']
+            and (auth.get('generation6') or {}).get('checkpoint') == previous['checkpoint']
+            and auth.get('limits') == COLLISION_LIMITS
+            and all((auth.get('failureEvidence') or {}).get(key, {}).get('sha256') == value
+                    for key, value in receipt['failureEvidenceSha256'].items()),
+            'Generation-7 successor authorization or collision sources differ')
+    predecessor = read_json((ledger.get('predecessors') or [{}])[0]['path'])
+    failures = {key: read_json((auth.get('failureEvidence') or {})[key]['path'])
+                for key in ('wrapper', 'proofError', 'cleanup')}
+    _gen7_collision_failure(predecessor, old_tuple, auth, failures)
+    attempts = ledger.get('attempts')
+    require(ledger.get('policyId') == COLLISION_POLICY
+            and ledger.get('limits') == COLLISION_LIMITS
+            and ledger.get('activeRunId') is None
+            and isinstance(attempts, list) and len(attempts) == 1
+            and attempts[0].get('operation') == 'standard-token'
+            and attempts[0].get('state') == 'TERMINAL'
+            and attempts[0].get('exitCode') == 0
+            and attempts[0].get('classification') == 'PASS_NATIVE_STANDARD_TOKEN'
+            and attempts[0].get('tuple') == new_tuple
+            and attempts[0].get('certificationCredit') is False
+            and isinstance(attempts[0].get('evidence'), list) and bool(attempts[0]['evidence'])
+            and attempts[0].get('runId') != receipt['standardTokenEvidence']['runId'],
+            'Generation-7 successor lacks one exact terminal standard token')
+    _gen7_outer_inner(attempts[0], Path(root), receipt['standardTokenEvidence'])
+    snapshots = live.get('snapshots')
+    exact = [x for x in snapshots if isinstance(x, dict) and x.get('name') == NEW_NAME] if isinstance(snapshots, list) else []
+    require(live.get('scope') == 'NATIVE_EXACT_L1_CHECKPOINT_INVENTORY'
+            and live.get('vm') == {'name': VM_NAME, 'id': VM_ID, 'state': 'Off'}
+            and len(exact) == 1 and exact[0].get('id') == prior['id']
+            and exact[0].get('vmId') == VM_ID
+            and exact[0].get('parentSnapshotId') == OLD_ID,
+            'Generation-7 native inventory lacks exact CLEAN-R2 and L1 Off')
+
+
 def _validate_v4_successor(ledger, new_tuple, journal_status):
     """Require the prospective repair-3 journal and immutable signed-output receipt."""
     remaining = {'standard-token': 0, 'diagnostic': 1, 'laptop-proof': 1,
@@ -1457,6 +1956,9 @@ def main():
     binding6 = sub.add_parser('rebind-gen6')
     for flag in ('root', 'tuple', 'approval', 'ledger', 'live'):
         binding6.add_argument('--' + flag, required=True)
+    binding7 = sub.add_parser('rebind-gen7')
+    for flag in ('root', 'tuple', 'approval', 'ledger', 'live', 'token-pointer'):
+        binding7.add_argument('--' + flag, required=True)
     args = parser.parse_args()
     if args.command == 'inspect':
         value = accepted_baseline(args.root, read_json(args.tuple) if args.tuple else None)
@@ -1469,6 +1971,9 @@ def main():
         value = rebind_gen4(args.root, args.tuple, args.approval, args.ledger, args.live)
     elif args.command == 'rebind-gen6':
         value = rebind_gen6(args.root, args.tuple, args.approval, args.ledger, args.live)
+    elif args.command == 'rebind-gen7':
+        value = rebind_gen7(args.root, args.tuple, args.approval, args.ledger,
+                            args.live, args.token_pointer)
     elif args.command == 'rebind-gen5':
         value = rebind_gen5(args.root, args.tuple, args.approval, args.ledger, args.live)
     else:

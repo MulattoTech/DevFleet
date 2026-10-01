@@ -12,7 +12,7 @@ jobs:
   python-source:
     name: Python source and export (Linux)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v7
@@ -26,13 +26,22 @@ jobs:
         run: |
           python -m unittest ai/test_verify_source_parts.py
           python ai/verify_source_parts.py
+          python tools/test_final_acceptance_tools.py
       - name: Run VM-free Python contracts
         run: |
           python -m pytest -q -k "not powershell_reader" \
+            .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_fresh_attempts.py \
             .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_causal_successor.py \
+            .agents/skills/devfleet-certification-orchestrator/scripts/fresh/test_post_collision_successor.py \
             tools/test_baseline_lineage.py \
             tools/test_baseline_temporal_binding.py \
+            tools/test_baseline_generation5_input_integrity.py \
+            tools/test_baseline_generation6.py \
+            tools/test_baseline_generation7.py \
+            tools/test_validate_release_bundle.py \
             tools/test_validate_release_bundle_generation5.py \
+            tools/test_validate_release_bundle_generation7.py \
+            tools/test_validate_public_push.py \
             tools/test_validate_native_proof.py \
             source/tests/test_dependency_advisories.py \
             source/tests/test_release_fingerprint.py \
@@ -41,7 +50,7 @@ jobs:
   powershell-contracts:
     name: PowerShell contracts (Windows)
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     defaults:
       run:
         shell: pwsh
@@ -50,17 +59,21 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - name: Run Generation-4 and Generation-6 Python and PowerShell reader contracts
+      - name: Install Python test dependencies
+        run: python -m pip install pytest
+      - name: Run Generation-4, Generation-6 and Generation-7 readers and packaging contracts
         run: |
-          python tools/test_baseline_generation4.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tools/test_baseline_generation6.py
+          python -m pytest -q tools/test_baseline_generation4.py tools/test_baseline_generation6.py tools/test_baseline_generation7.py tools/test_validate_release_bundle_generation7.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run VM-free PowerShell contracts
         run: |
           $ErrorActionPreference = 'Stop'
           $tests = @(
             'automation/release-e2e/tests/Test-BaselineLineage.ps1'
+            'automation/release-e2e/tests/Test-AuditBaselineChain.ps1'
+            'automation/release-e2e/tests/Test-HostSafetyDiagnostics.ps1'
+            'automation/release-e2e/tests/Test-EvidenceWriterAtomicMove.ps1'
+            'automation/release-e2e/tests/Test-WpfAtomicWriteCollision.ps1'
             'automation/release-e2e/tests/Test-ColdLaunchTelemetryObserver.ps1'
             'automation/release-e2e/tests/Test-PassiveColdLaunchTelemetry.ps1'
             'automation/release-e2e/tests/Test-ProductLaunchObserverDeferral.ps1'
@@ -81,36 +94,9 @@ jobs:
           }
           # Negative fixtures may leave LASTEXITCODE nonzero after a verified PASS.
           exit 0
-      - name: Run optional public issue regressions when present
+      - name: Run public source guard and Command Center contracts
         run: |
           $ErrorActionPreference = 'Stop'
-          # These tests arrive in separate public PRs. Run them as each PR lands;
-          # their absence on this CI-only branch is reported explicitly.
-          $optionalPowerShell = @(
-            'automation/release-e2e/tests/Test-HostSafetyDiagnostics.ps1'
-            'automation/release-e2e/tests/Test-EvidenceWriterAtomicMove.ps1'
-            'automation/release-e2e/tests/Test-WpfAtomicWriteCollision.ps1'
-          )
-          foreach ($test in $optionalPowerShell) {
-            if (-not (Test-Path -LiteralPath $test)) {
-              Write-Host "SKIP unmerged public test: $test"
-              continue
-            }
-            Write-Host "Running $test"
-            & $test
-            if (-not $?) { throw "Optional VM-free contract failed: $test" }
-          }
-          $optionalPython = @(
-            'tools/test_validate_public_push.py'
-            'tools/test_certification_command_center.py'
-          )
-          foreach ($test in $optionalPython) {
-            if (-not (Test-Path -LiteralPath $test)) {
-              Write-Host "SKIP unmerged public test: $test"
-              continue
-            }
-            Write-Host "Running $test"
-            python $test
-            if ($LASTEXITCODE -ne 0) { throw "Optional VM-free contract failed: $test" }
-          }
+          python -m pytest -q tools/test_validate_public_push.py tools/test_certification_command_center.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           exit 0
