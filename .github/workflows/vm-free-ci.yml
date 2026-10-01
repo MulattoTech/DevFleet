@@ -74,6 +74,7 @@ jobs:
             'automation/release-e2e/tests/Test-HostSafetyDiagnostics.ps1'
             'automation/release-e2e/tests/Test-EvidenceWriterAtomicMove.ps1'
             'automation/release-e2e/tests/Test-WpfAtomicWriteCollision.ps1'
+            'automation/release-e2e/tests/Test-HttpHostileCleanup.ps1'
             'automation/release-e2e/tests/Test-ColdLaunchTelemetryObserver.ps1'
             'automation/release-e2e/tests/Test-PassiveColdLaunchTelemetry.ps1'
             'automation/release-e2e/tests/Test-ProductLaunchObserverDeferral.ps1'
